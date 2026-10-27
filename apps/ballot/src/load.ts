@@ -25,6 +25,7 @@ import {
 } from "@abolishus/crypto";
 
 import { type Deployment, onL1 } from "./deployment.ts";
+import { isCodeOf, shortLink } from "./share.ts";
 
 /** Why the client couldn't fetch what it checks. */
 export type LoadProblem =
@@ -54,6 +55,12 @@ export type Loaded =
       readonly entries: readonly Uint8Array[];
       /** Whether our web pages withhold the text as a threat while the poll is open, so the client shows it under a notice. */
       readonly hiddenAsThreat: boolean;
+      /**
+       * The poll's short link on the website (share.ts), or `undefined` where
+       * the build names no website or the code couldn't be read as one of
+       * the registered hash's.
+       */
+      readonly shortLink: string | undefined;
     }
   | { readonly ok: false; readonly problem: LoadProblem };
 
@@ -96,6 +103,8 @@ const PAGE_COST = 64 * 1024;
 const MAX_RPC_ANSWER = 4096;
 // `{ state, latest: { seq, action, reason, decidedAt } }` with room to spare.
 const MAX_STATUS_ANSWER = 1024;
+// `{ code }`, a code being at most 52 characters.
+const MAX_CODE_ANSWER = 128;
 
 // No cookie, no referrer, no cache and no redirect to anywhere else: each
 // request names only the election, which is all the server needs (T-10, T-11).
@@ -126,22 +135,25 @@ export async function loadElection(
     const registeredHash = await registeredHashOf(deployment, registry, electionId, fetchFn);
     if (registeredHash.every((b) => b === 0)) return { ok: false, problem: "not-registered" };
     const id = toHex(electionId);
-    const [[[definition, displayText], entries], moderation] = await both(
+    const [[[[definition, displayText], entries], moderation], code] = await both(
       both(
         both(
-          apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
-          apiRecord(
-            deployment,
-            "display-text",
-            id,
-            "displayText",
-            MAX_DISPLAY_TEXT_ANSWER,
-            fetchFn,
+          both(
+            apiRecord(deployment, "definition", id, "definition", MAX_DEFINITION_ANSWER, fetchFn),
+            apiRecord(
+              deployment,
+              "display-text",
+              id,
+              "displayText",
+              MAX_DISPLAY_TEXT_ANSWER,
+              fetchFn,
+            ),
           ),
+          firstEntry(deployment, id, fetchFn),
         ),
-        firstEntry(deployment, id, fetchFn),
+        moderationOf(deployment, id, fetchFn),
       ),
-      moderationOf(deployment, id, fetchFn),
+      codeOf(deployment, id, registeredHash, fetchFn),
     );
     return {
       ok: true,
@@ -150,6 +162,10 @@ export async function loadElection(
       displayText,
       entries,
       hiddenAsThreat: moderation === "threat",
+      shortLink:
+        deployment.web === undefined || code === undefined
+          ? undefined
+          : shortLink(deployment.web, code),
     };
   } catch (error) {
     if (error instanceof Stop) return { ok: false, problem: error.problem };
@@ -313,6 +329,36 @@ async function moderationOf(
   if (reason === "threat") return "threat";
   if (typeof reason === "string" && WITHHOLDING.has(reason)) throw new Stop("withheld");
   return "shown";
+}
+
+/**
+ * The poll's short code (`GET /elections/code`), asked for beside the
+ * records, so it tells the API nothing they don't: never after answering,
+ * which would mark who answered (T-10). Only where the build names a
+ * website, and only a code that is a prefix of `registeredHash` (share.ts).
+ * Anything else is `undefined`: a missing code only leaves the link out, so
+ * it never stops voting. It rejects only for a fault of this page (an abort).
+ */
+async function codeOf(
+  deployment: Deployment,
+  electionId: string,
+  registeredHash: Uint8Array,
+  fetchFn: Fetch,
+): Promise<string | undefined> {
+  if (deployment.web === undefined) return undefined;
+  let answer: unknown;
+  try {
+    const url = `${deployment.api}/elections/code?electionId=${electionId}`;
+    const response = await fetchFn(url, { ...REQUEST, method: "GET" });
+    if (!response.ok) return undefined;
+    answer = await readJson(response, MAX_CODE_ANSWER);
+  } catch (error) {
+    if (error instanceof Stop || error instanceof TypeError) return undefined;
+    throw error;
+  }
+  if (!isRecord(answer) || Object.keys(answer).length !== 1) return undefined;
+  const code = answer["code"];
+  return typeof code === "string" && isCodeOf(code, registeredHash) ? code : undefined;
 }
 
 // The policy's removal grounds but `threat` (docs/moderation-policy.md, Reasons).

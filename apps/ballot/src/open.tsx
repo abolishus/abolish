@@ -314,6 +314,7 @@ type State =
       readonly kind: "ready";
       readonly election: CheckedElection;
       readonly hiddenAsThreat: boolean;
+      readonly shortLink: string | undefined;
     };
 
 const toHex = (bytes: Uint8Array) =>
@@ -379,6 +380,7 @@ export function OpenElection({
           key={attempt}
           election={state.election}
           hiddenAsThreat={state.hiddenAsThreat}
+          shortLink={state.shortLink}
           pick={restartedFor === electionId ? undefined : pick}
           source={source}
           languages={languages}
@@ -420,7 +422,14 @@ async function open(
     return { kind: "unavailable", problem: "worker-failed" };
   }
   return check.ok
-    ? { kind: "ready", election: check.election, hiddenAsThreat: loaded.hiddenAsThreat }
+    ? {
+        kind: "ready",
+        election: check.election,
+        hiddenAsThreat: loaded.hiddenAsThreat,
+        // No link for a poll our pages withhold: we don't offer to spread
+        // what moderation hid, as the website's share sheet doesn't.
+        shortLink: loaded.hiddenAsThreat ? undefined : loaded.shortLink,
+      }
     : { kind: "refused", check, registeredHash: toHex(loaded.registeredHash) };
 }
 
@@ -611,6 +620,7 @@ const RESTARTS: ReadonlySet<SealProblem> = new Set<SealProblem>([
 export function Ballot({
   election,
   hiddenAsThreat = false,
+  shortLink,
   pick,
   source,
   languages,
@@ -619,6 +629,8 @@ export function Ballot({
   election: CheckedElection;
   /** Our web pages withhold the text as a threat while the poll is open: shown here under a notice (docs/moderation-policy.md, Open polls). */
   hiddenAsThreat?: boolean;
+  /** The poll's short link on the website, offered after answering ("Ask others"), if there is one. */
+  shortLink?: string | undefined;
   /** The first question's option the link was tapped on, chosen in the first round only. */
   pick?: number | undefined;
   source: Omit<ElectionSource, "load" | "check">;
@@ -651,6 +663,12 @@ export function Ballot({
     definitionHash: election.definitionHash,
     closes: formatTime(locale, election.closesAt),
   };
+  // Shared as the poll's first question in the reader's language, and the
+  // link: nothing about this voter or their answers (docs/design/sharing.md).
+  const share =
+    shortLink === undefined || questions[0] === undefined
+      ? undefined
+      : { url: shortLink, title: questions[0].question };
   const definitionHash = fromHex(election.definitionHash);
   const electionId = fromHex(election.electionId);
 
@@ -1406,7 +1424,9 @@ export function Ballot({
         />
       );
     case "answered":
-      return <Answered poll={poll} trackingCode={step.trackingCode} onChange={again} />;
+      return (
+        <Answered poll={poll} trackingCode={step.trackingCode} share={share} onChange={again} />
+      );
     case "resuming":
     case "finding":
     case "sealing":
@@ -1480,7 +1500,13 @@ export function Ballot({
       );
     case "sent":
       return (
-        <Sent poll={poll} trackingCode={step.trackingCode} index={step.index} onAgain={again} />
+        <Sent
+          poll={poll}
+          trackingCode={step.trackingCode}
+          index={step.index}
+          share={share}
+          onAgain={again}
+        />
       );
     case "register":
       return (

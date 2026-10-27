@@ -392,6 +392,25 @@ export const esUS: Messages = {
   answeredPressuredTitle: "Si alguien te presionó",
   answeredPressured:
     "Puedes cambiar tus respuestas más tarde, en un lugar privado, y solo cuentan las últimas.",
+  // Asking others after answering (ask-others.tsx; docs/design/sharing.md).
+  askOthersTitle: "Pregunta a otros",
+  askOthersNeverYourAnswer:
+    "Comparte la pregunta, no tu respuesta. El enlace es el mismo para todos, así que no dice quién lo compartió, cómo respondió ni si respondió.",
+  askOthersLinkLabel: "Enlace a esta encuesta",
+  askOthersCopy: "Copiar enlace",
+  askOthersCopied: "Enlace copiado",
+  askOthersCopiedStatus: "Enlace copiado. Pégalo donde quieras.",
+  askOthersCopyFailed: "No se pudo copiar. Selecciona el enlace de arriba y cópialo.",
+  askOthersMenu: "Compartir…",
+  askOthersNoMenu:
+    "Este navegador no tiene menú para compartir. Copia el enlace y pégalo donde quieras, o envíalo por correo.",
+  askOthersEmail: "Enviar el enlace por correo",
+  askOthersQrShow: "Mostrar un código QR",
+  askOthersQrLabel: "Código QR de {link}",
+  askOthersQrNote:
+    "Apunta la cámara de un teléfono hacia él para abrir esta encuesta. Contiene el mismo enlace, así que no dice nada sobre quién lo mostró.",
+  askOthersFlyer: "Imprimir un volante",
+  askOthersNewTab: "(abre el sitio web en una pestaña nueva)",
   revoteExplained:
     "Puedes cambiar tus respuestas hasta que cierre la encuesta. Una boleta nueva desde este dispositivo reemplaza a esta.",
   sendRejectedTitle: "El tablero rechazó tu boleta",

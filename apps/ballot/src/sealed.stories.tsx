@@ -338,6 +338,44 @@ export const OnTheBoardDark: Story = {
   play: sent,
 };
 
+const SHARE = { url: "https://abolish.us/p/3j55dw1", title: "Which improvement matters most?" };
+
+/** "Ask others" sits after the tracking code and what this device checked, before what comes next. */
+async function asksOthersAfter(canvas: ReturnType<typeof within>, next: string) {
+  const region = canvas.getByRole("region", { name: "Ask others" });
+  const before = canvas.getByRole("heading", { name: "What this device checked" });
+  const after = canvas.getByRole("heading", { name: next });
+  await expect(
+    before.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  await expect(
+    region.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  await expect(within(region).getByRole("textbox", { name: "Link to this poll" })).toHaveValue(
+    SHARE.url,
+  );
+}
+
+export const OnTheBoardAskOthers: Story = {
+  name: "The cast ballot is on the board, with the poll's link for others",
+  render: () => (
+    <Sent poll={POLL} trackingCode={CODE} index={41n} share={SHARE} onAgain={onAgain} />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await asksOthersAfter(canvas, "Answer again");
+  },
+};
+
+export const OnTheBoardWithoutLink: Story = {
+  name: "The cast ballot is on the board, with no link to offer",
+  render: () => <Sent poll={POLL} trackingCode={CODE} index={41n} onAgain={onAgain} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.queryByRole("region", { name: "Ask others" })).toBeNull();
+  },
+};
+
 export const OnTheBoardAsACopy: Story = {
   name: "A copy of the cast ballot was already on the board",
   render: () => <Sent poll={POLL} trackingCode={CODE} onAgain={onAgain} />,
@@ -387,6 +425,15 @@ export const AlreadyAnsweredDark: Story = {
   parameters: { layout: "fullscreen", theme: "dark" },
   render: () => <Answered poll={POLL} trackingCode={CODE} onChange={onChange} />,
   play: answered,
+};
+
+export const AlreadyAnsweredAskOthers: Story = {
+  name: "The poll opens on a device that already answered it, with the poll's link for others",
+  render: () => <Answered poll={POLL} trackingCode={CODE} share={SHARE} onChange={onChange} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await asksOthersAfter(canvas, "You'll start fresh");
+  },
 };
 
 export const AnswerConflict: Story = {

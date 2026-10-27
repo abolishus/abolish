@@ -389,6 +389,25 @@ const enUS = {
   answeredPressuredTitle: "If someone pressured you",
   answeredPressured:
     "You can change your answers later, somewhere private, and only your last ones count.",
+  // Asking others after answering (ask-others.tsx; docs/design/sharing.md).
+  askOthersTitle: "Ask others",
+  askOthersNeverYourAnswer:
+    "Share the question, not your answer. The link is the same for everyone, so it doesn't say who shared it, how they answered or whether they did.",
+  askOthersLinkLabel: "Link to this poll",
+  askOthersCopy: "Copy link",
+  askOthersCopied: "Link copied",
+  askOthersCopiedStatus: "Link copied. Paste it anywhere.",
+  askOthersCopyFailed: "Couldn't copy. Select the link above and copy it.",
+  askOthersMenu: "Share…",
+  askOthersNoMenu:
+    "This browser doesn't have a share menu. Copy the link and paste it where you like, or email it.",
+  askOthersEmail: "Email the link",
+  askOthersQrShow: "Show a QR code",
+  askOthersQrLabel: "QR code for {link}",
+  askOthersQrNote:
+    "Point a phone's camera at it to open this poll. It holds the same link, so it says nothing about who showed it.",
+  askOthersFlyer: "Print a flyer",
+  askOthersNewTab: "(opens the website in a new tab)",
   revoteExplained:
     "You can change your answers until the poll closes. A new ballot from this device replaces this one.",
   sendRejectedTitle: "The board refused your ballot",

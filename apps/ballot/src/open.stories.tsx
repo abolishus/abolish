@@ -133,6 +133,7 @@ const LOADED: Loaded = {
   displayText: new Uint8Array(8),
   entries: [],
   hiddenAsThreat: false,
+  shortLink: undefined,
 };
 
 const SEALED: SealResult = { ok: true, seal: 7, trackingCode: fromHex(CODE) };
@@ -1472,6 +1473,64 @@ export const AlreadyOnTheBoard: Story = {
   },
 };
 
+const SHORT_LINK = "https://abolish.us/p/7z0ahc4";
+
+/** The "Ask others" region, or `null`. */
+const askOthers = (canvas: ReturnType<typeof within>) =>
+  canvas.queryByRole("region", { name: "Ask others" });
+
+export const SentAskOthers: Story = {
+  name: "On the board, the poll's link is offered to others after the tracking code",
+  args: {
+    source: source([{ ...LOADED, shortLink: SHORT_LINK }], {
+      ok: true,
+      election: POLL_OF_QUESTIONS,
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const shared: ShareData[] = [];
+    Object.defineProperty(navigator, "share", {
+      configurable: true,
+      value: async (data: ShareData) => void shared.push(data),
+    });
+    try {
+      await castInto(canvas, "Your ballot is on the board");
+      const region = askOthers(canvas);
+      if (region === null) throw new Error("no Ask others");
+      const part = within(region);
+      await expect(part.getByRole("textbox", { name: "Link to this poll" })).toHaveValue(
+        SHORT_LINK,
+      );
+      // After the tracking code, never above it.
+      const code = canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" });
+      await expect(
+        code.compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      // The first question and the link: nothing of the voter's answers.
+      await userEvent.click(part.getByRole("button", { name: "Share…" }));
+      await expect(shared).toEqual([{ title: FIRST, url: SHORT_LINK }]);
+    } finally {
+      Reflect.deleteProperty(navigator, "share");
+    }
+  },
+};
+
+export const SentNoLinkWhenHidden: Story = {
+  name: "On the board, a poll hidden on the website as a threat offers no link to others",
+  args: {
+    source: source([{ ...LOADED, hiddenAsThreat: true, shortLink: SHORT_LINK }], {
+      ok: true,
+      election: POLL_OF_QUESTIONS,
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await castInto(canvas, "Your ballot is on the board");
+    await expect(askOthers(canvas)).toBeNull();
+  },
+};
+
 export const RefusedByTheBoard: Story = {
   name: "The board refuses the ballot, naming the check",
   args: { source: castsSource({ answers: [{ kind: "rejected", code: "ballot-l1-ref" }] }) },
@@ -2528,6 +2587,30 @@ export const AnsweredOnOpening: Story = {
     for (const option of canvas.queryAllByRole("radio")) await expect(option).not.toBeChecked();
     await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const AnsweredAskOthers: Story = {
+  name: "The answered screen offers the poll's link to others",
+  args: {
+    source: source(
+      [{ ...LOADED, shortLink: SHORT_LINK }],
+      { ok: true, election: RECORDED_POLL },
+      SEALED,
+      OPENED,
+      { held: { kind: "read", casts: [BOARDED_RECORDED] } },
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: ANSWERED })).toHaveFocus();
+    const region = askOthers(canvas);
+    if (region === null) throw new Error("no Ask others");
+    await expect(within(region).getByRole("textbox", { name: "Link to this poll" })).toHaveValue(
+      SHORT_LINK,
+    );
+    // The screen's one action stays in the bottom bar.
+    await expect(canvas.getByRole("button", { name: "Change my answers" })).toBeVisible();
   },
 };
 

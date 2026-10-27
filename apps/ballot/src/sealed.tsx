@@ -10,6 +10,7 @@ import {
 } from "@abolishus/ui";
 import { useEffect, useState } from "react";
 
+import { AskOthers, type Share } from "./ask-others.tsx";
 import { ACTION, EverydayFrame, type FramePoll, Note, Part, ScreenTitle } from "./frame.tsx";
 import { catalogs, type Messages } from "./messages.ts";
 import { openingFileName, trackingCodeText } from "./tracking.ts";
@@ -306,11 +307,14 @@ export function Sent({
   poll,
   trackingCode,
   index,
+  share,
   onAgain,
 }: {
   poll: FramePoll;
   trackingCode: string;
   index?: bigint | undefined;
+  /** The poll's link to offer others, after the tracking code ("Ask others"), if there is one. */
+  share?: Share | undefined;
   onAgain: () => void;
 }) {
   const t = useTranslate(catalogs);
@@ -342,6 +346,7 @@ export function Sent({
       <Part title={t("sentUnsignedTitle")}>
         <p className="m-0">{t("sentUnsigned")}</p>
       </Part>
+      {share === undefined ? null : <AskOthers share={share} />}
       <Part title={t("answerAgain")}>
         <p className="m-0">{t("revoteExplained")}</p>
       </Part>
@@ -361,10 +366,13 @@ export function Sent({
 export function Answered({
   poll,
   trackingCode,
+  share,
   onChange,
 }: {
   poll: FramePoll;
   trackingCode: string;
+  /** The poll's link to offer others, after the tracking code ("Ask others"), if there is one. */
+  share?: Share | undefined;
   onChange: () => void;
 }) {
   const t = useTranslate(catalogs);
@@ -391,6 +399,7 @@ export function Answered({
       <Part title={t("sentUnsignedTitle")}>
         <p className="m-0">{t("sentUnsigned")}</p>
       </Part>
+      {share === undefined ? null : <AskOthers share={share} />}
       <Part title={t("answeredFreshTitle")}>
         <p className="m-0">{t("answeredFresh")}</p>
       </Part>

@@ -41,6 +41,9 @@ const HASH = "3f".repeat(32);
 const DEFINITION = "0001abcd";
 const TEXT = "0009ef";
 const ENTRY = "000704aa";
+// HASH's code in full is `7wzkyfsz` repeated, then `7wzg`.
+const CODE = "7wzkyfs";
+const WEB = "https://abolish.us";
 
 interface Call {
   readonly url: string;
@@ -70,7 +73,7 @@ const rpcResult = (id: number, result: unknown) => JSON.stringify({ jsonrpc: "2.
 /** An honest deployment, with any one answer replaced. */
 function honest(
   override: Partial<
-    Record<"chainId" | "call" | "definition" | "text" | "entries" | "status", Answer>
+    Record<"chainId" | "call" | "definition" | "text" | "entries" | "status" | "code", Answer>
   > = {},
 ) {
   return network((url, method) => {
@@ -89,6 +92,8 @@ function honest(
       return override.entries ?? { status: 200, body: JSON.stringify({ entries: [ENTRY] }) };
     if (url === `${DEPLOYMENT.api}/moderation/status?electionId=${ID_HEX}`)
       return override.status ?? { status: 200, body: JSON.stringify({ state: "visible" }) };
+    if (url === `${DEPLOYMENT.api}/elections/code?electionId=${ID_HEX}`)
+      return override.code ?? { status: 200, body: JSON.stringify({ code: CODE }) };
     return { status: 500, body: "" };
   });
 }
@@ -334,6 +339,83 @@ describe("the API's records", () => {
         const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
         if (!loaded.ok) throw new Error(loaded.problem);
         expect(hex(loaded.displayText)).toBe(hex(bytes));
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("the poll's short link", () => {
+  const WITH_WEB: Deployment = { ...DEPLOYMENT, web: WEB };
+  const codeCall = (calls: readonly Call[]) =>
+    calls.filter((c) => c.url.startsWith(`${DEPLOYMENT.api}/elections/code`));
+
+  test("a build that names a website asks for the code beside the records, as they are asked", async () => {
+    const { calls, fetchFn } = honest();
+    const loaded = await loadElection(WITH_WEB, ID, fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(loaded.shortLink).toBe(`${WEB}/p/${CODE}`);
+    // One request naming only the election: no credentials, referrer or redirect (T-10).
+    const [call] = codeCall(calls);
+    expect(codeCall(calls)).toHaveLength(1);
+    expect(call?.url).toBe(`${DEPLOYMENT.api}/elections/code?electionId=${ID_HEX}`);
+    expect(call?.init.credentials).toBe("omit");
+    expect(call?.init.referrerPolicy).toBe("no-referrer");
+    expect(call?.init.redirect).toBe("error");
+    expect(call?.init.method).toBe("GET");
+  });
+
+  test("a longer prefix of the registered hash is taken as it is", async () => {
+    const code = `${"7wzkyfsz".repeat(6)}7wzg`;
+    const { fetchFn } = honest({ code: { status: 200, body: JSON.stringify({ code }) } });
+    const loaded = await loadElection(WITH_WEB, ID, fetchFn);
+    expect(loaded.ok && loaded.shortLink).toBe(`${WEB}/p/${code}`);
+  });
+
+  test("a build that names no website asks for no code and offers no link", async () => {
+    const { calls, fetchFn } = honest();
+    const loaded = await loadElection(DEPLOYMENT, ID, fetchFn);
+    if (!loaded.ok) throw new Error(loaded.problem);
+    expect(loaded.shortLink).toBeUndefined();
+    expect(codeCall(calls)).toHaveLength(0);
+  });
+
+  test("a code that can't be read, or isn't the registered hash's, leaves the link out and the poll open", async () => {
+    const answers: Answer[] = [
+      "network",
+      { status: 404, body: "{}" },
+      { status: 503, body: "" },
+      { status: 200, body: "not json" },
+      { status: 200, body: JSON.stringify({ code: CODE, extra: 1 }) },
+      { status: 200, body: JSON.stringify({ code: 7 }) },
+      { status: 200, body: JSON.stringify([CODE]) },
+      // Another hash's code, a changed last character, its upper case, too short, too long.
+      { status: 200, body: JSON.stringify({ code: "0000000" }) },
+      { status: 200, body: JSON.stringify({ code: "7wzkyft" }) },
+      { status: 200, body: JSON.stringify({ code: CODE.toUpperCase() }) },
+      { status: 200, body: JSON.stringify({ code: "7wzkyf" }) },
+      { status: 200, body: JSON.stringify({ code: `${"7wzkyfsz".repeat(6)}7wzg0` }) },
+      // An answer longer than any code's, refused unread (T-52).
+      { status: 200, body: JSON.stringify({ code: CODE, pad: " ".repeat(200) }) },
+    ];
+    for (const code of answers) {
+      const loaded = await loadElection(WITH_WEB, ID, honest({ code }).fetchFn);
+      if (!loaded.ok) throw new Error(loaded.problem);
+      expect(loaded.shortLink).toBeUndefined();
+      expect(hex(loaded.definition)).toBe(DEFINITION);
+    }
+  });
+
+  test("a code of any other shape never becomes a link", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.string({ maxLength: 60 }), async (code) => {
+        fc.pre(!`${"7wzkyfsz".repeat(6)}7wzg`.startsWith(code) || code.length < 7);
+        const loaded = await loadElection(
+          WITH_WEB,
+          ID,
+          honest({ code: { status: 200, body: JSON.stringify({ code }) } }).fetchFn,
+        );
+        expect(loaded.ok && loaded.shortLink).toBeUndefined();
       }),
       { numRuns },
     );

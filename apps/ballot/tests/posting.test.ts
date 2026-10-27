@@ -525,6 +525,71 @@ describe("postThroughRelay", () => {
     expect(u.elapsed()).toBeGreaterThanOrEqual(700n + F);
   });
 
+  test("a later run reads L1 from the cast's mark, so an earlier run's deposit holds it (Outcome, The read)", async () => {
+    const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
+    // An earlier run, before a reload, marked the cast 900 seconds before
+    // this one started, and its relay deposited the posting 600 before it.
+    const DEPOSITED = -600n;
+    // An L1 that shows a deposit only to a read from at or before its block.
+    const honest = (w: ReturnType<typeof world>) => ({
+      ...w.io,
+      deposits: async (since: bigint, stop: () => boolean) => {
+        const read = await w.io.deposits(since, stop);
+        return read.ok
+          ? {
+              ...read,
+              landed: read.landed.map((x) => (x !== undefined && x >= since ? x : undefined)),
+            }
+          : read;
+      },
+    });
+    const w = world({ relay: () => sent, landed: () => [DEPOSITED] });
+    expect(await postThroughRelay(honest(w), [POSTING], CUTOFF, F, LATE, START - 900n)).toBe(
+      "relayed",
+    );
+    expect(w.l1Reads).toEqual([{ since: START - 900n, at: START + WAIT }]);
+    // Held until the deposit's L1 time plus F, as this run's own would be.
+    expect(w.elapsed()).toBeGreaterThanOrEqual(DEPOSITED + F);
+    expect(w.elapsed() - POLL).toBeLessThan(DEPOSITED + F);
+    // And recorded once it lands.
+    const v = world({
+      relay: () => sent,
+      landed: () => [DEPOSITED],
+      finalized: (t) => (t >= 30_000n ? [POSTING] : []),
+    });
+    expect(await postThroughRelay(honest(v), [POSTING], CUTOFF, F, LATE, START - 900n)).toBe(
+      "recorded",
+    );
+    // Read from the run's start, as without a mark, it isn't seen: the
+    // fallback comes once the wait is over.
+    const u = world({ relay: () => sent, landed: () => [DEPOSITED] });
+    expect(await postThroughRelay(honest(u), [POSTING], CUTOFF, F, LATE)).toBe("relayed");
+    expect(u.l1Reads).toEqual([{ since: START, at: START + WAIT }]);
+    expect(u.elapsed()).toBe(WAIT);
+  });
+
+  test("the mark reads L1 from no earlier than the run's start less F, nor later than its start", async () => {
+    const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
+    for (const [handed, since] of [
+      // A deposit older than F before the run has had its time to land.
+      [START - 10n * F, START - F],
+      [START - F - 1n, START - F],
+      [START - F, START - F],
+      [START - F + 1n, START - F + 1n],
+      // This run's own mark, and a device clock set back since the mark.
+      [START, START],
+      [START + 5_000n, START],
+    ] as const) {
+      const w = world({ relay: () => sent });
+      expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F, LATE, handed)).toBe("relayed");
+      expect(w.l1Reads).toEqual([{ since, at: START + WAIT }]);
+    }
+    // A run started within F of the epoch reads from the epoch at most.
+    const w = world({ relay: () => sent, start: F - 1n });
+    expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F, LATE, 0n)).toBe("relayed");
+    expect(w.l1Reads.map((r) => r.since)).toEqual([0n]);
+  });
+
   test("an L1 that can't be read, or whose read throws, falls back once the wait is over", async () => {
     const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
     const w = world({ relay: () => sent, landed: () => [700n] });

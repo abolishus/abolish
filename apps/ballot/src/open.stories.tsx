@@ -283,6 +283,8 @@ interface Voter {
 
 /** Before every story poll's close, by both clocks. */
 const BEFORE_CUTOFF = 1_760_000_000n;
+/** The cast's mark a store answers: an earlier run's, an hour before the stories' clock. */
+const HANDED_AT = BEFORE_CUTOFF - 3_600n;
 
 const VOTER: Voter = {
   identity: IDENTITY,
@@ -307,7 +309,7 @@ const VOTER: Voter = {
   chainTime: { ok: true, timestamp: BEFORE_CUTOFF },
   erased: "erased",
   postings: () => ({ ok: true }),
-  marked: "recorded",
+  marked: { handed: HANDED_AT },
   declined: "declined",
   declinedSeal: { ok: true },
   locks: true,
@@ -1963,6 +1965,9 @@ export const PostingChosen: Story = {
     await expect(of.post.mock.calls[0]?.[3]).toEqual(CUTOFFS);
     // Before the relay's send cutoff, no run is a late one.
     await expect(of.post.mock.calls[0]?.[4]).toBe(false);
+    // The cast's mark as the store answered it, the first run's, not this
+    // one's: the run looks for an earlier run's deposit from there.
+    await expect(of.post.mock.calls[0]?.[5]).toBe(HANDED_AT);
     // Posted before the ballot leaves: a ballot boarded with the seat neither
     // receipted nor posted would void the voter's earlier one.
     await expect(of.post.mock.invocationCallOrder[0]).toBeLessThan(
@@ -2219,7 +2224,7 @@ export const PostingNothingHandedNoWait: Story = {
 /** `CAST_RECORDED` marked `handed`: a run on this page or before a reload may have handed its parts out. */
 const CAST_HANDED: CastsRead = {
   kind: "read",
-  casts: CAST_RECORDED.casts.map((cast) => ({ ...cast, handed: true as const })),
+  casts: CAST_RECORDED.casts.map((cast) => ({ ...cast, handed: HANDED_AT })),
 };
 
 export const PostingMarkRefused: Story = {
@@ -2464,7 +2469,13 @@ export const PostingUnderTheLock: Story = {
       "markHanded",
       "post",
     ]);
-    await expect(of.markHanded).toHaveBeenCalledWith(fromHex(ELECTION_ID), 0, CAST.ballot);
+    // Marked with this device's clock, in seconds.
+    await expect(of.markHanded).toHaveBeenCalledWith(
+      fromHex(ELECTION_ID),
+      0,
+      CAST.ballot,
+      BEFORE_CUTOFF,
+    );
   },
 };
 
@@ -3081,7 +3092,7 @@ export const ResumedUndelivered: Story = {
 /** `RECORDED`'s cast marked `handed`: a run before the reload may have handed seat 1's posting out. */
 const RECORDED_HANDED: CastsRead = {
   kind: "read",
-  casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES, handed: true }],
+  casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES, handed: HANDED_AT }],
 };
 const RESUMED_WATCHING =
   "A posting started before may still put the missing parts on the public record.";
@@ -3190,7 +3201,9 @@ export const ResumedHandedEveryTrusteeReceipted: Story = {
     source: unsentSource(RECORDED_POLL, {
       held: {
         kind: "read",
-        casts: [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES.slice(1), handed: true }],
+        casts: [
+          { ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES.slice(1), handed: HANDED_AT },
+        ],
       },
       posted: ["recorded"],
       awaited: ["recorded"],

@@ -6,7 +6,14 @@
 // First, as in main.tsx.
 import "../../src/worker-policy.ts";
 
-import { CASTS_DB, eraseShares, readCasts, recordBoarded, recordCast } from "../../src/casts.ts";
+import {
+  CASTS_DB,
+  eraseShares,
+  readCasts,
+  recordBoarded,
+  recordCast,
+  recordHanded,
+} from "../../src/casts.ts";
 import { STAGING } from "../../src/deployment.ts";
 import {
   createIdentity,
@@ -346,6 +353,14 @@ const harness = {
     );
     if (checked === undefined) return Promise.resolve("unchecked");
     return recordBoarded(fromHex(electionId), tier, bytes, checked);
+  },
+  /**
+   * Marks the cast whose bytes are `ballot` handed at `at` seconds, a
+   * decimal string (casts.ts), answering the outcome with its mark as one.
+   */
+  async recordHanded(electionId: string, tier: number, ballot: string, at: string) {
+    const outcome = await recordHanded(fromHex(electionId), tier, fromHex(ballot), BigInt(at));
+    return typeof outcome === "string" ? outcome : outcome.handed.toString();
   },
   /** Erases every unreceipted seat's `ct_i` and `m_i` from the casts of `electionId` at `tier` (casts.ts). */
   eraseShares: (electionId: string, tier: number) => eraseShares(fromHex(electionId), tier),

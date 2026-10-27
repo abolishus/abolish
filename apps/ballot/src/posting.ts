@@ -252,7 +252,13 @@ interface Pending {
  * the election's lock (`waitForRecord`); one started past `c_E` sends
  * nothing and reads the finalized head once, for a posting an earlier run
  * handed out (The ballot's own deadline, A late relay run, Sending after a
- * run; T-15, T-25, T-52). A deadline counts as passed once this
+ * run; T-15, T-25, T-52). L1 is read from `handed`, the cast's mark, the
+ * time the first run of its seal was about to hand the same bytes out, so
+ * a deposit an earlier run's relay made, before a reload, still holds the
+ * client while it can land; never from before the run's start less
+ * `forcedInclusion`, since an older deposit has had its time to reach L2,
+ * nor after the run's start (Outcome, The read; T-13, T-52). Without it, from
+ * the run's start. A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
  * (T-25). In a late run, which has nothing to fall back to in time, a
@@ -267,9 +273,14 @@ export async function postThroughRelay(
   cutoff: bigint,
   forcedInclusion: bigint,
   late?: { readonly lastOffer: bigint },
+  handed?: bigint,
 ): Promise<PostAnswer> {
   const seconds = () => BigInt(Math.floor(io.now() / 1000));
   const started = seconds();
+  // A deposit older than `F` before the run has had its time to land.
+  const oldest = started > forcedInclusion ? started - forcedInclusion : 0n;
+  const since =
+    handed === undefined || handed >= started ? started : handed > oldest ? handed : oldest;
   const isLate = started > cutoff - POSTING_SEND_MARGIN;
   // A late run the voter wasn't told of hands nothing out (T-15).
   if (isLate && late === undefined) return "unreachable";
@@ -344,7 +355,7 @@ export async function postThroughRelay(
       // looked for again (Outcome, a qualifying deposit).
       if (waited.some((p) => !p.seen && p.lands === undefined)) {
         const l1 = await io
-          .deposits(started, () => time() > deadline)
+          .deposits(since, () => time() > deadline)
           .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
         if (l1.ok) {
           heard(l1.timestamp);

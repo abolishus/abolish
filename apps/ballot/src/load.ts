@@ -792,8 +792,9 @@ export async function loadDeposits(
     const [, head] = await both(checkChain(l1, fetchFn), headBlock(l1, fetchFn, "latest"));
     // Back in doubling steps to a block by `since`, at most
     // MAX_DEPOSIT_LOOKBACK blocks: a run's read comes within about an hour
-    // of its start, and an endpoint whose every block is later than `since`
-    // can't send the read back to the chain's start (T-52).
+    // of its start, and from at most `F` (13 hours on Base) before it, and
+    // an endpoint whose every block is later than `since` can't send the
+    // read back to the chain's start (T-52).
     let start: bigint | undefined;
     for (let back = 64n; start === undefined; back *= 2n) {
       if (back > MAX_DEPOSIT_LOOKBACK) throw new Stop("bad-answer");

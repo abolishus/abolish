@@ -265,7 +265,8 @@ contract ElectionRegistryTest is TestBase {
     }
 
     /// Every served profile registers, whatever the pins the check leaves to
-    /// the verifier (the receipt, ceremony transcript and tally opening).
+    /// the verifier (the receipt and ceremony transcript, and a tally opening
+    /// other than versions 2 and 3: 1, or 4 and 5, which no release reads).
     function test_RegistersEachServedProfile() public {
         uint8[5] memory versions = [1, 3, 4, 5, 6];
         for (uint256 i; i < 5; i++) {
@@ -278,7 +279,7 @@ contract ElectionRegistryTest is TestBase {
                 }
                 d.pinVersions[3] = other;
                 d.pinVersions[4] = other;
-                d.pinVersions[5] = other;
+                d.pinVersions[5] = other == 1 ? 1 : other + 2;
                 bytes memory enc = RegistryFixture.approve(lib, trustees, d);
                 vm.prank(CREATOR);
                 registry.registerDefinition(enc);
@@ -340,8 +341,30 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
+    /// Tally-opening versions 2 (a live poll's) and 3 (an author panel's) are
+    /// refused under every definition version, since this registry serves
+    /// neither a live poll nor an author panel and 2.3 fails both beside
+    /// every other profile (T-16, T-17, T-31).
+    function test_RefusesTallyOpeningVersions2And3() public {
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        for (uint256 i; i < 5; i++) {
+            for (uint8 v = 2; v <= 3; v++) {
+                bytes32 id = _create();
+                ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
+                d.pinVersions[5] = v;
+                bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+                _expectRefused(
+                    CREATOR,
+                    enc,
+                    abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(6), v)
+                );
+                _assertNoParameters(lib.hash(enc));
+            }
+        }
+    }
+
     /// A live version-6 poll, or one with an author panel, is refused at its
-    /// board-entry pin whatever it pins: verifier 2.3 fails it beside
+    /// board-entry pin whatever board-entry version it pins: verifier 2.3 fails it beside
     /// board-entry version 5, and the versions it needs (6 for a live poll's
     /// running openings, 7 for an author panel's approvals) aren't served
     /// (docs/spec/contracts.md, Registration, rule 9; T-16, T-17), so no
@@ -390,7 +413,8 @@ contract ElectionRegistryTest is TestBase {
             // Mostly the served version, so registrations happen too.
             uint8 v = pins[t] % 4 == 0 ? uint8(_bound(pins[t], 1, 255)) : d.pinVersions[t];
             d.pinVersions[t] = v;
-            if (expected.length == 0 && served[t] != 0 && v != served[t]) {
+            bool refused = served[t] != 0 ? v != served[t] : t == 5 && (v == 2 || v == 3);
+            if (expected.length == 0 && refused) {
                 expected = abi.encodeWithSelector(
                     ElectionRegistry.ProfileNotServed.selector, uint16(t + 1), v
                 );

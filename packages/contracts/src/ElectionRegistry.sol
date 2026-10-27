@@ -649,7 +649,8 @@ contract ElectionRegistry is EventAccumulator {
     /// Registration, rule 9), checked by record type in ascending order: the
     /// ballot version the board checks for it (1 for definition version 1, 2
     /// for 3 and 4, 3 for 5, 4 for 6), the spoiled-ballot opening version that
-    /// opens that ballot's cores, board-entry version 5, the only one that
+    /// opens that ballot's cores, a tally-opening version other than 2 and 3,
+    /// board-entry version 5, the only one that
     /// allows the close statement, for a sealed definition without an author
     /// panel and none for any other (a live poll's running openings need
     /// version 6 and an author panel's approvals version 7, which verifier 2.3
@@ -680,6 +681,11 @@ contract ElectionRegistry is EventAccumulator {
         if (pins[2] != (ballot == 1 ? 1 : ballot == 4 ? 3 : 2)) {
             revert ProfileNotServed(0x0003, pins[2]);
         }
+        // Tally-opening version 2 fixes a live poll's running opening and
+        // version 3 sums an author panel's half, and this registry serves
+        // neither, so 2.3 fails both beside any profile it serves; a version
+        // no release reads yet is left to 2.3, which reports it unverifiable.
+        if (pins[5] == 2 || pins[5] == 3) revert ProfileNotServed(0x0006, pins[5]);
         // Below definition version 6 `resultsMode` and `authorThreshold` are 0,
         // and at version 6 a live poll's `resultsMode` is above `SEALED`.
         if (

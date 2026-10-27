@@ -130,8 +130,9 @@ contract RegistryHandler is TestBase {
 /// 3. An election's definition hash is set once, by its creator, and never
 ///    changes afterwards (write-once; T-34, T-24).
 /// 4. A registration succeeds exactly when its caller is the creator, the
-///    election has no definition yet, and its definition's version has a
-///    profile the deployment serves (every version but 6).
+///    election has no definition yet, and its definition has a profile the
+///    deployment serves (every handler definition: a version-6 one is sealed
+///    with no author panel).
 /// 5. The event accumulator counts one event per creation and per registration.
 /// 6. The board's parameters are recorded for exactly the registered
 ///    definitions of every registered version, each exactly the registered definition's,

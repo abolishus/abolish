@@ -307,6 +307,17 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
             abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 7);
         _expectRefused(enc, reg, unserved);
         _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
+        // Pinning board-entry version 5 doesn't help it: the author panel
+        // itself is refused there, so its key set is never recorded (T-17).
+        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+        d.pinVersions[6] = 5;
+        enc = _approve(d);
+        reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
+        unserved =
+            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 5);
+        _expectRefused(enc, reg, unserved);
+        _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
+        _assertNothingRecorded(enc);
     }
 
     // --- checks 1 to 5 -------------------------------------------------------------

@@ -267,6 +267,7 @@ export {
   type L1Origin,
   MAX_EVENT_DATA,
   MAX_EVENT_TOPICS,
+  type PanelKindWord,
 } from "./contract-event.ts";
 export {
   type ArchivedContractLog,

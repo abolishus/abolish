@@ -3,11 +3,14 @@
 
 Elections for the verifier's delivery check beside an author panel
 (docs/spec/verifier.md, Key ceremony, step 5, and Counted set and tally;
-5.9; delivery.md, Delivery check (version 2)): a version-6 definition with a
-2-of-3 author panel whose seat 3 sent nothing, beside the 3-of-4 default
-panel whose seat 4 sent nothing, its board carrying both runs' transcripts,
-the author approvals record, three admitted ballots and version-2 share
-receipts. A ballot is delivered only once every registered seat of both
+5.9; delivery.md, Delivery check (version 2)): a version-6 definition, or,
+for docs/spec/vectors/verifier-delivery-v2-author-definition-v7.json, the
+same election under definition version 7 with a fixed electorate, which the
+verifier reads as version 6 under version 7's own hashes and stubs
+(docs/spec/verifier.md, Definition), with a 2-of-3 author panel whose seat 3
+sent nothing, beside the 3-of-4 default panel whose seat 4 sent nothing, its
+board carrying both runs' transcripts, the author approvals record, three
+admitted ballots and version-2 share receipts. A ballot is delivered only once every registered seat of both
 panels has receipted it, each receipt checked against its own panel's
 share hash and its own run's signing key, and an author seat is registered
 only by the author panel's own run, approved on the board, never by the
@@ -31,13 +34,15 @@ its RFC 6979 P-256 ECDSA signature) and verifier-openings-vectors.py (the
 floor of `s_S`, `period(closes_at) + 1`).
 
 The ballots' membership proofs are randomised, so their records are read
-from the committed verifier-ballots-v4-author.json (its "author-mixed" case)
-and checked against the ballots rebuilt here; nothing else needs a prover.
-Every other value comes from fixed labels (test data, never keys).
+from the committed verifier-ballots-v4-author.json (its "author-mixed" case),
+or verifier-ballots-v4-author-definition-v7.json for version 7, and checked
+against the ballots rebuilt here; nothing else needs a prover. Every other
+value comes from fixed labels (test data, never keys).
 
-Usage: python3 -I -B verifier-delivery-v2-author-vectors.py <constants> <out-dir>,
-where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json;
-then `vp check --fix` (the committed file is formatted).
+Usage: python3 -I -B verifier-delivery-v2-author-vectors.py <constants> <out-dir> [7],
+where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json
+and a final `7` makes the definition-version-7 file; then `vp check --fix`
+(the committed file is formatted).
 """
 
 import importlib.util
@@ -69,16 +74,18 @@ RECEIPT_TYPE = int.from_bytes(dv2.header(dv2.RECEIPT)[:2], "big")
 TALLY_OPENING_TYPE = 0x0006
 
 
-def main(constants, out_dir):
-    s = vba.build(constants)
+def main(constants, out_dir, version=6):
+    s = vba.build(constants, version)
     src = next(b for b in s["bundles"] if b["id"] == "author-mixed")
     d, run = src["definition"], src["run"]
     panel, author = s["panel"], s["author"]
     eid = d["election_id"]
     t_a, t_d, approved = src["board"][:3]
     assert t_a == run["transcript"] and run["registered"] == [1, 2]
+    assert vc.own_version(d) == version
 
-    committed = next(c for c in json.loads((VECTORS / "verifier-ballots-v4-author.json").read_text())["cases"] if c["id"] == "author-mixed")
+    source = "verifier-ballots-v4-author.json" if version == 6 else "verifier-ballots-v4-author-definition-v7.json"
+    committed = next(c for c in json.loads((VECTORS / source).read_text())["cases"] if c["id"] == "author-mixed")
     records = [vc.decode_entry(x, BOARD_VERSION)["payload"] for x in vo.split(bytes.fromhex(committed["board"]))]
     assert records[:3] == [t_a, t_d, approved]
     # The ballots in cells 0, 1 and 2 (entries 3 to 5 there), all admitted:
@@ -124,8 +131,8 @@ def main(constants, out_dir):
         m = iv4.statement(definition_hash, b["hash"], p, seat, sh)
         return dv2.receipt_record(definition_hash, b["hash"], p, seat, sh, iv4.sign(d_, m))
 
-    def every(b, skip=()):
-        return [receipt(b, p, seat) for p in (DEFAULT, AUTHOR) for seat in sorted(registered[p]) if (p, seat) not in skip]
+    def every(b, skip=(), definition_hash=defh):
+        return [receipt(b, p, seat, definition_hash=definition_hash) for p in (DEFAULT, AUTHOR) for seat in sorted(registered[p]) if (p, seat) not in skip]
 
     end = d["closes_at"] + d["l1_inclusion_bound"]
     clock = {"epoch": d["closes_at"] - 2 * PERIOD, "period": PERIOD, "deadline": 7200}
@@ -146,6 +153,8 @@ def main(constants, out_dir):
     cases = []
 
     def case(id_, description, segments, approvals=True):
+        if version == 7:
+            description = description.replace("Definition version 6", "Definition version 7 under a fixed electorate")
         entries = board(segments)
         ceremony_rows, _ = vc.expected(panel, d, entries, panel, BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
@@ -275,25 +284,45 @@ def main(constants, out_dir):
         approvals=False,
     )
 
+    if version == 7:
+        # Every seat of both panels receipts the cell-0 ballot's fields under
+        # the same election read as version 6: its receipts bind that
+        # reading's hash, another election's, in the statement and in the
+        # ballot hash they name, so none counts for the ballot boarded here,
+        # which isn't delivered (T-12, T-34, T-37). A ballot made for that
+        # reading would differ in more than its hash, but a receipt naming
+        # another definition is refused before anything else is compared.
+        v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(vb4.v6_reading(d))))
+        assert v6_hash != defh
+        ctx6 = dict(b0["ctx"], definitionHash=v6_hash)
+        b6 = dict(b0, ctx=ctx6, hash=b4.ballot_hash(ctx6, b0["vote"]))
+        c = case(
+            "v6-reading",
+            "Definition version 7 under a fixed electorate, beside the author panel: every registered seat of both panels receipts the cell-1 and tier-2 ballots in segment 3, but its receipts for the cell-0 ballot name that ballot's fields under the same election read as version 6 (that reading's hash in each statement and in the ballot hash it names): each is delivery-stray, so the cell-0 ballot misses every seat of both panels and isn't counted; the others are.",
+            [head, (3, every(b6, definition_hash=v6_hash) + every(b1) + every(b2))],
+        )
+        assert [(x["entry"], len(x["missing"])) for x in c["delivery"]["excluded"]] == [(3, 5)], c["delivery"]["excluded"]
+        assert [r["code"] for r in c["delivery"]["records"]] == ["delivery-stray"] * 5, c["delivery"]["records"]
+
     doc = {
         "format": "abolish-verifier-delivery-vectors/1",
-        "title": "The verifier's delivery check beside an author panel (definition version 6, ballot version 4, delivery records version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots and share receipts, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5, the report's delivery and the counted ballots' entries",
+        "title": f"The verifier's delivery check beside an author panel (definition version {'6' if version == 6 else '7 with a fixed electorate'}, ballot version 4, delivery records version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots and share receipts, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5, the report's delivery and the counted ballots' entries",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-delivery-v2-author-vectors.py, from verifier-ballots-v4-author-vectors.py, "
             "verifier-ceremony-vectors.py, ceremony-vectors.py, delivery-vectors.py, delivery-v2-vectors.py, intake-v4-vectors.py "
             "and verifier-openings-vectors.py (independent Python implementations); the ballot records are "
-            "verifier-ballots-v4-author.json's"
+            f"{source}'s"
         ),
         "panel": {"threshold": str(panel["k"]), "keys": [k.hex() for k in panel["keys"]]},
         "cases": cases,
     }
-    path = pathlib.Path(out_dir, "verifier-delivery-v2-author.json")
+    path = pathlib.Path(out_dir, "verifier-delivery-v2-author.json" if version == 6 else "verifier-delivery-v2-author-definition-v7.json")
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {path}: {len(cases)} cases")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: verifier-delivery-v2-author-vectors.py <constants> <out-dir>")
-    main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) not in (3, 4) or sys.argv[3:] not in ([], ["7"]):
+        raise SystemExit("usage: verifier-delivery-v2-author-vectors.py <constants> <out-dir> [7]")
+    main(sys.argv[1], sys.argv[2], 7 if sys.argv[3:] else 6)

@@ -242,7 +242,10 @@ def main(root):
         ("definition-v7-rolling-minimal", "the smallest rolling version-7 definition"),
         ("definition-v7-rolling-lists-at-max", "a rolling version-7 definition with its lists at their maxima"),
         ("definition-v7-fixed-typical", "a fixed version-7 definition (electorate_mode 1)"),
+        ("definition-v7-fixed-minimal", "the smallest fixed version-7 definition"),
         ("definition-v7-fixed-civic", "a fixed version-7 civic referendum"),
+        ("definition-v7-rolling-with-fixed-electorate", "a rolling version-7 definition that also lists a fixed "
+         "electorate, which decodes and fails well-formedness: the check reads the form only"),
         ("definition-v7-rolling-civic", "a rolling version-7 civic referendum, which decodes and fails "
          "well-formedness (rolling-class): rule 2 decodes it, and rule 3 refuses it, so no registry logs it, "
          "but the event check reads the form only, and well-formedness is 2.1's"),
@@ -266,6 +269,9 @@ def main(root):
         ("definition-v7-truncated", "a version-7 definition one byte short"),
         ("definition-v7-trailing", "a version-7 definition with a trailing byte"),
         ("definition-v7-electorate-mode-0", "a version-7 definition whose electorate_mode is 0"),
+        ("definition-v7-electorate-mode-3", "a version-7 definition whose electorate_mode is 3"),
+        ("definition-v7-rolling-electorate-over-max", "a rolling electorate of more tiers than the layout allows"),
+        ("definition-v7-rolling-tier-three", "a rolling tier labelled tier 3"),
         ("definition-v7-rolling-root-r", "a rolling tier's root at the field's modulus, non-canonical"),
         ("definition-v7-rolling-groups-over-max", "a rolling tier listing more groups than the layout allows"),
         ("definition-v7-profile-pins-six", "a version-7 definition whose profile pins definition version 6: "

@@ -242,9 +242,15 @@ interface Pending {
  * ([[posting-relay]], The ballot's own deadline). A run that starts with the
  * send cutoff already passed by this device's clock is a **late** run,
  * best effort: no deposit can then be forced in time, but an honest relay
- * with a live sequencer still records a posting in minutes, so it sends and
- * resends until `lastOffer`, the last-offer cutoff `c_E`, which is also its
- * deadline (The ballot's own deadline, A late relay run; T-25). A deadline counts as passed once this
+ * with a live sequencer still records a posting within about twenty
+ * minutes. It runs only where `late` is given, once the voter was told so
+ * (else it answers `unreachable` and sends nothing), sends and resends
+ * until `late.lastOffer`, the last-offer cutoff `c_E`, and then, with no
+ * fallback on a posting no head shows, reads the finalized head until
+ * `late.send`, the send cutoff `c_S`, past which a record no longer sends
+ * the ballot; one started past `c_E` sends nothing and reads the finalized
+ * head once, for a posting an earlier run handed out (The ballot's own
+ * deadline, A late relay run, Sending after a run; T-15, T-25). A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
  * (T-25). A read that fails or throws records nothing.
@@ -254,13 +260,15 @@ export async function postThroughRelay(
   postings: readonly Uint8Array[],
   cutoff: bigint,
   forcedInclusion: bigint,
-  lastOffer: bigint,
+  late?: { readonly lastOffer: bigint; readonly send: bigint },
 ): Promise<PostAnswer> {
   const seconds = () => BigInt(Math.floor(io.now() / 1000));
   const started = seconds();
-  const late = started > cutoff - POSTING_SEND_MARGIN;
-  const deadline = late ? lastOffer : cutoff - POSTING_CLIENT_MARGIN;
-  const sendCutoff = late ? lastOffer : cutoff - POSTING_SEND_MARGIN;
+  const isLate = started > cutoff - POSTING_SEND_MARGIN;
+  // A late run the voter wasn't told of hands nothing out (T-15).
+  if (isLate && late === undefined) return "unreachable";
+  const deadline = isLate ? (late?.send ?? 0n) : cutoff - POSTING_CLIENT_MARGIN;
+  const sendCutoff = isLate ? (late?.lastOffer ?? 0n) : cutoff - POSTING_SEND_MARGIN;
   const pending: Pending[] = postings.map((posting) => ({
     posting,
     sentAt: undefined,
@@ -292,6 +300,8 @@ export async function postThroughRelay(
     const left = pending.filter((p) => !recorded.has(p));
     if (left.length === 0) return "recorded";
     if (time() > deadline) return unrecorded();
+    // A late run past `c_E` waits only for what it handed out.
+    if (isLate && !read && time() > sendCutoff) return unrecorded();
     for (const p of left) {
       if (p.sentAt !== undefined) continue;
       const now = time();
@@ -308,7 +318,9 @@ export async function postThroughRelay(
     );
     // Still waited on: seen at the latest head, or its deposit still to reach L2.
     const held = (p: Pending) => p.seen || (p.lands !== undefined && time() < p.lands);
-    if (!waited.every(held)) {
+    // A late run has nothing to fall back to in time, so it waits for the
+    // record to its deadline whatever the heads show.
+    if (!isLate && !waited.every(held)) {
       // Looked for at the latest head only once its wait is over: a sighting
       // there only keeps the client waiting, to `c_P` at most.
       const latest = await find("latest");

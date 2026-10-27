@@ -314,6 +314,7 @@ const source: ElectionSource = {
           ballot: Uint8Array,
           postings: readonly Uint8Array[],
           cutoffs: PostingCutoffs,
+          late: boolean,
         ) {
           const { definitionHash, ballotHash } = postingTopics(postings);
           // Each request bounded, so neither the relay nor the RPCs can hold
@@ -345,7 +346,7 @@ const source: ElectionSource = {
               postings,
               cutoffs.force,
               STAGING.forcedInclusion,
-              cutoffs.lastOffer,
+              late ? { lastOffer: cutoffs.lastOffer, send: cutoffs.send } : undefined,
             );
           } finally {
             for (const call of calls) call.fill(0);

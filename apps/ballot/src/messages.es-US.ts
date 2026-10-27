@@ -338,6 +338,8 @@ export const esUS: Messages = {
   postingWalletOfferTitle: "Publicar desde tu propia billetera",
   postingWalletOffer:
     "Nuestro servicio de publicación no puso las partes que faltan en el registro público, así que tu propia billetera de Ethereum puede hacerlo, pagando la tarifa de la red. La dirección que paga se publica para siempre junto a esta boleta y a cada nueva respuesta que des en esta encuesta, así que usa una dirección nueva con fondos privados, nunca una ligada a ti o a una cuenta de un intercambio. Tu billetera y el nodo que usa ven las partes que faltan antes que el registro público, y puede que también el nodo con el que este dispositivo lee el tablero. Si la red no toma la publicación en diez minutos, o el nodo de tu billetera la rechaza, tu billetera te pide forzarla a través de Ethereum desde la misma dirección, lo que también necesita ETH ahí y cuesta más. Este dispositivo envía tu boleta solo cuando el registro las muestra.",
+  postingWalletLate:
+    "Ya es tarde para que tu billetera fuerce la publicación a través de Ethereum a tiempo, así que llega al registro público solo si la red la toma. Si el registro no la muestra a tiempo, tu boleta no se envía, y las partes quedan públicas para nada.",
   postingWalletPost: "Publicar desde mi billetera y enviar",
   postingHandedTitle: "Las partes que faltan todavía pueden llegar al tablero",
   postingHanded:

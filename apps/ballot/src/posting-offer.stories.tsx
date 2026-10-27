@@ -152,6 +152,17 @@ export const OfferedLate: Story = {
   },
 };
 
+export const OfferedLateWallet: Story = {
+  name: "Once the wallet's send may no longer be forced in time, its offer says so before it can be chosen",
+  args: { failed: true, onWallet: fn(), lateWallet: true },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText(/too late for your wallet to force the posting/)).toBeVisible();
+    await userEvent.click(canvas.getByRole("button", { name: "Post from my wallet, then send" }));
+    await expect(args.onWallet).toHaveBeenCalledOnce();
+  },
+};
+
 export const WalletForced: Story = {
   name: "Parts the wallet forced through Ethereum are counted as posted, with the page kept open",
   args: { failed: true, handed: true, onWallet: fn(), wallet: "forced" },

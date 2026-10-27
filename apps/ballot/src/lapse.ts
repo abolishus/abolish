@@ -51,10 +51,15 @@ export interface PostingCutoffs {
    * ballot before the close (T-25).
    */
   readonly lastOffer: bigint;
+  /**
+   * The send cutoff `c_S = closes_at − POSTING_SEND_TIME`, past which a
+   * recorded posting no longer sends its ballot: the ballot's own send.
+   */
+  readonly send: bigint;
 }
 
 /**
- * `c_B`, `c_L` and `c_E` for a poll closing at `closesAt` with `l1InclusionBound`,
+ * `c_B`, `c_L`, `c_E` and `c_S` for a poll closing at `closesAt` with `l1InclusionBound`,
  * under the release's `forcedInclusion` (`F`). The drift is the pinned
  * `MAX_SEQUENCER_DRIFT`, never the definition's own, which its creator could
  * set to 0 and leave a deposit no time to land (T-34).
@@ -71,6 +76,7 @@ export function postingCutoffs(
     ballot,
     force: ballot - BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT),
     lastOffer: closesAt - POSTING_SEND_TIME - POSTING_LATE_FINALITY,
+    send: closesAt - POSTING_SEND_TIME,
   };
 }
 

@@ -1692,6 +1692,34 @@ export const PostingOfferWithoutAContractPath: Story = {
   },
 };
 
+export const PostingTurnsLateWhileOffered: Story = {
+  name: "An offer left open past the relay's send cutoff says the run is late before it can be chosen",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 12_100n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await expect(canvas.queryByText("The poll closes soon")).toBeNull();
+    // The relay's send cutoff `c_L − POSTING_SEND_MARGIN` passes while the offer is open.
+    Object.assign(args.source, { now: () => Number(ELECTION.closesAt - 11_000n) * 1000 });
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    // Not run: the offer says first that it is best effort (T-15).
+    await expect(await canvas.findByText("The poll closes soon")).toBeVisible();
+    await expect(of.post).not.toHaveBeenCalled();
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.post).toHaveBeenCalledOnce();
+    await expect(of.post.mock.calls[0]?.[4]).toBe(true);
+  },
+};
+
 export const PostingChosen: Story = {
   name: "The voter posts the seat left: its share is checked again, posted, then the ballot sent",
   args: { source: offerSource({ posted: ["recorded"] }) },
@@ -1716,6 +1744,8 @@ export const PostingChosen: Story = {
     // Read from the close, never `c_D`: a posting recorded past it helps no
     // ballot of this client's.
     await expect(of.post.mock.calls[0]?.[3]).toEqual(CUTOFFS);
+    // Before the relay's send cutoff, no run is a late one.
+    await expect(of.post.mock.calls[0]?.[4]).toBe(false);
     // Posted before the ballot leaves: a ballot boarded with the seat neither
     // receipted nor posted would void the voter's earlier one.
     await expect(of.post.mock.invocationCallOrder[0]).toBeLessThan(
@@ -2690,6 +2720,7 @@ const CUTOFFS = {
   ballot: ELECTION.closesAt - 3_600n,
   force: ELECTION.closesAt - 5_400n,
   lastOffer: ELECTION.closesAt - 1_800n,
+  send: ELECTION.closesAt - 600n,
 };
 // What the shares are erased at, the close, and a time past it.
 const CUTOFF = ELECTION.closesAt;

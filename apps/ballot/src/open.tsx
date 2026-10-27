@@ -49,7 +49,7 @@ import {
 } from "./sealed.tsx";
 import { checkBoarded, type SendAnswer } from "./send.ts";
 import { formatTime } from "./time.ts";
-import type { WalletAnswer } from "./wallet.ts";
+import { type WalletAnswer, WALLET_FORCE_MARGIN } from "./wallet.ts";
 import type {
   CastResult,
   ChallengeResult,
@@ -167,9 +167,10 @@ export interface ElectionSource {
    * contract path, the only path a posting delivers by ([[delivery]],
    * Direct submit), answering `recorded` only once every one is recorded by
    * the contract, with its deadlines read from `cutoffs`, the poll's force
-   * cutoff `c_L` and, for a late run, its last-offer cutoff `c_E`
-   * ([[posting-relay]], Outcome, The ballot's own deadline); absent while
-   * the build has no
+   * cutoff `c_L` and, for a late run, the last-offer and send cutoffs `c_E`
+   * and `c_S`, a late run made only where `late` says the voter was told it
+   * is best effort ([[posting-relay]], Outcome, The ballot's own deadline);
+   * absent while the build has no
    * contract path, and then no posting is offered. The caller zeroes the
    * records once this settles.
    */
@@ -178,6 +179,7 @@ export interface ElectionSource {
     ballot: Uint8Array,
     postings: readonly Uint8Array[],
     cutoffs: PostingCutoffs,
+    late: boolean,
   ) => Promise<PostAnswer>;
   /**
    * Posts each of `postings` as `post` does, from the voter's own wallet
@@ -679,6 +681,17 @@ export function Ballot({
   /** The poll's own posting cutoffs `c_B` and `c_L`, in seconds ([[posting-relay]], The ballot's own deadline). */
   const cutoffs = () =>
     postingCutoffs(election.closesAt, election.l1InclusionBound, source.forcedInclusion);
+
+  /**
+   * Whether a run through the relay would be a late one, best effort: its
+   * send cutoff `c_L − POSTING_SEND_MARGIN` passed on this device.
+   */
+  const relayLate = () => passedOnDevice(cutoffs().force - POSTING_SEND_MARGIN, source.now());
+  /**
+   * Whether the wallet's send may no longer be forced in time: `c_L −
+   * WALLET_FORCE_MARGIN` passed on this device ([[posting-relay]], The offer).
+   */
+  const walletLate = () => passedOnDevice(cutoffs().force - WALLET_FORCE_MARGIN, source.now());
 
   /** Runs `steps` under the election's lock, where the build has one (`ElectionSource.exclusive`). */
   const locked = <T,>(steps: () => Promise<T>): Promise<T> =>
@@ -1253,13 +1266,20 @@ export function Ballot({
    * earlier one (Client rule 4; [[revoting]], Selection). A posting that
    * doesn't go through returns to the offer.
    */
-  function post(sending: Sending, handed: boolean) {
+  function post(sending: Sending, handed: boolean, offered: Step, warned: boolean) {
     if (posting === undefined) return;
+    // A run that became late while the offer was open is chosen only once
+    // the offer has said so (T-15).
+    const late = relayLate();
+    if (late && !warned) {
+      setStep({ ...offered });
+      return;
+    }
     setStep({ kind: "posting" });
     run(
       async (current) => {
         const posted = await postChecked(sending, (postings) =>
-          posting(electionId, sending.ballot, postings, cutoffs()).catch(
+          posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
             (): PostAnswer => "unreachable",
           ),
         );
@@ -1309,8 +1329,18 @@ export function Ballot({
    * `post`, then the wallet's run. A run that doesn't record them returns
    * to the offer with what the wallet met, the relay still there to try.
    */
-  function postFromOwnWallet(sending: Sending, relayed: boolean, handed: boolean) {
+  function postFromOwnWallet(
+    sending: Sending,
+    relayed: boolean,
+    handed: boolean,
+    offered: Step,
+    warned: boolean,
+  ) {
     if (postingOwn === undefined) return;
+    if (walletLate() && !warned) {
+      setStep({ ...offered });
+      return;
+    }
     setStep({ kind: "posting-wallet" });
     // Every answer but these may come after the wallet's estimate, which
     // carries the parts (Own wallet, step 3), so they count as handed.
@@ -1445,6 +1475,9 @@ export function Ballot({
       return <Working poll={poll} kind={step.kind} />;
     case "offer": {
       const { sending } = step;
+      // What the offer says now, which the choice is checked against when made.
+      const late = relayLate();
+      const lateWallet = walletLate();
       return (
         <PostingOffer
           poll={poll}
@@ -1455,14 +1488,26 @@ export function Ballot({
           onRetry={() => sendAgain(sending)}
           onDecline={() => decline(sending)}
           handed={step.handed === true}
-          onPost={posting === undefined ? undefined : () => post(sending, step.handed === true)}
+          onPost={
+            posting === undefined
+              ? undefined
+              : () => post(sending, step.handed === true, step, late)
+          }
           onWallet={
             step.fallback === true && postingOwn !== undefined
-              ? () => postFromOwnWallet(sending, step.relayed === true, step.handed === true)
+              ? () =>
+                  postFromOwnWallet(
+                    sending,
+                    step.relayed === true,
+                    step.handed === true,
+                    step,
+                    lateWallet,
+                  )
               : undefined
           }
           wallet={step.wallet}
-          late={passedOnDevice(cutoffs().force - POSTING_SEND_MARGIN, source.now())}
+          late={late}
+          lateWallet={lateWallet}
         />
       );
     }

@@ -79,6 +79,7 @@ describe("the client's own posting cutoffs", () => {
         expect(ballot).toBe(cD < margin ? cD : margin);
         expect(force).toBe(ballot - BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT));
         expect(postingCutoffs(closes, bound, f).lastOffer).toBe(closes - 1_800n);
+        expect(postingCutoffs(closes, bound, f).send).toBe(closes - 600n);
         // Never past the close, nor past `c_D`.
         expect(ballot).toBeLessThan(closes);
         expect(ballot).toBeLessThanOrEqual(cD);
@@ -93,6 +94,7 @@ describe("the client's own posting cutoffs", () => {
       ballot: closes - 3_600n,
       force: closes - 5_400n,
       lastOffer: closes - 1_800n,
+      send: closes - 600n,
     });
     // An `F` past the delivery window brings `c_D` before the margin.
     const cD = postingCutoff(closes, 0n, DELIVERY_WINDOW + 7_200n);

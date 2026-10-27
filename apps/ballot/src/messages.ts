@@ -336,6 +336,8 @@ const enUS = {
   postingWalletOffer:
     "Our relay didn't put the missing parts on the public record, so your own Ethereum wallet can, paying the network's fee. The address that pays is published for good beside this ballot and every new answer you give in this poll, so use a fresh address funded privately, never one tied to you or to an exchange account. Your wallet and the node it uses see the missing parts before the public record does, and so may the node this device reads the board through. If the network doesn't take the posting within ten minutes, or your wallet's node refuses it, your wallet asks you to force it through Ethereum from the same address, which needs ETH there too and costs more. This device sends your ballot only once the record shows them.",
   postingWalletPost: "Post from my wallet, then send",
+  postingWalletLate:
+    "It's now too late for your wallet to force the posting through Ethereum in time, so it reaches the public record only if the network takes it. If the record doesn't show it in time, your ballot isn't sent, and the parts are public for nothing.",
   postingHandedTitle: "The missing parts may still reach the board",
   postingHanded:
     "This try or an earlier one gave the missing parts to our posting relay or to your wallet, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back.",

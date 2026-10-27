@@ -121,6 +121,13 @@ def pins_for(ballot=4, opening=3, definition=6):
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
 
+def v6_reading(d):
+    """A fixed version-7 definition read as version 6: its fields without the mode and the empty list, pinning definition version 6."""
+    pinned = dict(d["profile"]["pins"])
+    pinned[1] = 6
+    return dict(rv.as_v6(d), profile={"protocol_major": 1, "pins": sorted(pinned.items())})
+
+
 def combination(d):
     """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll without an author panel fits with display-text 2, ballot 4, spoiled-ballot opening 3, tally-opening 1, board-entry 5 and contract-event 8 (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll or an author panel fails whatever it pins; a ballot version this verifier doesn't read is unsupported once nothing else fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails."""
     pins = dict(d["profile"]["pins"])
@@ -478,16 +485,10 @@ def build(constants, version=6):
         )
 
     if version == 7:
-        # The same election read as version 6: its fields without the mode
-        # and the empty list, pinning definition version 6. Its hash and
-        # stubs are another definition's, so a ballot made for it is another
+        # The same election read as version 6. Its hash and stubs are
+        # another definition's, so a ballot made for it is another
         # election's (T-12, T-34), and a transcript made for its stub
         # registers nothing here (T-37).
-        def v6_reading(x):
-            pinned = dict(x["profile"]["pins"])
-            pinned[1] = 6
-            return dict(rv.as_v6(x), profile={"protocol_major": 1, "pins": sorted(pinned.items())})
-
         e6 = dict(e, label="v6-reading", definitionHash=H(ds(DEFINITION_TAG, vc.encode(v6_reading(d)))))
         assert e6["definitionHash"] != e["definitionHash"]
         b_v6 = ballot("v6-reading", e6, 0, nullifier("r0/0", e6, 0), [(3, [0]), (4, []), (2, [0])], zero4)

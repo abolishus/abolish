@@ -39,13 +39,13 @@ import { blocksDir, close, listen, removeDirs } from "./fixture.ts";
 // each election's checkpoints, an L2 node scripted here answers the election
 // and trustee registries' logs, and the node gathers every input into a
 // bundle the verifier reads. What it gathers is checked against values
-// computed here, the topics come from contract-event-v8.json's tables rather
+// computed here, the topics come from contract-event-v12.json's tables rather
 // than the node's own constants, and the report must be the one the
 // verifier's own loader gives for the bundle it wrote (T-24, T-49, T-53).
 
 const vectors = JSON.parse(
   await readFile(
-    new URL("../../../docs/spec/vectors/contract-event-v8.json", import.meta.url),
+    new URL("../../../docs/spec/vectors/contract-event-v12.json", import.meta.url),
     "utf8",
   ),
 ) as { events: { signature: string; topic0: string }[] };
@@ -149,7 +149,9 @@ function pinned(panelId: Uint8Array): Log {
     data: concatBytes(
       word(BigInt(PANEL.threshold)),
       word(BigInt(PANEL.keys.length)),
-      word(96n),
+      // Transitional, as the launch panel is.
+      word(2n),
+      word(128n),
       word(BigInt(keys.length)),
       padded(keys),
     ),

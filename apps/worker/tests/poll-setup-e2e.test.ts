@@ -154,7 +154,7 @@ const EVENT_VERSION = POLL_DEFINITION_PROFILE.pins.find(
   (p) => p.record_type === RECORD_TYPES.contractEvent,
 )?.version as 7;
 
-/** The trustee registry's `PanelInput`, a seat's `(x, y)` from its secret. */
+/** The trustee registry's `PanelInput`, transitional, a seat's `(x, y)` from its secret. */
 function panelInput(secrets: readonly Uint8Array[], threshold: number, quorum: number) {
   const points = secrets.map((d) => {
     const ecdh = createECDH("prime256v1");
@@ -162,7 +162,13 @@ function panelInput(secrets: readonly Uint8Array[], threshold: number, quorum: n
     const u = ecdh.getPublicKey();
     return [BigInt(toHex(u.subarray(1, 33))), BigInt(toHex(u.subarray(33)))] as const;
   });
-  return { threshold, quorum, keys: toHex(Buffer.concat(secrets.map(identityKey))), points };
+  return {
+    threshold,
+    quorum,
+    kind: 2,
+    keys: toHex(Buffer.concat(secrets.map(identityKey))),
+    points,
+  };
 }
 
 async function freePort(): Promise<number> {

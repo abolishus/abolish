@@ -191,6 +191,96 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
         );
     }
 
+    // --- the civic record (Registration, rule 8) ---------------------------------
+
+    /// Classes 2 and 3 register only under a panel the trustee registry pins
+    /// as `independent`, through both calls; under a `transitional` one each
+    /// is refused after the ceremony check, recording nothing (T-14).
+    function test_CivicClassesNeedAnIndependentPanel() public {
+        uint8[2] memory classes = [2, 3];
+        for (uint8 kind = 1; kind <= 2; kind++) {
+            _useKind(kind);
+            for (uint256 c; c < 2; c++) {
+                for (uint256 withAuthor; withAuthor < 2; withAuthor++) {
+                    (bytes32 id, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+                    d.pollClass = classes[c];
+                    if (withAuthor == 0) _withoutAuthorPanel(d);
+                    bytes memory enc = _approve(d);
+                    bytes memory reg = withAuthor == 0
+                        ? bytes("")
+                        : _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
+                    bytes memory call = withAuthor == 0
+                        ? abi.encodeCall(ElectionRegistry.registerDefinition, (enc))
+                        : abi.encodeCall(
+                            ElectionRegistry.registerDefinitionWithAuthorPanel, (enc, reg)
+                        );
+                    if (kind == 1) {
+                        vm.prank(CREATOR);
+                        (bool ok,) = address(registry).call(call);
+                        assertTrue(ok, "refused under an independent panel");
+                        assertEq(registry.definitionHashOf(id), lib.hash(enc), "registered");
+                    } else {
+                        _expectCallRefused(
+                            call,
+                            abi.encodeWithSelector(
+                                ElectionRegistry.CivicPanelNotIndependent.selector, panel, kind
+                            )
+                        );
+                        _assertNothingRecorded(enc);
+                    }
+                }
+            }
+        }
+    }
+
+    /// An everyday poll (class 1) runs under any pinned panel, the
+    /// transitional one included.
+    function test_EverydayPollsRunUnderEitherKind() public {
+        for (uint8 kind = 1; kind <= 2; kind++) {
+            _useKind(kind);
+            (bytes32 id, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+            assertEq(d.pollClass, 1, "everyday");
+            _withoutAuthorPanel(d);
+            bytes memory enc = _approve(d);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            assertEq(registry.definitionHashOf(id), lib.hash(enc), "registered");
+            (, enc) = _approved(2, 3);
+            _register(enc, _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2)));
+        }
+    }
+
+    /// The kind is asked only once the ceremony is recorded: a civic
+    /// definition no quorum approved fails `CeremonyNotRecorded` under a
+    /// transitional panel.
+    function test_TheCeremonyIsCheckedBeforeTheKind() public {
+        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+        d.pollClass = 3;
+        _withoutAuthorPanel(d);
+        bytes memory enc = DefinitionEncoder.encode(d);
+        _expectCallRefused(
+            abi.encodeCall(ElectionRegistry.registerDefinition, (enc)),
+            abi.encodeWithSelector(
+                ElectionRegistry.CeremonyNotRecorded.selector, lib.stubHash(enc), DEFAULT_TRANSCRIPT
+            )
+        );
+    }
+
+    /// The deployed registry checks the kind before rule 9, so a civic
+    /// definition under a transitional panel is refused for its panel even
+    /// while rule 9 serves no version-6 definition.
+    function test_TheDeployedRegistryRefusesACivicPollUnderATransitionalPanel() public {
+        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
+        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+        d.pollClass = 2;
+        _withoutAuthorPanel(d);
+        bytes memory enc = _approve(d);
+        _expectCallRefused(
+            abi.encodeCall(ElectionRegistry.registerDefinition, (enc)),
+            abi.encodeWithSelector(ElectionRegistry.CivicPanelNotIndependent.selector, panel, 2)
+        );
+    }
+
     /// The deployed registry refuses every version-6 definition at rule 9,
     /// before the author panel's checks or `AuthorRegistrationMissing`, so it
     /// records no author key set until part 5e serves version 6.
@@ -504,6 +594,20 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
     }
 
     // --- helpers -----------------------------------------------------------------
+
+    /// A trustee registry pinning the default panel with kind `kind`, and a
+    /// registry serving version 6 over it.
+    function _useKind(uint8 kind) internal {
+        trustees = AuthorPanelFixture.trusteeRegistry(kind);
+        registry = new ServingVersion6Registry(RegistryFixture.deployment(address(trustees)));
+        assertEq(trustees.panelIds(0), panel, "the same panel");
+    }
+
+    function _withoutAuthorPanel(ElectionDefinitionLib.Definition memory d) internal pure {
+        d.authorThreshold = 0;
+        d.authorKeys = new ElectionDefinitionLib.P256Key[](0);
+        d.authorTranscriptHash = bytes32(0);
+    }
 
     function _create() internal returns (bytes32 id) {
         vm.prank(CREATOR);

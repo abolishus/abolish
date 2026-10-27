@@ -204,7 +204,7 @@ const harness = {
         records: query.records.map(fromHex),
         registry: fromHex(query.registry),
         chainId: BigInt(query.chainId),
-        version: 8,
+        version: 12,
         registrars: query.registrars.map(fromHex),
         threshold: query.threshold,
       });
@@ -216,7 +216,7 @@ const harness = {
         records: [],
         registry: new Uint8Array(20),
         chainId: 0n,
-        version: 8,
+        version: 12,
         registrars: [],
         threshold: 0,
       });
@@ -279,7 +279,7 @@ const harness = {
       records: query.records.map(fromHex),
       registry: fromHex(query.registry),
       chainId: BigInt(query.chainId),
-      version: 8,
+      version: 12,
       registrars: query.registrars.map(fromHex),
       threshold: query.threshold,
     });

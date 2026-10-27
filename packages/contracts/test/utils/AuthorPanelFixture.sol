@@ -36,17 +36,23 @@ library AuthorPanelFixture {
 
     bytes32 internal constant DEFAULT_TRANSCRIPT = keccak256("default transcript");
 
-    /// A trustee registry pinning `panel-4-of-7` with quorum 4.
+    /// A trustee registry pinning `panel-4-of-7` with quorum 4, transitional.
     function trusteeRegistry() internal returns (TrusteeRegistry) {
+        return trusteeRegistry(2);
+    }
+
+    /// A trustee registry pinning `panel-4-of-7` with quorum 4 and kind `kind`.
+    function trusteeRegistry(uint8 kind) internal returns (TrusteeRegistry) {
         string memory json = vm.readFile(TrusteeFixture.VECTORS);
         TrusteeRegistry.PanelInput[] memory panels = new TrusteeRegistry.PanelInput[](1);
         panels[0] = TrusteeFixture.panel(json, "panel-4-of-7", 4);
+        panels[0].kind = kind;
         return new TrusteeRegistry(panels);
     }
 
     /// A version-6 definition for election `id` with a `k`-of-`n` author panel
     /// of keys `1·G` to `n·G`, pinning what part 5e serves (ballot 4, opening
-    /// 3, board entry 7, contract event 9, display text 2), under the trustee
+    /// 3, board entry 7, contract event 12, display text 2), under the trustee
     /// registry's default panel.
     function definition(ElectionRegistry registry, bytes32 id, uint8 k, uint8 n)
         internal
@@ -57,7 +63,7 @@ library AuthorPanelFixture {
         d.pinVersions[1] = 4;
         d.pinVersions[2] = 3;
         d.pinVersions[6] = 7;
-        d.pinVersions[7] = 9;
+        d.pinVersions[7] = 12;
         d.pinVersions[8] = 2;
         d.authorThreshold = k;
         d.authorKeys = new ElectionDefinitionLib.P256Key[](n);

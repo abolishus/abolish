@@ -477,8 +477,8 @@ async function storedAccumulator(contract: Address, block: bigint) {
   };
 }
 
-/** The contract-event version every profile pins (verifier 2.3). */
-const EVENTS = 5;
+/** The contract-event version every profile pins (verifier 2.3; contracts.md, rule 9). */
+const EVENTS = 12;
 
 const eventContracts = () => ({
   electionRegistry: hexToBytes(electionRegistry),
@@ -613,6 +613,7 @@ beforeAll(async () => {
       {
         threshold: 2,
         quorum: 2,
+        kind: 2,
         keys: `0x${keys.map((k) => k.encoded.slice(2)).join("")}`,
         points: keys.map((k) => [k.x, k.y]),
       },

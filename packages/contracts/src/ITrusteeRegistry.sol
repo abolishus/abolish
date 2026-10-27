@@ -21,6 +21,12 @@ interface ITrusteeRegistry {
         uint8 panelSize
     ) external view returns (bool);
 
+    /// @notice A pinned panel's kind: 1 (`independent`), the only kind that
+    /// may hold a poll on the civic record, or 2 (`transitional`); 0 for a
+    /// panel it doesn't pin (docs/spec/contracts.md, Trustee registry, The
+    /// kind; T-14).
+    function kindOf(bytes32 panelId) external view returns (uint8);
+
     /// @notice Checks an author panel's registration record, in this
     /// registry's registration layout, for the election registry
     /// (docs/spec/contracts.md, Author panel registration, checks 6 to 9):

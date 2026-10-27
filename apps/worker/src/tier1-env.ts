@@ -69,7 +69,7 @@ const Public = z.strictObject({
     .refine((v) => v > 0n)
     .transform((v) => Number(v)),
   // `Tier1MemberAdded` is named from contract-event version 6.
-  TIER1_EVENT_VERSION: z.enum(["6", "7", "8"]),
+  TIER1_EVENT_VERSION: z.enum(["6", "7", "8", "9", "10", "11", "12"]),
   TIER1_MAX_FEE_PER_GAS: Uint(2n ** 128n - 1n).refine((v) => v > 0n),
 });
 

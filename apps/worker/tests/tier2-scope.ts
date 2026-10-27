@@ -32,6 +32,7 @@ export const TIER2_PANELS = [
   {
     threshold: panel.threshold,
     quorum: panel.threshold,
+    kind: 2,
     keys: `0x${panel.keys.join("")}` as Hex,
     points: panel.points.map(({ x, y }) => [BigInt(`0x${x}`), BigInt(`0x${y}`)] as const),
   },

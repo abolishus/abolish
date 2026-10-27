@@ -32,7 +32,7 @@ import {
   type RegistrationCheck,
   type SeatStore,
 } from "../src/index.ts";
-import { RELEASE_WINDOWS } from "../src/stub.ts";
+import { RELEASE_WINDOWS, stubDefinitionHash } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
 import {
   election,
@@ -188,8 +188,11 @@ export interface Seats {
 
 export function seatsOf(s: Setup, change: Partial<IntakeConfig> = {}, ceremony = s.e.seats): Seats {
   const seats: Seats = { intake: [], registrations: [], clock: s.e.stub.opens_at };
-  const registration: RegistrationCheck = async (definitionHash, keySetHash) => {
-    seats.registrations.push({ definitionHash, keySetHash });
+  const registration: RegistrationCheck = async (definition, keySetHash) => {
+    seats.registrations.push({
+      definitionHash: stubDefinitionHash(definition, definition.value.ceremony_transcript_hash),
+      keySetHash,
+    });
     return true;
   };
   seats.intake = ceremony.map(

@@ -163,6 +163,7 @@ export {
   readIdentityKey,
 } from "./config.ts";
 export { type L2ElectorateOptions, l2ElectorateCheck } from "./electorate.ts";
+export { type L2RegistrationOptions, l2RegistrationCheck } from "./registration.ts";
 export { type NodeEvent, type NodeOptions, TrusteeNode } from "./node.ts";
 export {
   type ApprovalPost,

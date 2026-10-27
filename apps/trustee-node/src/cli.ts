@@ -89,6 +89,7 @@ import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import { l2ElectorateCheck } from "./electorate.ts";
+import { l2RegistrationCheck } from "./registration.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
 import { type BoardOpenings, boardOpenings } from "./openings.ts";
@@ -143,11 +144,25 @@ function electorateOf(config: NodeConfig): ElectorateCheck {
 }
 
 /**
- * Nor is the registration read from finalized L2 (P2-13 part 3), so the
- * deployed endpoint refuses every delivery until it is: with no stub
- * approved, `intake-unapproved` comes first.
+ * Nor can it read a definition's registration without the L2 node and the
+ * election registry of `availability`, so its endpoint refuses every
+ * delivery with `intake-unregistered` (and, with no stub approved,
+ * `intake-unapproved` first).
  */
 const NO_REGISTRATION_CHECK: RegistrationCheck = () => Promise.resolve(false);
+
+/** [[verifier]] 2.1, 3.1's registration part and 3.2 over the seat's L2 node, where the configuration names it. */
+function registrationOf(config: NodeConfig): RegistrationCheck {
+  const a = config.availability;
+  if (a === undefined) return NO_REGISTRATION_CHECK;
+  return l2RegistrationCheck({
+    l2: rpcClient(a.l2),
+    chainId: config.l2ChainId,
+    electionRegistry: a.registry,
+    trusteeRegistry: config.trusteeRegistry,
+    fromBlock: a.registryFromBlock,
+  });
+}
 
 /**
  * Exit codes: 0 done, 2 bad usage or configuration, 1 a local ceremony that
@@ -325,7 +340,7 @@ async function intakeEndpoint(
     index: config.seat,
     ceremony: seat,
     electorate,
-    registration: NO_REGISTRATION_CHECK,
+    registration: registrationOf(config),
     store,
     now: () => BigInt(Math.floor(Date.now() / 1000)),
   });

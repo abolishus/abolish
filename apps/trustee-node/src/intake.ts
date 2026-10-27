@@ -51,18 +51,16 @@ import {
 import { MAX_RECORD } from "./wire.ts";
 
 /**
- * Whether finalized L2 shows the definition with this hash registered in the
- * election registry it names, under this key set in the trustee registry
- * ([[verifier]] 2.1, 2.5 and 3.2 from L2 state). It must resolve `false`
- * whenever it can't decide, since a seat takes no ballot of an election it
- * hasn't checked. The read belongs to `packages/verifier`'s chain access
- * (P2-13 part 3), as the electorate check's does; until a deployment supplies
- * it, every intake is refused.
+ * Whether finalized L2 shows `definition` (the approved stub with its
+ * transcript's hash) registered in the election registry it names, over the
+ * ceremony the trustee registry recorded with this key set ([[verifier]] 2.1,
+ * 3.1's registration part and 3.2 from L2 state, Registration). It must
+ * resolve `false` whenever it can't decide, since a seat takes no ballot of
+ * an election it hasn't checked. The deployment's reads the seat's own L2
+ * node through `packages/verifier`'s `registrationCheck` (src/registration.ts),
+ * as the electorate check does `electorateCheck`.
  */
-export type RegistrationCheck = (
-  definitionHash: Uint8Array,
-  keySetHash: Uint8Array,
-) => Promise<boolean>;
+export type RegistrationCheck = (definition: Stub, keySetHash: Uint8Array) => Promise<boolean>;
 
 export interface IntakeConfig extends Pins {
   /** This node's seat in the pinned panel, 1 to n: the seat `ceremony` holds. */
@@ -137,6 +135,12 @@ export class IntakeSeat {
   // since a check that couldn't decide yet may pass later. No secret is kept
   // here: each delivery reads them (`withSecrets`), so none outlives destruction.
   readonly #opened = new Map<string, Opened>();
+  // Stubs that passed the stub checks again at intake, by stub hash. The
+  // electorate's recount reads finalized history, so its pass stays one, and
+  // an election waiting on its registration (which comes after its
+  // ceremony) doesn't recount the whole registry log on every delivery
+  // (T-52). Kept in memory only: a restarted node recounts once.
+  readonly #stubPassed = new Set<string>();
 
   constructor(config: IntakeConfig) {
     if (
@@ -306,29 +310,31 @@ export class IntakeSeat {
     // identities nobody registered would lift the bound on what the seat
     // owes. The capacity check (4) passed when the seat approved; with no
     // other election it sees only this one's demand.
-    const again = await checkStub(stubBytes, config, config.electorate, new Map());
-    if (!again.ok) return { ok: false, code: "intake-definition" };
+    const stubName = hex(stubHash);
+    if (!this.#stubPassed.has(stubName)) {
+      const again = await checkStub(stubBytes, config, config.electorate, new Map());
+      if (!again.ok) return { ok: false, code: "intake-definition" };
+      this.#stubPassed.add(stubName);
+    }
     // Under definition version 5, ballot version 3: its questions' ranges
     // and the cell each ballot names (P2-14).
+    const definition: Stub =
+      record.version === 1
+        ? { version: 1, value: { ...record.value, ceremony_transcript_hash: result.hash } }
+        : { version: 5, value: { ...record.value, ceremony_transcript_hash: result.hash } };
     let election: BallotElection | QuestionBallotElection;
     try {
       election =
-        record.version === 1
-          ? ballotElection(
-              { ...record.value, ceremony_transcript_hash: result.hash },
-              result.registered,
-            )
-          : questionBallotElection(
-              { ...record.value, ceremony_transcript_hash: result.hash },
-              result.registered,
-            );
+        definition.version === 1
+          ? ballotElection(definition.value, result.registered)
+          : questionBallotElection(definition.value, result.registered);
     } catch (e) {
       // A root of 0, which anyone can prove membership of (T-04), passes no
       // correct electorate check; this refuses it whatever the deployment's does.
       if (e instanceof RangeError) return { ok: false, code: "intake-definition" };
       throw e;
     }
-    if (!(await config.registration(election.definitionHash, secrets.keySetHash)))
+    if (!(await config.registration(definition, secrets.keySetHash)))
       return { ok: false, code: "intake-unregistered" };
     return {
       ok: true,

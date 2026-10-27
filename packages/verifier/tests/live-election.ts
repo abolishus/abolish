@@ -69,13 +69,13 @@ export interface Cast {
 // Pick the first option of each question: one of three, up to two of four,
 // exactly one of two.
 export const VOTE: readonly (0 | 1)[] = [1, 0, 0, 1, 0, 0, 0, 1, 0];
-export const OTHER: readonly (0 | 1)[] = [0, 1, 0, 0, 1, 0, 0, 0, 1];
+const OTHER: readonly (0 | 1)[] = [0, 1, 0, 0, 1, 0, 0, 0, 1];
 
 export const counts = (ballots: number, votes: readonly (0 | 1)[]) =>
   votes.map((v) => String(v * ballots));
 
 /** `sealed`'s definition record with the live fields, under its own version. */
-export function madeLive(sealed: PanelledRecord): PanelledRecord {
+function madeLive(sealed: PanelledRecord): PanelledRecord {
   const live = { results_mode: RESULTS_MODES.live, live_every: 24, live_batch: 20 };
   const encoded =
     sealed.version === 6

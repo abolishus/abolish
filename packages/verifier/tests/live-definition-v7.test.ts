@@ -43,8 +43,10 @@ import { counts, liveElection, VOTE } from "./live-election.ts";
 // verifier-ballots-v4-definition-v7.json's `admitted` one (packages/crypto/
 // scripts/verifier-ballots-v4-vectors.py with `7`), beside
 // verifier-ballots-v4.json's for version 6. Every scenario of live.test.ts
-// gets the same rows and report under both, and the hash every ballot,
-// receipt and opening binds is the one the generator's own ballots name.
+// gets the same rows and report under both. The sealed definition's hash is
+// the one the generator's own ballots name, and the live one, which every
+// ballot, receipt and opening here binds, is `readDefinition`'s over the
+// same encoding with only the live fields changed.
 // Two scenarios are version 7's own: receipts and an opening made for the
 // same election read as version 6. 7.5's and 7.6's gates in `verifyBundle`,
 // the copies admission gives and the live restriction run on the version-7
@@ -266,10 +268,11 @@ describe(
 
     test("receipts: no ballot they name enters a running set, so nothing is released", () => {
       // Batch A is receipted only for the version-6 reading's hash, then
-      // batch B for this election's: R_1 is empty, and R_2's 20 ballots enter
-      // after the lag lets a release through, so no snapshot is chosen and an
-      // opening of batch A at snapshot 1 is unscheduled over a set R_1 isn't
-      // (T-16).
+      // batch B for this election's: R_1 is empty, so snapshot 1 fails the
+      // batch rule, and R_2 is batch B's 20 with nothing entering after it,
+      // so the lag rule never lets snapshot 2 through. No snapshot is chosen,
+      // and an opening of batch A at snapshot 1 is unscheduled over a set
+      // R_1 isn't (T-16).
       const e = live7.election();
       for (const b of live7.BATCH_A) e.ballot(b, 10);
       e.deliver([...live7.BATCH_A], 11, undefined, V6_HASH);
@@ -277,6 +280,7 @@ describe(
       e.deliver([...live7.BATCH_B], 31);
       const at = e.board(50, e.opening(live7.BATCH_A, 1, 1));
       const r = releaseChecks(e.inputs({ counted: [new Set(), new Set(), new Set()] }));
+      expect(r.rows.get("7.5")).toEqual({ status: "pass" });
       expect(r.rows.get("7.6")).toEqual({
         status: "fail",
         code: "running-unscheduled",

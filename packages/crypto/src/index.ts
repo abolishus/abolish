@@ -784,6 +784,8 @@ export {
   decodeDestructionStatement,
   decodePanelDestructionStatement,
   DESTRUCTION_STATEMENT,
+  type DestructionBoarding,
+  destructionBoarding,
   type DestructionElection,
   type DestructionEntry,
   type DestructionReport,

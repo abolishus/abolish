@@ -31,6 +31,7 @@ import {
   boardBallotHashes,
   boardBallotKeys,
   boardCheckpoints,
+  boardDestructionStatements,
   boardEntries,
   boardShareReceipts,
   boardSubtrees,
@@ -85,6 +86,12 @@ export type AppendErrorCode =
    * `existing` is that entry.
    */
   | "opening-present"
+  /**
+   * A destruction statement for a seat whose statement the board already
+   * carries in other bytes (docs/spec/tally.md, Destruction, Boarding):
+   * `existing` is that entry.
+   */
+  | "destruction-present"
   /** The entry would land in a segment after the latest the caller allows. */
   | "segment-late";
 
@@ -92,8 +99,9 @@ export class AppendError extends Error {
   override readonly name = "AppendError";
   readonly code: AppendErrorCode;
   /**
-   * Under `receipt-present` or `opening-present`: the entry that carries the
-   * earlier receipt or opening, with its payload.
+   * Under `receipt-present`, `opening-present` or `destruction-present`: the
+   * entry that carries the earlier receipt, opening or statement, with its
+   * payload.
    */
   readonly existing?: AppendedEntry & { readonly payload: Uint8Array };
   constructor(
@@ -375,6 +383,18 @@ export async function appendEntry(
      * the table can't tell a passing opening from a failing one.
      */
     readonly opening?: OpeningKey;
+    /**
+     * The payload is a destruction statement the caller's Boarding judge
+     * passed, attributed to this seat (docs/spec/tally.md, Destruction,
+     * Boarding): the seat is stored with the entry, and the board carries
+     * one statement per seat (T-17, T-52). The same bytes return the entry
+     * that carries them; other bytes are refused as `destruction-present`,
+     * naming the entry that does, which the caller judges as a repeat. Only
+     * for a statement the caller judged: the table can't tell an attributed
+     * statement from one that isn't. A destruction statement is boarded only
+     * with this key.
+     */
+    readonly destruction?: { readonly seat: number };
     /** The latest segment the entry may land in, else `segment-late` (rule 3's `s_D`). */
     readonly lastSegment?: number;
   } = {},
@@ -435,6 +455,23 @@ export async function appendEntry(
     )
       throw new AppendError("invalid-entry");
     opening = { cell, seat };
+  }
+  let destruction: { seat: number } | undefined;
+  // A statement boarded without its seat's key would be missed by the next
+  // statement's judge, which would then board the seat's second, a breach
+  // 8.5 lists against the operator (T-17).
+  if (options.destruction === undefined && recordTypeOf(body) === RECORD_TYPES.destructionStatement)
+    throw new AppendError("invalid-entry");
+  if (options.destruction !== undefined) {
+    const { seat } = options.destruction;
+    if (
+      recordTypeOf(body) !== RECORD_TYPES.destructionStatement ||
+      !Number.isInteger(seat) ||
+      seat < 1 ||
+      seat > 255
+    )
+      throw new AppendError("invalid-entry");
+    destruction = { seat };
   }
   const { lastSegment } = options;
   if (
@@ -554,6 +591,37 @@ export async function appendEntry(
           throw new AppendError("opening-present", { existing });
         }
       }
+      if (destruction !== undefined) {
+        // Read under the lock, so two statements racing in can't both be boarded.
+        const [seen] = await tx
+          .select({
+            idx: boardEntries.idx,
+            segment: boardEntries.segment,
+            payload: boardEntries.payload,
+            entryHash: boardEntries.entryHash,
+            link: boardEntries.link,
+          })
+          .from(boardDestructionStatements)
+          .innerJoin(
+            boardEntries,
+            and(
+              eq(boardEntries.electionId, boardDestructionStatements.electionId),
+              eq(boardEntries.idx, boardDestructionStatements.idx),
+            ),
+          )
+          .where(
+            and(
+              eq(boardDestructionStatements.electionId, id),
+              eq(boardDestructionStatements.seat, destruction.seat),
+            ),
+          );
+        if (seen !== undefined) {
+          const existing = boardedAt(id, version, seen);
+          const { payload, ...entry } = existing;
+          if (equalBytes(payload, body)) return entry;
+          throw new AppendError("destruction-present", { existing });
+        }
+      }
       if (options.first === true) {
         // Read under the lock, so two callers racing can't both append it.
         const [start] = await tx
@@ -638,6 +706,10 @@ export async function appendEntry(
         await tx.insert(boardShareReceipts).values({ electionId: id, idx: index, ...receipt });
       if (opening !== undefined)
         await tx.insert(boardTallyOpenings).values({ electionId: id, idx: index, ...opening });
+      if (destruction !== undefined)
+        await tx
+          .insert(boardDestructionStatements)
+          .values({ electionId: id, idx: index, ...destruction });
       // The subtrees this entry completes, from the ones covering the board
       // before it, in the same transaction: heads and proofs then never read
       // more than O(log n) of them (T-52).
@@ -1008,6 +1080,40 @@ export async function readBoardedOpenings(
     )
     .where(eq(boardTallyOpenings.electionId, id))
     .orderBy(asc(boardTallyOpenings.idx));
+  if (rows.length === 0) return [];
+  const version = await storedBoardVersion(client, id);
+  return rows.map((r) => boardedAt(id, version, r));
+}
+
+/**
+ * Every destruction statement boarded through `appendEntry`'s `destruction`
+ * key, with its entry, in board order: the statements the Boarding judge
+ * reads as already on the board (docs/spec/tally.md, Destruction, Boarding).
+ * One indexed read of at most one statement per seat (T-52).
+ */
+export async function readBoardedDestructions(
+  client: Sql,
+  electionId: Uint8Array,
+): Promise<(AppendedEntry & { readonly payload: Uint8Array })[]> {
+  const id = checkId(electionId);
+  const rows = await drizzle({ client })
+    .select({
+      idx: boardEntries.idx,
+      segment: boardEntries.segment,
+      payload: boardEntries.payload,
+      entryHash: boardEntries.entryHash,
+      link: boardEntries.link,
+    })
+    .from(boardDestructionStatements)
+    .innerJoin(
+      boardEntries,
+      and(
+        eq(boardEntries.electionId, boardDestructionStatements.electionId),
+        eq(boardEntries.idx, boardDestructionStatements.idx),
+      ),
+    )
+    .where(eq(boardDestructionStatements.electionId, id))
+    .orderBy(asc(boardDestructionStatements.idx));
   if (rows.length === 0) return [];
   const version = await storedBoardVersion(client, id);
   return rows.map((r) => boardedAt(id, version, r));

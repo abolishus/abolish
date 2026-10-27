@@ -731,7 +731,7 @@ const OPAQUE_HEAD = 73;
 // 12-second slots), and the most blocks holding deposits to the board whose
 // times it reads: room for any honest run, and a node claiming more only
 // brings the fallback sooner (T-52).
-const MAX_DEPOSIT_LOOKBACK = 8_192n;
+export const MAX_DEPOSIT_LOOKBACK = 8_192n;
 const MAX_DEPOSIT_BLOCKS = 256;
 
 /**
@@ -794,7 +794,10 @@ export async function loadDeposits(
     // MAX_DEPOSIT_LOOKBACK blocks: a run's read comes within about an hour
     // of its start, and from at most `F` (13 hours on Base) before it, and
     // an endpoint whose every block is later than `since` can't send the
-    // read back to the chain's start (T-52).
+    // read back to the chain's start (T-52). A start time `F` back takes the
+    // last step, so the read can span the whole lookback, about 27 hours:
+    // `MAX_DEPOSIT_BLOCKS` and the budget then bound more deposits, and a
+    // run reads again from its own start where this read fails (posting.ts).
     let start: bigint | undefined;
     for (let back = 64n; start === undefined; back *= 2n) {
       if (back > MAX_DEPOSIT_LOOKBACK) throw new Stop("bad-answer");

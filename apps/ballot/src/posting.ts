@@ -354,9 +354,16 @@ export async function postThroughRelay(
       // time to reach L2 has passed without its event failed, and isn't
       // looked for again (Outcome, a qualifying deposit).
       if (waited.some((p) => !p.seen && p.lands === undefined)) {
-        const l1 = await io
-          .deposits(since, () => time() > deadline)
-          .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
+        const read = (from: bigint) =>
+          io
+            .deposits(from, () => time() > deadline)
+            .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
+        let l1 = await read(since);
+        // A wider read from an earlier run's mark that is a bad answer (more
+        // deposits to the board than its bounds take) is read again from this run's
+        // start, so the mark never leaves the client worse off (T-52).
+        if (!l1.ok && l1.problem === "bad-answer" && since < started && time() <= deadline)
+          l1 = await read(started);
         if (l1.ok) {
           heard(l1.timestamp);
           for (const p of waited) {

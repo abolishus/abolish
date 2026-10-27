@@ -353,7 +353,7 @@ describe("the stored casts", () => {
       "a cast without its handed mark",
       record({ casts: [{ ballot, shares: kept(), boarded: null }] }),
     ],
-    ...[true, false, -1, 1.5, 2 ** 53, Number.NaN, "1", 1n, undefined].map(
+    ...[true, false, -1, -0, 1.5, 2 ** 53, Number.NaN, "1", 1n, undefined].map(
       (handed): [string, unknown] => [
         `a handed mark of ${String(handed)}`,
         record({ casts: [{ ballot, shares: kept(), handed, boarded: null }] }),

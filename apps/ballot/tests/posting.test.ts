@@ -18,6 +18,7 @@ import { keccak_256 } from "@noble/hashes/sha3.js";
 import { STAGING } from "../src/deployment.ts";
 import { WALLET_HOLD_MARGIN } from "../src/lapse.ts";
 import type { Fetch, LoadedDeposits, LoadedPostings } from "../src/load.ts";
+import { MAX_DEPOSIT_LOOKBACK } from "../src/load.ts";
 import {
   POSTING_CLIENT_MARGIN,
   POSTING_FORCE_AFTER,
@@ -584,10 +585,56 @@ describe("postThroughRelay", () => {
       expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F, LATE, handed)).toBe("relayed");
       expect(w.l1Reads).toEqual([{ since, at: START + WAIT }]);
     }
+    // A deposit L1 answers from before the start time less F holds nothing.
+    const v = world({ relay: () => sent, landed: () => [-F - 1n] });
+    expect(await postThroughRelay(v.io, [POSTING], CUTOFF, F, LATE, START - F)).toBe("relayed");
+    expect(v.elapsed()).toBe(WAIT);
     // A run started within F of the epoch reads from the epoch at most.
     const w = world({ relay: () => sent, start: F - 1n });
     expect(await postThroughRelay(w.io, [POSTING], CUTOFF, F, LATE, 0n)).toBe("relayed");
     expect(w.l1Reads.map((r) => r.since)).toEqual([0n]);
+  });
+
+  test("a read from the mark that is a bad answer is read again from the run's start, once", async () => {
+    const WAIT = POSTING_FORCE_AFTER + POSTING_SEEN;
+    const w = world({ relay: () => sent, landed: () => [700n] });
+    // An L1 with more deposits to the board in the wider window than a read takes.
+    const crowded = {
+      ...w.io,
+      deposits(since: bigint, stop: () => boolean): Promise<LoadedDeposits> {
+        if (since >= START) return w.io.deposits(since, stop);
+        w.l1Reads.push({ since, at: START + WAIT });
+        return Promise.resolve({ ok: false, problem: "bad-answer" });
+      },
+    };
+    expect(await postThroughRelay(crowded, [POSTING], CUTOFF, F, LATE, START - 900n)).toBe(
+      "relayed",
+    );
+    expect(w.l1Reads.map((r) => r.since)).toEqual([START - 900n, START]);
+    // Held by this run's own deposit, as without the mark.
+    expect(w.elapsed()).toBeGreaterThanOrEqual(700n + F);
+    // Unreachable isn't read again, nor a read already from the run's start.
+    for (const [handed, problem] of [
+      [START - 900n, "unreachable"],
+      [START, "bad-answer"],
+    ] as const) {
+      const v = world({ relay: () => sent });
+      let reads = 0;
+      const failing = {
+        ...v.io,
+        deposits: () => {
+          reads++;
+          return Promise.resolve<LoadedDeposits>({ ok: false, problem });
+        },
+      };
+      expect(await postThroughRelay(failing, [POSTING], CUTOFF, F, LATE, handed)).toBe("relayed");
+      expect(reads).toBe(1);
+    }
+  });
+
+  test("the deployment's F and a run's hour fit the deposit lookback at 12-second L1 slots", () => {
+    const run = POSTING_PATIENCE + POSTING_FORCE_AFTER + POSTING_SEEN;
+    expect((STAGING.forcedInclusion + run) / 12n).toBeLessThan(MAX_DEPOSIT_LOOKBACK);
   });
 
   test("an L1 that can't be read, or whose read throws, falls back once the wait is over", async () => {

@@ -414,7 +414,8 @@ function castOf(v: unknown): CastRecord | undefined {
   const { ballot, shares, boarded, handed } = v;
   if (!(ballot instanceof Uint8Array) || ballot.length > MAX_BOARD_PAYLOAD) return undefined;
   if (handed !== null && !Number.isSafeInteger(handed)) return undefined;
-  if (typeof handed === "number" && handed < 0) return undefined;
+  // One encoding of each time: `-0` is not 0's.
+  if (typeof handed === "number" && (handed < 0 || Object.is(handed, -0))) return undefined;
   const decoded = decodedOf(ballot);
   if (decoded === undefined) return undefined;
   const kept = sharesFor(decoded, shares);
@@ -432,7 +433,7 @@ function castOf(v: unknown): CastRecord | undefined {
 
 /**
  * The casts a stored value holds, or `undefined` if it isn't exactly a
- * record this client writes: version 6 and a list of version-3 ballot
+ * record this client writes: version 7 and a list of version-3 ballot
  * records naming strictly ascending L1 blocks, each with its qualified
  * seats' shares, each with its `m_i` or its receipt, its checked board
  * entry or `null`, and the time it was marked `handed` or `null`. Every byte array is a

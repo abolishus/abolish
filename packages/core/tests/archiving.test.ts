@@ -715,6 +715,9 @@ describe("archiveBoards", () => {
     await expect(run(arweave, { l1ChainId: 1n << 64n })).rejects.toThrow(RangeError);
   });
 
+  // Each history also replays every contract's archive, so the 30 runs take
+  // about two seconds locally and more than the 5 s default on CI's shared
+  // runner, where a run left going holds the lock every later test waits on.
   test("over any history of uploads, losses and reorganisations, the locator never falls and the walk from it finds everything", async () => {
     type Step =
       | { kind: "board"; segments: number[] }
@@ -847,7 +850,7 @@ describe("archiveBoards", () => {
       ),
       { numRuns: Math.min(numRuns, 30) },
     );
-  });
+  }, 60_000);
 });
 
 // The contract-event evidence and runs (src/archiving.ts, writeContractEvents;

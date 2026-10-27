@@ -10,15 +10,14 @@
 // for good (T-24, T-25, T-53, T-54;
 // 0029-board-data-availability).
 //
-// Only the ballot extent is decided. The counted extent's point needs `t_S`,
-// the end of `s_S`, which needs the contract-event window `W_C` of every
-// window `W_S` takes in (docs/spec/tally.md, Tally window); the verifier
-// knows only its floor, so that point stays unverifiable, never judged
-// against a guess, and 4.6 can fail but never pass yet. A point whose
-// evidence isn't held (the finalized L1 block before the anchoring deadline
-// of `s_A`, or no accumulator proven at or after `t_A`) is unverifiable,
-// never failed, so a withheld or erased attestation event can't fail an
-// honest election.
+// Both points are decided: the ballot extent at `C_A` and `t_A`, and the
+// counted extent at `C_S` and `t_A'`, whose `s_S` and `t_S` the definition
+// and the anchor's clock fix with the release's contract-event window
+// (docs/spec/tally.md, Tally window), never a bundle's word (T-34). A point
+// whose evidence isn't held (the finalized L1 block before its segment's
+// anchoring deadline, or no accumulator proven at or after its deadline) is
+// unverifiable, never failed, so a withheld or erased attestation event
+// can't fail an honest election; 4.6 passes only once both are held.
 
 import {
   type Anchor,
@@ -27,6 +26,7 @@ import {
   type AvailabilityEvent,
   type AvailabilityPanel,
   type AvailabilityRecordReport,
+  type PanelAvailability,
   availabilityWindows,
   BoardError,
   checkAvailability,
@@ -34,6 +34,7 @@ import {
   checkEventAccumulatorProof,
   checkpointHash,
   countedCheckpoints,
+  countedExtent,
   type ContractEventError,
   contractEventLog,
   type ContractEventRecord,
@@ -51,6 +52,7 @@ import type { ArchivedAccumulator } from "./evidence.ts";
 import { countedFloor } from "./openings.ts";
 import {
   accumulatorAtOutputRoot,
+  type OutputRootAccumulator,
   type OutputRootEvidence,
   OutputRootError,
   type OutputRootErrorCode,
@@ -119,13 +121,8 @@ export interface AvailabilityInputs {
 }
 
 export interface AvailabilityOutcome {
-  readonly status: "fail" | "unverifiable";
-  readonly code:
-    | "unavailable"
-    | AvailabilityEvidenceCode
-    | "unsupported-version"
-    | "not-reached"
-    | "not-implemented";
+  readonly status: "pass" | "fail" | "unverifiable";
+  readonly code?: "unavailable" | AvailabilityEvidenceCode | "unsupported-version" | "not-reached";
   readonly at?:
     | { readonly point: number; readonly panel: number }
     | { readonly event: number; readonly decodeError?: DecodeErrorCode }
@@ -140,6 +137,20 @@ export interface PanelAvailabilityReport {
   /** Each with the CID its complaint names, as hex. */
   readonly complained: readonly { readonly seat: number; readonly cid: string }[];
   readonly silent: readonly number[];
+}
+
+/** One panel at the counted extent: as at the ballot extent, each attesting seat with the obligation roots it names, as hex. */
+export interface CountedPanelAvailabilityReport extends Omit<PanelAvailabilityReport, "attested"> {
+  readonly attested: readonly { readonly seat: number; readonly roots: readonly string[] }[];
+}
+
+/** One point as the report lists it: its deadline, and once its evidence is held, its checkpoint and panels. */
+export interface PointAvailabilityReport<Panel> {
+  /** `t_A` or `t_A'`. */
+  readonly deadline: string;
+  /** `C_A` or `C_S`, or `null` where no counted checkpoint is at or before `s_A` or `s_S`; absent, as `panels` is, while the point's evidence isn't held. */
+  readonly checkpoint?: { readonly segment: number; readonly hash: string } | null;
+  readonly panels?: readonly Panel[];
 }
 
 /** What 4.6 found, reported once the accumulator replayed. */
@@ -163,14 +174,13 @@ export interface AvailabilityReport {
   };
   /** Where the events replayed came from: the bundle's `l2Board`, or the archive's runs. */
   readonly events: "bundle" | "archive";
-  readonly ballotExtent: {
-    /** `t_A`. */
-    readonly deadline: string;
-    /** `C_A`, or `null` where no counted checkpoint is at or before `s_A`; absent, as `panels` is, while the point's evidence isn't held. */
-    readonly checkpoint?: { readonly segment: number; readonly hash: string } | null;
-    readonly panels?: readonly PanelAvailabilityReport[];
-  };
-  /** Once the ballot extent's evidence is held: its availability records in event order, by their positions in the board's events, with their codes. */
+  readonly ballotExtent: PointAvailabilityReport<PanelAvailabilityReport>;
+  readonly countedExtent: PointAvailabilityReport<CountedPanelAvailabilityReport>;
+  /**
+   * Once the ballot extent's evidence is held: the availability records of
+   * each point whose evidence is held, in event order, by their positions in
+   * the board's events, with their codes.
+   */
   readonly records?: readonly AvailabilityRecordReport[];
 }
 
@@ -178,8 +188,6 @@ export interface AvailabilityResult {
   readonly row: AvailabilityOutcome;
   readonly report?: AvailabilityReport;
 }
-
-const NOT_IMPLEMENTED: AvailabilityOutcome = { status: "unverifiable", code: "not-implemented" };
 
 /** Check 4.6 over the board contract's events (docs/spec/availability.md, Availability check). */
 export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResult {
@@ -198,11 +206,12 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     eventVersion !== 12
   )
     return { row: { status: "unverifiable", code: "not-reached" } };
+  const pinned = eventVersion;
   // `C_A`: the counted checkpoint with the largest segment at or before
   // `s_A = period(closes_at) + 1`, from L1 alone. A failure of the board
   // checks' first steps is 4.2's, which no attestation can settle; a seal
   // never anchored is not, since withholding it mustn't hide a failure here.
-  let counted;
+  let counted: ReturnType<typeof countedCheckpoints>;
   try {
     counted = countedCheckpoints(inputs.electionId, inputs.anchors, clock, inputs.now);
   } catch (e) {
@@ -211,18 +220,32 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
   }
   if (inputs.closesAt < clock.epoch)
     return { row: { status: "unverifiable", code: "not-reached" } };
+  // `s_S` and `t_S`, its anchoring deadline, from the definition and the
+  // clock alone (docs/spec/tally.md, Tally window).
   const sA = countedFloor(inputs.closesAt, clock);
-  let cA: (typeof counted)[number] | undefined;
-  for (const cp of counted)
-    if (BigInt(cp.segment) <= sA && (cA === undefined || cp.segment > cA.segment)) cA = cp;
-  // Only `t_A` is used: `t_S`, and with it the counted extent's moments,
-  // isn't known (above), so `countedDue` is a placeholder no row reads.
-  const tA = availabilityWindows(inputs.closesAt, inputs.l1InclusionBound, 0n, {
+  const { segment: sS, due: tS } = countedExtent(clock, inputs.closesAt, inputs.l1InclusionBound);
+  const latestAtOrBefore = (segment: bigint) => {
+    let found: (typeof counted)[number] | undefined;
+    for (const cp of counted)
+      if (BigInt(cp.segment) <= segment && (found === undefined || cp.segment > found.segment))
+        found = cp;
+    return found;
+  };
+  // No counted checkpoint is past the seal's segment, so under a clock
+  // whose seal is before `s_S`, which no registered definition has, `C_S`
+  // would quietly be an earlier checkpoint than the one honest seats name:
+  // the counted extent isn't judged at all (the ballot extent still is).
+  const sealedAfter = BigInt(clock.lastSegment) >= sS;
+  const cA = latestAtOrBefore(sA);
+  const cS = latestAtOrBefore(sS);
+  const windows = availabilityWindows(inputs.closesAt, inputs.l1InclusionBound, tS, {
     forcedInclusion: PINNED_FORCED_INCLUSION,
     margin: PINNED_MARGIN,
-  }).ballotDeadline;
+  });
+  const tA = windows.ballotDeadline;
+  const tAPrime = windows.countedDeadline;
 
-  let proven;
+  let proven: OutputRootAccumulator | undefined;
   let failed: OutputRootErrorCode | undefined;
   try {
     proven = accumulatorAtOutputRoot(inputs.l2.proof, inputs.contracts.board);
@@ -231,166 +254,213 @@ export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResu
     failed = e.code;
   }
   // The archive's record stands in for a bundle proof that doesn't hold or
-  // is too early to hold the point; a bundle proof at or after `t_A` is
+  // is too early to hold both points; a bundle proof at or after `t_A'` is
   // enough, and an earlier archived one adds nothing (Archive, step 5). A
   // record dated after the finalized L1 time is never taken: it would hold
-  // `t_A` before the chain reached it, and its date is its writer's word.
+  // a point before the chain reached its deadline, and its date is its
+  // writer's word.
   const { archived } = inputs;
   const used =
     archived !== undefined &&
     archived.accumulator.timestamp <= inputs.now &&
     (proven === undefined ||
-      (proven.timestamp < tA && archived.accumulator.timestamp > proven.timestamp))
+      (proven.timestamp < tAPrime && archived.accumulator.timestamp > proven.timestamp))
       ? archived
       : undefined;
-  if (used !== undefined) proven = used.accumulator;
-  if (proven === undefined)
+  if (used === undefined && proven === undefined)
     return { row: { status: "unverifiable", code: failed as OutputRootErrorCode, at: {} } };
-  // The bundle's events where they reach the proven count, else the
-  // archive's where those do: the replay against the proof is what holds
-  // either to the board's history, so a run's events count for no more
-  // than the proof they replay to (T-53, T-71). Where neither reaches it,
-  // the bundle's are replayed as they are.
-  const { archivedEvents } = inputs;
-  const fromArchive =
-    archivedEvents !== undefined &&
-    BigInt(inputs.l2.events.length) < proven.count &&
-    BigInt(archivedEvents.length) >= proven.count;
-  // Only the first `count`: the proof fixes them, and the events the runs
-  // give past it are the archive's word, which mustn't leave unverifiable
-  // a point the proven prefix decides.
-  const records: ContractEventRecord[] = fromArchive
-    ? archivedEvents.slice(0, Number(proven.count))
-    : [];
-  if (!fromArchive)
-    for (const [at, bytes] of inputs.l2.events.entries())
-      try {
-        records.push(decodeContractEvent(bytes, eventVersion));
-      } catch (e) {
-        if (!(e instanceof DecodeError)) throw e;
-        return {
-          row: { status: "unverifiable", code: "decode", at: { event: at, decodeError: e.code } },
-        };
-      }
-  // The replay takes a counted log's 1 to 4 topics on trust; one with none
-  // isn't any log our contracts emit, so the archive isn't the board's.
-  if (records.slice(0, Number(proven.count)).some((r) => r.topics.length === 0))
-    return { row: { status: "unverifiable", code: "event-topics", at: {} } };
-  const replay = checkEventAccumulatorProof(
-    inputs.l2ChainId,
-    inputs.contracts.board,
-    records.map(contractEventLog),
-    proven,
-  );
-  if (replay !== null) return { row: { status: "unverifiable", code: replay, at: {} } };
-  // Only the logs the accumulator covers are evidence; any after them are
-  // in later blocks, which the OP Stack stamps strictly later, so none of
-  // them is in time for a point the proof's block is at or after.
-  const events: AvailabilityEvent[] = [];
-  const eventAt: number[] = [];
-  // Each record's point, read from the record the event check decoded, so
-  // a counted-extent record is left out whatever its code (stray, seat and
-  // signature codes carry none).
-  const pointAt: number[] = [];
-  for (const [at, record] of records.slice(0, Number(proven.count)).entries()) {
-    const checked = checkContractEvent(record, inputs.contracts, eventVersion);
-    // Every log the board emits passes the event check (T-53), so one that
-    // doesn't, or that isn't the board's, isn't the board's sequence: no
-    // evidence, never a failure.
-    if (!checked.ok) return { row: { status: "unverifiable", code: checked.error, at: {} } };
-    if (checked.role !== "board")
-      return { row: { status: "unverifiable", code: "unknown-contract", at: {} } };
-    const event = checked.event;
+  // A bundle proof at or after `t_A` decides the ballot extent on its own,
+  // so a later archived record taken for the counted extent, the archive's
+  // word (T-71), can't turn that proof's failure into `evidence-unchecked`.
+  if (used !== undefined && proven !== undefined && proven.timestamp >= tA) {
+    const bundle = judgeUnder(proven, undefined);
     if (
-      event.event !== "AvailabilityAttestationSubmitted" &&
-      event.event !== "AvailabilityComplaintSubmitted"
+      bundle.row.status === "fail" &&
+      bundle.row.at !== undefined &&
+      "point" in bundle.row.at &&
+      bundle.row.at.point === AVAILABILITY_POINTS.ballotExtent
     )
-      continue;
-    events.push({ payload: event.record, submittedAt: record.l2_timestamp });
-    eventAt.push(at);
-    pointAt.push(
-      event.event === "AvailabilityAttestationSubmitted"
-        ? decodeAvailabilityAttestation(event.record, 1).point
-        : decodeAvailabilityComplaint(event.record, 1).point,
-    );
+      return bundle;
   }
+  return judgeUnder(used?.accumulator ?? (proven as OutputRootAccumulator), used);
 
-  const judged = checkAvailability(
-    {
-      definitionHash: inputs.definitionHash,
-      panels: inputs.panels,
-      checkpoints: { ballot: cA === undefined ? null : checkpointHash(cA), counted: null },
-      // The counted extent's deadline is unknown; its records are judged
-      // by `checkAvailability` against this placeholder but never reported.
-      deadlines: { ballot: tA, counted: 0n },
-    },
-    events,
-  );
-  const ballotRecords = judged.records
-    .filter((r) => pointAt[r.at] === AVAILABILITY_POINTS.ballotExtent)
-    .map((r) => ({ ...r, at: eventAt[r.at] as number }));
-  const anchoringDeadline = clock.epoch + (sA + 1n) * clock.period + clock.deadline;
-  // The point waits on its evidence alone: L1 past the anchoring deadline
-  // of `s_A`, so `C_A` is fixed, and the accumulator proven at or after
-  // `t_A`, so every record that counts is in the replayed sequence.
-  const held = inputs.now >= anchoringDeadline && proven.timestamp >= tA;
-  const point = judged.points.find((p) => p.point === AVAILABILITY_POINTS.ballotExtent);
-  const report: AvailabilityReport = {
-    proven: {
-      block: proven.block.toString(),
-      hash: bytesToHex(proven.blockHash),
-      timestamp: proven.timestamp.toString(),
-      count: proven.count.toString(),
-      source: used === undefined ? "bundle" : "archive",
-      ...(used !== undefined && {
-        evidence: {
-          cid: bytesToHex(used.cid),
-          transaction: bytesToHex(used.transaction),
-          gameIndex: used.gameIndex.toString(),
-          game: bytesToHex(used.game),
-          outputRoot: bytesToHex(used.outputRoot),
+  function judgeUnder(
+    proven: OutputRootAccumulator,
+    used: ArchivedAccumulator | undefined,
+  ): AvailabilityResult {
+    // The bundle's events where they reach the proven count, else the
+    // archive's where those do: the replay against the proof is what holds
+    // either to the board's history, so a run's events count for no more
+    // than the proof they replay to (T-53, T-71). Where neither reaches it,
+    // the bundle's are replayed as they are.
+    const { archivedEvents } = inputs;
+    const fromArchive =
+      archivedEvents !== undefined &&
+      BigInt(inputs.l2.events.length) < proven.count &&
+      BigInt(archivedEvents.length) >= proven.count;
+    // Only the first `count`: the proof fixes them, and the events the runs
+    // give past it are the archive's word, which mustn't leave unverifiable
+    // a point the proven prefix decides.
+    const records: ContractEventRecord[] = fromArchive
+      ? archivedEvents.slice(0, Number(proven.count))
+      : [];
+    if (!fromArchive)
+      for (const [at, bytes] of inputs.l2.events.entries())
+        try {
+          records.push(decodeContractEvent(bytes, pinned));
+        } catch (e) {
+          if (!(e instanceof DecodeError)) throw e;
+          return {
+            row: { status: "unverifiable", code: "decode", at: { event: at, decodeError: e.code } },
+          };
+        }
+    // The replay takes a counted log's 1 to 4 topics on trust; one with none
+    // isn't any log our contracts emit, so the archive isn't the board's.
+    if (records.slice(0, Number(proven.count)).some((r) => r.topics.length === 0))
+      return { row: { status: "unverifiable", code: "event-topics", at: {} } };
+    const replay = checkEventAccumulatorProof(
+      inputs.l2ChainId,
+      inputs.contracts.board,
+      records.map(contractEventLog),
+      proven,
+    );
+    if (replay !== null) return { row: { status: "unverifiable", code: replay, at: {} } };
+    // Only the logs the accumulator covers are evidence; any after them are
+    // in later blocks, which the OP Stack stamps strictly later, so none of
+    // them is in time for a point the proof's block is at or after.
+    const events: AvailabilityEvent[] = [];
+    const eventAt: number[] = [];
+    // Each record's point, read from the record the event check decoded, so
+    // a record of a point whose evidence isn't held is left out of the report
+    // whatever its code (stray, seat and signature codes carry none).
+    const pointAt: number[] = [];
+    for (const [at, record] of records.slice(0, Number(proven.count)).entries()) {
+      const checked = checkContractEvent(record, inputs.contracts, pinned);
+      // Every log the board emits passes the event check (T-53), so one that
+      // doesn't, or that isn't the board's, isn't the board's sequence: no
+      // evidence, never a failure.
+      if (!checked.ok) return { row: { status: "unverifiable", code: checked.error, at: {} } };
+      if (checked.role !== "board")
+        return { row: { status: "unverifiable", code: "unknown-contract", at: {} } };
+      const event = checked.event;
+      if (
+        event.event !== "AvailabilityAttestationSubmitted" &&
+        event.event !== "AvailabilityComplaintSubmitted"
+      )
+        continue;
+      events.push({ payload: event.record, submittedAt: record.l2_timestamp });
+      eventAt.push(at);
+      pointAt.push(
+        event.event === "AvailabilityAttestationSubmitted"
+          ? decodeAvailabilityAttestation(event.record, 1).point
+          : decodeAvailabilityComplaint(event.record, 1).point,
+      );
+    }
+
+    const judged = checkAvailability(
+      {
+        definitionHash: inputs.definitionHash,
+        panels: inputs.panels,
+        checkpoints: {
+          ballot: cA === undefined ? null : checkpointHash(cA),
+          counted: cS === undefined ? null : checkpointHash(cS),
         },
-      }),
-    },
-    events: fromArchive ? "archive" : "bundle",
-    ballotExtent: {
-      deadline: tA.toString(),
-      // `C_A` and every code judged against it are fixed only once held.
-      ...(held && {
-        checkpoint:
-          cA === undefined ? null : { segment: cA.segment, hash: bytesToHex(checkpointHash(cA)) },
-      }),
-      ...(held &&
-        point !== undefined && {
-          panels: point.panels.map((p) => ({
-            panel: p.panel,
-            holds: p.holds,
-            attested: p.attested.map((a) => a.seat),
-            complained: p.complained.map((c) => ({ seat: c.seat, cid: bytesToHex(c.cid) })),
-            silent: p.silent,
-          })),
-        }),
-    },
-    ...(held && { records: ballotRecords }),
-  };
-  if (!held)
-    return { row: { status: "unverifiable", code: "availability-pending", at: {} }, report };
-  // A failure at one point fails the election whatever the other's evidence.
-  const failure = judged.failures.find((f) => f.point === AVAILABILITY_POINTS.ballotExtent);
-  // The archive's authority writes the record whole, and until P1-19 reads
-  // its game on L1 its output root is its own word, so it could prove a
-  // prefix of the events that leaves the attestations out (T-71): it can
-  // show a point held, never fail one, which an unforgeable root must.
-  if (failure !== undefined && used !== undefined)
-    return { row: { status: "unverifiable", code: "evidence-unchecked", at: {} }, report };
-  if (failure !== undefined)
-    return {
-      row: {
-        status: "fail",
-        code: "unavailable",
-        at: { point: failure.point, panel: failure.panel },
+        deadlines: { ballot: tA, counted: tAPrime },
       },
-      report,
+      events,
+    );
+    // A point waits on its evidence alone: L1 past its segment's anchoring
+    // deadline, so its checkpoint is fixed, and the accumulator proven at or
+    // after its deadline, so every record that counts is in the replayed
+    // sequence. `t_S` is `s_S`'s anchoring deadline.
+    const ballotHeld =
+      inputs.now >= clock.epoch + (sA + 1n) * clock.period + clock.deadline &&
+      proven.timestamp >= tA;
+    const countedHeld = sealedAfter && inputs.now >= tS && proven.timestamp >= tAPrime;
+    const heldPoint = (point: number | undefined) =>
+      point === AVAILABILITY_POINTS.ballotExtent
+        ? ballotHeld
+        : point === AVAILABILITY_POINTS.countedExtent && countedHeld;
+    const heldRecords = judged.records
+      .filter((r) => heldPoint(pointAt[r.at]))
+      .map((r) => ({ ...r, at: eventAt[r.at] as number }));
+    const pointOf = (point: number) => judged.points.find((p) => p.point === point);
+    const checkpointOf = (cp: (typeof counted)[number] | undefined) =>
+      cp === undefined ? null : { segment: cp.segment, hash: bytesToHex(checkpointHash(cp)) };
+    const panelOf = (p: PanelAvailability) => ({
+      panel: p.panel,
+      holds: p.holds,
+      complained: p.complained.map((c) => ({ seat: c.seat, cid: bytesToHex(c.cid) })),
+      silent: p.silent,
+    });
+    const ballotPoint = pointOf(AVAILABILITY_POINTS.ballotExtent);
+    const countedPoint = pointOf(AVAILABILITY_POINTS.countedExtent);
+    const report: AvailabilityReport = {
+      proven: {
+        block: proven.block.toString(),
+        hash: bytesToHex(proven.blockHash),
+        timestamp: proven.timestamp.toString(),
+        count: proven.count.toString(),
+        source: used === undefined ? "bundle" : "archive",
+        ...(used !== undefined && {
+          evidence: {
+            cid: bytesToHex(used.cid),
+            transaction: bytesToHex(used.transaction),
+            gameIndex: used.gameIndex.toString(),
+            game: bytesToHex(used.game),
+            outputRoot: bytesToHex(used.outputRoot),
+          },
+        }),
+      },
+      events: fromArchive ? "archive" : "bundle",
+      // Each point's checkpoint and every code judged against it are fixed only once held.
+      ballotExtent: {
+        deadline: tA.toString(),
+        ...(ballotHeld && { checkpoint: checkpointOf(cA) }),
+        ...(ballotHeld &&
+          ballotPoint !== undefined && {
+            panels: ballotPoint.panels.map((p) => ({
+              ...panelOf(p),
+              attested: p.attested.map((a) => a.seat),
+            })),
+          }),
+      },
+      countedExtent: {
+        deadline: tAPrime.toString(),
+        ...(countedHeld && { checkpoint: checkpointOf(cS) }),
+        ...(countedHeld &&
+          countedPoint !== undefined && {
+            panels: countedPoint.panels.map((p) => ({
+              ...panelOf(p),
+              attested: p.attested.map((a) => ({ seat: a.seat, roots: a.roots.map(bytesToHex) })),
+            })),
+          }),
+      },
+      ...((ballotHeld || countedHeld) && { records: heldRecords }),
     };
-  return { row: NOT_IMPLEMENTED, report };
+    // A failure at one point fails the election whatever the other's
+    // evidence, the ballot extent's first (docs/spec/availability.md,
+    // Availability check).
+    const failure = judged.failures.find((f) => heldPoint(f.point));
+    // The archive's authority writes the record whole, and until P1-19 reads
+    // its game on L1 its output root is its own word, so it could prove a
+    // prefix of the events that leaves the attestations out (T-71): it can
+    // show a point held, never fail one, which an unforgeable root must.
+    if (failure !== undefined && used !== undefined)
+      return { row: { status: "unverifiable", code: "evidence-unchecked", at: {} }, report };
+    if (failure !== undefined)
+      return {
+        row: {
+          status: "fail",
+          code: "unavailable",
+          at: { point: failure.point, panel: failure.panel },
+        },
+        report,
+      };
+    if (ballotHeld && !sealedAfter)
+      return { row: { status: "unverifiable", code: "not-reached" }, report };
+    if (!ballotHeld || !countedHeld)
+      return { row: { status: "unverifiable", code: "availability-pending", at: {} }, report };
+    return { row: { status: "pass" }, report };
+  }
 }

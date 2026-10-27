@@ -280,6 +280,24 @@ describe("the election's checks before intake", () => {
     expect((await deliver(seat!)).ok).toBe(true);
   });
 
+  it("recounts the electorate once per stub while the election waits on its registration (T-52)", async () => {
+    let counted = 0;
+    let decided = false;
+    const [seat] = seatsOf(s, {
+      store: new MemoryStore(),
+      electorate: () => {
+        counted += 1;
+        return Promise.resolve(true);
+      },
+      registration: () => Promise.resolve(decided),
+    }).intake;
+    for (let i = 0; i < 3; i++)
+      expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-unregistered" });
+    decided = true;
+    expect((await deliver(seat!)).ok).toBe(true);
+    expect(counted).toBe(1);
+  });
+
   it("refuses an election whose pins this node doesn't hold", async () => {
     const [seat] = seatsOf(s, { l2ChainId: L2_CHAIN_ID + 1n }).intake;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-definition" });

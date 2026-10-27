@@ -27,7 +27,7 @@ import {
 import { type MembershipProverArtifacts, proveMembership } from "@abolishus/membership-prover";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import { IntakeSeat, type SeatStore } from "../src/index.ts";
-import { RELEASE_WINDOWS } from "../src/stub.ts";
+import { RELEASE_WINDOWS, stubDefinitionHash } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
 import { stubHashOf } from "../src/wire.ts";
 import {
@@ -136,8 +136,10 @@ function seatsOf(
         index: i + 1,
         ceremony,
         electorate: change.electorate ?? (() => Promise.resolve(true)),
-        registration: (definitionHash) => {
-          seats.registrations.push(definitionHash);
+        registration: (definition) => {
+          seats.registrations.push(
+            stubDefinitionHash(definition, definition.value.ceremony_transcript_hash),
+          );
           return Promise.resolve(change.registered?.() ?? true);
         },
         store: change.store ?? (stores[i] as SeatStore),

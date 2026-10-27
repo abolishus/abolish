@@ -85,7 +85,6 @@ import {
   boundDefinition,
   type Ceremony,
   definitionBytes,
-  definitionHash,
   displayText,
   type FixtureDefinition,
   newTrustees,
@@ -124,7 +123,6 @@ import {
   ceremonyRegistration,
   createElection,
   deployL2,
-  type Registered,
   registerCeremony,
   registerDefinition,
   registrationCheck,
@@ -367,15 +365,14 @@ async function run(
   };
   // The panel's nodes, which run the ceremonies and intake of the elections
   // of one question (definition version 1, the one the node reads): their
-  // registration check reads the registries for the definitions registered
-  // here, and their clock is the L1's time as the run moves it.
-  const registered = new Map<string, Registered>();
+  // registration check reads the registries' logs on the L2, and their clock
+  // is the L1's time as the run moves it.
   let l1Time = now;
   const nodes = await startSeats(stores, trustees, {
     l2ChainId: L2_CHAIN_ID,
     trusteeRegistry: l2.trusteeRegistry,
     electorate: electorateCheck(electorate),
-    registration: registrationCheck(l2, registered),
+    registration: registrationCheck(l2, L2_CHAIN_ID),
     now: () => l1Time,
   });
   // Elections of one question (definition version 1), then the poll of
@@ -406,11 +403,6 @@ async function run(
       });
       await registerCeremony(l2, anvil, registrationFrom(stub, trustees.panel, ran, approvals));
       await registerDefinition(l2, anvil, definition);
-      registered.set(hex(definitionHash(definition)), {
-        electionId: stub.election_id,
-        stubHash: ran.stubHash,
-        panelId: stub.panel_id,
-      });
     } else {
       // Five seats are under rule 7's quorum: every node that took part
       // refuses to approve (T-54), and the registries refuse the ceremony

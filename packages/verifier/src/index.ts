@@ -63,6 +63,12 @@ export {
   type ElectorateOutcome,
   type GroupRegistryRelease,
 } from "./electorate.ts";
+export {
+  registrationCheck,
+  type RegistrationFailure,
+  type RegistrationOutcome,
+  type RegistrationRelease,
+} from "./registration.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {

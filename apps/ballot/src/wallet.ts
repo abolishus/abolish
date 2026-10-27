@@ -518,8 +518,10 @@ export const WALLET_EARLIER_READ = BigInt(WALLET_REQUEST_MS / 1000);
  * address isn't put beside a deposit still landing and a second fee isn't
  * paid for a no-op repeat (Outcome, The read; T-13). The read is the
  * untrusted L1 endpoint's word, so, like a sighting, it only ever delays a
- * send, never past the margins a sighting keeps, and is given up after
- * `WALLET_EARLIER_READ`; one that fails holds nothing back (T-25, T-52).
+ * send, never past the margins a sighting keeps; it is made only while such
+ * a hold could still apply, given up after `WALLET_EARLIER_READ` or once
+ * none could, and its head's time isn't counted; one that fails holds
+ * nothing back (T-25, T-50, T-52).
  */
 export async function postFromWallet(
   io: WalletIo,
@@ -598,11 +600,14 @@ export async function postFromWallet(
   // whole wait: sending beside a posting already landing would only put the
   // voter's address beside it (T-13).
   // An earlier run's deposit on L1 holds a send back as a sighting does.
-  const held = (p: Pending) =>
-    (holds(p.seenAt) || holds(p.earlierAt)) &&
-    (isLate ||
-      time() + WALLET_FORCE_MARGIN < force ||
-      (!depositable() && time() + WALLET_LATE_MARGIN < cutoff));
+  const holding = () =>
+    time() + WALLET_FORCE_MARGIN < force ||
+    (!depositable() && time() + WALLET_LATE_MARGIN < cutoff);
+  const held = (p: Pending) => (holds(p.seenAt) || holds(p.earlierAt)) && (isLate || holding());
+  // Whether a hold may still apply to a send made now: past `c_B`, only in a
+  // late run, until `c_E`.
+  const mayHold = () =>
+    time() > cutoff ? late !== undefined && !sent && time() < late.lastOffer : holding();
   const shows = (read: LoadedPostings, p: Pending) =>
     read.ok && read.records.some((record) => equalBytes(record, p.posting));
   // A deposit's gas limit from the build's own estimate, a quarter over as
@@ -655,15 +660,18 @@ export async function postFromWallet(
       for (const p of left) if (p.seenAt === undefined && shows(latest, p)) p.seenAt = time();
     }
     // Once, before the first send: an earlier run's deposit of a posting
-    // neither head shows yet (Outcome, The read; T-13).
-    if (!looked && since !== undefined && left.some((p) => p.sentAt === undefined)) {
+    // neither head shows yet (Outcome, The read; T-13). Only while a hold may
+    // still apply, and given up once none may, so the read never eats into
+    // the margins a send keeps for its forcing or its cutoff (T-50).
+    if (!looked && since !== undefined && left.some((p) => p.sentAt === undefined) && mayHold()) {
       looked = true;
       const begun = time();
       const l1 = await io
-        .deposits(since, () => time() > begun + WALLET_EARLIER_READ)
+        .deposits(since, () => time() > begun + WALLET_EARLIER_READ || !mayHold())
         .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
-      if (l1.ok) {
-        heard(l1.timestamp);
+      // The L1 head's time isn't heard here: an L1 endpoint answering one
+      // ahead could only bring the cutoffs sooner (T-25).
+      if (l1.ok && mayHold()) {
         for (const p of left)
           if (p.sentAt === undefined && l1.landed[pending.indexOf(p)] !== undefined)
             p.earlierAt = time();

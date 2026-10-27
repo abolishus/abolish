@@ -1082,6 +1082,53 @@ describe("postFromWallet", () => {
     const force = START + WALLET_FORCE_MARGIN - 1n;
     expect(await past.run([A], CUTOFF, force, undefined, EARLIER)).toBe("forced");
     expect(past.sends.map(({ at }) => at)).toEqual([0n]);
+    // Nor is L1 read from the mark then: no hold could apply.
+    expect(past.l1Reads.filter(({ since }) => since === EARLIER)).toEqual([]);
+  });
+
+  test("gives a slow L1 read up once no hold could apply, so it never eats the margins (T-50)", async () => {
+    // A slow endpoint, answering each step just as the read is given up.
+    const slowly = (w: ReturnType<typeof world>) => {
+      w.io.deposits = async (_, stop) => {
+        while (!stop()) await w.io.sleep(10_000);
+        return { ok: true, timestamp: 0n, landed: [EARLIER] };
+      };
+      return w;
+    };
+    // Begun 100 s before c_L − WALLET_FORCE_MARGIN: sent by then, and forced.
+    const force = START + WALLET_FORCE_MARGIN + 100n;
+    const near = slowly(world({ safe: () => [] }));
+    expect(await near.run([A], CUTOFF, force, undefined, EARLIER)).toBe("forced");
+    expect(START + (near.sends[0]?.at ?? 0n)).toBeLessThanOrEqual(
+      force - WALLET_FORCE_MARGIN + 10n,
+    );
+    expect(near.deposits).toHaveLength(1);
+    // Begun 100 s before c_B − WALLET_LATE_MARGIN, nothing forceable: sent by then.
+    const ballot = START + WALLET_LATE_MARGIN + 100n;
+    const late = slowly(world({}));
+    expect(await late.run([A], ballot, START, undefined, EARLIER)).toBe("sent");
+    expect(START + (late.sends[0]?.at ?? 0n)).toBeLessThanOrEqual(
+      ballot - WALLET_LATE_MARGIN + 10n,
+    );
+    // In a late run, given up at c_E, and the send still made by then.
+    const lastOffer = START + 100n;
+    const atEnd = slowly(world({}));
+    expect(await atEnd.run([A], START - 1n, START - 1n, lastOffer, EARLIER)).toBe("sent");
+    expect(START + (atEnd.sends[0]?.at ?? 0n)).toBeLessThanOrEqual(lastOffer);
+    // Past c_B with no late run offered, no read at all.
+    const refused = world({ landed: earlierA });
+    expect(await refused.run([A], START - 1n, START - 1n, undefined, EARLIER)).toBe("late");
+    expect(refused.l1Reads).toEqual([]);
+  });
+
+  test("doesn't count the L1 head's time read for an earlier deposit toward the cutoffs (T-25)", async () => {
+    const w = world({});
+    // An L1 endpoint answering a head within WALLET_HOLD_MARGIN ahead.
+    w.io.deposits = () =>
+      Promise.resolve({ ok: true, timestamp: START + WALLET_HOLD_MARGIN, landed: [undefined] });
+    const cutoff = START + WALLET_HOLD_MARGIN - 1n;
+    expect(await w.run([A], cutoff, cutoff, undefined, EARLIER)).not.toBe("late");
+    expect(w.sends.map(({ at }) => at)).toEqual([0n]);
   });
 
   test("a late run holds a posting an earlier run deposited, and never past c_E", async () => {

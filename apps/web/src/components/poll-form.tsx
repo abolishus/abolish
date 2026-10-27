@@ -88,6 +88,19 @@ function formatIn(locale: string, timeZone: string, date: Date): string {
 }
 
 /**
+ * The closing time in UTC beside the author's own, as its time alone where
+ * both clocks are on the same day, so the review doesn't say the date twice
+ * (P2-29, creating a poll's iteration 4).
+ */
+function utcBeside(locale: string, timeZone: string, date: Date): string {
+  const day = (zone: string) =>
+    new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: zone }).format(date);
+  return day(timeZone) === day("UTC")
+    ? new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone: "UTC" }).format(date)
+    : formatUtc(locale, date);
+}
+
+/**
  * `timeZone`'s name for `locale` as people say it ("Eastern Time"), or its
  * IANA ID where the browser has no such name.
  */
@@ -570,13 +583,17 @@ function ReviewList({
   return (
     <dl className="m-0 grid">
       {rows.map((r) => (
+        // Below sm, "Change" shares its label's row rather than taking a 48px
+        // row of its own under every value (P2-29, creating a poll's iteration 4).
         <div
           key={r.label}
-          className="grid gap-x-6 gap-y-1 border-b border-border py-3 first:border-t sm:grid-cols-[9rem_1fr_auto]"
+          className="grid grid-cols-[1fr_auto] items-center gap-x-6 gap-y-1 border-b border-border py-3 first:border-t sm:grid-cols-[9rem_1fr_auto] sm:items-start"
         >
           <dt className="font-semibold">{r.label}</dt>
-          <dd className="m-0 min-w-0 text-pretty wrap-anywhere">{r.value}</dd>
-          <dd className="m-0">
+          <dd className="col-span-2 m-0 min-w-0 text-pretty wrap-anywhere sm:col-span-1">
+            {r.value}
+          </dd>
+          <dd className="col-start-2 row-start-1 m-0 sm:col-start-3">
             {r.field === undefined ? null : (
               <a
                 href={`#${r.field}`}
@@ -656,7 +673,7 @@ function PollReview({
           <span suppressHydrationWarning>
             {t("pollFormReviewClosesAt", {
               when: formatIn(locale, form.timeZone, new Date(Number(closesAt) * 1000)),
-              utc: formatUtc(locale, new Date(Number(closesAt) * 1000)),
+              utc: utcBeside(locale, form.timeZone, new Date(Number(closesAt) * 1000)),
             })}
           </span>
         ),
@@ -1360,14 +1377,14 @@ export function PollFormPage({
             title={t("pollFormSubmitTitle")}
             id="poll-form-submit"
             lede={
-              <>
+              <div className="grid gap-3">
                 <p className="m-0">{t("pollFormSubmitLede")}</p>
                 {isNew ? null : (
                   <p className="m-0 text-sm text-muted-foreground">
                     {t("pollFormSubmitCloudflare")}
                   </p>
                 )}
-              </>
+              </div>
             }
           >
             {/* Only a saved draft can be submitted, so before the first save

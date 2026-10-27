@@ -331,7 +331,7 @@ export const TopicAndPlace: Story = {
       "Topic",
     ]);
     await expect(
-      review.getByText("November 4, 2026 at 10:00 AM your time, November 4, 2026 at 3:00 PM UTC"),
+      review.getByText("November 4, 2026 at 10:00 AM your time (3:00 PM UTC)"),
     ).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
     // With phone verification off, Tier 0 is named by the e-mail alone, in words.
@@ -433,6 +433,54 @@ export const OptionControlsPhone: Story = {
       .getByRole("textbox", { name: "Details for option 1 (optional)" })
       .getBoundingClientRect();
     await expect(field.width).toBe(details.width);
+  },
+};
+
+export const ReviewPhone: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const review = await canvas.findByRole("region", { name: "Check it through" });
+    // Each "Change" shares its label's row, where it took a row of its own
+    // under every value (P2-29, creating a poll's iteration 4).
+    for (const term of within(review).getAllByRole("term")) {
+      const change = within(review).queryByRole("link", { name: `Change ${term.textContent}` });
+      if (change === null) continue;
+      const label = term.getBoundingClientRect();
+      const link = change.getBoundingClientRect();
+      await expect(link.top).toBeLessThan(label.bottom);
+      await expect(link.bottom).toBeGreaterThan(label.top);
+    }
+    // The closing time says its date once where both clocks share the day.
+    await expect(
+      within(review).getByText("November 4, 2026 at 10:00 AM your time (3:00 PM UTC)"),
+    ).toBeVisible();
+    // The When section's lede is its rule alone, three lines at most.
+    const lede = canvas.getByText(/^Choose a time on your own clock/);
+    const lines =
+      lede.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(lede).lineHeight);
+    await expect(lines).toBeLessThanOrEqual(3);
+  },
+};
+
+export const ClosesOnAnotherUtcDay: Story = {
+  args: {
+    client: fakeDrafts({
+      // 2026-11-05T03:30:00Z, the evening before in New York.
+      read: { summary: SUMMARY, draft: { ...SAVED, closesAt: 1793849400n } },
+    }),
+    id: ID,
+    challenge: fakeChallenge(),
+  },
+  play: async ({ canvasElement }) => {
+    const review = within(
+      await within(canvasElement).findByRole("region", { name: "Check it through" }),
+    );
+    await expect(
+      review.getByText("November 4, 2026 at 10:30 PM your time (November 5, 2026 at 3:30 AM UTC)"),
+    ).toBeVisible();
   },
 };
 

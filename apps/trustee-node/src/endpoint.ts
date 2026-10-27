@@ -93,7 +93,7 @@ const CORS = {
 
 /**
  * Serves `intake` at `POST /v1/intake`. The body is a `Delivery` as
- * `application/octet-stream`; a share receipt record (`0x000b`) comes back
+ * `application/octet-stream`; a share receipt record (`0x000c`) comes back
  * with 200, a refusal's code as text with 422.
  */
 export async function serveIntake(intake: Intake, options: EndpointOptions): Promise<Endpoint> {

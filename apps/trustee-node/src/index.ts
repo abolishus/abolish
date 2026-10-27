@@ -50,7 +50,15 @@ export {
   MAX_ANSWER,
   type OpeningOperator,
   type OperatorAnswer,
+  type ReceiptOperator,
 } from "./operator.ts";
+export {
+  RECEIPTS_PER_STEP,
+  type ReceiptCopiesStatus,
+  ReceiptCopySender,
+  type ReceiptCopySenderOptions,
+  RETRY_AFTER,
+} from "./receipt-copies.ts";
 export {
   type StatementSend,
   StatementSender,
@@ -83,6 +91,7 @@ export {
 } from "./summing.ts";
 export {
   type ElectionRefusal,
+  givenReceipts,
   heldShares,
   type IntakeConfig,
   type IntakeOutcome,

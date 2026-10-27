@@ -21,6 +21,7 @@ import {
   CeremonySeat,
   decideObligation,
   encodeDelivery,
+  givenReceipts,
   IntakeSeat,
   type ObligationStatus,
   type ObligationView,
@@ -131,8 +132,12 @@ describe("intake", () => {
       recast.ciphertexts[0] as Uint8Array,
     );
     if (!first.ok || !second.ok) expect.fail("an honest delivery was refused");
-    // One public part: the same ballot hash and the same receipt.
+    // One public part: the same ballot hash and the same receipt, kept once
+    // for the seat's own board-path copy.
     expect(hex(second.receipt)).toBe(hex(first.receipt));
+    expect(
+      (await givenReceipts(store, s.e.stubHash)).map((g) => [g.ballot, hex(g.receipt)]),
+    ).toEqual([[hex(first.ballotHash), hex(first.receipt)]]);
     expect(await store.list(`intake/${hex(s.e.stubHash)}`)).toEqual([hex(first.ballotHash)]);
     expect(await store.list(`copies/${hex(s.e.stubHash)}/${hex(first.ballotHash)}`)).toEqual([
       `100-${"07".repeat(32)}`,
@@ -516,6 +521,8 @@ describe("the obligation decided at the intake cutoff", () => {
       honest.ciphertexts[0] as Uint8Array,
     );
     expect(out).toEqual({ ok: false, code: "intake-closed" });
+    // Nor keeps one to board itself.
+    expect(await givenReceipts(store, s.e.stubHash)).toEqual([]);
   });
 
   describe("the receipts it owes, sent as batches by c_D (part 4b-2b-1)", () => {

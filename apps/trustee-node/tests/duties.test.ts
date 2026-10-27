@@ -34,6 +34,8 @@ import {
   type ReceiptEvent,
   runInTurn,
   type StatementEvent,
+  type ReceiptCopyEvent,
+  ReceiptCopySends,
   StatementSends,
   TallyDuties,
   tallyDeadline,
@@ -42,6 +44,7 @@ import {
 import { L1AnchorError } from "../src/l1.ts";
 import type { OpeningSenderStatus } from "../src/opening-sender.ts";
 import { SendError } from "../src/send.ts";
+import type { ReceiptCopiesStatus } from "../src/receipt-copies.ts";
 import type { StatementSenderStatus } from "../src/statement-sender.ts";
 import type { TallyDutyStatus } from "../src/tally.ts";
 import { MemoryStore } from "../src/store.ts";
@@ -1016,6 +1019,75 @@ describe("the statement senders", () => {
     await h.duties.step();
     expect(h.built()).toBe(0);
     expect(h.events).toEqual([{ event: "statements-abandoned", stubHash: name(1) }]);
+  });
+});
+
+describe("the receipt copies", () => {
+  const sending: ReceiptCopiesStatus = { state: "sending", given: 2, boarded: 1, refused: 0 };
+  const tD = (n: number) => {
+    const e = approvedOf(n);
+    return deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery;
+  };
+
+  function senders(scripts: Map<number, ReceiptCopiesStatus[]>, clock: () => bigint) {
+    const events: ReceiptCopyEvent[] = [];
+    const stepped: string[] = [];
+    let built = 0;
+    const duties = new ReceiptCopySends({
+      seat: {
+        approvedStubs: async () => [...scripts.keys()].map((n) => approvedOf(n).stubHash),
+        approvedElection: async (stubHash) => approvedOf(stubHash[0] as number),
+        destroying: async () => false,
+      },
+      build: async (e) => {
+        built++;
+        const n = e.stubHash[0] as number;
+        return {
+          deadline: tD(n),
+          step: async () => {
+            stepped.push(name(n));
+            const script = scripts.get(n) as ReceiptCopiesStatus[];
+            return (script.length > 1 ? script.shift() : script[0]) as ReceiptCopiesStatus;
+          },
+        };
+      },
+      clock,
+      log: (e) => events.push(e),
+    });
+    return { duties, events, stepped, built: () => built };
+  }
+
+  test("send until the delivery deadline, past every receipt boarded so far, and never past it", async () => {
+    let wall = 0n;
+    const all: ReceiptCopiesStatus = { state: "sending", given: 2, boarded: 2, refused: 0 };
+    const h = senders(new Map([[1, [sending, all]]]), () => wall);
+    for (let i = 0; i < 3; i++) await h.duties.step();
+    expect(h.stepped).toHaveLength(3);
+    wall = tD(1);
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(4);
+    wall += 1n;
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.stepped).toHaveLength(4);
+    expect(h.events).toEqual([
+      { event: "receipt-copies", stubHash: name(1), ...sending },
+      { event: "receipt-copies", stubHash: name(1), ...all },
+    ]);
+  });
+
+  test("settle at once under a board-entry version that can't carry a share receipt", async () => {
+    const h = senders(new Map([[1, [{ state: "unboardable" }]]]), () => 0n);
+    for (let i = 0; i < 3; i++) await h.duties.step();
+    expect(h.stepped).toHaveLength(1);
+  });
+
+  test("set nothing up once the delivery deadline has passed", async () => {
+    const h = senders(new Map([[1, [sending]]]), () => tD(1) + 1n);
+    await h.duties.step();
+    await h.duties.step();
+    expect(h.built()).toBe(0);
+    expect(h.events).toEqual([{ event: "receipt-copies-abandoned", stubHash: name(1) }]);
   });
 });
 

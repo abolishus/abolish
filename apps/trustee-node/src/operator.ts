@@ -1,9 +1,10 @@
-// The seat's side of the operator's opening and destruction routes
-// (`POST /openings`, `POST /destructions`, apps/api; docs/spec/tally.md,
-// Opening record, Boarding; Destruction, Boarding): the two calls the node
-// makes to the board operator's API. Each sends a record the seat signed (a
-// tally opening, its destruction statement) and reads back what the
-// operator claims of it. The operator is trusted for nothing here: whether a
+// The seat's side of the operator's opening, destruction and share-receipt
+// routes (`POST /openings`, `POST /destructions`, `POST /receipts`,
+// apps/api; docs/spec/tally.md, Opening record, Boarding; Destruction,
+// Boarding; docs/spec/delivery.md, Boarding): the three calls the node makes
+// to the board operator's API. Each sends a record the seat signed (a tally
+// opening, its destruction statement, a share receipt it gave at intake)
+// and reads back what the operator claims of it. The operator is trusted for nothing here: whether a
 // cell is published is read from the anchored board (`boardOpenings`), and
 // an answer only decides when the record is sent again (T-53, T-54). The
 // request carries the election's id and the record, both public once
@@ -19,7 +20,7 @@ export type OperatorAnswer =
    * sender checks the entry's payload against its own opening.
    */
   | { readonly state: "boarded"; readonly entry: Uint8Array; readonly earlier: boolean }
-  /** 422 `OPENING_REJECTED` or `DESTRUCTION_REJECTED`: the Boarding rule's code, as the operator judged it. */
+  /** 422 `OPENING_REJECTED`, `DESTRUCTION_REJECTED` or `RECEIPT_REJECTED`: the Boarding rule's code, as the operator judged it. */
   | { readonly state: "rejected"; readonly code: string }
   /**
    * 503 `OPENING_NOT_READY`: the operator hasn't fixed the counted set yet;
@@ -30,7 +31,7 @@ export type OperatorAnswer =
   | { readonly state: "not-open" }
   /**
    * Anything else: the operator couldn't judge it in time
-   * (`OPENINGS_UNAVAILABLE`, `DESTRUCTIONS_UNAVAILABLE`), limited the rate, failed, or couldn't be
+   * (`OPENINGS_UNAVAILABLE`, `DESTRUCTIONS_UNAVAILABLE`, `RECEIPTS_UNAVAILABLE`), limited the rate, failed, or couldn't be
    * reached; `reason` says which, never a body.
    */
   | { readonly state: "unavailable"; readonly reason: string };
@@ -43,6 +44,11 @@ export interface OpeningOperator {
 /** What the node needs of the operator to board its destruction statement; `HttpOperator` too. */
 export interface DestructionOperator {
   submitDestruction(electionId: Uint8Array, statement: Uint8Array): Promise<OperatorAnswer>;
+}
+
+/** What the node needs of the operator to board a share receipt it gave; `HttpOperator` too. */
+export interface ReceiptOperator {
+  submitReceipt(electionId: Uint8Array, receipt: Uint8Array): Promise<OperatorAnswer>;
 }
 
 export interface HttpOperatorOptions {
@@ -90,7 +96,8 @@ interface Route {
   readonly path: string;
   readonly field: string;
   readonly rejected: string;
-  readonly notReady: string;
+  /** The receipts route has no such answer: a receipt is boarded at once or refused. */
+  readonly notReady: string | undefined;
 }
 
 const OPENINGS: Route = {
@@ -106,8 +113,15 @@ const DESTRUCTIONS: Route = {
   notReady: "DESTRUCTION_NOT_READY",
 };
 
+const RECEIPTS: Route = {
+  path: "receipts",
+  field: "record",
+  rejected: "RECEIPT_REJECTED",
+  notReady: undefined,
+};
+
 /** The operator's API at its base URL: HTTPS, or HTTP to loopback for a local run. */
-export class HttpOperator implements OpeningOperator, DestructionOperator {
+export class HttpOperator implements OpeningOperator, DestructionOperator, ReceiptOperator {
   readonly #base: URL;
   readonly #fetch: typeof fetch;
   readonly #timeoutMs: number;
@@ -124,6 +138,10 @@ export class HttpOperator implements OpeningOperator, DestructionOperator {
 
   submitDestruction(electionId: Uint8Array, statement: Uint8Array): Promise<OperatorAnswer> {
     return this.#post(DESTRUCTIONS, electionId, statement);
+  }
+
+  submitReceipt(electionId: Uint8Array, receipt: Uint8Array): Promise<OperatorAnswer> {
+    return this.#post(RECEIPTS, electionId, receipt);
   }
 
   async #post(route: Route, electionId: Uint8Array, record: Uint8Array): Promise<OperatorAnswer> {
@@ -169,7 +187,8 @@ export class HttpOperator implements OpeningOperator, DestructionOperator {
     const code = error.success ? error.data.code : undefined;
     if (response.status === 422 && code === route.rejected && error.data?.data !== undefined)
       return { state: "rejected", code: error.data.data.code };
-    if (response.status === 503 && code === route.notReady) return { state: "not-ready" };
+    if (response.status === 503 && code !== undefined && code === route.notReady)
+      return { state: "not-ready" };
     if (
       (response.status === 409 && code === "ELECTION_NOT_OPEN") ||
       (response.status === 404 && code === "ELECTION_NOT_FOUND")

@@ -186,6 +186,51 @@ describe("the availability configuration", () => {
   });
 });
 
+describe("the group registry's configuration", () => {
+  const registrars = ["11".repeat(20), "22".repeat(20), "33".repeat(20)];
+  const group = (change: Record<string, unknown> = {}) => ({
+    address: `0x${"c5".repeat(20)}`,
+    fromBlock: "199",
+    registrars,
+    threshold: 2,
+    ...change,
+  });
+
+  test("is optional: without it the node refuses every stub", () => {
+    const a = parseConfig(JSON.stringify(config({ availability: availability() }))).availability;
+    expect(a?.groupRegistry).toBeUndefined();
+  });
+
+  test("pins the registry, its deployment block and the release's registrars", () => {
+    const g = parseConfig(
+      JSON.stringify(config({ availability: availability({ groupRegistry: group() }) })),
+    ).availability?.groupRegistry;
+    if (g === undefined) return expect.fail("no group registry");
+    expect(hex(g.address)).toBe("c5".repeat(20));
+    expect(g.fromBlock).toBe(199n);
+    expect(g.registrars.map(hex)).toEqual(registrars);
+    expect(g.threshold).toBe(2);
+  });
+
+  test.each([
+    ["one registrar", { registrars: registrars.slice(0, 1), threshold: 1 }],
+    ["registrars out of order", { registrars: [registrars[1], registrars[0], registrars[2]] }],
+    ["a repeated registrar", { registrars: [registrars[0], registrars[0], registrars[1]] }],
+    [
+      "seventeen registrars",
+      { registrars: Array.from({ length: 17 }, (_, i) => (i + 16).toString(16).repeat(20)) },
+    ],
+    ["a threshold of 1, which one key meets", { threshold: 1 }],
+    ["a threshold above the registrars", { threshold: 4 }],
+    ["a short address", { address: "c5".repeat(19) }],
+    ["no deployment block", { fromBlock: undefined }],
+    ["an unknown field", { extra: 1 }],
+  ])("refuses %s", (_, change) => {
+    const c = config({ availability: availability({ groupRegistry: group(change) }) });
+    expect(() => parseConfig(JSON.stringify(c))).toThrow(ConfigError);
+  });
+});
+
 describe("the intake endpoint's configuration", () => {
   test("listens where it says, over TLS with a certificate and key or on loopback without", () => {
     const tls = parseConfig(

@@ -22,6 +22,13 @@ import { servedBlocks } from "../src/served.ts";
 import { MemoryStore } from "../src/store.ts";
 import { LocalCoordinator, serveCoordinator } from "../src/local.ts";
 import { anvil, freePort, type Node } from "./anvil.ts";
+import {
+  chainId,
+  registry,
+  release,
+  ROOT_BLOCK,
+  tierOf,
+} from "../../../packages/verifier/tests/registry-logs.ts";
 import { L2_CHAIN_ID, panelOf, stubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -79,7 +86,7 @@ describe("local-ceremony", () => {
 });
 
 describe("run", () => {
-  test("refuses every stub until the node has a production electorate check, and stops at once when aborted mid-poll", async () => {
+  test("refuses every stub without a group registry to check its electorate against, and stops at once when aborted mid-poll", async () => {
     const { panel, secrets } = panelOf(3, 2);
     const stub = encodeElectionDefinition(stubFor(panel));
     const coordinator = new LocalCoordinator({
@@ -243,6 +250,145 @@ describe("run's configuration", () => {
       expect(t.out).toEqual([]);
     }
   });
+});
+
+describe("run with the group registry", () => {
+  // The registry's log of regional-cells.json's one-group tier, emitted at
+  // the vectors' registry address on an Anvil node of their chain by code
+  // that logs its calldata: `k ‖ k topics ‖ data`, for k of 1 to 3. The
+  // records' approvals bind that chain and address, so the recount accepts
+  // them only there.
+  // PUSH1 0 CALLDATALOAD PUSH1 0xf8 SHR (k), the data copied to memory from
+  // byte 1 + 32k, then LOG1, LOG2 or LOG3 over the topics at 1, 33 and 65.
+  const EMITTER =
+    "0x60003560f81c80602002600101803603808260003790509080600114602d5780600214603757600314604457005b50600135906000a1005b50602135600135826000a2005b604135602135600135836000a300";
+  const BOARD = `0x${"b0".repeat(20)}`;
+  const PORTAL = `0x${"90".repeat(20)}`;
+  const tier = tierOf("one-group");
+  let chain: Node;
+  let deployer: string;
+
+  beforeAll(async () => {
+    chain = await anvil(chainId, true);
+    const address = `0x${hex(registry)}`;
+    await chain.rpc.call("anvil_setCode", [address, EMITTER]);
+    for (const a of [BOARD, PORTAL]) await chain.rpc.call("anvil_setCode", [a, "0x00"]);
+    [deployer] = (await chain.rpc.call("eth_accounts", [])) as [string];
+    for (const r of tier.records) {
+      const k = Uint8Array.of(r.topics.length);
+      const data = Buffer.concat([k, ...r.topics, r.data]);
+      await chain.rpc.call("eth_sendTransaction", [
+        { from: deployer, to: address, data: `0x${data.toString("hex")}`, gas: "0x200000" },
+      ]);
+    }
+    // Past the tier's block and Anvil's finality depth, so the tier is final.
+    await chain.rpc.call("anvil_mine", [`0x${(ROOT_BLOCK + 200n).toString(16)}`]);
+  }, 60_000);
+  afterAll(() => chain?.process.kill());
+
+  test("passes a stub whose tier the registry's finalized log makes, and refuses one it doesn't", async () => {
+    const { panel, secrets } = panelOf(3, 2);
+    const keyFile = join(dir, "identity-electorate");
+    await writeFile(keyFile, hex(secrets[0] as Uint8Array), { mode: 0o600 });
+    const accountKeyFile = join(dir, "account-electorate");
+    await writeFile(accountKeyFile, hex(crypto.getRandomValues(new Uint8Array(32))), {
+      mode: 0o600,
+    });
+    const blocks = join(dir, "blocks-electorate");
+    await mkdir(blocks);
+    const [cell] = tier.electorate.cells;
+    const stated = {
+      tier: 0 as const,
+      group_id: tier.electorate.groups[0]?.group_id as bigint,
+      root: cell?.root as bigint,
+      root_l2_block: ROOT_BLOCK,
+      group_size: cell?.members as bigint,
+    };
+    const outcome = async (name: string, group_size: bigint) => {
+      const coordinator = new LocalCoordinator({
+        stub: encodeElectionDefinition(
+          stubFor(panel, {
+            l2_chain_id: chainId,
+            group_registry: registry,
+            electorate: [{ ...stated, group_size }],
+          }),
+        ),
+        panel,
+        l2ChainId: chainId,
+        trusteeRegistry: TRUSTEE_REGISTRY,
+        roundMs: 60_000,
+        now: () => 0,
+      });
+      const { url, server } = await serveCoordinator(coordinator);
+      try {
+        const configFile = join(dir, `${name}.json`);
+        await writeFile(
+          configFile,
+          JSON.stringify({
+            panel: { threshold: 2, keys: panel.keys.map(hex) },
+            panelId: hex(panelId(panel)),
+            l2ChainId: chainId.toString(),
+            trusteeRegistry: hex(TRUSTEE_REGISTRY),
+            seat: 1,
+            identityKeyFile: keyFile,
+            store: join(dir, `${name}-store`),
+            coordinator: url,
+            pollSeconds: 3600,
+            availability: {
+              l1: chain.url.href,
+              l1ChainId: chainId.toString(),
+              l2: chain.url.href,
+              anchor: `0x${"a1".repeat(20)}`,
+              anchorFromBlock: "0",
+              anchorClock: { epoch: "0", period: "3600", deadline: "43200" },
+              registry: `0x${"e1".repeat(20)}`,
+              registryFromBlock: "0",
+              board: BOARD,
+              boardFromBlock: "0",
+              portal: PORTAL,
+              accountKeyFile,
+              l1MaxFeePerGas: "300000000000",
+              l2MaxFeePerGas: "10000000000",
+              forceAfterSeconds: 1800,
+              forceLeadSeconds: 3600,
+              sendMarginSeconds: 1800,
+              blocks,
+              serve: { port: 0 },
+              groupRegistry: {
+                address: hex(registry),
+                fromBlock: "0",
+                registrars: release.registrars.map(hex),
+                threshold: release.threshold,
+              },
+            },
+          }),
+        );
+        const stop = new AbortController();
+        const t = io(stop.signal);
+        const code = await cli(["run", "--config", configFile], {
+          ...t.io,
+          out: (v) => {
+            t.out.push(v);
+            const e = (v as { event?: string }).event;
+            if (e === "sent" || e === "refused") stop.abort();
+          },
+        });
+        expect(code).toBe(0);
+        return t.out.find((v) => ["sent", "refused"].includes((v as { event: string }).event));
+      } finally {
+        server.close();
+      }
+    };
+    expect(await outcome("electorate-pass", stated.group_size)).toMatchObject({
+      event: "sent",
+      round: 1,
+    });
+    expect(await outcome("electorate-fail", stated.group_size + 1n)).toMatchObject({
+      event: "refused",
+      round: 1,
+      code: "stub-electorate",
+    });
+  }, 120_000);
 });
 
 describe("run with the availability duty", () => {

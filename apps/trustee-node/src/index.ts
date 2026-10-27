@@ -155,7 +155,14 @@ export {
   type HttpOptions,
   TransportError,
 } from "./client.ts";
-export { ConfigError, type NodeConfig, parseConfig, readIdentityKey } from "./config.ts";
+export {
+  ConfigError,
+  type GroupRegistryConfig,
+  type NodeConfig,
+  parseConfig,
+  readIdentityKey,
+} from "./config.ts";
+export { type L2ElectorateOptions, l2ElectorateCheck } from "./electorate.ts";
 export { type NodeEvent, type NodeOptions, TrusteeNode } from "./node.ts";
 export {
   type ApprovalPost,

@@ -327,6 +327,11 @@ export type PanelledFacts = (
  * doesn't export it.
  */
 export function panelledFacts(given: PanelledDefinition): PanelledFacts {
+  // Another version is refused as unsupported before decoding, as it was
+  // before version 7 was read; the decoder then holds the copy to the pin.
+  const own = pinnedVersion(given, RECORD_TYPES.electionDefinition);
+  if (own !== 6 && own !== 7)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
   if (!("electorate_mode" in given)) {
     const d = decodeElectionDefinitionV6(encodeElectionDefinitionV6(given));
     return {

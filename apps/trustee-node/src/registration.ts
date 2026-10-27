@@ -20,10 +20,12 @@
 // the seat take ballots of a definition before, or without, its
 // registration (T-71, T-53). What remains trusted is the root, as there. A
 // registration after the newest proven root waits for the next one (the
-// L2's proposal interval). Whatever can't be decided (a node of another
+// L2's proposal interval), and one not yet final in the seat's L2 node's
+// view waits for that too, since a game may claim an unsafe block and the
+// seat keeps a pass. Whatever can't be decided (a node of another
 // chain, one that can't be read or doesn't prove, no root yet) is a refusal.
 
-import { chainId, GameBlockError, type Rpc, RpcError } from "@abolishus/node";
+import { chainId, GameBlockError, l2Finalized, type Rpc, RpcError } from "@abolishus/node";
 import { OutputRootError, registrationCheck, type RegistrationRelease } from "@abolishus/verifier";
 import { bytesToHex, keccak256, toBytes } from "viem";
 import type { RegistrationCheck } from "./intake.ts";
@@ -105,6 +107,12 @@ export function l2RegistrationCheck(options: L2RegistrationOptions): Registratio
       const recorded = trusteeLog.filter((r) =>
         leads(r, [CEREMONY_REGISTERED, stubHash(definition), d.panel_id]),
       );
+      // T-34, T-71: a respected game may claim an unsafe block's root, which
+      // the seat's honest node proves, and intake keeps a pass, so a record
+      // must also be final: one reorganised away could leave the election
+      // registered later under other bytes.
+      const final = await l2Finalized(l2);
+      if ([...registered, ...recorded].some((r) => r.l2_block > final)) return false;
       return (
         registrationCheck(definition, keySetHash, [...recorded, ...registered], release).status ===
         "pass"

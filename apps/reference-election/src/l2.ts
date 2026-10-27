@@ -381,12 +381,20 @@ export async function registerDefinition(
  * `CeremonyRegistered` through `packages/verifier`'s `registrationCheck`.
  * The fixture's L2 posts no output roots, so the accumulators are read from
  * the contracts' storage at the latest block, standing in for the ones a
- * root proves (apps/node's tests prove one under a root). A failed read
+ * root proves (apps/node's tests prove one under a root), and Anvil's latest
+ * block for finalized L2, whose finalized block trails the latest by two
+ * epochs the run doesn't wait out. A failed read
  * throws, stopping the run rather than reading as a refusal.
  */
 export function registrationCheck(l2: L2, l2ChainId: bigint): RegistrationCheck {
   const rpc = {
-    call: (method: string, params: readonly unknown[]) => l2.rpc.call<unknown>(method, params),
+    call: (method: string, params: readonly unknown[]) =>
+      l2.rpc.call<unknown>(
+        method,
+        method === "eth_getBlockByNumber" && params[0] === "finalized"
+          ? ["latest", ...params.slice(1)]
+          : params,
+      ),
   };
   return l2RegistrationCheck({
     l2: rpc,

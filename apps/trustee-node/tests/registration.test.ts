@@ -39,6 +39,8 @@ const FROM_BLOCK = 5n;
 const TRUSTEE_FROM_BLOCK = 3n;
 // The block the output root is posted for: past the registration's (20).
 const PROVEN_BLOCK = 40n;
+// The seat's L2 node's finalized block: past the registration's, short of the root's.
+const FINALIZED = 30n;
 
 interface Log {
   readonly address: string;
@@ -59,11 +61,15 @@ const logOf = (r: ContractEventRecord): Log => ({
 const same = (a: Uint8Array, b: Uint8Array) => hex(a) === hex(b);
 
 /** An L2 node answering `eth_getLogs` from `held` by address and range, as a real one does. */
-function l2Node(held: readonly ContractEventRecord[], chain: bigint) {
+function l2Node(held: readonly ContractEventRecord[], chain: bigint, finalized = FINALIZED) {
   const asked: unknown[] = [];
   const rpc: Rpc = {
     call: async (method, params) => {
       if (method === "eth_chainId") return `0x${chain.toString(16)}`;
+      if (method === "eth_getBlockByNumber") {
+        expect(params).toEqual(["finalized", false]);
+        return { number: `0x${finalized.toString(16)}` };
+      }
       if (method !== "eth_getLogs") throw new Error(`unexpected ${method}`);
       const [filter] = params as [
         { address: string; fromBlock: string; toBlock: string; topics: string[] },
@@ -314,6 +320,16 @@ describe("l2RegistrationCheck", () => {
     const at = (block: bigint) => provenOver(honest(), v5.value.l2_chain_id, block)();
     expect(await check(node.rpc, v5, { accumulators: at(19n) })(v5, KEY_SET)).toBe(false);
     expect(await check(node.rpc, v5, { accumulators: at(20n) })(v5, KEY_SET)).toBe(true);
+  });
+
+  test("refuses a registration or ceremony record not finalized yet, though a root past it proves it", async () => {
+    // Registered in block 20 and the ceremony in 15: a game may claim an
+    // unsafe block's root, and the seat keeps a pass (T-34, T-71).
+    const at = (finalized: bigint) =>
+      check(l2Node(honest(), v5.value.l2_chain_id, finalized).rpc, v5)(v5, KEY_SET);
+    expect(await at(19n)).toBe(false);
+    expect(await at(14n)).toBe(false);
+    expect(await at(20n)).toBe(true);
   });
 
   test("refuses, reading no log, with no root yet or one below either registry's deployment", async () => {

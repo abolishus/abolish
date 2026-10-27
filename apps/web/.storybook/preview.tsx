@@ -51,6 +51,13 @@ const preview: Preview = {
     viewport: {
       options: {
         phone: { name: "Small phone", styles: { width: "360px", height: "780px" }, type: "mobile" },
+        // The narrowest screen in use, a folded Galaxy Z Fold; a
+        // 360px phone zoomed to 125% is little wider (288px).
+        folded: {
+          name: "Folded phone",
+          styles: { width: "280px", height: "653px" },
+          type: "mobile",
+        },
         desktop: { name: "Desktop", styles: { width: "1280px", height: "800px" }, type: "desktop" },
       },
     },

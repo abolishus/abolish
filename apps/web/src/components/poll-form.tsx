@@ -78,6 +78,24 @@ const whoName = (t: Translate, tier: number, phoneVerification: boolean) =>
     ? t(phoneVerification ? "pollFormWho_phone" : "pollFormWho_email")
     : tierName(t, tier, phoneVerification);
 
+/**
+ * Our own words with each hyphenated word kept on one line: on a phone the
+ * review's `text-pretty` broke "e-mail" at its hyphen, "e-" ending one line
+ * and "mail address" starting the next (P2-29, creating a poll's iteration
+ * 14). Never for an asker's text, whose long hyphenated words must still wrap.
+ */
+function wholeWords(text: string): ReactNode {
+  return text.split(/(\S+-\S+)/).map((part, i) =>
+    i % 2 === 1 ? (
+      <span key={i} className="whitespace-nowrap">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
 /** A date and time for `locale` on `timeZone`'s clock, for what only the browser shows. */
 function formatIn(locale: string, timeZone: string, date: Date): string {
   return new Intl.DateTimeFormat(locale, {
@@ -693,7 +711,7 @@ function PollReview({
     },
     {
       label: t("pollFormReviewWho"),
-      value: form.tiers.map((tier) => whoName(t, tier, phoneVerification)).join(", "),
+      value: wholeWords(form.tiers.map((tier) => whoName(t, tier, phoneVerification)).join(", ")),
     },
     {
       label: t("pollFormReviewCloses"),
@@ -1319,7 +1337,7 @@ export function PollFormPage({
               <ul className="m-0 grid list-none divide-y divide-border p-0">
                 {form.tiers.map((tier) => (
                   <li key={tier} className="py-3 text-base font-semibold first:pt-0 last:pb-0">
-                    {whoName(t, tier, phoneVerification)}
+                    {wholeWords(whoName(t, tier, phoneVerification))}
                   </li>
                 ))}
               </ul>

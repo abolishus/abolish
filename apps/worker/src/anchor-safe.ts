@@ -268,10 +268,11 @@ const GAS_HEADROOM = 120n;
 /**
  * A replacement's least fee, as eighths of the pending transaction's: pools
  * refuse one that doesn't raise both its fee cap and its tip by their
- * margin (10% by geth's default), so 12.5% clears it with room.
+ * margin (10% by geth's default), so 12.5% clears it with room. One wei
+ * more on top, so a zero tip is raised too.
  */
 const REPLACEMENT_EIGHTHS = 9n;
-const bumped = (fee: bigint) => (fee * REPLACEMENT_EIGHTHS + 7n) / 8n;
+const bumped = (fee: bigint) => (fee * REPLACEMENT_EIGHTHS) / 8n + 1n;
 
 export interface SafeSenderOptions {
   /** One L1 node. */
@@ -399,7 +400,10 @@ export function safeSender(options: SafeSenderOptions): (calldata: Uint8Array) =
     }
     // The latest nonce, not the pending one: a transaction stuck under a
     // fee rise is replaced at today's fees, or at its own bumped if they
-    // are higher, never queued behind.
+    // are higher, never queued behind. Read after the estimate, so a stuck
+    // transaction mined in between leaves this one at a spent Safe nonce:
+    // it reverts on chain, costing its gas, and the next run reads both
+    // afresh.
     const [estimate, nextNonce] = await Promise.all([
       client.estimateMaxPriorityFeePerGas(),
       client.getTransactionCount({ address: executor.address, blockTag: "latest" }),

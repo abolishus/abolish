@@ -401,7 +401,11 @@ describe("the ballot extent", { timeout: 120_000 }, () => {
       code: "unavailable",
       at: { point: 1, panel: 1 },
     });
-    expect(availabilityChecks(inputs([attest(1), attest(2)], { clock })).row).toEqual(PENDING);
+    // A seal before `s_S` leaves the counted extent unjudged (below).
+    expect(availabilityChecks(inputs([attest(1), attest(2)], { clock })).row).toEqual({
+      status: "unverifiable",
+      code: "not-reached",
+    });
   });
 
   test("a close before the clock's epoch isn't reached, even within a period of it", () => {
@@ -623,6 +627,55 @@ describe("the counted extent", { timeout: 120_000 }, () => {
     );
     expect(short.row).toEqual({ status: "unverifiable", code: "evidence-unchecked", at: {} });
     expect(short.report?.countedExtent.panels?.[0]).toMatchObject({ holds: false });
+  });
+
+  test("a bundle proof at or after t_A keeps its ballot-extent failure from a later archived record", () => {
+    const sent = [attest(1), attestCounted(1), attestCounted(2)];
+    const between = board(sent, { timestamp: T_A + 10n });
+    const after = board(sent, { timestamp: T_A_PRIME + 10n });
+    const r = availabilityChecks(
+      inputs(sent, {
+        anchors: ALL_ANCHORS,
+        now: T_A_PRIME + 10n,
+        l2: between,
+        archived: after.archived(9),
+      }),
+    );
+    expect(r.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 1 } });
+    expect(r.report?.proven.source).toBe("bundle");
+  });
+
+  test("a clock sealing before s_S leaves the counted extent unjudged, never C_S an earlier checkpoint", () => {
+    const clock = { ...CLOCK, lastSegment: S_S - 1 };
+    const sent = [attestCounted(1), attestCounted(2)];
+    const r = availabilityChecks(past(sent, { clock }));
+    expect(r.row).toEqual({ status: "unverifiable", code: "not-reached" });
+    expect(r.report?.countedExtent).toEqual({ deadline: T_A_PRIME.toString() });
+    // The ballot extent is still judged.
+    expect(
+      availabilityChecks(
+        inputs([attest(1), ...sent], {
+          clock,
+          anchors: ALL_ANCHORS,
+          now: T_A_PRIME + 10n,
+          provenAt: T_A_PRIME + 10n,
+        }),
+      ).row,
+    ).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 1 } });
+    expect(availabilityChecks(past(sent, { clock: { ...CLOCK, lastSegment: S_S } })).row).toEqual({
+      status: "pass",
+    });
+  });
+
+  test("beside an author panel, points come before panels and each point lists both", () => {
+    const author = { panel: SEAT_PANELS.author, threshold: 2, registered: [] };
+    const r = availabilityChecks(past([attestCounted(1)], { panels: [DEFAULT, author] }));
+    // The default panel is short at point 2, but the author panel's point 1 is first.
+    expect(r.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 2 } });
+    expect(r.report?.countedExtent.panels?.map((p) => [p.panel, p.holds])).toEqual([
+      [1, false],
+      [2, false],
+    ]);
   });
 
   test("4.6 passes exactly when each point's threshold of seats attested it in time", () => {

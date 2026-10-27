@@ -204,7 +204,11 @@ export const Phone: Story = {
   },
 };
 
-/** No open questions: the page says so, and the ways to ask and browse stay. */
+/**
+ * No open questions: the page says so, and the ways to ask and browse stay.
+ * Every Discover order lists open polls only, so the section doesn't offer
+ * "See all questions" to a page that says there are none either.
+ */
 export const Empty: Story = {
   args: { newest: { cards: [], ballot: "https://ballot.example/" } },
   play: async ({ canvasElement }) => {
@@ -215,7 +219,9 @@ export const Empty: Story = {
     await expect(main.queryByText("The newest open questions.", { exact: false })).toBeNull();
     await expect(main.queryByText(/Choose an answer/)).toBeNull();
     await expect(main.queryByRole("list", { name: "What people are asking" })).toBeNull();
+    await expect(main.queryByRole("link", { name: "See all questions" })).toBeNull();
     await expect(main.getByRole("link", { name: "Ask a question" })).toBeVisible();
+    await expect(main.getByRole("link", { name: "Browse questions" })).toBeVisible();
   },
 };
 

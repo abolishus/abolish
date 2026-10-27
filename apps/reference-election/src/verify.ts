@@ -41,6 +41,21 @@ export interface VerifierRun {
     readonly destruction?: {
       readonly seats: readonly { readonly seat: number; readonly code?: string }[];
     };
+    /** Where the run read the archive: 4.4's replay of each L2 contract's events (docs/spec/verifier.md, Archive). */
+    readonly archive?: {
+      readonly replay?: {
+        readonly contracts: readonly {
+          readonly role: string;
+          readonly held: string;
+          readonly evidence: {
+            readonly records: readonly { readonly replay: unknown }[];
+            readonly findings: readonly unknown[];
+          };
+          readonly runs: { readonly complete: boolean; readonly findings: readonly unknown[] };
+        }[];
+        readonly findings: readonly unknown[];
+      };
+    };
     /** How a copy read by CID came out (docs/spec/verifier.md, Board by CID). */
     readonly board?: {
       readonly byCid?: {

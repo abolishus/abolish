@@ -1,5 +1,6 @@
 import { expect, test } from "vite-plus/test";
 import {
+  checkArchivedEvents,
   checkBallots,
   checkControl,
   checkExpectations,
@@ -288,4 +289,55 @@ test("a tallied election must pass the tally rows, open its one cell to the coun
     undefined,
   ])
     expect(checkTallied("honest", tallied({ destruction }), expected, 3)).toHaveLength(1);
+});
+
+test("checkArchivedEvents holds every contract's replay to its events, whole", () => {
+  const held = { "election-registry": 7n, "trustee-registry": 4n, board: 0n };
+  const contract = (role: string, n: bigint) => ({
+    role,
+    held: n.toString(),
+    evidence: { records: n === 0n ? [] : [{ replay: null as unknown }], findings: [] },
+    runs: { complete: true, findings: [] },
+  });
+  const report = (
+    contracts = Object.entries(held).map(([r, n]) => contract(r, n)),
+    findings = [],
+  ) => ({
+    report: { ...honest.report, archive: { replay: { contracts, findings } } },
+  });
+  expect(checkArchivedEvents("arweave", report(), held)).toEqual([]);
+  const [registry, trustees, board] = report().report.archive.replay.contracts as [
+    ReturnType<typeof contract>,
+    ReturnType<typeof contract>,
+    ReturnType<typeof contract>,
+  ];
+  // No replay, a finding, a contract short of its events, a record that
+  // doesn't replay, runs with a gap, and a contract missing or out of order.
+  for (const r of [
+    { report: honest.report },
+    report(undefined, [{ code: "evidence-over-budget" }] as never),
+    report([{ ...registry, held: "6" }, trustees, board]),
+    report([
+      { ...registry, evidence: { records: [{ replay: { rule: "accumulator" } }], findings: [] } },
+      trustees,
+      board,
+    ]),
+    report([
+      registry,
+      {
+        ...trustees,
+        evidence: { records: [], findings: [{ code: "evidence-unavailable" }] as never },
+      },
+      board,
+    ]),
+    report([registry, trustees, { ...board, runs: { complete: false, findings: [] } }]),
+    report([
+      registry,
+      trustees,
+      { ...board, runs: { complete: true, findings: [{ code: "run-malformed" }] as never } },
+    ]),
+    report([registry, trustees]),
+    report([trustees, registry, board]),
+  ])
+    expect(checkArchivedEvents("arweave", r, held)).toHaveLength(1);
 });

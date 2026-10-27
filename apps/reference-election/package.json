@@ -19,7 +19,8 @@
     "@abolishus/worker": "workspace:*",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
-    "ioredis": "catalog:"
+    "ioredis": "catalog:",
+    "viem": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",

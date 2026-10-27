@@ -1545,16 +1545,19 @@ describe("contract-event version 12 against version 11", () => {
     const v12 = contractsOf(V12);
     const record = recordOf(honest.fields);
     fc.assert(
-      fc.property(fc.bigInt({ min: 0n, max: (1n << 256n) - 1n }), (kind) => {
-        const data = record.data.slice();
-        data.set(uintWord(kind), 64);
-        const result = checkContractEvent({ ...record, data }, v12, 12);
-        if (kind === 1n || kind === 2n) {
-          if (!result.ok || result.event.event !== "PanelPinned") return false;
-          return result.event.kind === Number(kind);
-        }
-        return !result.ok && result.error === "event-data";
-      }),
+      fc.property(
+        fc.oneof(fc.bigInt({ min: 0n, max: 300n }), fc.bigInt({ min: 0n, max: (1n << 256n) - 1n })),
+        (kind) => {
+          const data = record.data.slice();
+          data.set(uintWord(kind), 64);
+          const result = checkContractEvent({ ...record, data }, v12, 12);
+          if (kind === 1n || kind === 2n) {
+            if (!result.ok || result.event.event !== "PanelPinned") return false;
+            return result.event.kind === Number(kind);
+          }
+          return !result.ok && result.error === "event-data";
+        },
+      ),
       { numRuns },
     );
     for (const kind of [0n, 1n, 2n, 3n, 255n, 256n, 257n, (1n << 255n) + 2n]) {

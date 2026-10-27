@@ -10,11 +10,11 @@ const ROLE: Record<ContractName, ContractRole> = {
   Board: "board",
 };
 
-// The newest version this release reads: an event it adds must be indexed
-// before any profile can pin it.
-const latest = Math.max(
-  ...Object.keys(CONTRACT_EVENT_SIGNATURES).map(Number),
-) as keyof typeof CONTRACT_EVENT_SIGNATURES;
+// The newest version a deployable board emits: an event it adds must be
+// indexed before any profile can pin it. Versions 10 and 11 add the rolling
+// ballot events, which the board's ABI gains with its rolling calls (P2-17
+// part 5); until then the registry refuses every definition that needs them.
+const latest = 9;
 
 const subscribed = (contract: ContractName) =>
   indexedEvents()

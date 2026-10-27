@@ -902,6 +902,8 @@ class ModelL2 implements ContractEventSource {
   forgeState: { accumulator?: Uint8Array; count?: bigint } | undefined;
   /** How many times `events` was asked. */
   eventReads = 0;
+  /** The bound each record was asked for the board under: its last record's block. */
+  readonly boardBounds: bigint[] = [];
   /** Rewrites the board's record or events before they are given. */
   tamper: {
     evidence?: (e: ContractEventEvidence) => ContractEventEvidence;
@@ -934,9 +936,11 @@ class ModelL2 implements ContractEventSource {
     return this.history(contract).filter((e) => e.l2_block <= block);
   }
 
-  async evidence(contract: Uint8Array, after: bigint) {
+  async evidence(contract: Uint8Array, after: bigint, atLeast: bigint) {
     if (this.failing) throw new Error("the L2 node is down");
+    if (equalBytes(contract, BOARD)) this.boardBounds.push(atLeast);
     let block = (after - T0 + 1n) / 2n;
+    if (block < atLeast) block = atLeast;
     block = ((block + 4n) / 5n) * 5n;
     if (block > this.head || block > this.gamesTo) return undefined;
     const logs = this.counted(contract, block);
@@ -1093,6 +1097,12 @@ describe("archiveBoards with contract events", () => {
       [1n, 2],
     ]);
     expectReplays(replays, l2);
+    // Each record is asked for at or above the last one's block, so a game
+    // created later for an older block can't be picked and refused.
+    expect(l2.boardBounds[0]).toBe(0n);
+    expect(l2.boardBounds.at(-1)).toBeGreaterThan(0n);
+    for (const [i, b] of l2.boardBounds.entries())
+      expect(b).toBeGreaterThanOrEqual(l2.boardBounds[i - 1] ?? 0n);
   });
 
   test("examines at most maxPeriods periods a run, in order", async () => {

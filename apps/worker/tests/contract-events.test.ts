@@ -244,7 +244,7 @@ const proxyOf = (i: number): Address => toHex(0x9a3e0000n + BigInt(i), { size: 2
 
 function l1Of(games: readonly Game[], options: { chainId?: bigint } = {}) {
   const calls: { fn: string; block: unknown; index?: number }[] = [];
-  const state = { finalized: 9_000n };
+  const state = { finalized: 9_000n, respected: PINNED };
   const client = createPublicClient({
     transport: custom({
       async request({ method, params }: { method: string; params?: unknown[] }) {
@@ -267,7 +267,7 @@ function l1Of(games: readonly Game[], options: { chainId?: bigint } = {}) {
           const result = (): unknown => {
             if (to.toLowerCase() === PORTAL) {
               if (functionName === "disputeGameFactory") return FACTORY;
-              if (functionName === "respectedGameType") return PINNED;
+              if (functionName === "respectedGameType") return state.respected;
             }
             if (to.toLowerCase() === FACTORY) {
               if (functionName === "gameCount") return BigInt(games.length);
@@ -350,7 +350,7 @@ describe("the record for a period", () => {
     // The second step's game is created first.
     const games = [await honest(step(1).block, created), await honest(step(0).block, created + 1n)];
     const { source } = await sourceOf(games);
-    const record = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp);
+    const record = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n);
     if (record === undefined) throw new Error("no record");
     expect(record.game_index).toBe(1n);
     expect(bytesToHex(record.game)).toBe(proxyOf(1));
@@ -361,14 +361,14 @@ describe("the record for a period", () => {
       timestamp: step(0).timestamp,
     });
     // One second later the first step's block is before the end.
-    const next = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp + 1n);
+    const next = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp + 1n, 0n);
     expect(next?.game_index).toBe(0n);
     expect(judged(next!)).toMatchObject({ count: step(1).count, accumulator: step(1).accumulator });
   });
 
   test("carries each proof node once, in ascending byte order", async () => {
     const { source } = await sourceOf([await honest(step(1).block, t0)]);
-    const record = await source.evidence(hexToBytes(REGISTRY), step(1).timestamp);
+    const record = await source.evidence(hexToBytes(REGISTRY), step(1).timestamp, 0n);
     const hexes = record!.nodes.map((n) => bytesToHex(n));
     expect(new Set(hexes).size).toBe(hexes.length);
     expect([...hexes].sort()).toEqual(hexes);
@@ -390,19 +390,19 @@ describe("the record for a period", () => {
       await honest(step(2).block + 1n, t0 + 4n, 2),
     ];
     const { source } = await sourceOf(games);
-    const record = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp);
+    const record = await source.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n);
     expect(record?.game_index).toBe(5n);
     expect(judged(record!)).toMatchObject({ count: step(2).count, timestamp: step(2).timestamp });
     // The game shown false aside, the next block is the resolved one's.
-    const after = await source.evidence(hexToBytes(REGISTRY), step(2).timestamp + 1n);
+    const after = await source.evidence(hexToBytes(REGISTRY), step(2).timestamp + 1n, 0n);
     expect(after?.game_index).toBe(6n);
   });
 
   test("is none while no game claims a block at or after the end", async () => {
     const { source } = await sourceOf([await honest(step(0).block, t0)]);
-    expect(await source.evidence(hexToBytes(REGISTRY), step(0).timestamp + 1n)).toBeUndefined();
+    expect(await source.evidence(hexToBytes(REGISTRY), step(0).timestamp + 1n, 0n)).toBeUndefined();
     const { source: empty } = await sourceOf([]);
-    expect(await empty.evidence(hexToBytes(REGISTRY), step(0).timestamp)).toBeUndefined();
+    expect(await empty.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n)).toBeUndefined();
   });
 
   test("reads games only from those created GAME_LEAD before the end, and at most MAX_EVIDENCE_GAMES", async () => {
@@ -423,7 +423,7 @@ describe("the record for a period", () => {
     }));
     const games = [...old, ...others, await honest(step(1).block, end)];
     const { source, calls } = await sourceOf(games);
-    expect(await source.evidence(hexToBytes(REGISTRY), end)).toBeUndefined();
+    expect(await source.evidence(hexToBytes(REGISTRY), end, 0n)).toBeUndefined();
     const read = calls.filter((c) => c.fn === "gameAtIndex").map((c) => c.index ?? -1);
     // The bisection's reads, then the window from the first game at or after
     // the lead, never an older game's claim.
@@ -433,30 +433,30 @@ describe("the record for a period", () => {
     expect(calls.filter((c) => c.fn === "rootClaim")).toHaveLength(0);
     // One game fewer in the way finds the record.
     const { source: wider } = await sourceOf([...old, ...others.slice(1), games.at(-1)!]);
-    expect((await wider.evidence(hexToBytes(REGISTRY), end))?.game_index).toBe(
+    expect((await wider.evidence(hexToBytes(REGISTRY), end, 0n))?.game_index).toBe(
       BigInt(old.length + others.length - 1),
     );
   });
 
   test("reads every L1 value at the finalized head, and each period's games once while it stays", async () => {
     const { source, calls, state } = await sourceOf([await honest(step(1).block, t0)]);
-    await source.evidence(hexToBytes(REGISTRY), step(1).timestamp);
+    await source.evidence(hexToBytes(REGISTRY), step(1).timestamp, 0n);
     const first = calls.length;
     for (const c of calls) expect(c.block).toBe(toHex(9_000n));
     // Another contract's record for the same period is at the same block.
-    const other = await source.evidence(hexToBytes(OTHER), step(1).timestamp);
+    const other = await source.evidence(hexToBytes(OTHER), step(1).timestamp, 0n);
     expect(calls.length).toBe(first);
     expect(other?.game_index).toBe(0n);
     expect(bytesToHex(other!.contract)).toBe(OTHER);
     state.finalized = 9_001n;
-    await source.evidence(hexToBytes(REGISTRY), step(1).timestamp);
+    await source.evidence(hexToBytes(REGISTRY), step(1).timestamp, 0n);
     expect(calls.length).toBe(2 * first);
     for (const c of calls.slice(first)) expect(c.block).toBe(toHex(9_001n));
   });
 
   test("of a contract with no code proves its absence", async () => {
     const { source } = await sourceOf([await honest(step(0).block, t0)]);
-    const record = await source.evidence(hexToBytes(NO_CODE), step(0).timestamp);
+    const record = await source.evidence(hexToBytes(NO_CODE), step(0).timestamp, 0n);
     expect(() =>
       accumulatorAtOutputRoot(
         {
@@ -488,6 +488,88 @@ describe("the record for a period", () => {
   });
 });
 
+/** The L2 node with `edit` applied to each answer it gives to `method`. */
+function editedNode(method: string, edit: (answer: unknown, params: unknown[]) => unknown) {
+  return createPublicClient({
+    transport: custom({
+      async request({ method: m, params }: { method: string; params?: unknown[] }) {
+        const answer = await rpc(m, params ?? []);
+        return m === method ? edit(answer, params ?? []) : answer;
+      },
+    }),
+  }) as PublicClient;
+}
+
+describe("the record's block", () => {
+  test("never falls below the contract's last record, whatever game is created later", async () => {
+    // The second step's game first; then, created later, a true root for
+    // the first step's lower block, which would be the lowest at or after
+    // the end.
+    const games = [await honest(step(1).block, t0), await honest(step(0).block, t0 + 1n)];
+    const { source } = await sourceOf(games);
+    const contract = hexToBytes(REGISTRY);
+    expect((await source.evidence(contract, step(0).timestamp, 0n))?.game_index).toBe(1n);
+    const bounded = await source.evidence(contract, step(0).timestamp, step(1).block);
+    expect(bounded?.game_index).toBe(0n);
+    expect(judged(bounded!)).toMatchObject({ count: step(1).count });
+    // Above every claim, none yet.
+    expect(await source.evidence(contract, step(0).timestamp, step(1).block + 1n)).toBeUndefined();
+  });
+
+  test("waits on a node missing a block below its head rather than move on", async () => {
+    const games = [await honest(step(0).block, t0), await honest(step(1).block, t0)];
+    const hole = editedNode("eth_getBlockByNumber", (answer, params) =>
+      params[0] === toHex(step(0).block) ? null : answer,
+    );
+    const { source } = await sourceOf(games, hole);
+    await expect(source.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n)).rejects.toThrow(
+      "the L2 node lacks a block below its head",
+    );
+  });
+
+  test("follows the type the portal respects at the finalized head, never another", async () => {
+    const pinned = await honest(step(0).block, t0);
+    const games = [pinned, { ...(await honest(step(1).block, t0)), type: 7 }];
+    const { source, state } = await sourceOf(games);
+    const contract = hexToBytes(REGISTRY);
+    expect((await source.evidence(contract, step(0).timestamp, 0n))?.game_index).toBe(0n);
+    state.respected = 7;
+    state.finalized = 9_001n;
+    expect((await source.evidence(contract, step(0).timestamp, 0n))?.game_index).toBe(1n);
+  });
+
+  test("is refused when the node answers with another block", async () => {
+    const games = [await honest(step(0).block, t0)];
+    const other = editedNode("eth_getBlockByNumber", (answer) => ({
+      ...(answer as object),
+      number: toHex(step(0).block + 1n),
+    }));
+    const { source } = await sourceOf(games, other);
+    await expect(source.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n)).rejects.toThrow(
+      "the L2 node answered with another block",
+    );
+  });
+
+  test("carries the same nodes whatever case the node writes them in", async () => {
+    const games = [await honest(step(1).block, t0)];
+    const upper = (h: unknown) => `0x${String(h).slice(2).toUpperCase()}`;
+    const shouting = editedNode("eth_getProof", (answer) => {
+      const a = answer as { accountProof: string[]; storageProof: { proof: string[] }[] };
+      return {
+        ...a,
+        accountProof: a.accountProof.map(upper),
+        storageProof: a.storageProof.map((p) => ({ ...p, proof: p.proof.map(upper) })),
+      };
+    });
+    const contract = hexToBytes(REGISTRY);
+    const plain = await (await sourceOf(games)).source.evidence(contract, step(1).timestamp, 0n);
+    const loud = await (
+      await sourceOf(games, shouting)
+    ).source.evidence(contract, step(1).timestamp, 0n);
+    expect(loud).toEqual(plain);
+  });
+});
+
 describe("the events since a record", () => {
   test("are the index's, numbered from the count asked, and replay from one record to the next", async () => {
     const { source } = await sourceOf([
@@ -495,8 +577,8 @@ describe("the events since a record", () => {
       await honest(step(1).block, t0),
     ]);
     const contract = hexToBytes(REGISTRY);
-    const first = judged((await source.evidence(contract, step(0).timestamp))!);
-    const second = judged((await source.evidence(contract, step(1).timestamp))!);
+    const first = judged((await source.evidence(contract, step(0).timestamp, 0n))!);
+    const second = judged((await source.evidence(contract, step(1).timestamp, 0n))!);
     const events = await source.events(contract, 0n, 1n);
     const log = logs[0]!;
     expect(events).toEqual([
@@ -554,7 +636,7 @@ describe("failures", () => {
       }),
     }) as PublicClient;
     const { source: lame } = await sourceOf([await honest(step(0).block, t0)], flaky);
-    const error = await lame.evidence(hexToBytes(REGISTRY), step(0).timestamp).catch((e) => e);
+    const error = await lame.evidence(hexToBytes(REGISTRY), step(0).timestamp, 0n).catch((e) => e);
     expect(error).toBeInstanceOf(Error);
     expect(String(error.message)).toBe("an L1 or L2 node failed");
     expect(error.cause).toBeUndefined();

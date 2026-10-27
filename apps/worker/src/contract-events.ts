@@ -114,11 +114,11 @@ export interface ChainContractEventsOptions {
  */
 export class ChainContractEvents implements ContractEventSource {
   readonly #o: ChainContractEventsOptions;
-  // Every contract's record for one period is read at one block, so a run
-  // picks each period's block once; the picks are kept only while the L1
-  // node's finalized head is the one they were read at, so a game shown
-  // false since is never picked again.
-  #picks = new Map<bigint, Pick | undefined>();
+  // Every contract's record for one period is read at one block (for
+  // contracts whose last records agree), so a run picks each period's block
+  // once; the picks are kept only while the L1 node's finalized head is the
+  // one they were read at, so a game shown false since is never picked again.
+  #picks = new Map<string, Pick | undefined>();
   #pickedAt: bigint | undefined;
 
   private constructor(options: ChainContractEventsOptions) {
@@ -136,9 +136,13 @@ export class ChainContractEvents implements ContractEventSource {
     });
   }
 
-  evidence(contract: Uint8Array, after: bigint): Promise<ContractEventEvidence | undefined> {
+  evidence(
+    contract: Uint8Array,
+    after: bigint,
+    atLeast: bigint,
+  ): Promise<ContractEventEvidence | undefined> {
     return quietly(NODES, async () => {
-      const pick = await this.#pick(after);
+      const pick = await this.#pick(after, atLeast);
       if (pick === undefined) return undefined;
       const proof = await this.#o.l2.getProof({
         address: bytesToHex(contract),
@@ -196,7 +200,8 @@ export class ChainContractEvents implements ContractEventSource {
   }
 
   /**
-   * The lowest L2 block at or after `after` that a game claims, among
+   * The lowest L2 block at or after `after`, numbered at least `atLeast`
+   * (the contract's last record's block), that a game claims, among
    * `MAX_EVIDENCE_GAMES` games from the first created at or after
    * `after − GAME_LEAD`, at the L1 node's finalized head: of the type the
    * portal respects there (never configured, T-71), not shown false, and
@@ -204,9 +209,12 @@ export class ChainContractEvents implements ContractEventSource {
    * whose root the node doesn't reproduce is passed over rather than stall
    * every contract until it is shown false; a node that lies to pass over an
    * honest one only moves the record to a later block, which core checks as
-   * it checks any.
+   * it checks any. The bound keeps the picks from falling: a game anyone
+   * creates later, with a true root, for a block below the last record's
+   * would otherwise be the lowest for the next period, and core refuses a
+   * record below the last one, so the contract would stall for good.
    */
-  async #pick(after: bigint): Promise<Pick | undefined> {
+  async #pick(after: bigint, atLeast: bigint): Promise<Pick | undefined> {
     const { l1, l2, portal } = this.#o;
     const head = await l1.getBlock({ blockTag: "finalized" });
     if (head.number === null) throw new SourceError("the L1 node has no finalized block");
@@ -215,7 +223,8 @@ export class ChainContractEvents implements ContractEventSource {
       this.#picks = new Map();
       this.#pickedAt = blockNumber;
     }
-    if (this.#picks.has(after)) return this.#picks.get(after);
+    const key = `${after}:${atLeast}`;
+    if (this.#picks.has(key)) return this.#picks.get(key);
     const [factory, respected] = await Promise.all([
       l1.readContract({
         address: portal,
@@ -267,7 +276,7 @@ export class ChainContractEvents implements ContractEventSource {
         read("l2SequenceNumber"),
         read("status"),
       ]);
-      if (status === CHALLENGER_WINS) continue;
+      if (status === CHALLENGER_WINS || l2Block < atLeast) continue;
       claims.push({ index: i, game: proxy, root: hexToBytes(rootClaim), l2Block });
     }
     claims.sort((a, b) => (a.l2Block < b.l2Block ? -1 : a.l2Block > b.l2Block ? 1 : 0));
@@ -277,9 +286,16 @@ export class ChainContractEvents implements ContractEventSource {
         method: "eth_getBlockByNumber",
         params: [toHex(claim.l2Block), false],
       })) as RawBlock | null;
-      // A block the node doesn't hold yet: a game claiming a future block,
-      // or a node behind; either way not one to prove at now.
-      if (block === null || typeof block !== "object") continue;
+      if (block === null || typeof block !== "object") {
+        // A block past the node's head: a game claiming a future block, or a
+        // node behind, in which case every later claim is past it too. One
+        // missing below its head is the node's failure, which waits rather
+        // than move the record to a later block.
+        const l2Head = await l2.request({ method: "eth_blockNumber" });
+        if (!isQuantity(l2Head) || claim.l2Block <= BigInt(l2Head))
+          throw new SourceError("the L2 node lacks a block below its head");
+        continue;
+      }
       if (!isQuantity(block.number) || !isQuantity(block.timestamp))
         throw new SourceError("the L2 node's block has no number or timestamp");
       if (BigInt(block.number) !== claim.l2Block)
@@ -305,7 +321,7 @@ export class ChainContractEvents implements ContractEventSource {
       pick = { claim, header, passerRoot };
       break;
     }
-    this.#picks.set(after, pick);
+    this.#picks.set(key, pick);
     return pick;
   }
 }

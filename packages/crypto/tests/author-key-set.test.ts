@@ -14,18 +14,25 @@ import {
   deliveryDeadlines,
   deliverySegments,
   type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
   electionAuthorStubV6Hash,
   electionDefinitionV6Hash,
+  electionDefinitionV7Hash,
   electionStubV6Hash,
+  ELECTORATE_MODES,
   encryptSharesV4,
   type KemPublicKey,
+  membershipScope,
   openChallengeV3,
   panelBallotCore,
   panelBallotElection,
   panelTrackingCode,
+  panelTallyRules,
   RECORD_TYPES,
   type RegisteredKeys,
   shareVoteV4,
+  tallyRules,
+  UnsupportedVersionError,
 } from "../src/index.ts";
 import { panelBallotElectionWith } from "../src/ballot.ts";
 import { checkChallengeOpeningV3With, coreHashV4 } from "../src/challenge.ts";
@@ -586,5 +593,192 @@ describe("checkDeliveryV2 beside an author panel takes its approved key set", ()
     expect(
       checkDeliveryV2({ ...against, definitionHash }, ballots, [overwriting, ...rest], e.d),
     ).toEqual(expected);
+  });
+});
+
+// A version-7 definition under a fixed electorate is version 6's fields with
+// the mode and an empty rolling list appended, pinning itself as version 7
+// (docs/spec/election-definition.md, Layout (version 7)).
+const fixedV7 = (d: ElectionDefinitionV6): ElectionDefinitionV7 => ({
+  ...d,
+  profile: {
+    ...d.profile,
+    pins: d.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.electionDefinition ? { ...p, version: 7 } : p,
+    ),
+  },
+  electorate_mode: ELECTORATE_MODES.fixed,
+  rolling_electorate: [],
+});
+
+const withoutAuthor = (d: ElectionDefinitionV6): ElectionDefinitionV6 => ({
+  ...d,
+  author_threshold: 0,
+  author_keys: [],
+  author_transcript_hash: new Uint8Array(32),
+});
+
+// Delivery's election for a definition without an author panel, under `d`'s
+// own hash when it has one.
+function plainAgainst(
+  e: ReturnType<typeof election>,
+  d: ElectionDefinitionV6 | ElectionDefinitionV7,
+): DeliveryElectionV2 {
+  const bound = BigInt(d.l1_inclusion_bound);
+  const clock = { epoch: 1767225600n, period: 3600n };
+  return {
+    definitionHash:
+      "electorate_mode" in d && d.electorate_mode === ELECTORATE_MODES.fixed
+        ? electionDefinitionV7Hash(d)
+        : new Uint8Array(32),
+    panelSize: d.panel_size,
+    authorPanelSize: 0,
+    registered: { default: e.registered, author: [] },
+    segments: deliverySegments(clock, d.closes_at, bound),
+    deadlines: deliveryDeadlines(d.closes_at, bound),
+  };
+}
+
+describe("version 6's per-election checks read a fixed version 7 under its own hashes", () => {
+  // Verifier 2.3: what holds of version 6 holds of version 7, and a fixed
+  // version 7 pins ballot version 4; its hash and author stub hash are its
+  // own encoding's, so no ballot, record or approval made for a version-6
+  // reading of it is read as its own (T-34, T-36, T-37).
+  test("a ballot election is version 6's but for the hash and the scopes it gives", () => {
+    const e = election("author-mixed");
+    const d6 = withoutAuthor(e.d);
+    const d7 = fixedV7(d6);
+    const six = panelBallotElection(d6, e.registered);
+    const seven = panelBallotElection(d7, e.registered);
+    const hash = electionDefinitionV7Hash(d7);
+    expect(seven.definitionHash).toEqual(hash);
+    expect(seven.definitionHash).not.toEqual(electionDefinitionV6Hash(d6));
+    expect(seven.cells).toEqual(
+      six.cells.map((c) => ({ ...c, scope: membershipScope(hash, c.tier, c.root) })),
+    );
+    expect({ ...seven, definitionHash: [], cells: [] }).toEqual({
+      ...six,
+      definitionHash: [],
+      cells: [],
+    });
+    // With an author panel's seats given, as the opening tests take them.
+    const authored = panelBallotElectionWith(fixedV7(e.d), e.registered, [1, 2]);
+    expect(authored.definitionHash).toEqual(electionDefinitionV7Hash(fixedV7(e.d)));
+    expect(authored.authorPanelSize).toBe(e.d.author_keys.length);
+  });
+
+  test("an author panel's approvals of the version-6 reading approve nothing under version 7", () => {
+    const e = election("author-mixed");
+    expect(e.approve()).toEqual({ ok: true, seats: [1, 2] });
+    // The approvals sign the version-6 author stub, which a version-7
+    // definition with the same fields doesn't have (T-17, T-37).
+    expect(() => panelBallotElection(fixedV7(e.d), e.registered, e.authorRegistered)).toThrow(
+      /approved key set/,
+    );
+  });
+
+  test("the version is the value's own pin, never its shape", () => {
+    const e = election("author-mixed");
+    const d6 = withoutAuthor(e.d);
+    // Version 7's fields under a version-6 pin decode as no definition (the
+    // version byte is the fields' layout's, the pin another), so neither
+    // version's hash is taken over them.
+    const shaped = { ...fixedV7(d6), profile: d6.profile };
+    expect(() => panelBallotElection(shaped, e.registered)).toThrow(/profile-mismatch/);
+    // Version 6's fields under a version-7 pin decode as no definition.
+    const pinned = { ...d6, profile: fixedV7(d6).profile };
+    expect(() => panelBallotElection(pinned, e.registered)).toThrow(/profile-mismatch/);
+    for (const d of [shaped, pinned]) {
+      expect(() => tallyRules({ version: 6, value: d })).toThrow();
+      expect(() => checkDeliveryV2(plainAgainst(e, d), [], [], d)).toThrow();
+    }
+    // A fixed version 7 pinning another ballot version than 4 has no version-4 election.
+    const ballotPin = (d: ElectionDefinitionV7, version: number): ElectionDefinitionV7 => ({
+      ...d,
+      profile: {
+        ...d.profile,
+        pins: d.profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.ballot ? { ...p, version } : p,
+        ),
+      },
+    });
+    expect(() => panelBallotElection(ballotPin(fixedV7(d6), 5), e.registered)).toThrow(
+      UnsupportedVersionError,
+    );
+  });
+
+  test("a rolling version 7, and an ill-formed fixed one, are refused", () => {
+    const e = election("author-mixed");
+    const d7 = fixedV7(withoutAuthor(e.d));
+    const rolling: ElectionDefinitionV7 = { ...d7, electorate_mode: ELECTORATE_MODES.rolling };
+    expect(() => panelBallotElection(rolling, e.registered)).toThrow(UnsupportedVersionError);
+    expect(() => tallyRules({ version: 7, value: rolling })).toThrow(UnsupportedVersionError);
+    expect(() =>
+      panelTallyRules(
+        { version: 7, value: { ...fixedV7(e.d), electorate_mode: ELECTORATE_MODES.rolling } },
+        1,
+      ),
+    ).toThrow(UnsupportedVersionError);
+    // Under a fixed electorate the rolling list must be empty (`electorate`).
+    const listed: ElectionDefinitionV7 = {
+      ...d7,
+      rolling_electorate: [{ tier: 0, root_l2_block: 1n, groups: [1n], root: 1n, group_size: 1n }],
+    };
+    expect(() => panelBallotElection(listed, e.registered)).toThrow(/isn't well-formed/);
+    expect(() => tallyRules({ version: 7, value: listed })).toThrow(/isn't well-formed/);
+  });
+
+  test("tally rules are version 6's, and a record's version must be its value's pin", () => {
+    const e = election("author-mixed");
+    const d6 = withoutAuthor(e.d);
+    expect(tallyRules({ version: 7, value: fixedV7(d6) })).toEqual(
+      tallyRules({ version: 6, value: d6 }),
+    );
+    expect(() => tallyRules({ version: 7, value: fixedV7(e.d) })).toThrow(/per panel/);
+    for (const panel of [1, 2] as const)
+      expect(panelTallyRules({ version: 7, value: fixedV7(e.d) }, panel)).toEqual(
+        panelTallyRules({ version: 6, value: e.d }, panel),
+      );
+    // A version-6 value labelled 7, and a version-7 one labelled 6.
+    const shaped = { ...fixedV7(d6), profile: d6.profile };
+    expect(() => tallyRules({ version: 7, value: shaped })).toThrow(/profile-mismatch/);
+    expect(() => tallyRules({ version: 6, value: fixedV7(d6) })).toThrow(UnsupportedVersionError);
+    expect(() => panelTallyRules({ version: 6, value: fixedV7(e.d) }, 1)).toThrow(
+      UnsupportedVersionError,
+    );
+  });
+
+  test("delivery is checked against the version-7 hash and the version-7 author stub", () => {
+    const e = election("author-mixed");
+    expect(e.approve()).toEqual({ ok: true, seats: [1, 2] });
+    const d7 = fixedV7(withoutAuthor(e.d));
+    const against = plainAgainst(e, d7);
+    expect(checkDeliveryV2(against, [], [], d7).ballots).toEqual([]);
+    // Its version-6 reading's hash names another election.
+    expect(() =>
+      checkDeliveryV2(
+        { ...against, definitionHash: electionDefinitionV6Hash(withoutAuthor(e.d)) },
+        [],
+        [],
+        d7,
+      ),
+    ).toThrow(/not the definition of this election/);
+    expect(() =>
+      checkDeliveryV2(against, [], [], { ...d7, electorate_mode: ELECTORATE_MODES.rolling }),
+    ).toThrow(UnsupportedVersionError);
+    const authored = fixedV7(e.d);
+    expect(() =>
+      checkDeliveryV2(
+        {
+          ...against,
+          definitionHash: electionDefinitionV7Hash(authored),
+          authorPanelSize: authored.author_keys.length,
+          registered: { default: e.registered, author: e.authorRegistered },
+        },
+        [],
+        [],
+        authored,
+      ),
+    ).toThrow(/approved key set/);
   });
 });

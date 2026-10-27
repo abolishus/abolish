@@ -16,13 +16,20 @@ import {
   electionDefinitionRule,
   electionDefinitionV3Rule,
   electionDefinitionV4Rule,
+  type ElectionDefinitionV5,
   electionDefinitionV5Rule,
   type ElectionDefinitionV6,
-  electionDefinitionV6Rule,
 } from "./election-definition.ts";
 import { type Element, G, GENERATOR_H, GROUP_ORDER, IDENTITY } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
-import { type AnyElectionDefinitionRecord, UnsupportedVersionError } from "./protocol.ts";
+import {
+  type AnyElectionDefinitionRecord,
+  type ElectionDefinitionV7Record,
+  type PanelledDefinition,
+  panelledFacts,
+  type PanelledFacts,
+  UnsupportedVersionError,
+} from "./protocol.ts";
 import { RECORD_TYPES } from "./record.ts";
 
 const { MAX_OPTIONS, MAX_QUESTIONS, MAX_TRUSTEES } = PARAMETERS;
@@ -127,18 +134,21 @@ function checkRules(rules: TallyRules): void {
 
 /**
  * The rules a cell of a registered definition is tallied under
- * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under versions 5 and 6
+ * (docs/spec/tally.md, Context): `m`, `k` and `n`, and under versions 5 to 7
  * each question's option count and limits. A version-6 definition's ballots
  * are version 4: without an author panel their default half is the whole
  * sharing, tallied by the default panel exactly as version 5's ballots are,
  * so the rules are version 5's; with one, its halves are tallied per panel
  * (`panelTallyRules`) and it is refused here, so no caller sums a half under
- * one panel's rules as the whole vote (T-28, T-37). Any later version is
- * `UnsupportedVersionError` (T-36). A definition that isn't well-formed is
+ * one panel's rules as the whole vote (T-28, T-37). A version-7 definition
+ * under a fixed electorate is read as version 6 is (`panelledFacts`); a
+ * rolling one, and any later version, is `UnsupportedVersionError` (T-36). A definition that isn't well-formed is
  * refused: its questions could hold limits no ballot proves, which would
  * make `tally-question-range` judge an honest cell (T-28, T-34).
  */
-export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules {
+export function tallyRules(
+  definition: AnyElectionDefinitionRecord | ElectionDefinitionV7Record,
+): TallyRules {
   const rules = (d: { readonly threshold: number; readonly panel_size: number }) => ({
     threshold: d.threshold,
     panelSize: d.panel_size,
@@ -159,17 +169,23 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
       return { optionCount: definition.value.option_count, ...rules(definition.value) };
     }
     case 5:
-    case 6: {
-      const failure =
-        definition.version === 5
-          ? electionDefinitionV5Rule(definition.value)
-          : electionDefinitionV6Rule(definition.value);
-      if (failure !== undefined)
-        throw new RangeError("tallyRules: the definition isn't well-formed");
-      if (definition.version === 6 && definition.value.author_keys.length !== 0)
-        throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
+    case 6:
+    case 7: {
+      const notWellFormed = () => new RangeError("tallyRules: the definition isn't well-formed");
+      let d: ElectionDefinitionV5 | PanelledDefinition;
+      if (definition.version === 5) {
+        if (electionDefinitionV5Rule(definition.value) !== undefined) throw notWellFormed();
+        d = definition.value;
+      } else {
+        // Read from its one decoded copy, which its rules were judged on.
+        const facts = panelledOf(definition);
+        if (!facts.wellFormed) throw notWellFormed();
+        if (facts.value.author_keys.length !== 0)
+          throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
+        d = facts.value;
+      }
       const questions = Object.freeze(
-        definition.value.questions.map((q) =>
+        d.questions.map((q) =>
           Object.freeze({
             optionCount: q.option_count,
             minSelections: q.min_selections,
@@ -179,7 +195,7 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
       );
       return Object.freeze({
         optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
-        ...rules(definition.value),
+        ...rules(d),
         questions,
       });
     }
@@ -192,9 +208,23 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
   }
 }
 
+// `panelledFacts` for a record: its value's own pin must be the record's
+// version, so a value can't be read under another version's hash or rules.
+function panelledOf(
+  definition:
+    | { readonly version: 6; readonly value: ElectionDefinitionV6 }
+    | ElectionDefinitionV7Record,
+): PanelledFacts {
+  const facts = panelledFacts(definition.value);
+  if (facts.version !== definition.version)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+  return facts;
+}
+
 /**
  * The rules panel `panel` tallies its half of a cell under, for a version-6
- * definition with an author panel, which pins tally-opening version 3
+ * definition, or a version-7 one under a fixed electorate, with an author
+ * panel, which pins tally-opening version 3
  * (docs/spec/tally.md, Author panel, Panels and counted set): the default
  * panel's `threshold` and `panel_size`, or the author panel's
  * `author_threshold` and number of `author_keys`, with the definition's
@@ -203,14 +233,19 @@ export function tallyRules(definition: AnyElectionDefinitionRecord): TallyRules 
  * refused (T-28, T-36, T-37).
  */
 export function panelTallyRules(
-  definition: { readonly version: 6; readonly value: ElectionDefinitionV6 },
+  definition:
+    | { readonly version: 6; readonly value: ElectionDefinitionV6 }
+    | ElectionDefinitionV7Record,
   panel: 1 | 2,
 ): TallyRules {
-  if (definition.version !== 6)
-    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
-  const d = definition.value;
-  if (electionDefinitionV6Rule(d) !== undefined)
-    throw new RangeError("panelTallyRules: the definition isn't well-formed");
+  if (definition.version !== 6 && definition.version !== 7)
+    throw new UnsupportedVersionError(
+      RECORD_TYPES.electionDefinition,
+      (definition as { readonly version: number }).version,
+    );
+  const facts = panelledOf(definition);
+  if (!facts.wellFormed) throw new RangeError("panelTallyRules: the definition isn't well-formed");
+  const d = facts.value;
   if (d.author_keys.length === 0)
     throw new RangeError("panelTallyRules: the definition has no author panel");
   if (panel !== 1 && panel !== 2) throw new RangeError("panelTallyRules: panel is 1 or 2");

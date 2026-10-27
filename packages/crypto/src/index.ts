@@ -569,6 +569,8 @@ export {
   electionDefinitionHash,
   type ElectionDefinitionRecord,
   type AnyElectionDefinitionRecord,
+  type ElectionDefinitionV7Record,
+  type PanelledDefinition,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,

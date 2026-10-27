@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import type { BoardRow, EntryKind } from "../board.ts";
+import type { AnchorRow, BoardRow, EntryKind } from "../board.ts";
 import type { PollView } from "../poll.ts";
 import { PollBoard } from "./poll-board.tsx";
 
@@ -37,11 +37,20 @@ const rows: BoardRow[] = Array.from({ length: 25 }, (_, i) => ({
   hash: (25 + i).toString(16).padStart(2, "0").repeat(32),
 }));
 
+/** The latest checkpoints, from period 8 back, as many as the page asks for. */
+const anchors: AnchorRow[] = Array.from({ length: 6 }, (_, i) => ({
+  segment: 8 - i,
+  size: String(100 - 10 * i),
+  head: (0x40 + i).toString(16).repeat(32),
+  root: (0x50 + i).toString(16).repeat(32),
+  hash: (0x60 + i).toString(16).repeat(32),
+}));
+
 const base = `/polls/${poll.electionId}/board`;
 
 const meta = {
   component: PollBoard,
-  args: { poll, head, from: "25", rows, pageSize: 25 },
+  args: { poll, head, from: "25", rows, pageSize: 25, anchors, anchorPage: 6 },
 } satisfies Meta<typeof PollBoard>;
 
 export default meta;
@@ -73,6 +82,56 @@ export const Default: Story = {
     // Never a lookup by entry number (T-10).
     await expect(canvas.queryByRole("textbox")).toBeNull();
     await expect(canvas.getByText(/doesn't look up a receipt's entry/)).toBeVisible();
+    const list = canvas.getByRole("list", { name: "Checkpoints, latest first" });
+    const items = within(list).getAllByRole("listitem");
+    await expect(items).toHaveLength(6);
+    await expect(within(items[0]!).getByRole("heading", { level: 3 })).toHaveTextContent(
+      "After period 8",
+    );
+    await expect(within(items[0]!).getByText("Latest")).toBeVisible();
+    await expect(within(items[1]!).queryByText("Latest")).toBeNull();
+    await expect(
+      canvas.getByRole("img", { name: "Fingerprint of the checkpoint after period 8" }),
+    ).toBeVisible();
+    await expect(
+      within(items[5]!).getByRole("figure", { name: "Checkpoint hash, the value anchored" }),
+    ).toHaveTextContent("65".repeat(32));
+    await expect(canvas.getByText(/reads every checkpoint from Ethereum/)).toBeVisible();
+    // As many as the page asked for: there may be earlier ones.
+    await expect(canvas.getByText(/Only the latest 6 checkpoints/)).toBeVisible();
+  },
+};
+
+/** Fewer checkpoints than the page asks for: the first is among them. */
+export const FewAnchors: Story = {
+  args: { anchors: anchors.slice(4) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const list = canvas.getByRole("list", { name: "Checkpoints, latest first" });
+    await expect(within(list).getAllByRole("listitem")).toHaveLength(2);
+    await expect(canvas.queryByText(/Only the latest/)).toBeNull();
+  },
+};
+
+/** No period has ended since the first entry: nothing to anchor yet. */
+export const NoAnchors: Story = {
+  args: { anchors: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("status")).toHaveTextContent("No checkpoint yet.");
+    await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
+  },
+};
+
+/** Checkpoints the page refused: none shown, and the entries still are. */
+export const AnchorsRefused: Story = {
+  args: { anchors: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("status")).toHaveTextContent(/checkpoints for this board that/);
+    await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
+    await expect(canvas.queryByText(/Only the latest/)).toBeNull();
+    await expect(canvas.getByRole("table", { name: "Entries 25 to 49 of 100" })).toBeVisible();
   },
 };
 
@@ -100,6 +159,7 @@ export const Empty: Story = {
     head: { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) },
     from: "0",
     rows: [],
+    anchors: [],
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

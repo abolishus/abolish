@@ -10,8 +10,10 @@
 import {
   boardEntryHash,
   type BoardEntryVersion,
+  checkpointHash,
   DecodeError,
   decodeBoardEntry,
+  decodeCheckpoint,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
@@ -90,6 +92,59 @@ export function boardRows(
       segment: entry.segment,
       kind,
       hash: toHex(boardEntryHash(bytes)),
+    });
+  }
+  return rows;
+}
+
+export interface AnchorRow {
+  /** The anchoring period the checkpoint closes. */
+  readonly segment: number;
+  /** Entries on the board after that period, as a canonical decimal `u64`. */
+  readonly size: string;
+  readonly head: string;
+  readonly root: string;
+  /** The checkpoint's hash, computed here: the value the anchor on L1 holds for it. */
+  readonly hash: string;
+}
+
+/**
+ * The rows for `checkpoints`, the API's latest checkpoints of the board of
+ * `electionId`, latest first, or `undefined` if any doesn't decode, names
+ * another election, or doesn't go back from the one before it: an earlier
+ * period and at most as many entries. A board only grows (T-24), so
+ * checkpoints that break this can't all be anchored for one board, and none
+ * is shown. They aren't held to the head's size: a checkpoint taken after
+ * the head was read may count more.
+ * Whether each is in the anchor on L1 is the verifier's check (T-23).
+ */
+export function anchorRows(
+  electionId: string,
+  checkpoints: readonly string[],
+): readonly AnchorRow[] | undefined {
+  const rows: AnchorRow[] = [];
+  for (const hex of checkpoints) {
+    let checkpoint;
+    try {
+      checkpoint = decodeCheckpoint(fromHex(hex));
+    } catch (error) {
+      if (error instanceof DecodeError || error instanceof RangeError) return undefined;
+      throw error;
+    }
+    const previous = rows.at(-1);
+    if (
+      toHex(checkpoint.election_id) !== electionId ||
+      checkpoint.size < 1n ||
+      (previous !== undefined &&
+        (checkpoint.segment >= previous.segment || checkpoint.size > BigInt(previous.size)))
+    )
+      return undefined;
+    rows.push({
+      segment: checkpoint.segment,
+      size: checkpoint.size.toString(),
+      head: toHex(checkpoint.head),
+      root: toHex(checkpoint.root),
+      hash: toHex(checkpointHash(checkpoint)),
     });
   }
   return rows;

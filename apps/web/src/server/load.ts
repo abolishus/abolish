@@ -4,8 +4,8 @@ import { placeIsWellFormed, type PollTopic } from "@abolishus/core/poll-draft-ru
 import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
-import { type BoardRow, boardRows } from "../board.ts";
-import { BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import { type AnchorRow, anchorRows, type BoardRow, boardRows } from "../board.ts";
+import { ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
 import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
@@ -211,6 +211,13 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
   return { kind: "poll", electionId };
 }
 
+/**
+ * The board's latest checkpoints, checked (src/board.ts), or `undefined` when
+ * one the server sent fails its checks: the page then shows the entries
+ * without them.
+ */
+export type Anchors = readonly AnchorRow[] | undefined;
+
 export type BoardPage =
   | {
       readonly kind: "board";
@@ -220,6 +227,7 @@ export type BoardPage =
       readonly from: string;
       /** The entries from `from`, checked; empty at the end of the board. */
       readonly rows: readonly BoardRow[];
+      readonly anchors: Anchors;
     }
   | {
       /** `from` is past the end of the board as `head` gives it. */
@@ -227,6 +235,7 @@ export type BoardPage =
       readonly poll: PollView;
       readonly head: BoardHead;
       readonly from: string;
+      readonly anchors: Anchors;
     }
   | { readonly kind: "not-found" }
   | {
@@ -264,15 +273,17 @@ export async function loadBoardPage(
           if (outOfRange(error)) return undefined;
           throw error;
         }),
+      api.board.getCheckpoints({ electionId, limit: String(ANCHOR_PAGE) }),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, head, first] = answers;
+  const [{ definition }, head, first, { checkpoints }] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
-  if (first === undefined) return { kind: "beyond", poll: view.poll, head, from };
+  const anchors = anchorRows(electionId, checkpoints);
+  if (first === undefined) return { kind: "beyond", poll: view.poll, head, from, anchors };
   // The API may cut a page short by bytes (T-52); the rest is asked for, so
   // every page holds the same window of the board and the next one starts
   // where it ends. Each answer short of the end holds at least one entry, so
@@ -293,7 +304,7 @@ export async function loadBoardPage(
       ? undefined
       : boardRows(electionId, view.boardEntryVersion, BigInt(from), entries);
   if (rows === undefined) return { kind: "unavailable", problem: "undecodable-entries" };
-  return { kind: "board", poll: view.poll, head, from, rows };
+  return { kind: "board", poll: view.poll, head, from, rows, anchors };
 }
 
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;

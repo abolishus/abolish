@@ -7,14 +7,20 @@ import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 
 import { shortCode } from "@abolishus/core/short-codes";
 import {
+  BOARD_TREE,
+  boardEntryHash,
+  chainLink,
   decodeBoardEntry,
+  decodeCheckpoint,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
   electionDefinitionHash,
   electionDefinitionV5Hash,
   encodeBoardEntry,
+  encodeCheckpoint,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  merkleRoot,
 } from "@abolishus/crypto";
 
 import { fromHex, toHex } from "../src/values.ts";
@@ -81,6 +87,34 @@ export const BOARD = Array.from({ length: Number(HEAD.treeSize) }, (_, i) => {
     ),
   );
 });
+
+/**
+ * The typical poll's checkpoints, the latest first, as `apps/api` serves
+ * them: one for each of `BOARD`'s segments but the last, still open, with
+ * its size, chain head and root. `BOARD` isn't a board the verifier accepts
+ * (its payloads break the openings' order), and the page reads no CID, so
+ * those are placeholders. Served for every poll, so any other poll's name
+ * another election.
+ */
+const hashes = BOARD.map((e) => boardEntryHash(fromHex(e)));
+const links = hashes.reduce<Uint8Array[]>(
+  (chain, h) => [...chain, chainLink(chain.at(-1) ?? new Uint8Array(32), h)],
+  [],
+);
+export const CHECKPOINTS = Array.from({ length: Math.floor((BOARD.length - 1) / 5) }, (_, s) => {
+  const size = 5 * (s + 1);
+  return toHex(
+    encodeCheckpoint({
+      election_id: fromHex(ID),
+      segment: s,
+      size: BigInt(size),
+      head: links[size - 1]!,
+      root: merkleRoot(BOARD_TREE, hashes.slice(0, size)),
+      object_cid: new Uint8Array(36).fill(s),
+      hashes_cid: new Uint8Array(36).fill(s + 1),
+    }),
+  );
+}).toReversed();
 
 /** A poll whose text moderation has hidden: the approval vector, under an ID of its own. */
 export const HIDDEN_ID = "ef".repeat(32);
@@ -428,6 +462,15 @@ export function stubApi(): Server {
         // At most 7 entries an answer, as a page the API cut short by bytes would be.
         const limit = Math.min(Number(url.searchParams.get("limit")), 7);
         return json(200, { entries: BOARD.slice(start, start + limit) });
+      }
+      case "/board/checkpoints": {
+        const before = url.searchParams.get("before");
+        const limit = Number(url.searchParams.get("limit"));
+        return json(200, {
+          checkpoints: CHECKPOINTS.filter(
+            (c) => before === null || decodeCheckpoint(fromHex(c)).segment < Number(before),
+          ).slice(0, limit),
+        });
       }
       case "/moderation/status":
         return json(

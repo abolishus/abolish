@@ -1,9 +1,11 @@
 import { readFileSync } from "node:fs";
 
+import { encodeCheckpoint } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { boardRows } from "../src/board.ts";
+import { anchorRows, boardRows } from "../src/board.ts";
+import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
 
@@ -15,10 +17,21 @@ interface EntryVector {
   value?: { election_id: string; index: string; segment: string; payload: string };
   entryHash?: string;
 }
+interface CheckpointVector {
+  electionId: string;
+  segment: string;
+  size: string;
+  head: string;
+  root: string;
+  objectCid: string;
+  hashesCid: string;
+  hash: string;
+}
 interface BoardVector {
   id: string;
   electionId: string;
   entries: string[];
+  checkpoints: CheckpointVector[];
 }
 const file = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
@@ -129,6 +142,100 @@ describe("boardRows", () => {
           // A changed entry is a different entry: its hash is never the original's.
           const original = boardRows(valid.electionId, 1, 0n, valid.entries)!;
           expect(rows[which]?.hash).not.toBe(original[which]?.hash);
+        },
+      ),
+      runs,
+    );
+  });
+});
+
+// The checkpoint's bytes are encoded here from the vector's fields; the hash
+// each row shows is checked against the vector's own.
+const encoded = (c: CheckpointVector, change: Partial<CheckpointVector> = {}) => {
+  const v = { ...c, ...change };
+  return toHex(
+    encodeCheckpoint({
+      election_id: fromHex(v.electionId),
+      segment: Number(v.segment),
+      size: BigInt(v.size),
+      head: fromHex(v.head),
+      root: fromHex(v.root),
+      object_cid: fromHex(v.objectCid),
+      hashes_cid: fromHex(v.hashesCid),
+    }),
+  );
+};
+const latestFirst = valid.checkpoints.toReversed();
+
+describe("anchorRows (P2-19)", () => {
+  test("shows each checkpoint's period, size, head and root, and the vector's hash", () => {
+    expect(latestFirst.length).toBeGreaterThan(2);
+    expect(
+      anchorRows(
+        valid.electionId,
+        latestFirst.map((c) => encoded(c)),
+      ),
+    ).toEqual(
+      latestFirst.map((c) => ({
+        segment: Number(c.segment),
+        size: c.size,
+        head: c.head,
+        root: c.root,
+        hash: c.hash,
+      })),
+    );
+    expect(anchorRows(valid.electionId, [])).toEqual([]);
+  });
+
+  test("refuses checkpoints served for another poll (T-31)", () => {
+    expect(
+      anchorRows(
+        "00".repeat(32),
+        latestFirst.map((c) => encoded(c)),
+      ),
+    ).toBeUndefined();
+  });
+
+  test("refuses checkpoints that aren't the latest first, or that shrink going forward (T-24)", () => {
+    const [last, before] = latestFirst;
+    expect(
+      anchorRows(
+        valid.electionId,
+        valid.checkpoints.map((c) => encoded(c)),
+      ),
+    ).toBeUndefined();
+    expect(anchorRows(valid.electionId, [encoded(last!), encoded(last!)])).toBeUndefined();
+    // An earlier period holding more entries than a later one.
+    expect(
+      anchorRows(valid.electionId, [encoded(last!), encoded(before!, { size: "1000" })]),
+    ).toBeUndefined();
+    // As many is a re-anchor of a period that added nothing, and stands.
+    expect(
+      anchorRows(valid.electionId, [encoded(last!), encoded(before!, { size: last!.size })]),
+    ).toHaveLength(2);
+    expect(anchorRows(valid.electionId, [encoded(last!, { size: "0" })])).toBeUndefined();
+  });
+
+  test("refuses bytes that aren't a checkpoint", () => {
+    const one = encoded(latestFirst[0]!);
+    for (const bad of [one.slice(0, -2), `${one}00`, one.toUpperCase(), "zz", ""])
+      expect(anchorRows(valid.electionId, [bad])).toBeUndefined();
+  });
+
+  test("never throws on a mutated checkpoint, and never shows one under the original's hash", () => {
+    const list = latestFirst.map((c) => encoded(c));
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: list.length - 1 }),
+        fc.nat(),
+        fc.integer({ min: 1, max: 255 }),
+        (which, at, flip) => {
+          const bytes = fromHex(list[which]!);
+          const i = at % bytes.length;
+          bytes[i] = bytes[i]! ^ flip;
+          const mutated = list.with(which, toHex(bytes));
+          const rows = anchorRows(valid.electionId, mutated);
+          if (rows !== undefined) expect(rows[which]!.hash).not.toBe(latestFirst[which]!.hash);
         },
       ),
       runs,

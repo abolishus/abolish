@@ -2,6 +2,8 @@ import {
   BOARD_TREE,
   checkBoard,
   checkElectionToShow,
+  checkpointOf,
+  decodeCheckpoint,
   type DisplayText,
   displayTextCommitment,
   encodeDisplayText,
@@ -43,6 +45,7 @@ import {
   shortCode,
   storeDefinition,
   storeDisplayText,
+  takeCheckpoints,
 } from "@abolishus/core";
 import {
   contract,
@@ -969,6 +972,7 @@ describe("board", () => {
     for (const [path, extra] of [
       ["/board/head", {}],
       ["/board/entries", { start: "0", limit: "1" }],
+      ["/board/checkpoints", { limit: "1" }],
       ["/board/proofs/inclusion", { index: "0", treeSize: "1" }],
       ["/board/proofs/consistency", { firstSize: "1", secondSize: "1" }],
     ] as const) {
@@ -1008,6 +1012,35 @@ describe("board", () => {
       await get("/board/entries", { electionId: e.idHex, start: "0", limit: "256" }),
     )) as { entries: string[] };
     expect(page.entries).toHaveLength(8);
+  });
+
+  test("checkpoints are the verifier's own, the latest first, paged by before (P2-19)", async () => {
+    // Two entries a segment: segments 0 to 3.
+    const e = await election(8);
+    const none = (await json(
+      await get("/board/checkpoints", { electionId: e.idHex, limit: "5" }),
+    )) as { checkpoints: string[] };
+    expect(none.checkpoints).toEqual([]);
+    await takeCheckpoints(app, e.id, 3);
+    const page = async (q: Record<string, string>) =>
+      (
+        (await json(await get("/board/checkpoints", { electionId: e.idHex, ...q }))) as {
+          checkpoints: string[];
+        }
+      ).checkpoints.map((c) => decodeCheckpoint(unhex(c)));
+    const all = await page({ limit: "256" });
+    expect(all.map((c) => c.segment)).toEqual([3, 2, 1, 0]);
+    for (const c of all) expect(c).toEqual(checkpointOf(e.checked, c.segment));
+    expect(await page({ limit: "2" })).toEqual(all.slice(0, 2));
+    expect(await page({ limit: "2", before: "2" })).toEqual(all.slice(2));
+    expect(await page({ limit: "2", before: "0" })).toEqual([]);
+    expect(await page({ limit: "2", before: "18446744073709551615" })).toEqual(all.slice(0, 2));
+  });
+
+  test("checkpoints: a limit over 256 or a before that isn't a canonical u64 is refused", async () => {
+    const e = await election(1);
+    for (const q of [{ limit: "257" }, { limit: "1", before: "01" }, { limit: "1", before: "-1" }])
+      expect((await get("/board/checkpoints", { electionId: e.idHex, ...q })).status).toBe(400);
   });
 
   test("every inclusion and consistency proof verifies", async () => {

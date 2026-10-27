@@ -630,6 +630,26 @@ const enUS = {
     "Our server sent entries for this poll's board that don't check: one doesn't decode under the poll's definition, names another poll or sits at another place. This page shows none of them rather than show a board it can't read. Its board is unaffected wherever else it is copied.",
   fingerprintHead: "Fingerprint of the chain head {prefix}",
   fingerprintEntry: "Fingerprint of entry {entry}",
+  boardAnchorsMark: "Anchors",
+  boardAnchorsTitle: "Checkpoints for Ethereum",
+  boardAnchorsLede:
+    "After each hour that added entries, our server takes a checkpoint of the board: how many entries it holds, its chain head and its Merkle root at the end of that hour. Its hash then goes into the anchor contract on Ethereum, and from then on an altered entry no longer matches it.",
+  boardAnchorsClaim:
+    "These checkpoints come from our server. This page decodes each one, checks that it names this poll and that each earlier one holds no more entries, and computes its hash itself. Whether each hash is in the anchor on Ethereum, and whether it matches the board, is for the verifier, which reads every checkpoint from Ethereum.",
+  boardAnchorsList: "Checkpoints, latest first",
+  boardAnchorPeriod: "After period {segment}",
+  boardAnchorLatest: "Latest",
+  boardAnchorSize: "Entries by then",
+  boardAnchorHash: "Checkpoint hash, the value anchored",
+  boardAnchorHead: "Chain head by then",
+  boardAnchorRoot: "Merkle root by then",
+  boardAnchorsNone:
+    "No checkpoint yet. The first is taken once the hour of the board's first entry has ended.",
+  boardAnchorsMore:
+    "Only the latest {count} checkpoints are shown here. The verifier reads every one, from the first, on Ethereum.",
+  boardAnchorsUndecodable:
+    "Our server sent checkpoints for this board that don't check: one doesn't decode, names another poll, or holds more entries than a later one. This page shows none of them rather than show anchors it can't read. The anchor on Ethereum is unaffected.",
+  fingerprintCheckpoint: "Fingerprint of the checkpoint after period {segment}",
   entryKind_ballot: "Sealed ballot",
   entryKind_spoiledOpening: "Spoiled ballot, opened",
   entryKind_ceremony: "Key ceremony",

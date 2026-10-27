@@ -2,6 +2,7 @@ import { oc } from "@orpc/contract";
 import * as z from "zod/mini";
 
 import {
+  CHECKPOINT_BYTES,
   Hash32,
   hexBytes,
   hexFixed,
@@ -251,6 +252,22 @@ const getEntries = oc
           `a page of more than one entry exceeds ${MAX_PAGE_BYTES} bytes`,
         ),
       ),
+    }),
+  );
+
+const getCheckpoints = oc
+  .route({
+    method: "GET",
+    path: "/board/checkpoints",
+    summary: "The board's latest checkpoints",
+    description: `Encoded checkpoints (docs/spec/board.md, Segments and checkpoints, ${CHECKPOINT_BYTES} bytes each) this server has taken of the board, one per anchoring period that added entries, the latest first: at most \`limit\`, each with a \`segment\` below \`before\` when it is given. Fewer than \`limit\` means none earlier. Taking a checkpoint is not anchoring it: each is this server's claim until its hash is found in the anchor contract the definition's \`l1_anchor\` names, which the verifier reads for every one (T-23, T-24).`,
+    tags: ["board"],
+  })
+  .errors(electionNotFound)
+  .input(z.strictObject({ electionId: Hash32, before: z.optional(U64), limit: PageSize }))
+  .output(
+    z.strictObject({
+      checkpoints: z.array(hexFixed(CHECKPOINT_BYTES)).check(z.maxLength(MAX_PAGE)),
     }),
   );
 
@@ -741,7 +758,7 @@ export const contract = {
     resolveCode,
     getCode,
   },
-  board: { getHead, getEntries, getInclusionProof, getConsistencyProof },
+  board: { getHead, getEntries, getCheckpoints, getInclusionProof, getConsistencyProof },
   ballots: { submit: submitBallot },
   receipts: { submit: submitReceipt },
   openings: { submit: submitOpening },

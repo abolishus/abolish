@@ -465,6 +465,71 @@ export const ReviewPhone: Story = {
   },
 };
 
+/** The middle of the first line of `element`'s text, on the screen. */
+function textMiddle(element: Element): number {
+  const range = element.ownerDocument.createRange();
+  range.selectNodeContents(element);
+  const line = range.getClientRects()[0];
+  if (line === undefined) throw new Error("no text");
+  return line.top + line.height / 2;
+}
+
+export const ReviewDesktop: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(1280);
+    const review = await canvas.findByRole("region", { name: "Check it through" });
+    // In three columns, each "Change" reads on its label's line, where it
+    // sat 12px under it, centred in its 48px target (P2-29, creating a
+    // poll's iteration 5).
+    let changes = 0;
+    for (const term of within(review).getAllByRole("term")) {
+      const change = within(review).queryByRole("link", { name: `Change ${term.textContent}` });
+      if (change === null) continue;
+      changes += 1;
+      await expect(Math.abs(textMiddle(change) - textMiddle(term))).toBeLessThanOrEqual(1);
+    }
+    await expect(changes).toBe(5);
+  },
+};
+
+export const SubmitIsTheNextStep: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const submit = await canvas.findByRole("button", { name: "Submit poll" });
+    const save = canvas.getByRole("button", { name: "Save draft" });
+    const ground = (button: HTMLElement) => getComputedStyle(button).backgroundColor;
+    // A saved draft with nothing unsaved has one next step, and its button is
+    // the primary one; an edit gives the primary back to saving (P2-29,
+    // creating a poll's iteration 5).
+    const primary = ground(submit);
+    const outline = ground(save);
+    await expect(primary).not.toBe(outline);
+    // Waited for: the buttons ease between their colours.
+    const swapped = (to: HTMLElement, from: HTMLElement) =>
+      waitFor(async () => {
+        await expect(ground(to)).toBe(primary);
+        await expect(ground(from)).toBe(outline);
+      });
+    await userEvent.type(canvas.getByRole("textbox", { name: "Title" }), " and days");
+    await swapped(save, submit);
+    await userEvent.click(save);
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    // Off the button, whose hover would tint it.
+    await userEvent.unhover(save);
+    await swapped(submit, save);
+    // The preview and where it's listed carry headings, not mono marks: the
+    // everyday register keeps those for evidence.
+    await expect(canvas.queryByText("Preview")).toBeNull();
+    await expect(
+      canvas.getByRole("heading", { name: "Where it's listed", level: 3 }),
+    ).toBeVisible();
+  },
+};
+
 export const ClosesOnAnotherUtcDay: Story = {
   args: {
     client: fakeDrafts({

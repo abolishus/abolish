@@ -374,7 +374,9 @@ export const TopicAndPlace: Story = {
     ).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
     // With phone verification off, Tier 0 is named by the e-mail alone, in words.
-    await expect(review.getByText("People with a verified e-mail address")).toBeVisible();
+    await expect(
+      review.getByText(wholeText("People with a verified e-mail address")),
+    ).toBeVisible();
     await userEvent.click(review.getByRole("link", { name: "Change Topic" }));
     await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveFocus();
     await expect(writes(args.client)[0]![2]).toMatchObject({
@@ -407,10 +409,10 @@ export const PhoneVerification: Story = {
     const canvas = within(canvasElement);
     const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
     const name = "People with a verified e-mail address and phone number";
-    await expect(who.getByText(name)).toBeVisible();
+    await expect(who.getByText(wholeText(name))).toBeVisible();
     await expect(who.getByText(/Each verified phone number counts once/)).toBeVisible();
     const review = within(canvas.getByRole("region", { name: "Check it through" }));
-    await expect(review.getByText(name)).toBeVisible();
+    await expect(review.getByText(wholeText(name))).toBeVisible();
     await expect(canvas.queryByText(/Tier 0/)).toBeNull();
   },
 };
@@ -421,7 +423,7 @@ export const EmailVerification: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
-    await expect(who.getByText("People with a verified e-mail address")).toBeVisible();
+    await expect(who.getByText(wholeText("People with a verified e-mail address"))).toBeVisible();
     await expect(who.getByText(/Each verified e-mail address counts once/)).toBeVisible();
     await expect(canvas.queryByText(/Tier 0|voting identity/)).toBeNull();
     // The one tier is a statement, not a row between two rules: with the next
@@ -562,6 +564,48 @@ export const ReviewPhone: Story = {
     await expect(lines).toBeLessThanOrEqual(3);
   },
 };
+
+/**
+ * The review's `text-pretty` ended the who row's first line at "e-", with
+ * "mail address" under it, wherever the row was 212px to 270px wide: on the
+ * site, any screen under 303px, a folded phone's 280 or a 360px phone zoomed
+ * to 125% (P2-29, creating a poll's iteration 14). Both places the who-name
+ * is drawn keep "e-mail" on one line.
+ */
+export const WhoKeepsItsWordsFolded: Story = {
+  args: { client: savedDraft(), id: ID },
+  globals: { viewport: { value: "folded", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(280);
+    const name = "People with a verified e-mail address";
+    const who = within(await canvas.findByRole("region", { name: "Who can answer?" }));
+    const review = within(canvas.getByRole("region", { name: "Check it through" }));
+    for (const element of [who.getByText(wholeText(name)), review.getByText(wholeText(name))])
+      await expect(wordLines(element, "e-mail")).toBe(1);
+  },
+};
+
+/** The element whose whole text is `text`, read across the spans inside it. */
+function wholeText(text: string) {
+  return (_: string, element: Element | null) =>
+    element?.textContent === text &&
+    [...element.children].every((child) => child.textContent !== text);
+}
+
+/** How many lines `word`, the first time it appears in `element`'s text, is drawn on. */
+function wordLines(element: Element, word: string): number {
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    const at = node.textContent?.indexOf(word) ?? -1;
+    if (at < 0) continue;
+    const range = element.ownerDocument.createRange();
+    range.setStart(node, at);
+    range.setEnd(node, at + word.length);
+    return new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size;
+  }
+  throw new Error(`no "${word}"`);
+}
 
 /**
  * Each review row's value lies as far below its row's top as every other

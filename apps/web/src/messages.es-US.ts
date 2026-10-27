@@ -1272,6 +1272,7 @@ export const esUS: Messages = {
   pollFormReviewListingLede:
     "Esto no forma parte de la encuesta. Decide dónde la encuentran, y la moderación puede cambiarlo.",
   pollFormReviewTitleRow: "Título",
+  pollFormReviewDescription: "Descripción",
   pollFormReviewQuestions: "Preguntas",
   pollFormReviewQuestionCount: { one: "{count} pregunta", other: "{count} preguntas" },
   pollFormReviewWho: "Quién puede responder",
@@ -1282,6 +1283,7 @@ export const esUS: Messages = {
   pollFormReviewNotSet: "Sin definir",
   pollFormReviewClosesAt: "{when} en tu hora ({utc} UTC)",
   pollFormReviewUntitled: "Aún sin título",
+  pollFormReviewNoDescription: "Sin descripción",
   pollFormReviewChange: "Cambiar",
   pollFormSave: "Guardar borrador",
   pollFormSaved: "Tu borrador está guardado.",

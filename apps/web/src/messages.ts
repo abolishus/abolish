@@ -1242,6 +1242,7 @@ const enUS = {
   pollFormReviewListingLede:
     "These aren't part of the poll. They decide where people find it, and moderation can change them.",
   pollFormReviewTitleRow: "Title",
+  pollFormReviewDescription: "Description",
   pollFormReviewQuestions: "Questions",
   pollFormReviewQuestionCount: { one: "{count} question", other: "{count} questions" },
   pollFormReviewWho: "Who can answer",
@@ -1252,6 +1253,7 @@ const enUS = {
   pollFormReviewNotSet: "Not set",
   pollFormReviewClosesAt: "{when} your time ({utc} UTC)",
   pollFormReviewUntitled: "No title yet",
+  pollFormReviewNoDescription: "No description",
   pollFormReviewChange: "Change",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",

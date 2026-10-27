@@ -363,6 +363,7 @@ export const TopicAndPlace: Story = {
     const terms = review.getAllByRole("term").map((d) => d.textContent);
     await expect(terms).toEqual([
       "Title",
+      "Description",
       "Questions",
       "Who can answer",
       "Closes",
@@ -373,6 +374,7 @@ export const TopicAndPlace: Story = {
       review.getByText("November 4, 2026 at 10:00 AM your time (3:00 PM UTC)"),
     ).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
+    await expect(review.getByText("No description")).toBeVisible();
     // With phone verification off, Tier 0 is named by the e-mail alone, in words.
     await expect(
       review.getByText(wholeText("People with a verified e-mail address")),
@@ -621,7 +623,7 @@ async function valuesLineUp(review: HTMLElement) {
       if (term.parentElement === null || value === null) throw new Error("a term with no value");
       return value.getBoundingClientRect().top - term.parentElement.getBoundingClientRect().top;
     });
-  await expect(offsets).toHaveLength(6);
+  await expect(offsets).toHaveLength(7);
   const [first = 0] = offsets;
   for (const offset of offsets) await expect(Math.abs(offset - first)).toBeLessThanOrEqual(1);
 }
@@ -652,8 +654,15 @@ export const ReviewDesktop: Story = {
       changes += 1;
       await expect(Math.abs(textMiddle(change) - textMiddle(term))).toBeLessThanOrEqual(1);
     }
-    await expect(changes).toBe(5);
+    await expect(changes).toBe(6);
     await valuesLineUp(review);
+    // The description is recorded for good as the title is, where the review
+    // left it out (iteration 17).
+    await expect(
+      within(review).getByText("The council is weighing longer hours next year."),
+    ).toBeVisible();
+    await userEvent.click(within(review).getByRole("link", { name: "Change Description" }));
+    await expect(canvas.getByRole("textbox", { name: "Description (optional)" })).toHaveFocus();
     // The questions are numbered as the form numbers them, where the reset's
     // bare list drew them as an unmarked indent (iteration 15).
     const questions = within(review).getByRole("list");

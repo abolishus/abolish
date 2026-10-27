@@ -1273,17 +1273,19 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
                     threshold: d.threshold,
                     registered: checked.registered,
                   },
-                  // The board contract has no author panel key set yet, so no
-                  // author seat's record can count and the panel holds no
-                  // point (docs/spec/availability.md, Contract path; P2-16
-                  // parts 3 and 5); 2.3 refuses every author panel anyway.
+                  // The author panel's registered key set, its own run's that
+                  // its approvals approved, as the default panel's is its run's:
+                  // the election registry's record of it isn't read yet
+                  // (docs/spec/availability.md, Terms; 3.1's
+                  // registration part; T-37, T-53). Beside an author panel
+                  // `registered` is set only with it.
                   ...(author === undefined
                     ? []
                     : [
                         {
                           panel: SEAT_PANELS.author,
                           threshold: author.panel.threshold,
-                          registered: [],
+                          registered: checked.authorRegistered ?? [],
                         },
                       ]),
                 ],

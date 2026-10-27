@@ -374,6 +374,29 @@ describe("the ballot extent", { timeout: 120_000 }, () => {
     expect(r.report?.records?.[2]).toMatchObject({ code: "availability-seat" });
   });
 
+  test("an author panel holds a point by its own key set's threshold, each panel judged alone", () => {
+    const author = { panel: SEAT_PANELS.author, threshold: 2, registered: seats(2, 3) };
+    const byAuthor = (seat: number, over: Partial<Sent> = {}) =>
+      attest(seat, undefined, { panel: SEAT_PANELS.author, ...over });
+    const both = availabilityChecks(
+      inputs([attest(1), attest(2), byAuthor(1), byAuthor(3)], { panels: [DEFAULT, author] }),
+    );
+    expect(both.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(both.report?.ballotExtent.panels?.map((p) => [p.panel, p.holds, p.attested])).toEqual([
+      [1, true, [1, 2]],
+      [2, true, [1, 3]],
+    ]);
+    // The default panel's quorum never stands in for the author panel's,
+    // nor another author seat's key for a seat's own (T-37).
+    const short = availabilityChecks(
+      inputs([attest(1), attest(2), attest(3), byAuthor(1), byAuthor(2, { signer: 3 })], {
+        panels: [DEFAULT, author],
+      }),
+    );
+    expect(short.row).toEqual({ status: "fail", code: "unavailable", at: { point: 1, panel: 2 } });
+    expect(short.report?.records?.[4]).toMatchObject({ code: "availability-signature" });
+  });
+
   test("the counted extent's records are left out of the report, and decide nothing, while its evidence isn't held", () => {
     const counted = { point: AVAILABILITY_POINTS.countedExtent } as const;
     const r = availabilityChecks(

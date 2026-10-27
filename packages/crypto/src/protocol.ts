@@ -379,9 +379,9 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
 // for the same reason. Version 4 pairs only with definition version 6 and
 // version 7's fixed electorate. Ballot.ts reads version 5 too, which only
-// version 7's rolling electorate pins: 2.3 reads it beside that electorate
-// alone (`profileCombinationRule`), and it joins this set when the verifier
-// admits it (P2-17 part 4); until then a version-5 pin beside any other
+// version 7's rolling electorate pins: 2.3 reads it beside version 7 alone
+// (`profileCombinationRule`), and it joins this set when the verifier
+// admits it (P2-17 part 4); until then a version-5 pin beside an earlier
 // definition is judged as unknown, unsupported where nothing else fails, as
 // the verifier's 2.3 vectors, written before version 5 had a layout, expect.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
@@ -414,11 +414,15 @@ const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9]);
 // may name the event, so it is unsupported, never a failure (T-36).
 const NO_RELAYED_ROLLING: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 
-/** The ballot version a definition version pins, under its electorate mode for version 7. */
-function ballotFor(definition: number, d: object): number {
-  if (definition === 7)
-    return "electorate_mode" in d && d.electorate_mode === ELECTORATE_MODES.rolling ? 5 : 4;
-  return DEFINITION_BALLOT.get(definition) ?? 1;
+/**
+ * The ballot version a definition version pins, under its electorate mode
+ * for version 7; undefined for a mode version 7 doesn't have, which only an
+ * untyped caller can pass (the decoder refuses it).
+ */
+function ballotFor(definition: number, d: object): number | undefined {
+  if (definition !== 7) return DEFINITION_BALLOT.get(definition) ?? 1;
+  const mode = "electorate_mode" in d ? d.electorate_mode : undefined;
+  return mode === ELECTORATE_MODES.fixed ? 4 : mode === ELECTORATE_MODES.rolling ? 5 : undefined;
 }
 
 /** Why 2.3's profile combination refuses a definition's pins. */
@@ -433,9 +437,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version 2, version 5 ballot version 3, version 6 ballot version 4 and
  * version 7 ballot version 4 under `electorate_mode` 1 (fixed) and ballot
  * version 5 under 2 (rolling), and each of those ballot versions pairs with
- * those definitions only (ballot version 5 beside any other definition is
- * still a version this package doesn't know, below, until the verifier
- * admits it: P2-17 part 4); ballot version 5 also needs contract-event version
+ * those definitions only (ballot version 5 beside a definition before
+ * version 7 is still a version this package doesn't know, below, until the
+ * verifier admits it: P2-17 part 4); ballot version 5 also needs contract-event version
  * 11, the only one whose tables name the relayed rolling ballot, and fails
  * beside version 8, 9 or 10 (T-25, T-50, T-53); what follows of version 6
  * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
@@ -548,9 +552,10 @@ export function profileCombinationRule(
   // version 3 to 7 it is judged last, as unsupported (T-36). Under
   // version 1 it isn't judged here: verifier 5.x refuses its records.
   const wanted = ballotFor(definition, d);
-  // Ballot version 5 is read beside the rolling electorate that pins it,
-  // and nowhere else yet (BALLOT_VERSIONS).
-  const unknownBallot = !BALLOT_VERSIONS.has(ballot) && !(ballot === 5 && wanted === 5);
+  if (wanted === undefined) return "profile-combination";
+  // Ballot version 5 is read beside version 7, whose rolling electorate
+  // pins it, and nowhere else yet (BALLOT_VERSIONS).
+  const unknownBallot = !BALLOT_VERSIONS.has(ballot) && !(ballot === 5 && definition === 7);
   if (!unknownBallot && ballot !== wanted) return "profile-combination";
   const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
   const coreOpening = unknownBallot ? undefined : CORE_OPENING.get(ballot);

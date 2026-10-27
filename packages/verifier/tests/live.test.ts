@@ -1,45 +1,14 @@
 import { readFileSync } from "node:fs";
 import {
-  aggregateCell,
-  aggregateHash,
-  type AnchorClock,
-  ballotHashV4,
-  type CommittedVoteV4,
-  decode,
   decodeBallot,
   decodeBoardEntry,
-  encodeBoardEntry,
   encodeElectionDefinitionV6,
-  encodeRunningOpening,
-  encodeShareReceiptV2,
-  identityKey,
-  KEM_PUBLIC_KEY,
-  openCell,
   panelBallotElection,
-  proveValidityV4,
-  type QuestionRules,
   RECORD_TYPES,
-  type RegisteredKeys,
-  RESULTS_MODES,
-  type Share,
-  shareReceiptRecordV2,
-  shareReceiptStatementV4,
-  shareVoteV4,
-  signRunningOpening,
-  signStatement,
-  sumShares,
-  tallyRules,
-  type VoteSharingV4,
 } from "@abolishus/crypto";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { describe, expect, test } from "vite-plus/test";
-import {
-  ballotChecks,
-  judgeFor,
-  LiveCopies,
-  type LiveBallotCopy,
-  type RejectedBallot,
-} from "../src/ballots.ts";
+import { ballotChecks, judgeFor, LiveCopies, type RejectedBallot } from "../src/ballots.ts";
 import { ceremonyChecks } from "../src/ceremony.ts";
 import {
   authorRunOf,
@@ -51,7 +20,6 @@ import {
   BUNDLE_FORMAT_BLOCKS,
   BUNDLE_FORMAT_CEREMONY,
   type CheckResult,
-  decodeHeader,
   electionAdmission,
   parseBundle,
   type PinnedPanel,
@@ -59,8 +27,9 @@ import {
   splitEntries,
   verifyBundle,
 } from "../src/index.ts";
-import { releaseChecks, type ReleaseInputs } from "../src/live.ts";
+import { releaseChecks } from "../src/live.ts";
 import { run, toHex } from "./headers.ts";
+import { type Cast, counts, liveElection, VOTE } from "./live-election.ts";
 
 // Live releases in the verdict (docs/spec/verifier.md, Releases): the copies
 // admission gives the running sets, each judged by its membership proof
@@ -69,9 +38,8 @@ import { run, toHex } from "./headers.ts";
 // snapshot; the rows and the report's `releases` once 7.1 passed; and
 // 7.5's and 7.6's gates in `verifyBundle`. No vector reaches a sealed live
 // board with ballots (P2-15 part 7), so `releaseChecks` runs on an election
-// cast here under verifier-ballots-v4.json's `admitted` definition made
-// live, with @abolishus/crypto's client and trustee paths (`shareVoteV4`,
-// `proveValidityV4`, the receipt and running-opening signatures, `openCell`),
+// cast by live-election.ts under verifier-ballots-v4.json's `admitted`
+// definition made live, with @abolishus/crypto's client and trustee paths,
 // never with the checks under test; the expected releases follow from
 // tally.md's release choice by hand, and releases.test.ts checks the choice
 // itself against live-verifier.json.
@@ -79,7 +47,6 @@ import { run, toHex } from "./headers.ts";
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
 const hex = (s: string) => Uint8Array.from(Buffer.from(s, "hex"));
-const text = (s: string) => new TextEncoder().encode(s);
 
 interface Case {
   readonly id: string;
@@ -98,14 +65,6 @@ const caseOf = (id: string) => {
   if (c === undefined) throw new Error(`no case ${id}`);
   return c;
 };
-const delivery = read("delivery-v2.json") as {
-  readonly seats: { readonly default: readonly { readonly kemKey: string }[] };
-};
-const KEM = decode(
-  KEM_PUBLIC_KEY,
-  hex((delivery.seats.default[0] as { readonly kemKey: string }).kemKey),
-);
-
 type V6 = Extract<VerifiedDefinition, { readonly version: 6 }>;
 
 /** A case's board-entry version 5 copy, its definition, and the key set its transcript registers. */
@@ -224,227 +183,12 @@ describe("the copies admission gives the running sets", () => {
   }, 60_000);
 });
 
-// verifier-ballots-v4.json's `admitted` definition, made live: releases every
-// 24 hourly periods, a batch of 20. Tier 0 has cells 0 and 1, tier 2 cell 2.
-const sealedDefinition = decodeDefinition(hex(caseOf("admitted").definition)) as V6;
-const definition = decodeDefinition(
-  encodeElectionDefinitionV6({
-    ...sealedDefinition.value,
-    results_mode: RESULTS_MODES.live,
-    live_every: 24,
-    live_batch: 20,
-  }),
-) as V6;
-const d = definition.value;
-const { hash, rule } = readDefinition(definition);
-const RULES = tallyRules(definition);
-const OPENS = d.opens_at;
-const CLOSES = d.closes_at;
-const CLOCK: AnchorClock = { epoch: OPENS, period: 3600n, deadline: 600n, lastSegment: 1000 };
-
-// Seats 1 to 3 of the 3-of-4 default panel, with signing keys of the test's own.
-const SEATS = [1, 2, 3];
-const SECRETS = [1, 2, 3, 4].map((i) => sha256(text(`live.test seat ${i}`)));
-const secret = (seat: number) => SECRETS[seat - 1] as Uint8Array;
-const REGISTERED: RegisteredKeys[] = SEATS.map((index) => ({
-  index,
-  kemKey: KEM,
-  signingKey: identityKey(secret(index)),
-}));
-
-// A finalized header every 12 hours from just before opening to after close.
-const BLOCKS = run(
-  21_000_000n,
-  Array.from({ length: 17 }, (_, k) => OPENS - 12n + BigInt(k) * 43_200n),
-).map((h) => decodeHeader(h.encoded));
-const REFERENCE = 21_000_000n;
-
-interface Cast {
-  readonly cell: number;
-  readonly nullifier: bigint;
-  readonly vote: CommittedVoteV4;
-  readonly hash: Uint8Array;
-  readonly sharing: VoteSharingV4;
-}
-
-let nextNullifier = 5_000n;
-const rules = {
-  questions: RULES.questions as readonly QuestionRules[],
-  threshold: RULES.threshold,
-  panelSize: RULES.panelSize,
-  authorThreshold: 0,
-  authorPanelSize: 0,
-};
-/** A version-4 ballot in cell 2 with these flat votes, by a new nullifier unless one is given. */
-function cast(votes: readonly (0 | 1)[], nullifier = nextNullifier++): Cast {
-  const sharing = shareVoteV4(rules, votes);
-  const shareHashes = Array.from({ length: RULES.panelSize }, (_, i) =>
-    SEATS.includes(i + 1)
-      ? sha256(text(`share ${nullifier} ${i + 1} ${votes.join("")}`))
-      : new Uint8Array(32),
-  );
-  const vote = proveValidityV4(
-    { ...rules, definitionHash: hash, cell: 2, nullifier },
-    sharing,
-    shareHashes,
-    [],
-  );
-  return {
-    cell: 2,
-    nullifier,
-    vote,
-    hash: ballotHashV4({ definitionHash: hash, cell: 2, nullifier }, vote),
-    sharing,
-  };
-}
-
-// Pick the first option of each question: one of three, up to two of four,
-// exactly one of two.
-const VOTE: readonly (0 | 1)[] = [1, 0, 0, 1, 0, 0, 0, 1, 0];
-const OTHER: readonly (0 | 1)[] = [0, 1, 0, 0, 1, 0, 0, 0, 1];
-const BATCH_A = Array.from({ length: 20 }, () => cast(VOTE));
-const BATCH_B = Array.from({ length: 20 }, () => cast(OTHER));
-// A re-voter: two distinct ballots of one nullifier before the first snapshot.
-const FIRST = cast(VOTE);
-const SECOND = cast(OTHER, FIRST.nullifier);
-// Any ballot payload stands for a ballot's entry: releaseChecks reads its copies from admission.
-const PLACEHOLDER = (() => {
-  const { entries } = splitEntries(hex(caseOf("admitted").board));
-  for (const e of entries) {
-    const { payload } = decodeBoardEntry(e, 5);
-    if (((payload[0] as number) << 8) + (payload[1] as number) === RECORD_TYPES.ballot)
-      return payload;
-  }
-  throw new Error("fixture: no ballot");
-})();
-
-/** One board under board-entry version 6, which carries running openings. */
-function election() {
-  const entries: Uint8Array[] = [];
-  const copies: LiveBallotCopy[] = [];
-  const board = (segment: number, payload: Uint8Array) => {
-    entries.push(
-      encodeBoardEntry(
-        { election_id: d.election_id, index: BigInt(entries.length), segment, payload },
-        6,
-      ),
-    );
-    return entries.length - 1;
-  };
-  /** `b`'s copy; `message` stands in for M, one per ballot unless another L1 reference is given. */
-  const ballot = (b: Cast, segment: number, message = sha256(b.hash)) => {
-    const entry = board(segment, PLACEHOLDER);
-    copies.push({
-      entry,
-      segment,
-      tier: 2,
-      cell: b.cell,
-      nullifier: b.nullifier,
-      message,
-      member: true,
-      rejected: false,
-      reference: REFERENCE,
-      referenceKnown: true,
-      tally: {
-        cell: b.cell,
-        vss: b.vote.vss,
-        deliveryV4: { cell: b.cell, nullifier: b.nullifier, vote: b.vote },
-      },
-    });
-  };
-  const receipt = (b: Cast, seat: number, signer = seat) => {
-    const shareHash = b.vote.share_hashes[seat - 1] as Uint8Array;
-    const m = shareReceiptStatementV4({
-      definition_hash: hash,
-      ballot_hash: b.hash,
-      panel: 1,
-      seat,
-      share_hash: shareHash,
-    });
-    return encodeShareReceiptV2(
-      shareReceiptRecordV2(hash, seat, {
-        panel: 1,
-        ballotHash: b.hash,
-        shareHash,
-        receipt: signStatement(secret(signer), "abolish/v1/sig/share-receipt-2", m),
-      }),
-    );
-  };
-  const deliver = (ballots: readonly Cast[], segment: number, seats = SEATS) => {
-    for (const b of ballots) for (const seat of seats) board(segment, receipt(b, seat));
-  };
-  /** Seats 1 to k's opening of `set` in cell 2 as release `snapshot`, signed by `signer`. */
-  const opening = (
-    set: readonly Cast[],
-    snapshot: number,
-    signer: number,
-    tamper?: (o: Share[]) => Share[],
-  ) => {
-    const vss = set.map((b) => b.vote.vss);
-    const summed = new Map(
-      SEATS.slice(0, RULES.threshold).map((seat) => [
-        seat,
-        sumShares(
-          RULES,
-          set.map((b) => b.sharing.shares[seat - 1] as readonly Share[]),
-        ),
-      ]),
-    );
-    const opened = openCell(RULES, vss, summed);
-    if (!opened.ok) throw new Error(`fixture: the set doesn't open (${opened.code})`);
-    const shares = opened.counts.map((v, j) => ({ v, r: opened.randomness[j] as bigint }));
-    return encodeRunningOpening(
-      signRunningOpening(secret(signer), {
-        definition_hash: hash,
-        cell: 2,
-        snapshot,
-        aggregate_hash: aggregateHash(aggregateCell(RULES, vss)),
-        signer,
-        opening: tamper === undefined ? shares : tamper(shares),
-      }),
-    );
-  };
-  const counted = (ballots: readonly Cast[]) => [
-    new Set<string>(),
-    new Set<string>(),
-    new Set(ballots.map((b) => toHex(sha256(b.hash)))),
-  ];
-  const inputs = (over: Partial<ReleaseInputs> = {}): ReleaseInputs => ({
-    definition,
-    definitionHash: hash,
-    registered: REGISTERED,
-    copies,
-    entries,
-    boardEntryVersion: 6,
-    extent: entries.length,
-    clock: CLOCK,
-    blocks: BLOCKS,
-    counted: counted([...BATCH_A, ...BATCH_B, SECOND]),
-    ...over,
-  });
-  return { entries, board, ballot, deliver, opening, inputs };
-}
-
-/**
- * Batch A cast and receipted before snapshot 1 (σ_1 = 23), batch B before
- * snapshot 2 (σ_2 = 47), and a re-voter's two ballots before snapshot 1.
- */
-function honest(withhold = false) {
-  const e = election();
-  for (const b of BATCH_A) e.ballot(b, 10);
-  e.ballot(FIRST, 10);
-  e.ballot(SECOND, 12);
-  // Seat 3's receipts for batch A wait until after snapshot 1 when it withholds them.
-  e.deliver([...BATCH_A], 11, withhold ? [1, 2] : SEATS);
-  if (withhold) e.deliver([...BATCH_A], 30, [3]);
-  e.deliver([FIRST, SECOND], 13);
-  for (const b of BATCH_B) e.ballot(b, 30);
-  e.deliver([...BATCH_B], 31);
-  return e;
-}
-
-const counts = (ballots: number, votes: readonly (0 | 1)[]) =>
-  votes.map((v) => String(v * ballots));
+// verifier-ballots-v4.json's `admitted` definition, made live
+// (live-election.ts): releases every 24 hourly periods, a batch of 20. Tier 0
+// has cells 0 and 1, tier 2 cell 2.
+const live = liveElection(caseOf("admitted").definition, caseOf("admitted").board);
+const { rule, OPENS, CLOSES, BLOCKS, BATCH_A, BATCH_B, election, honest } = live;
+const d = (live.definition as V6).value;
 
 describe("the releases once 7.1 passed", { timeout: 120_000 }, () => {
   test("the fixture's definition is a well-formed live version 6 without an author panel", () => {

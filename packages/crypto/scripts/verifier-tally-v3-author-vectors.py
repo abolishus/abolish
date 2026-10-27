@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Independent generator for docs/spec/vectors/verifier-tally-v3-author.json.
+"""Independent generator for docs/spec/vectors/verifier-tally-v3-author.json
+and verifier-tally-v3-author-definition-v7.json.
 
 Elections for the verifier's tally beside an author panel (docs/spec/
 verifier.md, Counted set and tally, steps 4 to 7; Tally openings; 7.1 to
 7.4 and 8.5; tally.md, Author panel, Opening checks, Boarding (version 3) and
 Windows and destruction (version 2)): verifier-ballots-v4-author.json's
 "author-mixed" election under a profile that pins tally-opening version 3,
+or, for the definition-version-7 file, the same election under definition
+version 7 with a fixed electorate, which the verifier reads as version 6
+under version 7's own hashes and stubs (docs/spec/verifier.md, Definition),
 with a 2-of-3 author panel whose seat 3 sent nothing beside the 3-of-4
 default panel whose seat 4 sent nothing, its board carrying both runs'
 transcripts, the author approvals record, three admitted ballots (one per
@@ -45,12 +49,13 @@ verifier-openings-vectors.py (the floor of `s_S`).
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for verifier-ballots-v4-author.json:
 
-  python3 -I -B verifier-tally-v3-author-vectors.py statements <constants> <work>/statements.json
+  python3 -I -B verifier-tally-v3-author-vectors.py statements <constants> <work>/statements.json [7]
   vp node ballot-proofs.mjs <artifacts-dir> <work>/statements.json <work>/proofs.json
-  python3 -I -B verifier-tally-v3-author-vectors.py assemble <constants> <work>/proofs.json <out-dir>
+  python3 -I -B verifier-tally-v3-author-vectors.py assemble <constants> <work>/proofs.json <out-dir> [7]
 
-where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json
-and ballot-proofs.mjs runs outside the workspace (see its header). Every value
+where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json,
+ballot-proofs.mjs runs outside the workspace (see its header) and a final `7`
+makes the definition-version-7 file, with its own proofs. Every value
 but the proofs is deterministic from fixed labels (test data, never keys);
 Groth16 proving is randomised, so the committed file is the record. Then
 `vp check --fix` formats it.
@@ -114,12 +119,12 @@ vba.base_pins = vba.pins
 vba.pins = pins
 
 
-def build(constants):
+def build(constants, version=6):
     """The "author-mixed" election under this profile: its definition, runs, approvals and the three admitted ballots, with the proofs they need."""
-    s = vba.build(constants)
+    s = vba.build(constants, version)
     src = next(b for b in s["bundles"] if b["id"] == "author-mixed")
     d = src["definition"]
-    assert dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] == 3
+    assert dict(d["profile"]["pins"])[TALLY_OPENING_TYPE] == 3 and vc.own_version(d) == version
     ballots = [p for p in src["board"][3:6]]
     pids = [pid for _, pid in ballots]
     assert pids == [f"author/{label}" for label, _, _ in BALLOTS], pids
@@ -128,14 +133,14 @@ def build(constants):
     return s, src, ballots, checks
 
 
-def statements(constants, out):
-    s, _, ballots, checks = build(constants)
+def statements(constants, out, version=6):
+    s, _, ballots, checks = build(constants, version)
     proofs = [s["proofs"][pid] for _, pid in ballots]
     pathlib.Path(out).write_text(json.dumps({"proofs": proofs, "checks": checks}, indent=2) + "\n")
 
 
-def assemble(constants, proofs_path, out_dir):
-    s, src, proved, _ = build(constants)
+def assemble(constants, proofs_path, out_dir, version=6):
+    s, src, proved, _ = build(constants, version)
     got = json.loads(pathlib.Path(proofs_path).read_text())
     d, e, run = src["definition"], src["election"], src["run"]
     panel, author = s["panel"], s["author"]
@@ -198,11 +203,11 @@ def assemble(constants, proofs_path, out_dir):
         summed = {i: tv.sum_shares(m, [b["shares"][p][i - 1] for b in counted]) for i in range(1, thresholds[p] + 1)}
         return tv.honest_opening(m, summed, thresholds[p])
 
-    def opening(cell, p, counted, signer, signed_by=None, panel_byte=None, change=None):
+    def opening(cell, p, counted, signer, signed_by=None, panel_byte=None, change=None, definition_hash=defh):
         """A version-3 tally opening of `cell` for panel `p` over `counted`, by `signer`, signed with `signed_by`'s secret (the signer's own by default)."""
         agg = tv.aggregate(m, thresholds[p], [b["vote"]["vss" if p == DEFAULT else "authorVss"] for b in counted])
         o = {
-            "definitionHash": defh,
+            "definitionHash": definition_hash,
             "cell": cell,
             "panel": p if panel_byte is None else panel_byte,
             "aggregateHash": pt.aggregate_hash(agg),
@@ -324,6 +329,8 @@ def assemble(constants, proofs_path, out_dir):
     cases = []
 
     def case(id_, description, segments):
+        if version == 7 and not description.startswith("Definition version 7"):
+            description = "Definition version 7 under a fixed electorate. " + description
         entries = board(segments)
         ceremony_rows, _ = vc.expected(panel, d, entries, panel, BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
@@ -561,9 +568,41 @@ def assemble(constants, proofs_path, out_dir):
     assert undecided_d["expected"]["8.5"] == outcome("unverifiable", "not-implemented", {"panel": DEFAULT, "seat": 2})
     assert undecided_d["destruction"]["earliest"] == s_t and "latest" not in undecided_d["destruction"]
 
+    if version == 7:
+        # The same election read as version 6 (verifier-ballots-v4-vectors.py,
+        # v6_reading) is another election: a partial opening or a destruction
+        # statement made for that reading's hash names another definition, so
+        # it is stray, attributed but never counted (T-14, T-29, T-37).
+        v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(vb4.v6_reading(d))))
+        assert v6_hash != defh
+        reading = case(
+            "v6-reading",
+            "Definition version 7 under a fixed electorate, beside the author panel: as counted without the strays, but both panels' partial openings of cell 0 are made for the same election read as version 6 (that reading's hash), each a tally-stray attributed to its seat. Cell 0 has no partial opening of its own, so it fails tally-missing for the author panel, checked first; cells 1 and 2 pass. Their default partial openings are tally-early, as cell 0 never has a passing author one, and 7.4 fails at the first stray.",
+            segments(
+                [(timely, opening(0, AUTHOR, [b0], 1, definition_hash=v6_hash))],
+                authors(skip=(0,)),
+                [(timely + 1, opening(0, DEFAULT, [b0], 2, definition_hash=v6_hash))],
+                defaults(skip=(0,)),
+            ),
+        )
+        assert reading["expected"]["7.2"] == outcome("fail", "tally-missing", {"cell": 0, "panel": AUTHOR})
+        assert reading["expected"]["7.4"] == outcome("fail", "tally-stray", {"entry": reading["tallies"][0]["entry"]})
+        got = [(o.get("cell"), o["panel"], o["signer"], [b["code"] for b in o["breaks"]]) for o in reading["tallies"]]
+        assert got == [(None, AUTHOR, 1, ["tally-stray"]), (1, AUTHOR, 1, []), (2, AUTHOR, 1, []), (None, DEFAULT, 2, ["tally-stray"]), (1, DEFAULT, 2, ["tally-early"]), (2, DEFAULT, 2, ["tally-early"])], got
+        assert [("counts" in c) for c in reading["cells"]] == [False, True, True]
+        statements_v6 = case(
+            "v6-reading-destruction",
+            f"Definition version 7 under a fixed electorate, beside the author panel: as destroyed, but every registered seat of both panels states destruction in segment {s_o1} for the same election read as version 6 (that reading's hash): each statement is stray, attributed to its seat, so every seat is destruction-missing and 8.5 fails at default seat 1; every cell passes.",
+            segments(*honest_openings, [(s_o1, statement(p, i, definition=v6_hash)) for p, i in seats]),
+        )
+        assert statements_v6["expected"]["7.2"] == outcome("pass") and statements_v6["expected"]["7.4"] == outcome("pass")
+        got = statements_v6["destruction"]
+        assert [x.get("code") for x in got["seats"]] == ["destruction-missing"] * len(seats), got
+        assert [(x["panel"], x["signer"]) for x in got["stray"]] == seats, got
+
     doc = {
         "format": "abolish-verifier-tally-vectors/1",
-        "title": "The verifier's tally beside an author panel (definition version 6, ballot version 4, tally-opening version 3, destruction statement version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots, share receipts, partial openings and destruction statements, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5, the counted ballots' entries and the report's cells, tiers, tallies and destruction",
+        "title": f"The verifier's tally beside an author panel (definition version {'6' if version == 6 else '7 with a fixed electorate'}, ballot version 4, tally-opening version 3, destruction statement version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots, share receipts, partial openings and destruction statements, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5, the counted ballots' entries and the report's cells, tiers, tallies and destruction",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-tally-v3-author-vectors.py, from verifier-ballots-v4-author-vectors.py, "
@@ -575,19 +614,21 @@ def assemble(constants, proofs_path, out_dir):
         "panel": {"threshold": str(panel["k"]), "keys": [k.hex() for k in panel["keys"]]},
         "cases": cases,
     }
-    path = pathlib.Path(out_dir, "verifier-tally-v3-author.json")
+    path = pathlib.Path(out_dir, "verifier-tally-v3-author.json" if version == 6 else "verifier-tally-v3-author-definition-v7.json")
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {path}: {len(cases)} cases")
 
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
-    if cmd == "statements":
-        statements(sys.argv[2], sys.argv[3])
-    elif cmd == "assemble":
-        assemble(sys.argv[2], sys.argv[3], sys.argv[4])
+    version = 7 if sys.argv[-1] == "7" else 6
+    args = sys.argv[2:-1] if version == 7 else sys.argv[2:]
+    if cmd == "statements" and len(args) == 2:
+        statements(*args, version)
+    elif cmd == "assemble" and len(args) == 3:
+        assemble(*args, version)
     else:
-        raise SystemExit("usage: verifier-tally-v3-author-vectors.py statements <constants> <out> | assemble <constants> <proofs> <out-dir>")
+        raise SystemExit("usage: verifier-tally-v3-author-vectors.py statements <constants> <out> [7] | assemble <constants> <proofs> <out-dir> [7]")
 
 
 if __name__ == "__main__":

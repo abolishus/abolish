@@ -547,8 +547,12 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
         {form.description === "" ? null : (
           <p className="m-0 text-base whitespace-pre-line wrap-anywhere">{form.description}</p>
         )}
+        {/* In the poll's own words' face, as the poll page states its close:
+            12px monospace is the civic record's mark for evidence, and at
+            360px it split "3:00" from "PM UTC" (P2-29, creating a poll's
+            iteration 18). */}
         {closesAt === undefined ? null : (
-          <p className="m-0 font-mono text-xs tracking-wide" suppressHydrationWarning>
+          <p className="m-0 text-sm text-muted-foreground" suppressHydrationWarning>
             {t("pollFormPreviewCloses", {
               when: formatUtc(locale, new Date(Number(closesAt) * 1000)),
             })}
@@ -747,9 +751,17 @@ function PollReview({
           {form.questions.length === 0 ? null : (
             // Numbered as the form's "Question 1" and "Question 2" are; the
             // reset's bare list read as a stray indent (iteration 15).
+            // A question emptied since the save reads as one, as the title
+            // does, where it left a bare number (iteration 18).
             <ol className="m-0 mt-1 grid list-decimal gap-1 ps-5">
               {form.questions.map((q) => (
-                <li key={q.key}>{q.question}</li>
+                <li key={q.key}>
+                  {q.question === "" ? (
+                    <span className="text-muted-foreground">{t("pollFormReviewNoQuestion")}</span>
+                  ) : (
+                    q.question
+                  )}
+                </li>
               ))}
             </ol>
           )}

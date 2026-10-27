@@ -568,6 +568,45 @@ export const ReviewPhone: Story = {
 };
 
 /**
+ * The preview states the close in the poll's own face, as the poll page
+ * does, where it drew it in 12px monospace, the civic record's mark for
+ * evidence, split at 360 between "3:00" and "PM UTC" (P2-29, creating a
+ * poll's iteration 18).
+ */
+export const PreviewClosesInWordsPhone: Story = {
+  args: { client: savedDraft(), id: ID },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const preview = within(
+      await canvas.findByRole("complementary", { name: "What people will see" }),
+    );
+    const closes = getComputedStyle(preview.getByText(/^Closes November 4, 2026/));
+    const rule = getComputedStyle(preview.getByText("Choose one."));
+    await expect(closes.fontFamily).toBe(rule.fontFamily);
+    await expect(closes.fontSize).toBe(rule.fontSize);
+  },
+};
+
+/**
+ * A question emptied since the save reads "No question yet" in the review,
+ * as an emptied title reads "No title yet", where it left "1." with nothing
+ * after it (P2-29, creating a poll's iteration 18).
+ */
+export const EmptiedQuestionInReview: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const review = within(await canvas.findByRole("region", { name: "Check it through" }));
+    const first = within(canvas.getByRole("region", { name: "Question 1" }));
+    await userEvent.clear(first.getByRole("textbox", { name: "What do you want to ask?" }));
+    const [one, two] = within(review.getByRole("list")).getAllByRole("listitem");
+    await expect(one).toHaveTextContent("No question yet");
+    await expect(two).toHaveTextContent("Which evenings should it stay open late?");
+  },
+};
+
+/**
  * The review's `text-pretty` ended the who row's first line at "e-", with
  * "mail address" under it, wherever the row was 212px to 270px wide: on the
  * site, any screen under 303px, a folded phone's 280 or a 360px phone zoomed

@@ -1284,6 +1284,7 @@ export const esUS: Messages = {
   pollFormReviewClosesAt: "{when} en tu hora ({utc} UTC)",
   pollFormReviewUntitled: "Aún sin título",
   pollFormReviewNoDescription: "Sin descripción",
+  pollFormReviewNoQuestion: "Aún sin pregunta",
   pollFormReviewChange: "Cambiar",
   pollFormSave: "Guardar borrador",
   pollFormSaved: "Tu borrador está guardado.",

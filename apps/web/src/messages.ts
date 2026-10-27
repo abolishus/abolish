@@ -1254,6 +1254,7 @@ const enUS = {
   pollFormReviewClosesAt: "{when} your time ({utc} UTC)",
   pollFormReviewUntitled: "No title yet",
   pollFormReviewNoDescription: "No description",
+  pollFormReviewNoQuestion: "No question yet",
   pollFormReviewChange: "Change",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",

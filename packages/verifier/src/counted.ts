@@ -605,7 +605,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       delivery,
       ...close,
       cells: tally.cells,
-      tiers: tierResults(definition, rules, tally.cells),
+      tiers: tierResults(cellTiers(definition), rules, tally.cells),
       ...questionReports(rules),
       tallyBreaks: tally.breaks,
       tallyEarly: tally.early,
@@ -672,7 +672,7 @@ export function countedChecks(inputs: CountedInputs): CountedResult {
       signers,
     };
   });
-  const tierReports = tierResults(definition, rules, cellReports);
+  const tierReports = tierResults(tiers, rules, cellReports);
   const questions = questionReports(rules);
   // Every board-path entry past `s_S` is outside its own window, and none
   // carried by a contract event is left, so no late entry changes a counted
@@ -977,19 +977,20 @@ function deliveryV2(
 type CommittedVss = BallotTally["vss"];
 
 /** The seats the openings in `passing` are attributed to, ascending; an unattributed one counts as well (8.4). */
-const signersOf = (passing: readonly OpeningReport[]) =>
+export const signersOf = (passing: readonly OpeningReport[]) =>
   [...new Set(passing.flatMap((p) => (p.signer === null ? [] : [p.signer])))].sort((a, b) => a - b);
 
 /**
  * Each tier's result, derived from its cells' counts, never opened (tally.md,
- * Coarser totals): only where every cell of the tier passed.
+ * Coarser totals): only where every cell of the tier passed. `tiers` is each
+ * cell's tier, in partition order (`cellTiers`).
  */
-function tierResults(
-  definition: VerifiedDefinition,
+export function tierResults(
+  tiers: readonly number[],
   rules: TallyRules,
   cells: readonly CellReport[],
 ): readonly TierReport[] {
-  return [...new Set(cellTiers(definition))].map((tier) => {
+  return [...new Set(tiers)].map((tier) => {
     const members = cells.filter((c) => c.tier === tier);
     const counted = members.reduce((n, c) => n + c.counted, 0);
     const counts = members.map((c) => c.counts);
@@ -1005,7 +1006,7 @@ function tierResults(
  * on its own, never a figure joining two, since none is opened (8.1;
  * ADR 0026, No cross-tabulation; T-29, T-16).
  */
-function countsOf(
+export function countsOf(
   rules: TallyRules,
   counts: readonly bigint[],
 ): { readonly counts: readonly string[]; readonly byQuestion?: readonly (readonly string[])[] } {
@@ -1016,7 +1017,9 @@ function countsOf(
 }
 
 /** Under definition versions 5 to 7, each question's limits and its method (8.1). */
-function questionReports(rules: TallyRules): { readonly questions?: readonly QuestionReport[] } {
+export function questionReports(rules: TallyRules): {
+  readonly questions?: readonly QuestionReport[];
+} {
   if (rules.questions === undefined) return {};
   return {
     questions: rules.questions.map((q, question) => ({

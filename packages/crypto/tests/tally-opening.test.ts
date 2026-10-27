@@ -5,6 +5,7 @@ import {
   aggregateCell,
   aggregateHash,
   type CellCheck,
+  checkCountedTally,
   checkTally,
   type CommittedVote,
   decode,
@@ -525,5 +526,90 @@ describe("checks without vectors", () => {
     );
     expect(r.ok).toBe(true);
     expect(r.cells[0]?.passing).toEqual([{ at: 0, signer: null }]);
+  });
+});
+
+describe("checkCountedTally (docs/spec/verifier.md, Results from the counted tally)", () => {
+  const summed = (
+    rules: TallyElection["rules"],
+    cells: readonly (readonly CommittedVote["vss"][])[],
+  ) =>
+    cells.map((ballots) => ({ aggregate: aggregateCell(rules, ballots), counted: ballots.length }));
+
+  test.each(vectors.elections)("gives checkTally's verdict on election $id", (v) => {
+    const cells = v.cells.map((c) => c.map((b) => decode(VSS, hex(b)) as CommittedVote["vss"]));
+    const payloads = v.openings.map((b) => hex(b));
+    const r = checkCountedTally(election, summed(election.rules, cells), payloads, 1);
+    expect(asVector(r)).toEqual(v.result);
+  });
+
+  test("gives checkTally's verdict over the same ballots summed, under either pin", () => {
+    fc.assert(
+      fc.property(arbElection, (input) => {
+        const { el, cells, records } = honestTally(input);
+        const ballots = cells.map((c) => c.ballots);
+        const two = records.map((r) => encodeTallyOpening(decodeTallyOpening(r, 1), 2));
+        expect(checkCountedTally(el, summed(el.rules, ballots), records, 1)).toEqual(
+          checkTally(el, ballots, records, 1),
+        );
+        expect(checkCountedTally(el, summed(el.rules, ballots), two, 2)).toEqual(
+          checkTally(el, ballots, two, 2),
+        );
+      }),
+      { numRuns: Math.max(10, numRuns / 20) },
+    );
+  });
+
+  test("a cell counted with fewer ballots than an option's count fails tally-range", () => {
+    // The count is the only thing read of the ballots beyond their aggregate:
+    // a caller that undercounts a cell must never see its opening pass.
+    const { el, cells, records } = honestTally({
+      rules: { optionCount: 2, threshold: 2, panelSize: 3 },
+      signer: 1,
+      definitionHash: new Uint8Array(32),
+      votes: [
+        [
+          [1, 0],
+          [1, 1],
+        ],
+      ],
+    });
+    const [cell] = summed(
+      el.rules,
+      cells.map((c) => c.ballots),
+    );
+    if (cell === undefined) throw new Error("no cell");
+    const r = checkCountedTally(el, [{ ...cell, counted: 1 }], records, 1);
+    expect(r.failure).toEqual({ cell: 0, code: "tally-range", option: 0 });
+  });
+
+  test("refuses a cell of another shape or count, and malformed rules, as the caller's error", () => {
+    const { el, cells, records } = honestTally({
+      rules: { optionCount: 2, threshold: 2, panelSize: 3 },
+      signer: 1,
+      definitionHash: new Uint8Array(32),
+      votes: [[[1, 0]]],
+    });
+    const [cell] = summed(
+      el.rules,
+      cells.map((c) => c.ballots),
+    );
+    if (cell === undefined) throw new Error("no cell");
+    const run =
+      (c: typeof cell, e: TallyElection = el) =>
+      () =>
+        checkCountedTally(e, [c], records, 1);
+    expect(run(cell)).not.toThrow();
+    expect(run({ ...cell, counted: -1 })).toThrow(RangeError);
+    expect(run({ ...cell, counted: 0.5 })).toThrow(RangeError);
+    expect(run({ ...cell, aggregate: cell.aggregate.slice(1) })).toThrow(RangeError);
+    expect(run({ ...cell, aggregate: cell.aggregate.map((row) => row.slice(1)) })).toThrow(
+      RangeError,
+    );
+    expect(run(cell, { ...el, rules: { ...el.rules, threshold: 4 } })).toThrow(RangeError);
+    expect(() => checkCountedTally(el, [], records, 1)).toThrow(RangeError);
+    expect(() =>
+      checkCountedTally({ ...el, definitionHash: new Uint8Array(31) }, [cell], records, 1),
+    ).toThrow(RangeError);
   });
 });

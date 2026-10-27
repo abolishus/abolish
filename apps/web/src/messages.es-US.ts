@@ -608,9 +608,9 @@ export const esUS: Messages = {
   boardUnanchored:
     "Hasta que un punto de control en L1 cubra estos valores, solo cuentan con la palabra de este servidor. Guárdalos: un tablero posterior que no los extienda es evidencia de manipulación.",
   boardHeadHistory:
-    "La raíz del árbol de arriba y la del punto de control más reciente son una sola historia: esta página comprobó la prueba de consistencia de nuestro servidor de que el árbol menor es el comienzo del mayor.",
+    "La raíz del árbol de arriba y la del punto de control más reciente son una sola historia: esta página comprobó que el árbol menor es el comienzo del mayor, con la prueba de consistencia de nuestro servidor, o con la misma raíz al mismo tamaño.",
   boardHeadHistoryBroken:
-    "La raíz del árbol de arriba y la del punto de control más reciente no son una sola historia: la prueba de consistencia de nuestro servidor entre ellas falla. Guarda ambas. Un tablero con dos historias es prueba de manipulación.",
+    "La raíz del árbol de arriba y la del punto de control más reciente no son una sola historia: nuestro servidor no pudo probar que el árbol menor es el comienzo del mayor. Guarda ambas. Un tablero con dos historias es evidencia de manipulación.",
   boardLink: "Leer el tablero, entrada por entrada",
   boardPageEyebrow: "Encuesta {prefix}… · Tablero público",
   boardPageTitle: "El tablero de la encuesta",
@@ -674,9 +674,9 @@ export const esUS: Messages = {
   boardAnchorHead: "Cabeza de la cadena hasta entonces",
   boardAnchorRoot: "Raíz de Merkle hasta entonces",
   boardAnchorExtends:
-    "Extiende el punto de control después del período {segment}: esta página comprobó la prueba de consistencia de nuestro servidor entre los dos.",
+    "Extiende el punto de control después del período {segment}: esta página lo comprobó, con la prueba de consistencia de nuestro servidor entre los dos, o con la misma raíz al mismo tamaño.",
   boardAnchorBroken:
-    "No extiende el punto de control después del período {segment}: la prueba de consistencia de nuestro servidor entre los dos falla. Guarda ambos. Un tablero con dos historias es prueba de manipulación.",
+    "No extiende el punto de control después del período {segment}: nuestro servidor no pudo probar que lo extiende. Guarda ambos. Un tablero con dos historias es evidencia de manipulación.",
   boardAnchorsNone: "Todavía no se ha tomado ningún punto de control de este tablero.",
   boardAnchorsMore:
     "Aquí solo se muestran los {count} puntos de control más recientes. El verificador lee cada uno de los anclados, desde el primero.",

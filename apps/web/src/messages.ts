@@ -601,9 +601,9 @@ const enUS = {
   boardUnanchored:
     "Until an L1 checkpoint covers these values, they are only this server's word. Keep them: a later board that doesn't extend them is evidence of tampering.",
   boardHeadHistory:
-    "The tree root above and the latest checkpoint's are one history: this page checked our server's consistency proof that the smaller tree is the start of the larger.",
+    "The tree root above and the latest checkpoint's are one history: this page checked that the smaller tree is the start of the larger, by our server's consistency proof, or by the same root at the same size.",
   boardHeadHistoryBroken:
-    "The tree root above and the latest checkpoint's are not one history: our server's consistency proof between them fails. Keep both. One board with two histories is evidence of tampering.",
+    "The tree root above and the latest checkpoint's are not one history: our server couldn't prove that the smaller tree is the start of the larger. Keep both. One board with two histories is evidence of tampering.",
   boardLink: "Read the board, entry by entry",
   boardPageEyebrow: "Poll {prefix}… · Public board",
   boardPageTitle: "The poll's board",
@@ -666,9 +666,9 @@ const enUS = {
   boardAnchorHead: "Chain head by then",
   boardAnchorRoot: "Merkle root by then",
   boardAnchorExtends:
-    "Extends the checkpoint after period {segment}: this page checked our server's consistency proof between the two.",
+    "Extends the checkpoint after period {segment}: this page checked it, by our server's consistency proof between the two, or by the same root at the same size.",
   boardAnchorBroken:
-    "Doesn't extend the checkpoint after period {segment}: our server's consistency proof between the two fails. Keep both. One board with two histories is evidence of tampering.",
+    "Doesn't extend the checkpoint after period {segment}: our server couldn't prove that it does. Keep both. One board with two histories is evidence of tampering.",
   boardAnchorsNone: "No checkpoint has been taken of this board yet.",
   boardAnchorsMore:
     "Only the latest {count} checkpoints are shown here. The verifier reads every anchored one, from the first.",

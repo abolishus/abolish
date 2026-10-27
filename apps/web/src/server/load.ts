@@ -257,10 +257,7 @@ export type Anchors = readonly AnchorRow[] | undefined;
  * server's consistency proof checked here (src/board.ts, `oneHistory`).
  */
 export interface Histories {
-  /**
-   * The head's tree and the latest checkpoint's, the smaller first; or
-   * `undefined` when there is no checkpoint or the head was read empty.
-   */
+  /** The head's tree and the latest checkpoint's, the smaller first; `undefined` with no checkpoint. */
   readonly head: boolean | undefined;
   /** For each checkpoint the anchors show but the last, whether it extends the next (earlier) one. */
   readonly anchors: readonly boolean[];
@@ -304,8 +301,10 @@ const outOfRange = (error: unknown) =>
 
 /**
  * Whether `earlier` and `later` are one history, by the server's consistency
- * proof between them. Equal sizes need no proof. A server that refuses one
- * as out of range claims a tree larger than its board, so the claims fail.
+ * proof between them. Equal sizes need no proof, and an empty `earlier` has
+ * none: a board that held entries never reads empty again. A server that
+ * refuses one as out of range claims a tree larger than its board, so the
+ * claims fail.
  */
 async function proveOneHistory(
   api: Api,
@@ -313,7 +312,7 @@ async function proveOneHistory(
   earlier: TreeClaim,
   later: TreeClaim,
 ): Promise<boolean> {
-  if (earlier.size === later.size) return oneHistory(earlier, later, []);
+  if (earlier.size === later.size || earlier.size === "0") return oneHistory(earlier, later, []);
   try {
     const { path } = await api.board.getConsistencyProof({
       electionId,
@@ -333,7 +332,7 @@ async function proveOneHistory(
  * they tell our server nothing a visit didn't (T-10). The head and the
  * checkpoints are read together, so either may be the larger.
  */
-async function loadHistories(
+export async function loadHistories(
   api: Api,
   electionId: string,
   head: BoardHead,
@@ -343,7 +342,7 @@ async function loadHistories(
   const latest = shown[0];
   const tree = { size: head.treeSize, root: head.root };
   const [headHistory, anchorHistories] = await Promise.all([
-    latest === undefined || head.treeSize === "0"
+    latest === undefined
       ? undefined
       : BigInt(tree.size) <= BigInt(latest.size)
         ? proveOneHistory(api, electionId, tree, latest)

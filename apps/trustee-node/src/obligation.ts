@@ -62,6 +62,12 @@ export interface Obligation {
   readonly receipts: readonly Uint8Array[];
   /** Its complaint scope: ballot hashes whose failing postings it owes complaints about by `c_K`. */
   readonly complaints: readonly Uint8Array[];
+  /**
+   * Every ballot hash of the view it decided over. The selection over them
+   * put each one a complaint can matter for into the scope, so the
+   * complaints it makes outside the scope skip them (`ComplaintDuty`).
+   */
+  readonly viewed: readonly Uint8Array[];
 }
 
 export interface ObligationOptions {
@@ -78,6 +84,7 @@ const HASH = bytesFixed(32);
 const DECIDED = struct([
   ["receipts", list(HASH, 2 ** 32 - 1)],
   ["complaints", list(HASH, 2 ** 32 - 1)],
+  ["viewed", list(HASH, 2 ** 32 - 1)],
 ] as const);
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -124,6 +131,9 @@ export async function decideObligation(
   const obligation = {
     receipts: owedReceipts(ballots, held.receipts, l1, window),
     complaints: complaintScope(ballots, l1, window),
+    viewed: [...new Map(ballots.map((b) => [hex(b.ballotHash), b.ballotHash])).values()].sort(
+      (a, b) => (hex(a) < hex(b) ? -1 : 1),
+    ),
   };
   // ADR 0002, Decision, 2026-10-12: membership-checked intake bounds both at
   // two per member of each tier, whatever anyone delivers or withholds.
@@ -135,6 +145,6 @@ export async function decideObligation(
 }
 
 function decided(bytes: Uint8Array): ObligationStatus {
-  const { receipts, complaints } = decode(DECIDED, bytes);
-  return { state: "decided", receipts, complaints };
+  const { receipts, complaints, viewed } = decode(DECIDED, bytes);
+  return { state: "decided", receipts, complaints, viewed };
 }

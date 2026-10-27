@@ -598,18 +598,26 @@ describe("the complaint duties", () => {
             { state: "waiting-postings", until: 700n },
             { state: "waiting-ballots", missing: 1, until: 900n },
             { state: "sent", batches: 1, recorded: 0, total: 1 },
-            { state: "recorded", total: 1 },
+            { state: "outside-sent", batches: 1, recorded: 0, total: 1 },
+            { state: "recorded", total: 1, outside: 1, outsideMissing: 0 },
           ],
         ],
-        [2, [{ state: "recorded", total: 0 }]],
+        [2, [{ state: "recorded", total: 0, outside: 0, outsideMissing: 0 }]],
       ]),
     );
-    for (let i = 0; i < 8; i++) await h.duties.step();
-    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(6);
+    for (let i = 0; i < 9; i++) await h.duties.step();
+    expect(h.stepped.filter((s) => s === name(1))).toHaveLength(7);
     expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
     expect(h.events).toEqual([
       { event: "complaints", stubHash: name(1), state: "open", until: "500" },
-      { event: "complaints", stubHash: name(2), state: "recorded", total: 0 },
+      {
+        event: "complaints",
+        stubHash: name(2),
+        state: "recorded",
+        total: 0,
+        outside: 0,
+        outsideMissing: 0,
+      },
       { event: "complaints", stubHash: name(1), state: "waiting-postings", until: "700" },
       {
         event: "complaints",
@@ -619,7 +627,22 @@ describe("the complaint duties", () => {
         until: "900",
       },
       { event: "complaints", stubHash: name(1), state: "sent", batches: 1, recorded: 0, total: 1 },
-      { event: "complaints", stubHash: name(1), state: "recorded", total: 1 },
+      {
+        event: "complaints",
+        stubHash: name(1),
+        state: "outside-sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      },
+      {
+        event: "complaints",
+        stubHash: name(1),
+        state: "recorded",
+        total: 1,
+        outside: 1,
+        outsideMissing: 0,
+      },
     ]);
   });
 

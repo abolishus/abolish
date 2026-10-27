@@ -1166,8 +1166,7 @@ const enUS = {
   pollFormWho_email: "People with a verified e-mail address",
   pollFormWho_phone: "People with a verified e-mail address and phone number",
   pollFormWhenTitle: "When does it close?",
-  pollFormWhenLede:
-    "Choose a time on your own clock ({zone}). Your poll opens about half an hour after you submit it, once it is set up, and must then stay open for at least an hour, so choose a time at least 90 minutes from now and no more than a year ahead.",
+  pollFormWhenLede: "Choose a time on your own clock ({zone}), from 90 minutes to a year from now.",
   pollFormDateLabel: "Closing date",
   pollFormTimeLabel: "Closing time",
   pollFormUtc: "People answering see it as {when} UTC, the clock every poll keeps.",
@@ -1203,14 +1202,14 @@ const enUS = {
   pollFormReviewTopic: "Topic",
   pollFormReviewNone: "None",
   pollFormReviewNotSet: "Not set",
-  pollFormReviewClosesAt: "{when} your time, {utc} UTC",
+  pollFormReviewClosesAt: "{when} your time ({utc} UTC)",
   pollFormReviewUntitled: "No title yet",
   pollFormReviewChange: "Change",
   pollFormSave: "Save draft",
   pollFormSaved: "Your draft is saved.",
   pollFormSubmitTitle: "Ready to ask?",
   pollFormSubmitLede:
-    "Submitting sets your poll up on the public record, and it opens for answers when that's done. You can't change it after you submit.",
+    "Submitting sets your poll up on the public record, and it opens for answers when that's done, about half an hour later. It must then stay open for at least an hour. You can't change it after you submit.",
   pollFormSubmitCloudflare:
     "Before it's sent, a check by Cloudflare confirms you're a person. Cloudflare sees your browser's address while it runs.",
   pollFormSubmit: "Submit poll",

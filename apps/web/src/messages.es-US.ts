@@ -1194,7 +1194,7 @@ export const esUS: Messages = {
   pollFormWho_phone: "Personas con un correo electrónico y un número de teléfono verificados",
   pollFormWhenTitle: "¿Cuándo cierra?",
   pollFormWhenLede:
-    "Elige una hora de tu propio reloj ({zone}). Tu encuesta se abre una media hora después de que la envíes, cuando ya está preparada, y luego debe seguir abierta al menos una hora, así que elige una hora al menos 90 minutos a partir de ahora y no más de un año después.",
+    "Elige una hora de tu propio reloj ({zone}), entre 90 minutos y un año a partir de ahora.",
   pollFormDateLabel: "Fecha de cierre",
   pollFormTimeLabel: "Hora de cierre",
   pollFormUtc:
@@ -1231,14 +1231,14 @@ export const esUS: Messages = {
   pollFormReviewTopic: "Tema",
   pollFormReviewNone: "Ninguno",
   pollFormReviewNotSet: "Sin definir",
-  pollFormReviewClosesAt: "{when} en tu hora, {utc} UTC",
+  pollFormReviewClosesAt: "{when} en tu hora ({utc} UTC)",
   pollFormReviewUntitled: "Aún sin título",
   pollFormReviewChange: "Cambiar",
   pollFormSave: "Guardar borrador",
   pollFormSaved: "Tu borrador está guardado.",
   pollFormSubmitTitle: "¿Listo para preguntar?",
   pollFormSubmitLede:
-    "Al enviarla, tu encuesta se prepara en el registro público y se abre a respuestas cuando eso termina. No puedes cambiarla después de enviarla.",
+    "Al enviarla, tu encuesta se prepara en el registro público y se abre a respuestas cuando eso termina, una media hora después. Luego debe seguir abierta al menos una hora. No puedes cambiarla después de enviarla.",
   pollFormSubmitCloudflare:
     "Antes de enviarla, una verificación de Cloudflare confirma que eres una persona. Cloudflare ve la dirección de tu navegador mientras se ejecuta.",
   pollFormSubmit: "Enviar encuesta",

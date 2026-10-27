@@ -7,6 +7,7 @@ import {
   answeredCast,
   type Boarded,
   type CastAsked,
+  type CastRecord,
   type CastsRead,
   type CheckedReceipt,
   type DeclinePostingOutcome,
@@ -1482,9 +1483,13 @@ export function Ballot({
    * receipted or its posting recorded (`waitForRecord`), taking the
    * election's lock only now, and only while the wait still stands and the
    * cast is still kept unsent: neither declined nor erased since, which
-   * leaves a seat with nothing, nor boarded (Sending after a run; T-25,
-   * T-52). A wait and a run that both find the record send the identical
-   * bytes, at worst a repeat the board answers as this ballot.
+   * leaves a seat with nothing, nor boarded, and the send cutoff `c_S` not
+   * passed on this device, since the lock may have been held long (Sending
+   * after a run; T-25, T-52). The last checks are made just before the send,
+   * with nothing awaited between, so a choice the voter made meanwhile wins.
+   * A cast another tab sent opens on the sent screen. A wait and a run that
+   * both find the record send the identical bytes, at worst a repeat the
+   * board answers as this ballot.
    */
   function sendAfterWait(sending: Sending, ended: () => boolean) {
     const mine = ++asked.current;
@@ -1497,12 +1502,19 @@ export function Ballot({
           if (ended()) return undefined;
           const read = await source.casts(electionId, sending.tier);
           if (read.kind === "unreadable") return undefined;
-          const cast = read.casts.find((c) => equalBytes(c.ballot, sending.ballot));
-          if (
-            cast === undefined ||
-            cast.boarded !== undefined ||
-            cast.shares.some((share) => "erased" in share)
-          )
+          let cast: CastRecord | undefined;
+          try {
+            cast = read.casts.find((c) => equalBytes(c.ballot, sending.ballot));
+          } finally {
+            // Only the cast's state is needed here, never its `m_i` (T-18).
+            for (const { shares } of read.casts)
+              for (const share of shares) if ("m" in share) share.m.fill(0);
+          }
+          if (cast === undefined || cast.shares.some((share) => "erased" in share))
+            return undefined;
+          if (cast.boarded !== undefined)
+            return { kind: "sent", trackingCode: sending.trackingCode } satisfies Step;
+          if (ended() || !current() || passedOnDevice(cutoffs().send, source.now()))
             return undefined;
           shown = true;
           return sendPosted(sending, current);
@@ -1528,6 +1540,8 @@ export function Ballot({
   useEffect(() => {
     const awaitPosted = posting === undefined ? undefined : source.awaitPosted;
     if (waitingFor === undefined || awaitPosted === undefined) return;
+    // Past `c_S` a record no longer sends the ballot: nothing to wait for.
+    if (passedOnDevice(cutoffs().send, source.now())) return;
     let ended = false;
     setWatched(waitingFor);
     void (async () => {
@@ -1562,6 +1576,17 @@ export function Ballot({
     run(async () => {
       // Under the election's lock, so no tab is posting a seat this erases.
       const erased = await locked(async () => {
+        // The wait after a run may have sent it just before (Sending after
+        // a run): a boarded ballot counts, so it is never called declined.
+        const read = await source.casts(electionId, tier).catch(() => undefined);
+        const own =
+          read?.kind === "read"
+            ? read.casts.find((cast) => equalBytes(cast.ballot, ballot))
+            : undefined;
+        if (read?.kind === "read")
+          for (const { shares } of read.casts)
+            for (const share of shares) if ("m" in share) share.m.fill(0);
+        if (own?.boarded !== undefined) return "sent" as const;
         const outcome = await source
           .declinePosting(electionId, tier, ballot)
           .catch((): DeclinePostingOutcome => "unwritable");
@@ -1571,6 +1596,8 @@ export function Ballot({
       // A lock this browser refused erased nothing: the offer stands.
       if (erased === undefined) return { kind: "offer", sending };
       switch (erased) {
+        case "sent":
+          return { kind: "sent", trackingCode: sending.trackingCode };
         case "declined":
           return { kind: "declined" };
         case "missing":

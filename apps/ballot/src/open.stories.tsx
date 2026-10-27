@@ -2089,6 +2089,37 @@ export const PostingWaitEndedByAnotherRun: Story = {
   },
 };
 
+/** `CAST_RECORDED` once its ballot was boarded, by the wait after a run or another tab. */
+const CAST_BOARDED: CastsRead = {
+  kind: "read",
+  casts: CAST_RECORDED.casts.map((cast) => ({
+    ...cast,
+    boarded: { entry: Uint8Array.of(1), link: new Uint8Array(32) },
+  })),
+};
+
+export const PostingDeclinedAfterTheWaitSent: Story = {
+  name: "Leaving a ballot the wait after a run already sent shows it sent, never declined",
+  args: {
+    source: offerSource({ posted: ["relayed"], awaited: ["hold"], heldAfterSend: CAST_BOARDED }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    await castInto(canvas, OFFER);
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await canvas.findByText(WATCHING);
+    // Sent meanwhile, as the wait's send just before the voter's choice would be.
+    await of.send(fromHex(ELECTION_ID), CAST.ballot);
+    await userEvent.click(canvas.getByRole("button", { name: "Leave this ballot" }));
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: "Your ballot is on the board" }),
+    ).toBeVisible();
+    await expect(of.declinePosting).not.toHaveBeenCalled();
+    await expect(of.declineSeal).not.toHaveBeenCalled();
+  },
+};
+
 export const PostingWaitFindsTheSeatErased: Story = {
   name: "A record the wait found sends nothing once the cast's seat was declined or erased elsewhere",
   args: {

@@ -181,6 +181,8 @@ describe("chunks and the data tree", () => {
     );
   });
 
+  // Up to 40 chunks' paths each proved twice, a run: at CI's FC_NUM_RUNS of
+  // 1,000 it takes about five seconds, past the default timeout.
   test("property: every chunk's path proves exactly its bounds and hash, and nothing else", () => {
     fc.assert(
       fc.property(
@@ -214,7 +216,7 @@ describe("chunks and the data tree", () => {
       ),
       { numRuns },
     );
-  });
+  }, 60_000);
 });
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 4096 });

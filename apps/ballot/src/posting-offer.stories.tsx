@@ -212,6 +212,20 @@ export const OfferClosed: Story = {
   },
 };
 
+export const OfferedWhileWatching: Story = {
+  name: "While the page waits for parts a run handed out, it says it sends the ballot once they're posted, and until when",
+  args: { failed: true, relayed: true, watching: "Fri 17 Oct, 21:50" },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("This page sends your ballot once they're posted")).toBeVisible();
+    await expect(canvas.getByRole("status")).toHaveTextContent(/until Fri 17 Oct, 21:50/);
+    // Every choice is still there: the wait takes none away.
+    await userEvent.click(canvas.getByRole("button", { name: "Post publicly, then send" }));
+    await expect(args.onPost).toHaveBeenCalledOnce();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
+  },
+};
+
 export const WalletForced: Story = {
   name: "Parts the wallet forced through Ethereum are counted as posted, with the page kept open",
   args: { failed: true, handed: true, onWallet: fn(), wallet: "forced" },

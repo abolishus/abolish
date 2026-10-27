@@ -5,7 +5,9 @@
 // board's event at the finalized head, falling back at the relay's
 // patience, its send cutoff, a sent posting's wait, and the client's
 // deadline `c_P`, read from the force cutoff `c_L`; a late run, past the
-// send cutoff, at the last-offer cutoff `c_E` (T-10, T-25, T-50, T-52).
+// send cutoff, at the last-offer cutoff `c_E`; and the wait after a run,
+// which reads only the finalized head, until the send cutoff `c_S` (T-10,
+// T-25, T-50, T-52).
 
 import fc from "fast-check";
 import { readFileSync } from "node:fs";
@@ -27,9 +29,12 @@ import {
   postingCalldata,
   postThroughRelay,
   postingTopics,
+  type RecordWait,
+  type RecordWaitIo,
   type RelayAnswer,
   sendPosting,
   timedFetch,
+  waitForRecord,
 } from "../src/posting.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -162,10 +167,8 @@ describe("postThroughRelay", () => {
   const CUTOFF = START + 100_000n;
   // The last-offer cutoff `c_E`, as far past `c_L` as the deployed values put it.
   const LAST = CUTOFF + 3_600n;
-  // And the send cutoff `c_S`, `POSTING_LATE_FINALITY` after it.
-  const SEND = LAST + 1_200n;
-  // A late run's cutoffs, given once the voter was told it is best effort.
-  const LATE = { lastOffer: LAST, send: SEND };
+  // A late run's cutoff, given once the voter was told it is best effort.
+  const LATE = { lastOffer: LAST };
   const OTHER = Uint8Array.of(0, 13, 1, 0xdd);
 
   /**
@@ -348,18 +351,20 @@ describe("postThroughRelay", () => {
     expect(await postThroughRelay(honest.io, [POSTING], CUTOFF, F, LATE)).toBe("recorded");
     expect(honest.sends).toHaveLength(1);
     // With nothing to fall back to in time, a sent posting no head shows is
-    // waited for to c_S, and one recorded past c_E still sends the ballot.
+    // waited for to c_E, its deadline, and no longer: one recorded past it is
+    // the page's wait to find, without the election's lock (T-52).
     const unseen = world({ relay: () => sent, start });
     expect(await postThroughRelay(unseen.io, [POSTING], CUTOFF, F, LATE)).toBe("relayed");
-    expect(start + unseen.elapsed()).toBeGreaterThan(SEND);
-    expect(start + unseen.elapsed()).toBeLessThanOrEqual(SEND + POLL);
+    expect(start + unseen.elapsed()).toBeGreaterThan(LAST);
+    expect(start + unseen.elapsed()).toBeLessThanOrEqual(LAST + POLL);
     const slow = world({
       relay: () => sent,
       finalized: (t) => (t >= 900n ? [POSTING] : []),
       start: LAST - 300n,
     });
-    expect(await postThroughRelay(slow.io, [POSTING], CUTOFF, F, LATE)).toBe("recorded");
+    expect(await postThroughRelay(slow.io, [POSTING], CUTOFF, F, LATE)).toBe("relayed");
     expect(slow.sends).toHaveLength(1);
+    expect(LAST - 300n + slow.elapsed()).toBeLessThanOrEqual(LAST + POLL);
   });
 
   test("a late run the voter wasn't told of sends nothing (T-15)", async () => {
@@ -375,10 +380,10 @@ describe("postThroughRelay", () => {
     for (const s of busy.sends) expect(s.at).toBeLessThanOrEqual(LAST);
     expect(start + busy.elapsed()).toBeGreaterThan(LAST);
     expect(start + busy.elapsed()).toBeLessThanOrEqual(LAST + POLL);
-    // A sent posting is waited for to c_S, never past it.
+    // A sent posting is waited for to c_E, never past it, a sighting or not.
     const seen = world({ relay: () => sent, latest: () => [POSTING], start });
     expect(await postThroughRelay(seen.io, [POSTING], CUTOFF, F, LATE)).toBe("relayed");
-    expect(start + seen.elapsed()).toBeLessThanOrEqual(SEND + POLL);
+    expect(start + seen.elapsed()).toBeLessThanOrEqual(LAST + POLL);
     // Past c_E nothing is sent at all, and the finalized head is read once.
     const past = world({ relay: () => sent, start: LAST + 1n });
     expect(await postThroughRelay(past.io, [POSTING], CUTOFF, F, LATE)).toBe("unreachable");
@@ -423,11 +428,11 @@ describe("postThroughRelay", () => {
 
   test("a late run counts a head's time only within WALLET_HOLD_MARGIN of the device's clock (T-25)", async () => {
     const start = CUTOFF - POSTING_SEND_MARGIN + 1n;
-    // An endpoint answering a head past c_S can't end the run before it sends.
+    // An endpoint answering a head past c_E can't end the run before it sends.
     const forged = world({
       relay: () => sent,
       finalized: (t) => (t >= 600n ? [POSTING] : []),
-      chainAhead: SEND - start + 1n,
+      chainAhead: LAST - start + 1n,
       start,
     });
     expect(await postThroughRelay(forged.io, [POSTING], CUTOFF, F, LATE)).toBe("recorded");
@@ -589,10 +594,208 @@ describe("postThroughRelay", () => {
           // cutoff; a late run, started past it, within one round of c_E and
           // never sending past it.
           const late = start > CUTOFF - POSTING_SEND_MARGIN;
-          const deadline = late ? SEND : CUTOFF - POSTING_CLIENT_MARGIN;
+          const deadline = late ? LAST : CUTOFF - POSTING_CLIENT_MARGIN;
           expect(start + w.elapsed()).toBeLessThanOrEqual(deadline + POLL);
           for (const s of w.sends)
             expect(s.at).toBeLessThanOrEqual(late ? LAST : CUTOFF - POSTING_SEND_MARGIN);
+        },
+      ),
+      { numRuns },
+    );
+  });
+});
+
+describe("waitForRecord", () => {
+  // The send cutoff `c_S`, an hour ahead of the wait's start.
+  const START = 1_800_000_000n;
+  const SEND = START + 3_600n;
+  const POLL = BigInt(POSTING_POLL_MS / 1000);
+  const SECOND = Uint8Array.of(0, 13, 1, 0xee);
+  const OTHER_RECORD = Uint8Array.of(0, 13, 1, 0xaa, 0xbc);
+
+  /**
+   * A page and a board on a clock that moves only by the wait's sleeps:
+   * `postings` says, at each time (seconds from `start`), which records the
+   * page makes (`undefined` once the cast is gone), and `finalized` which
+   * the finalized head carries from each block on; each block is a second.
+   */
+  function world({
+    postings = () => [POSTING],
+    finalized = () => [],
+    chainAhead = 0n,
+    start = START,
+    readFails = false,
+    endAt,
+  }: {
+    postings?: (t: bigint) => readonly Uint8Array[] | undefined;
+    finalized?: (t: bigint) => readonly { readonly at: bigint; readonly record: Uint8Array }[];
+    chainAhead?: bigint;
+    start?: bigint;
+    readFails?: boolean;
+    /** When, in seconds from `start`, the page gives the wait up. */
+    endAt?: bigint;
+  }) {
+    let ms = Number(start) * 1000;
+    const t = () => BigInt(Math.floor(ms / 1000));
+    const made: Uint8Array[] = [];
+    const reads: { from: bigint | undefined; at: bigint }[] = [];
+    const io: RecordWaitIo = {
+      postings() {
+        const records = postings(t() - start)?.map((p) => p.slice());
+        if (records !== undefined) made.push(...records);
+        return Promise.resolve(records);
+      },
+      find(_, from): Promise<LoadedPostings> {
+        reads.push({ from, at: t() });
+        if (readFails) return Promise.resolve({ ok: false, problem: "unreachable" });
+        // Only the events from block `from` on: a record read once stays read.
+        const low = from === undefined ? 0n : from - start;
+        const records = finalized(t() - start)
+          .filter(({ at }) => at >= low && at <= t() - start)
+          .map(({ record }) => record);
+        return Promise.resolve({ ok: true, block: t(), timestamp: t() + chainAhead, records });
+      },
+      now: () => ms,
+      sleep(wait) {
+        ms += wait;
+        return Promise.resolve();
+      },
+      ended: () => endAt !== undefined && t() - start >= endAt,
+    };
+    return { io, made, reads, elapsed: () => t() - start };
+  }
+
+  const on = (at: bigint, record = POSTING) => ({ at, record });
+
+  test("recorded once the finalized head carries every posting's exact bytes, read at a run's cadence", async () => {
+    const w = world({
+      postings: () => [POSTING, SECOND],
+      finalized: () => [on(300n), on(900n, SECOND)],
+    });
+    expect(await waitForRecord(w.io, SEND)).toBe("recorded");
+    // Read first a round after the run's own last read, then once a round.
+    expect(w.reads.map(({ at }) => at - START)).toEqual(
+      Array.from({ length: Number(900n / POLL) }, (_, i) => BigInt(i + 1) * POLL),
+    );
+    // Each read from where the last one ended, the earlier record still counted.
+    for (const [i, { from }] of w.reads.entries())
+      expect(from).toBe(i === 0 ? undefined : START + BigInt(i) * POLL + 1n);
+  });
+
+  test("never recorded on other bytes for the ballot, nor on a record of only some seats", async () => {
+    const other = world({ finalized: () => [on(0n, OTHER_RECORD)] });
+    expect(await waitForRecord(other.io, SEND)).toBe("lapsed");
+    const some = world({ postings: () => [POSTING, SECOND], finalized: () => [on(0n)] });
+    expect(await waitForRecord(some.io, SEND)).toBe("lapsed");
+  });
+
+  test("a seat receipted since is no longer waited for, and none left sends the ballot at once", async () => {
+    // Seat two receipted in another tab after ten minutes; only the first is posted.
+    const w = world({
+      postings: (t) => (t >= 600n ? [POSTING] : [POSTING, SECOND]),
+      finalized: () => [on(60n)],
+    });
+    expect(await waitForRecord(w.io, SEND)).toBe("recorded");
+    expect(w.elapsed()).toBe(600n);
+    // Every seat receipted: no read at all.
+    const none = world({ postings: () => [] });
+    expect(await waitForRecord(none.io, SEND)).toBe("recorded");
+    expect(none.reads).toHaveLength(0);
+  });
+
+  test("a cast declined or erased since ends the wait (gone)", async () => {
+    const w = world({ postings: (t) => (t >= 300n ? undefined : [POSTING]) });
+    expect(await waitForRecord(w.io, SEND)).toBe("gone");
+    expect(w.elapsed()).toBe(300n);
+  });
+
+  test("lapses at c_S by this device's clock, and a record found past it sends nothing", async () => {
+    const w = world({});
+    expect(await waitForRecord(w.io, SEND)).toBe("lapsed");
+    expect(START + w.elapsed()).toBeGreaterThan(SEND);
+    expect(START + w.elapsed()).toBeLessThanOrEqual(SEND + POLL);
+    for (const { at } of w.reads) expect(at).toBeLessThanOrEqual(SEND);
+    // A head past c_S within WALLET_HOLD_MARGIN of the device's clock counts:
+    // the record it carries is too late to send the ballot.
+    const late = world({
+      finalized: () => [on(0n)],
+      chainAhead: WALLET_HOLD_MARGIN,
+      start: SEND - WALLET_HOLD_MARGIN + 1n - POLL,
+    });
+    expect(await waitForRecord(late.io, SEND)).toBe("lapsed");
+  });
+
+  test("a head further ahead than WALLET_HOLD_MARGIN can't end the wait (T-25)", async () => {
+    const w = world({
+      finalized: () => [on(1_200n)],
+      chainAhead: WALLET_HOLD_MARGIN + 1n,
+      start: SEND - 1_800n,
+    });
+    expect(await waitForRecord(w.io, SEND)).toBe("recorded");
+    expect(w.elapsed()).toBe(1_200n);
+  });
+
+  test("a read that fails or throws records nothing, and c_S still ends the wait", async () => {
+    const fails = world({ finalized: () => [on(0n)], readFails: true });
+    expect(await waitForRecord(fails.io, SEND)).toBe("lapsed");
+    const v = world({ finalized: () => [on(0n)] });
+    const throwing = { ...v.io, find: () => Promise.reject(new DOMException("t", "TimeoutError")) };
+    expect(await waitForRecord(throwing, SEND)).toBe("lapsed");
+  });
+
+  test("the page giving the wait up ends it before any further read or record", async () => {
+    const w = world({ finalized: () => [on(600n)], endAt: 300n });
+    expect(await waitForRecord(w.io, SEND)).toBe("ended");
+    expect(w.elapsed()).toBe(300n);
+    expect(w.reads.every(({ at }) => at - START < 300n)).toBe(true);
+    // Given up while a read is under way: that read's record sends nothing.
+    const during = world({ finalized: () => [on(0n)] });
+    let reading = false;
+    const io = {
+      ...during.io,
+      find: (...args: Parameters<RecordWaitIo["find"]>) => {
+        reading = true;
+        return during.io.find(...args);
+      },
+      ended: () => reading,
+    };
+    expect(await waitForRecord(io, SEND)).toBe("ended");
+  });
+
+  test("every record the page made is zeroed once read for (T-18)", async () => {
+    const w = world({ postings: () => [POSTING, SECOND], finalized: () => [on(600n)] });
+    expect(await waitForRecord(w.io, SEND)).toBe("lapsed");
+    expect(w.made.length).toBeGreaterThan(0);
+    for (const record of w.made) expect(record).toEqual(new Uint8Array(record.length));
+  });
+
+  test("recorded only once every posting is on the finalized head by c_S, and every wait ends within a round of it", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.option(fc.bigInt({ min: 0n, max: 5_000n })),
+        fc.option(fc.bigInt({ min: 0n, max: 5_000n })),
+        fc.option(fc.bigInt({ min: 0n, max: 5_000n })),
+        fc.bigInt({ min: 0n, max: 2_000n }),
+        async (firstAt, secondAt, goneAt, ahead) => {
+          const w = world({
+            postings: (t) => (goneAt !== null && t >= goneAt ? undefined : [POSTING, SECOND]),
+            finalized: () => [
+              ...(firstAt === null ? [] : [on(firstAt)]),
+              ...(secondAt === null ? [] : [on(secondAt, SECOND)]),
+            ],
+            chainAhead: ahead,
+          });
+          const result: RecordWait = await waitForRecord(w.io, SEND);
+          const end = START + w.elapsed();
+          if (result === "recorded") {
+            expect(firstAt !== null && firstAt <= w.elapsed()).toBe(true);
+            expect(secondAt !== null && secondAt <= w.elapsed()).toBe(true);
+            expect(end).toBeLessThanOrEqual(SEND);
+            if (ahead <= WALLET_HOLD_MARGIN) expect(end + ahead).toBeLessThanOrEqual(SEND);
+          }
+          if (result === "gone") expect(goneAt !== null && goneAt <= w.elapsed()).toBe(true);
+          expect(end).toBeLessThanOrEqual(SEND + POLL);
+          for (const record of w.made) expect(record).toEqual(new Uint8Array(record.length));
         },
       ),
       { numRuns },

@@ -29,7 +29,7 @@ import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { Declined, PostingOffer } from "./posting-offer.tsx";
-import { POSTING_REQUEST_MS, POSTING_SEND_MARGIN } from "./posting.ts";
+import { POSTING_REQUEST_MS, POSTING_SEND_MARGIN, type RecordWait } from "./posting.ts";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
@@ -167,9 +167,9 @@ export interface ElectionSource {
    * contract path, the only path a posting delivers by ([[delivery]],
    * Direct submit), answering `recorded` only once every one is recorded by
    * the contract, with its deadlines read from `cutoffs`, the poll's force
-   * cutoff `c_L` and, for a late run, the last-offer and send cutoffs `c_E`
-   * and `c_S`, a late run made only where `late` says the voter was told it
-   * is best effort ([[posting-relay]], Outcome, The ballot's own deadline);
+   * cutoff `c_L` and, for a late run, the last-offer cutoff `c_E`, a late
+   * run made only where `late` says the voter was told it is best effort
+   * ([[posting-relay]], Outcome, The ballot's own deadline);
    * absent while the build has no
    * contract path, and then no posting is offered. The caller zeroes the
    * records once this settles.
@@ -200,6 +200,19 @@ export interface ElectionSource {
     cutoffs: PostingCutoffs,
     late: boolean,
   ) => Promise<WalletAnswer>;
+  /**
+   * Waits, without the election's lock, until the board records the posting
+   * records `postings` makes afresh for each read, at the L2's finalized
+   * head, at a run's read cadence, until `send`, the send cutoff `c_S`, or
+   * until `ended` says the page gave the wait up (`waitForRecord`;
+   * [[posting-relay]], The ballot's own deadline, Sending after a run);
+   * absent where `post` is.
+   */
+  readonly awaitPosted?: (
+    postings: () => Promise<readonly Uint8Array[] | undefined>,
+    send: bigint,
+    ended: () => boolean,
+  ) => Promise<RecordWait>;
   /**
    * The election's lock across this origin's tabs (`electionLock`), held
    * from a posting's check through its posting and by every delivery and
@@ -1465,6 +1478,77 @@ export function Ballot({
   }
 
   /**
+   * Sends the ballot of a cast whose every seat the wait after a run found
+   * receipted or its posting recorded (`waitForRecord`), taking the
+   * election's lock only now, and only while the wait still stands and the
+   * cast is still kept unsent: neither declined nor erased since, which
+   * leaves a seat with nothing, nor boarded (Sending after a run; T-25,
+   * T-52). A wait and a run that both find the record send the identical
+   * bytes, at worst a repeat the board answers as this ballot.
+   */
+  function sendAfterWait(sending: Sending, ended: () => boolean) {
+    const mine = ++asked.current;
+    const current = () => asked.current === mine;
+    let shown = false;
+    void (async () => {
+      let next: Step | undefined;
+      try {
+        next = await locked(async () => {
+          if (ended()) return undefined;
+          const read = await source.casts(electionId, sending.tier);
+          if (read.kind === "unreadable") return undefined;
+          const cast = read.casts.find((c) => equalBytes(c.ballot, sending.ballot));
+          if (
+            cast === undefined ||
+            cast.boarded !== undefined ||
+            cast.shares.some((share) => "erased" in share)
+          )
+            return undefined;
+          shown = true;
+          return sendPosted(sending, current);
+        });
+      } catch {
+        // Once the screen says it is sending, a failure says it wasn't sent.
+        next = shown
+          ? { kind: "unsent", reason: "unreachable", sending: { ...sending, undelivered: [] } }
+          : undefined;
+      }
+      if (next !== undefined && current()) setStep(next);
+    })();
+  }
+
+  // Sending after a run ([[posting-relay]], The ballot's own deadline): while
+  // the offer stands for a cast whose parts a run may have handed out, the
+  // page waits for them to be recorded, with no lock and no offer of its own,
+  // and sends the ballot once they are (`waitForRecord`). Choosing anything
+  // on the offer ends it; a run that falls back again starts it anew.
+  const waitingFor = step.kind === "offer" && step.handed === true ? step.sending : undefined;
+  // The cast the wait is under way for, which the offer says it is.
+  const [watched, setWatched] = useState<Sending | undefined>(undefined);
+  useEffect(() => {
+    const awaitPosted = posting === undefined ? undefined : source.awaitPosted;
+    if (waitingFor === undefined || awaitPosted === undefined) return;
+    let ended = false;
+    setWatched(waitingFor);
+    void (async () => {
+      const outcome = await awaitPosted(
+        async () => {
+          const checked = await postable(waitingFor);
+          return "kind" in checked ? undefined : checked.postings;
+        },
+        cutoffs().send,
+        () => ended,
+      ).catch((): RecordWait => "ended");
+      if (ended) return;
+      setWatched(undefined);
+      if (outcome === "recorded") sendAfterWait(waitingFor, () => ended);
+    })();
+    return () => {
+      ended = true;
+    };
+  }, [waitingFor]);
+
+  /**
    * The voter left the ballot rather than post its missing parts: their
    * `ct_i` and `m_i` are erased from this device's record and every `m_i`
    * from the worker's seals ([[delivery]], Client rule 4; T-18), and the
@@ -1582,6 +1666,7 @@ export function Ballot({
           lateWallet={walletSays === "late"}
           halt={halted()}
           closed={offerClosed()}
+          watching={watched === sending ? formatTime(locale, cutoffs().send) : undefined}
         />
       );
     }

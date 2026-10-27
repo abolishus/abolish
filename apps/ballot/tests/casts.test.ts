@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  answeredCast,
   type CastAsked,
   castAsAsked,
   type CastRecord,
@@ -832,6 +833,63 @@ describe("an unsent cast", () => {
         expect(unsent.undelivered.map(({ seat }) => seat)).toEqual(
           newest.shares.filter((share) => "m" in share).map(({ seat }) => seat),
         );
+      }),
+      { numRuns },
+    );
+  });
+});
+
+describe("an answered cast", () => {
+  const definition = DECODED.definition_hash;
+  const boarded = (n: bigint, list = receipted()): CastRecord => ({
+    ballot: naming(n),
+    l1Number: n,
+    shares: list,
+    boarded: boardedFor(naming(n)),
+  });
+
+  test("is none for no casts, and for a newest the board never took, whatever came before it", () => {
+    expect(answeredCast([], definition)).toBeUndefined();
+    const newest: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: shares() };
+    expect(answeredCast([newest], definition)).toBeUndefined();
+    // The earlier one is in, but the newest is unsent, declined or erased: only it is the voter's last.
+    expect(answeredCast([boarded(9n), newest], definition)).toBeUndefined();
+    const declined: CastRecord = { ballot: naming(10n), l1Number: 10n, shares: erased() };
+    expect(answeredCast([boarded(9n), declined], definition)).toBeUndefined();
+  });
+
+  test.each(CORE_VECTORS.map((v) => [v.id, v] as const))(
+    "is the tracking code shown before the cast, once the board took it (%s)",
+    (_, v) => {
+      const ballot = recordOf(v);
+      const decoded = decodeBallot(ballot, 3);
+      const cast: CastRecord = {
+        ballot,
+        l1Number: decoded.l1_ref_number,
+        shares: [],
+        boarded: boardedFor(ballot),
+      };
+      expect(hex(answeredCast([cast], decoded.definition_hash) ?? new Uint8Array())).toBe(
+        v.coreHash,
+      );
+    },
+  );
+
+  test("is none for a newest cast of another poll, or bytes that aren't a version-3 record", () => {
+    const other = { ...boarded(10n), ballot: otherDefinition(naming(10n)) };
+    expect(answeredCast([other], definition)).toBeUndefined();
+    const torn = { ...boarded(10n), ballot: naming(10n).subarray(1) };
+    expect(answeredCast([torn], definition)).toBeUndefined();
+    expect(answeredCast([boarded(10n)], otherDefinition(BALLOT).subarray(3, 35))).toBeUndefined();
+  });
+
+  test("is said exactly when the newest cast is boarded, and then never left unsent (fast-check)", () => {
+    fc.assert(
+      fc.property(casts, (held) => {
+        const answered = answeredCast(held, definition);
+        expect(answered !== undefined).toBe(held.at(-1)?.boarded !== undefined);
+        // A cast left to finish and one said to be in are never the same.
+        if (answered !== undefined) expect(unsentCast(held, definition)).toBeUndefined();
       }),
       { numRuns },
     );

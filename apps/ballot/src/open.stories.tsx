@@ -1,4 +1,6 @@
 import {
+  cellCoreHash,
+  decodeBallot,
   decodeShareReceipt,
   encodeBoardEntry,
   encodeShareReceipt,
@@ -14,6 +16,7 @@ import { I18nProvider } from "@abolishus/ui";
 import { App } from "./app.tsx";
 import type { Backer } from "./backup-offer.tsx";
 import type {
+  CastRecord,
   CastsRead,
   CheckedReceipt,
   DeclinePostingOutcome,
@@ -2351,6 +2354,7 @@ export const RepeatReceiptsBoarded: Story = {
 const RECORDED = fromHex(
   (RECORDS as { ballots: { encoding: string }[] }).ballots[0]?.encoding ?? "",
 );
+const RECORDED_BALLOT = decodeBallot(RECORDED, 3);
 const RECORDED_POLL: CheckedElection = {
   ...POLL_OF_QUESTIONS,
   definitionHash: toHex(RECORDED.subarray(3, 35)),
@@ -2483,6 +2487,76 @@ export const ResumedOfAnotherPoll: Story = {
     ).toBeVisible();
     await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
     await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+const BOARDED_RECORDED: CastRecord = {
+  ballot: RECORDED,
+  l1Number: 7n,
+  shares: RECORDED_SHARES.slice(1),
+  boarded: { entry: new Uint8Array(8), link: new Uint8Array(32) },
+};
+const ANSWERED = "You've already answered this poll";
+
+export const AnsweredOnOpening: Story = {
+  name: "A cast the board took opens on the answered screen, and changing starts afresh",
+  args: {
+    source: unsentSource(RECORDED_POLL, { held: { kind: "read", casts: [BOARDED_RECORDED] } }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: ANSWERED })).toHaveFocus();
+    // The tracking code of the cast this device recorded, shown before it was cast.
+    await expect(
+      canvas.getByRole("figure", { name: "Tracking code of your sealed ballot" }),
+    ).toHaveTextContent(
+      toHex(
+        cellCoreHash({
+          definitionHash: fromHex(RECORDED_POLL.definitionHash),
+          ballotVersion: 3,
+          cell: RECORDED_BALLOT.cell,
+          vss: RECORDED_BALLOT.committed_vote.vss,
+          shareHashes: RECORDED_BALLOT.committed_vote.share_hashes,
+        }),
+      ),
+    );
+    await userEvent.click(canvas.getByRole("button", { name: "Change my answers" }));
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    // Nothing chosen carries over, and nothing left the device on opening.
+    for (const option of canvas.queryAllByRole("radio")) await expect(option).not.toBeChecked();
+    await expect(mocks(args.source).deliver).not.toHaveBeenCalled();
+    await expect(mocks(args.source).send).not.toHaveBeenCalled();
+  },
+};
+
+export const AnsweredOfAnotherPoll: Story = {
+  name: "A boarded cast naming another poll's definition opens on the questions",
+  args: {
+    source: unsentSource(POLL_OF_QUESTIONS, { held: { kind: "read", casts: [BOARDED_RECORDED] } }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: ANSWERED })).toBeNull();
+  },
+};
+
+export const AnsweredThenUnsent: Story = {
+  name: "A later cast never sent is offered before saying the poll was answered",
+  args: {
+    source: unsentSource(RECORDED_POLL, {
+      held: {
+        kind: "read",
+        casts: [BOARDED_RECORDED, { ballot: RECORDED, l1Number: 8n, shares: RECORDED_SHARES }],
+      },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND }),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: ANSWERED })).toBeNull();
   },
 };
 

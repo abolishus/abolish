@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { type Answers, pickLanguage, questionsOf, votesOf } from "./answers.ts";
 import {
+  answeredCast,
   type Boarded,
   type CastAsked,
   type CastsRead,
@@ -35,6 +36,7 @@ import { AnswerQuestions } from "./questions.tsx";
 import { checkReceiptEntry, type ReceiptAnswer } from "./receipts.ts";
 import { type Held, Register, type Registrar, RegisterWaiting } from "./register.tsx";
 import {
+  Answered,
   Opened,
   Sealed,
   SealStopped,
@@ -493,6 +495,7 @@ export function BrokenLink() {
 type Step =
   | { readonly kind: "resuming" }
   | { readonly kind: "answering" }
+  | { readonly kind: "answered"; readonly trackingCode: string }
   | { readonly kind: "finding" }
   | { readonly kind: "sealing" }
   | {
@@ -696,13 +699,17 @@ export function Ballot({
    * can't be read offer nothing here: the cast's own read stops on them.
    * Once the poll's posting cutoff passed, every unreceipted seat's `ct_i`
    * and `m_i` are erased first, and a cast holding an erased seat is never
-   * offered ([[delivery]], Client rule 4).
+   * offered ([[delivery]], Client rule 4). With nothing to finish, a cast
+   * the board took opens on "You've already answered" (P2-25 part 3).
    */
   async function resume(): Promise<Step> {
     const c = cutoff();
     // The chain's time, read at most once, and only for a tier that keeps a
     // share past the cutoff by this device's clock: most visits read nothing.
     let chain: Promise<LoadedChainTime> | undefined;
+    // A cast the board took, in the first of the poll's tiers that has one:
+    // said only once no tier has a cast left to finish, which comes first.
+    let answered: Uint8Array | undefined;
     for (const tier of election.tiers) {
       let held = await source.casts(electionId, tier);
       if (held.kind === "unreadable") continue;
@@ -720,7 +727,10 @@ export function Ballot({
         }
       }
       const unsent = unsentCast(held.casts, definitionHash);
-      if (unsent === undefined) continue;
+      if (unsent === undefined) {
+        answered ??= answeredCast(held.casts, definitionHash);
+        continue;
+      }
       if (unsent === "other-election") return stopped("cast-faulty");
       const { ballot, trackingCode, undelivered } = unsent;
       return {
@@ -729,7 +739,9 @@ export function Ballot({
         sending: { ballot, tier, trackingCode: toHex(trackingCode), undelivered, resumed: true },
       };
     }
-    return { kind: "answering" };
+    return answered === undefined
+      ? { kind: "answering" }
+      : { kind: "answered", trackingCode: toHex(answered) };
   }
 
   /**
@@ -1393,6 +1405,8 @@ export function Ballot({
           onSeal={seal}
         />
       );
+    case "answered":
+      return <Answered poll={poll} trackingCode={step.trackingCode} onChange={again} />;
     case "resuming":
     case "finding":
     case "sealing":

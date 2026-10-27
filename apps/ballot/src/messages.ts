@@ -378,6 +378,17 @@ const enUS = {
   sentUnsignedTitle: "What this device checked",
   sentUnsigned:
     "The board's answer isn't signed yet, so it is the board's word. Later, check on the board from another device that your tracking code is there.",
+  // A poll this device already answered (sealed.tsx, Answered).
+  answeredTitle: "You've already answered this poll",
+  answered:
+    "This device sent your sealed ballot for this poll, and the public board took it. You can change your answers until the poll closes: a new ballot from this device replaces your earlier one, and only your last one counts.",
+  answeredChange: "Change my answers",
+  answeredFreshTitle: "You'll start fresh",
+  answeredFresh:
+    "Changing them means answering every question again, starting from nothing chosen. This device doesn't keep how you answered, so no one who picks it up can see that here. To keep your earlier answers, there's nothing to do.",
+  answeredPressuredTitle: "If someone pressured you",
+  answeredPressured:
+    "You can change your answers later, somewhere private, and only your last ones count.",
   revoteExplained:
     "You can change your answers until the poll closes. A new ballot from this device replaces this one.",
   sendRejectedTitle: "The board refused your ballot",

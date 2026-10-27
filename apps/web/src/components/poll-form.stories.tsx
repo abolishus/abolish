@@ -436,6 +436,39 @@ export const OptionControlsPhone: Story = {
   },
 };
 
+export const RuleChoicesPhone: Story = {
+  args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    const first = within(await canvas.findByRole("region", { name: "Question 1" }));
+    // The five rules are one column of full-width choices, where they
+    // wrapped two, one, one and one at their words' widths (P2-29, creating
+    // a poll's iteration 6).
+    const choices = first.getAllByRole("radio").map((radio) => {
+      const label = radio.closest("label");
+      if (label === null) throw new Error("a rule without its label");
+      return label.getBoundingClientRect();
+    });
+    await expect(choices).toHaveLength(5);
+    const field = first
+      .getByRole("textbox", { name: "What do you want to ask?" })
+      .getBoundingClientRect();
+    for (const [i, box] of choices.entries()) {
+      await expect(box.left).toBe(field.left);
+      await expect(box.width).toBe(field.width);
+      if (i > 0) await expect(box.top).toBeGreaterThan(choices[i - 1]?.bottom ?? 0);
+    }
+    // The preview is framed by the everyday register's soft rule, not the
+    // civic record's heavy one.
+    const preview = await canvas.findByRole("complementary", { name: "What people will see" });
+    const frame = within(preview).getByText("Harbor library hours").parentElement?.parentElement;
+    if (frame === null || frame === undefined) throw new Error("no preview frame");
+    await expect(getComputedStyle(frame).borderTopWidth).toBe("1px");
+  },
+};
+
 export const ReviewPhone: Story = {
   args: { client: savedDraft(), id: ID, challenge: fakeChallenge() },
   globals: { viewport: { value: "phone", isRotated: false } },
@@ -698,6 +731,12 @@ export const ProblemsInAQuestion: Story = {
       "Question 2: These numbers don't fit the options: an answer must be able to pick at least one, and no more than there are.",
       "Question 2: Another option of this question says the same. People couldn't tell them apart.",
     ]);
+    // Apart, so problems that wrap don't read as one paragraph (P2-29,
+    // creating a poll's iteration 6).
+    const [one, two] = within(summary)
+      .getAllByRole("listitem")
+      .map((item) => item.getBoundingClientRect());
+    await expect((two?.top ?? 0) - (one?.bottom ?? 0)).toBeGreaterThanOrEqual(8);
     await expect(writes(args.client)).toEqual([]);
   },
 };

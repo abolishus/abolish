@@ -334,7 +334,10 @@ function QuestionFields({
               max: rule === "exactly" || rule === "upTo" ? Math.max(max, 2) : max,
             });
           }}
-          className="flex flex-wrap gap-2"
+          // One column of full-width choices on a phone, where five boxes of
+          // their words' widths wrapped two, one, one and one (P2-29, creating
+          // a poll's iteration 6).
+          className="grid gap-2 sm:flex sm:flex-wrap"
         >
           {ANSWER_RULES.map((r) => (
             <Label
@@ -472,7 +475,9 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
   const closesAt = closesAtOf(form);
   const placeholder = "text-muted-foreground italic";
   return (
-    <div className="grid gap-6 border-2 border-foreground p-5 sm:p-6">
+    // The everyday register's soft rule, not the civic record's heavy frame
+    // (P2-29, creating a poll's iteration 6).
+    <div className="grid gap-6 border border-border p-5 sm:p-6">
       <div className="grid gap-2">
         <p
           className={cn(
@@ -1103,7 +1108,9 @@ export function PollFormPage({
                 {t(errorsStopped === "save" ? "pollFormErrorsTitle" : "pollFormSubmitErrorsTitle")}
               </h2>
               <p className="m-0">{t("pollFormErrorsLede")}</p>
-              <ul className="m-0 grid list-none p-0">
+              {/* Apart, so problems that wrap don't read as one paragraph (P2-29,
+                  creating a poll's iteration 6). */}
+              <ul className="m-0 grid list-none gap-2 p-0">
                 {errors.map((e) => (
                   <li key={`${e.id}-${e.problem}`}>
                     <a

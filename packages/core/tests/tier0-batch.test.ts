@@ -893,6 +893,8 @@ describe("selection", () => {
     );
   });
 
+  // 20,000 shuffles draw at least 380,000 indices from `crypto.getRandomValues`, a
+  // few seconds on a loaded CI runner, past the default five.
   test("chooses each item about equally often", () => {
     // 5 of 20, 20,000 draws: each item's expected count is 5,000, with a
     // standard deviation near 61; 6 deviations either way fails by chance
@@ -902,7 +904,7 @@ describe("selection", () => {
     for (let i = 0; i < 20_000; i++)
       for (const c of selectUniformly(items, 5)) counts[c] = (counts[c] ?? 0) + 1;
     for (const c of counts) expect(Math.abs(c - 5_000)).toBeLessThan(6 * 61);
-  });
+  }, 60_000);
 });
 
 describe("the queue's state", () => {

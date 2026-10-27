@@ -5,7 +5,7 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
 import { type AnchorRow, anchorRows, type BoardRow, boardRows } from "../board.ts";
-import { ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import { ACTIVITY_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
 import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
@@ -212,7 +212,7 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
 }
 
 /**
- * The board's latest checkpoints, checked (src/board.ts), or `undefined` when
+ * The board's latest `ACTIVITY_PAGE` checkpoints, checked (src/board.ts), or `undefined` when
  * one the server sent fails its checks: the page then shows the entries
  * without them.
  */
@@ -273,7 +273,7 @@ export async function loadBoardPage(
           if (outOfRange(error)) return undefined;
           throw error;
         }),
-      api.board.getCheckpoints({ electionId, limit: String(ANCHOR_PAGE) }),
+      api.board.getCheckpoints({ electionId, limit: String(ACTIVITY_PAGE) }),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };

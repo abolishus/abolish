@@ -5,7 +5,7 @@ import { PollBoard } from "../components/poll-board.tsx";
 import { Notice } from "../components/site-layout.tsx";
 import { fetchBoardPage } from "../data.ts";
 import { catalogs } from "../messages.ts";
-import { ANCHOR_PAGE, BOARD_PAGE } from "../page-sizes.ts";
+import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE } from "../page-sizes.ts";
 import { titles } from "../titles.ts";
 import { isCanonicalU64, isElectionId, searchText } from "../values.ts";
 
@@ -55,6 +55,7 @@ export const Route = createFileRoute("/polls/$electionId_/board")({
           rows={page.kind === "board" ? page.rows : undefined}
           pageSize={BOARD_PAGE}
           anchors={page.anchors}
+          activityPage={ACTIVITY_PAGE}
           anchorPage={ANCHOR_PAGE}
         />
       );

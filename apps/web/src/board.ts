@@ -149,3 +149,33 @@ export function anchorRows(
   }
   return rows;
 }
+
+export interface ActivityBar {
+  /** The anchoring period. */
+  readonly segment: number;
+  /** Entries the board added in it, as a canonical decimal `u64`. */
+  readonly added: string;
+}
+
+/**
+ * Entries added in each period that `anchors` (checked by `anchorRows`,
+ * latest first) has a checkpoint for, earliest first: each checkpoint's size
+ * less the one before it. Every period that adds entries gets a checkpoint
+ * (docs/spec/board.md, Segments and checkpoints), so the periods between two
+ * added none. The earliest of `anchors` has a count only when the list is the
+ * whole board's, fewer than the `asked` the API was asked for: otherwise the
+ * checkpoint before it is unknown and it is left out. These are differences
+ * of the server's claims, never more than they are (T-23, T-24).
+ */
+export function activityBars(anchors: readonly AnchorRow[], asked: number): readonly ActivityBar[] {
+  const bars: ActivityBar[] = [];
+  for (const [i, anchor] of anchors.entries()) {
+    const before = anchors[i + 1];
+    if (before === undefined && anchors.length >= asked) break;
+    bars.push({
+      segment: anchor.segment,
+      added: (BigInt(anchor.size) - BigInt(before?.size ?? "0")).toString(),
+    });
+  }
+  return bars.reverse();
+}

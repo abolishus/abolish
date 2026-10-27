@@ -630,6 +630,24 @@ const enUS = {
     "Our server sent entries for this poll's board that don't check: one doesn't decode under the poll's definition, names another poll or sits at another place. This page shows none of them rather than show a board it can't read. Its board is unaffected wherever else it is copied.",
   fingerprintHead: "Fingerprint of the chain head {prefix}",
   fingerprintEntry: "Fingerprint of entry {entry}",
+  boardActivityMark: "Activity",
+  boardActivityTitle: "Entries per period",
+  boardActivityLede:
+    "How many entries the board added in each of its latest anchoring periods, an hour each, worked out from the checkpoints below: each count is how many more entries a period's checkpoint holds than the checkpoint before it. A period with no checkpoint added nothing.",
+  boardActivityClaim:
+    "These counts are worked out here from our server's checkpoints, so they are only as good as those are. The verifier counts every period from the board and its anchors.",
+  boardActivityChart:
+    "Entries per period, periods {first} to {last}: {total} entries in all. Every period is in the table below.",
+  boardActivityPeriod: "Period {segment}",
+  boardActivityMost: "Most in one period: {count}",
+  boardActivityTable: "The count for each period",
+  boardActivityCaption: "Entries added in each period, earliest first",
+  boardActivityColumnPeriod: "Period",
+  boardActivityColumnAdded: "Entries added",
+  boardActivityNone:
+    "No period's entries can be counted yet: that takes a checkpoint, and the one before it or the board's first.",
+  boardActivityUndecodable:
+    "Without checkpoints that check, this page can't count the board's entries per period.",
   boardAnchorsMark: "Anchors",
   boardAnchorsTitle: "Checkpoints for Ethereum",
   boardAnchorsLede:

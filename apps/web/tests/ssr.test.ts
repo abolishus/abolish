@@ -535,9 +535,26 @@ describe("board page", () => {
         expect(page).toContain(toHex(checkpoint.root));
       }
       expect(page).toContain("that is for the verifier, which reads the anchor itself");
-      // As many as the page asked for: there may be earlier ones.
-      expect(page).toContain("Only the latest 6 checkpoints are shown here.");
+      // Fewer than the page asked for, and all of them shown: none earlier.
+      expect(page).not.toContain("Only the latest");
     }
+  });
+
+  test("counts each period's entries from the checkpoints, as SVG attributes only", async () => {
+    const html = await (await get(`/polls/${ID}/board?from=25`)).text();
+    expect(html).toContain(
+      'aria-label="Entries per period, periods 0 to 5: 30 entries in all. Every period is in the table below."',
+    );
+    const table = html.slice(html.indexOf("Entries added in each period, earliest first"));
+    const counts = [
+      ...table.matchAll(/<th scope="row"[^>]*>(\d+)<\/th><td[^>]*><data value="(\d+)"/g),
+    ];
+    expect(counts.map((m) => [Number(m[1]), Number(m[2])])).toEqual(
+      [0, 1, 2, 3, 4, 5].map((s) => [s, 5]),
+    );
+    const bars = [...html.matchAll(/<rect [^>]*height="([\d.]+)"[^>]*class="fill-primary"/g)];
+    expect(bars).toHaveLength(6);
+    expect(new Set(bars.map((m) => m[1])).size).toBe(1);
   });
 
   test("refuses checkpoints that name another poll, showing none of them (T-31)", async () => {
@@ -1784,7 +1801,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 165, css: 40, fonts: 58 },
   "/account": { html: 6, js: 191, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 246, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 247, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 166, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

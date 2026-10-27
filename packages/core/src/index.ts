@@ -24,6 +24,8 @@ export {
   archiveLocator,
   archiveManifestSequence,
   type ArchiveOptions,
+  ArchiveResumeError,
+  type ArchiveResumeErrorCode,
   type ArchiveRun,
   type ArweaveClient,
 } from "./archiving.ts";

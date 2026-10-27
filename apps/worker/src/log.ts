@@ -5,6 +5,7 @@
 
 import type {
   AnchorFindingCode,
+  ArchiveResumeErrorCode,
   CloseRoundsReport,
   OpenRunsReport,
   PollOpenReport,
@@ -68,9 +69,11 @@ export interface AnchorFindingLine {
 /**
  * What an archive run did, in counts: objects first seen, transactions
  * confirmed, manifests written, uploads posted and objects refused, with the
- * sequence of the manifest the locator names once one does. Or that another
- * run held the archive's lock. Everything counted is public: the objects are
- * the board's, and the uploads are on Arweave.
+ * manifests read back from the anchor's chain after a wipe when there were
+ * any, and the sequence of the manifest the locator names once one does. Or
+ * that another run held the archive's lock, or why the anchor's chain
+ * couldn't be taken up (core's ArchiveResumeErrorCode). Everything counted is
+ * public: the objects are the board's, and the uploads are on Arweave.
  */
 export type ArchiveLine =
   | {
@@ -80,9 +83,15 @@ export type ArchiveLine =
       readonly written: number;
       readonly posted: number;
       readonly refused: number;
+      readonly resumed?: number;
       readonly locator?: number;
     }
-  | { readonly queue: "{archive}"; readonly finding: "archive-busy" };
+  | { readonly queue: "{archive}"; readonly finding: "archive-busy" }
+  | {
+      readonly queue: "{archive}";
+      readonly finding: "archive-resume";
+      readonly reason: ArchiveResumeErrorCode;
+    };
 
 /**
  * What a Tier 0 boundary did to one published group. The group ID is public

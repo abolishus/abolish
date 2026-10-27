@@ -277,3 +277,38 @@ test("fails a run that refused an object, and still posts the rest", async () =>
   ]);
   expect(arweave.txs.size).toBe(before);
 });
+
+test("after a wipe, takes up the anchor's chain and logs it, and fails a run that can't", async () => {
+  await db.admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM archive_transactions`;
+    await tx`DELETE FROM archive_objects`;
+    await tx`DELETE FROM archive_manifests`;
+  });
+  const before = arweave.txs.size;
+  // A locator this worker never writes: the run says why and posts nothing.
+  chain.locators.push(new Uint8Array(70));
+  await archives.add("archive", {});
+  expect(await outcome("{archive}")).toEqual([
+    { queue: "{archive}", finding: "archive-resume", reason: "locator" },
+    { queue: "{archive}", outcome: "failed", error: "archive-findings", ms: expect.any(Number) },
+  ]);
+  chain.locators.pop();
+  // The anchor's own: manifest 0 read back, the board's objects registered
+  // again and marked listed there, nothing posted.
+  await archives.add("archive", {});
+  expect(await outcome("{archive}")).toEqual([
+    {
+      queue: "{archive}",
+      registered: 4,
+      confirmed: 0,
+      written: 0,
+      posted: 0,
+      refused: 0,
+      resumed: 1,
+      locator: 0,
+    },
+    completed("{archive}"),
+  ]);
+  expect(arweave.txs.size).toBe(before);
+});

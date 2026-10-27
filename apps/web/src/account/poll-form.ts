@@ -367,6 +367,11 @@ export interface FieldError {
   readonly problem: FormProblem;
   /** The question it is in, counting from 1, so the summary can say. */
   readonly question?: number;
+  /**
+   * The option it is in, counting from 1 within its question, so two
+   * options' problems don't read the same (P2-29, creating a poll's iteration 11).
+   */
+  readonly option?: number;
 }
 
 const bytes = (s: string) => new TextEncoder().encode(s).length;
@@ -401,9 +406,19 @@ function placeProblem(value: string): FormProblem | undefined {
  */
 export function fieldErrors(form: PollForm): FieldError[] {
   const errors: FieldError[] = [];
-  const add = (id: string, problem: FormProblem | undefined, question?: number) => {
-    if (problem !== undefined)
-      errors.push(question === undefined ? { id, problem } : { id, problem, question });
+  const add = (
+    id: string,
+    problem: FormProblem | undefined,
+    question?: number,
+    option?: number,
+  ) => {
+    if (problem === undefined) return;
+    errors.push({
+      id,
+      problem,
+      ...(question === undefined ? {} : { question }),
+      ...(option === undefined ? {} : { option }),
+    });
   };
   add(fieldId.title, textProblem(form.title, TEXT_BYTES.title, "titleMissing"));
   add(fieldId.description, textProblem(form.description, TEXT_BYTES.description, undefined));
@@ -437,11 +452,13 @@ export function fieldErrors(form: PollForm): FieldError[] {
         textProblem(label, TEXT_BYTES.label, "labelMissing") ??
           (again ? "labelRepeated" : undefined),
         n,
+        j + 1,
       );
       add(
         fieldId.optionDescription(q.key, o.key),
         textProblem(o.description, TEXT_BYTES.optionDescription, undefined),
         n,
+        j + 1,
       );
     });
     if (m < 2) add(fieldId.addOption(q.key), "tooFewOptions", n);

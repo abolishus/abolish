@@ -1299,6 +1299,7 @@ export const esUS: Messages = {
   pollFormSubmitErrorsTitle: "Tu encuesta no se envió",
   pollFormErrorsLede: "Corrige esto y vuelve a guardar:",
   pollFormInQuestion: "Pregunta {n}: {problem}",
+  pollFormInOption: "Pregunta {n}, opción {o}: {problem}",
   pollForm_titleMissing: "Ponle un título a tu encuesta.",
   pollForm_tooLong: "Esto es demasiado largo.",
   pollForm_unstorable: "Esto contiene un carácter que no se puede guardar. Vuelve a escribirlo.",

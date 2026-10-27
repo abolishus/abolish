@@ -259,7 +259,7 @@ describe("the poll form's checks", () => {
     );
   });
 
-  test("name each problem on its field, in page order, with its question", () => {
+  test("name each problem on its field, in page order, with its question and option", () => {
     expect(fieldErrors(form())).toEqual([]);
     const q = question({
       key: "q2",
@@ -271,8 +271,8 @@ describe("the poll form's checks", () => {
     expect(fieldErrors(form({ title: "", questions: [question(), q] }))).toEqual([
       { id: fieldId.title, problem: "titleMissing" },
       { id: fieldId.max("q2"), problem: "rangeInvalid", question: 2 },
-      { id: fieldId.label("q2", "Yes"), problem: "labelRepeated", question: 2 },
-      { id: fieldId.label("q2", ""), problem: "labelMissing", question: 2 },
+      { id: fieldId.label("q2", "Yes"), problem: "labelRepeated", question: 2, option: 2 },
+      { id: fieldId.label("q2", ""), problem: "labelMissing", question: 2, option: 3 },
     ]);
     expect(problems(form({ questions: [question(), question({ key: "b" })] }))).toEqual([
       "questionRepeated",

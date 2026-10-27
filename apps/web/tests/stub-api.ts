@@ -10,6 +10,7 @@ import {
   BOARD_TREE,
   boardEntryHash,
   chainLink,
+  consistencyProof,
   decodeBoardEntry,
   decodeCheckpoint,
   decodeElectionDefinition,
@@ -52,7 +53,6 @@ export const ID = typical.value.election_id;
 /** Known to the stub, but its definition names another election. */
 export const SWAPPED_ID = "ab".repeat(32);
 export const UNKNOWN_ID = "cd".repeat(32);
-export const HEAD = { treeSize: "30", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
 /** A creator profile's public handle, as the log names it. */
 export const PROFILE_HANDLE = "k7qa2mzr5xw3bn4d";
 
@@ -64,7 +64,7 @@ export const LATEST = {
 };
 
 /**
- * The typical poll's board, as many entries as `HEAD` claims: the valid board
+ * The typical poll's board, 30 entries: the valid board
  * vector's payloads under the typical poll's ID, at their positions. The stub
  * serves these entries for every poll, so any other poll's board names
  * another election.
@@ -75,7 +75,7 @@ const boardVector = (
   ) as { boards: { id: string; entries: string[] }[] }
 ).boards.find((b) => b.id === "valid");
 if (boardVector === undefined) throw new Error("vectors missing");
-export const BOARD = Array.from({ length: Number(HEAD.treeSize) }, (_, i) => {
+export const BOARD = Array.from({ length: 30 }, (_, i) => {
   const { payload } = decodeBoardEntry(
     fromHex(boardVector.entries[i % boardVector.entries.length]!),
     1,
@@ -101,6 +101,17 @@ const links = hashes.reduce<Uint8Array[]>(
   (chain, h) => [...chain, chainLink(chain.at(-1) ?? new Uint8Array(32), h)],
   [],
 );
+/** The typical poll's head: its whole board, as the latest checkpoint has it. */
+export const HEAD = {
+  treeSize: String(BOARD.length),
+  chainHead: toHex(links.at(-1)!),
+  root: toHex(merkleRoot(BOARD_TREE, hashes)),
+};
+/**
+ * While set, every consistency proof the stub serves has one hash changed,
+ * as a server showing two histories of one board would (T-24).
+ */
+export const brokenProofs = { on: false };
 export const CHECKPOINTS = Array.from({ length: BOARD.length / 5 }, (_, s) => {
   const size = 5 * (s + 1);
   return toHex(
@@ -462,6 +473,20 @@ export function stubApi(): Server {
         // At most 7 entries an answer, as a page the API cut short by bytes would be.
         const limit = Math.min(Number(url.searchParams.get("limit")), 7);
         return json(200, { entries: BOARD.slice(start, start + limit) });
+      }
+      case "/board/proofs/consistency": {
+        const firstSize = Number(url.searchParams.get("firstSize"));
+        const secondSize = Number(url.searchParams.get("secondSize"));
+        if (firstSize < 1 || firstSize > secondSize || secondSize > BOARD.length)
+          return json(416, {
+            defined: true,
+            code: "OUT_OF_RANGE",
+            status: 416,
+            message: "The requested positions are beyond the board this server holds.",
+          });
+        const path = consistencyProof(BOARD_TREE, hashes.slice(0, secondSize), firstSize);
+        if (brokenProofs.on && path[0] !== undefined) path[0] = path[0].map((b) => b ^ 1);
+        return json(200, { path: path.map(toHex) });
       }
       case "/board/checkpoints": {
         const before = url.searchParams.get("before");

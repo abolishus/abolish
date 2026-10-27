@@ -50,7 +50,17 @@ const base = `/polls/${poll.electionId}/board`;
 
 const meta = {
   component: PollBoard,
-  args: { poll, head, from: "25", rows, pageSize: 25, anchors, activityPage: 24, anchorPage: 6 },
+  args: {
+    poll,
+    head,
+    from: "25",
+    rows,
+    pageSize: 25,
+    anchors,
+    histories: { head: true, anchors: [true, true, true, true, true] },
+    activityPage: 24,
+    anchorPage: 6,
+  },
 } satisfies Meta<typeof PollBoard>;
 
 export default meta;
@@ -97,6 +107,19 @@ export const Default: Story = {
       within(items[5]!).getByRole("figure", { name: "Checkpoint hash, the value to anchor" }),
     ).toHaveTextContent("65".repeat(32));
     await expect(canvas.getByText(/doesn't check that any of them is anchored/)).toBeVisible();
+    // Each consistency proof's verdict beside what it checked (T-24).
+    await expect(
+      canvas.getByText(/^The tree root above and the latest checkpoint's are one history/),
+    ).toBeVisible();
+    await expect(
+      within(items[0]!).getByText(/^Extends the checkpoint after period 7:/),
+    ).toBeVisible();
+    await expect(
+      within(items[4]!).getByText(/^Extends the checkpoint after period 3:/),
+    ).toBeVisible();
+    // The last one shown has no earlier one shown to extend.
+    await expect(within(items[5]!).queryByText(/^Extends/)).toBeNull();
+    await expect(canvasElement.querySelectorAll('[data-history="broken"]')).toHaveLength(0);
     // More than the anchors show.
     await expect(canvas.getByText(/Only the latest 6 checkpoints/)).toBeVisible();
     // Activity: one bar per checkpointed period, the first one's count its whole size.
@@ -136,9 +159,37 @@ export const ActivityCut: Story = {
   },
 };
 
+/**
+ * Consistency proofs that fail: the head and the latest checkpoint, and the
+ * second checkpoint and the third, are two histories. Both say so, as
+ * evidence, and the page shows everything else as before (T-24).
+ */
+export const HistoriesBroken: Story = {
+  args: { histories: { head: false, anchors: [true, false, true, true, true] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(/^The tree root above and the latest checkpoint's are not one history/),
+    ).toBeVisible();
+    const items = within(
+      canvas.getByRole("list", { name: "Checkpoints, latest first" }),
+    ).getAllByRole("listitem");
+    await expect(
+      within(items[0]!).getByText(/^Extends the checkpoint after period 7:/),
+    ).toBeVisible();
+    await expect(
+      within(items[1]!).getByText(
+        /^Doesn't extend the checkpoint after period 6:.*evidence of tampering\.$/,
+      ),
+    ).toBeVisible();
+    await expect(canvasElement.querySelectorAll('[data-history="broken"]')).toHaveLength(2);
+    await expect(canvas.getByRole("table", { name: "Entries 25 to 49 of 100" })).toBeVisible();
+  },
+};
+
 /** Fewer checkpoints than the page asks for: the first is among them. */
 export const FewAnchors: Story = {
-  args: { anchors: anchors.slice(7) },
+  args: { anchors: anchors.slice(7), histories: { head: true, anchors: [true] } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const list = canvas.getByRole("list", { name: "Checkpoints, latest first" });
@@ -149,7 +200,7 @@ export const FewAnchors: Story = {
 
 /** No period has ended since the first entry: nothing to anchor yet. */
 export const NoAnchors: Story = {
-  args: { anchors: [] },
+  args: { anchors: [], histories: { head: undefined, anchors: [] } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const [activity, checkpoints] = canvas.getAllByRole("status");
@@ -157,12 +208,13 @@ export const NoAnchors: Story = {
     await expect(checkpoints).toHaveTextContent("No checkpoint has been taken of this board yet.");
     await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
     await expect(canvas.queryByRole("img", { name: /^Entries per period/ })).toBeNull();
+    await expect(canvas.queryByText(/one history/)).toBeNull();
   },
 };
 
 /** Checkpoints the page refused: none shown, and the entries still are. */
 export const AnchorsRefused: Story = {
-  args: { anchors: undefined },
+  args: { anchors: undefined, histories: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const [activity, checkpoints] = canvas.getAllByRole("status");
@@ -171,6 +223,7 @@ export const AnchorsRefused: Story = {
     await expect(canvas.queryByRole("img", { name: /^Entries per period/ })).toBeNull();
     await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
     await expect(canvas.queryByText(/Only the latest/)).toBeNull();
+    await expect(canvas.queryByText(/one history/)).toBeNull();
     await expect(canvas.getByRole("table", { name: "Entries 25 to 49 of 100" })).toBeVisible();
   },
 };
@@ -200,6 +253,7 @@ export const Empty: Story = {
     from: "0",
     rows: [],
     anchors: [],
+    histories: { head: undefined, anchors: [] },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);

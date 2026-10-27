@@ -55,6 +55,7 @@ export const Route = createFileRoute("/polls/$electionId_/board")({
           rows={page.kind === "board" ? page.rows : undefined}
           pageSize={BOARD_PAGE}
           anchors={page.anchors}
+          histories={page.histories}
           activityPage={ACTIVITY_PAGE}
           anchorPage={ANCHOR_PAGE}
         />

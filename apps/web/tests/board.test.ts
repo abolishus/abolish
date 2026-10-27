@@ -4,7 +4,7 @@ import { encodeCheckpoint } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { activityBars, type AnchorRow, anchorRows, boardRows } from "../src/board.ts";
+import { activityBars, type AnchorRow, anchorRows, boardRows, oneHistory } from "../src/board.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -33,9 +33,27 @@ interface BoardVector {
   entries: string[];
   checkpoints: CheckpointVector[];
 }
+interface ConsistencyVector {
+  size1: string;
+  size2: string;
+  path: string[];
+}
+interface RejectedVector {
+  id: string;
+  kind: string;
+  size1?: string;
+  size2?: string;
+  root1?: string;
+  root2?: string;
+  path: string[];
+}
 const file = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
-) as { entries: EntryVector[]; boards: BoardVector[] };
+) as {
+  entries: EntryVector[];
+  boards: BoardVector[];
+  tree: { roots: string[]; consistency: ConsistencyVector[]; rejected: RejectedVector[] };
+};
 const decodable = file.entries.filter((v) => v.value !== undefined);
 const undecodable = file.entries.filter((v) => v.value === undefined);
 const board = (id: string) => {
@@ -295,5 +313,66 @@ describe("activityBars", () => {
       }),
       runs,
     );
+  });
+});
+
+describe("oneHistory", () => {
+  const { roots, consistency, rejected } = file.tree;
+  // `roots[n - 1]` is the root of the vectors' tree of its first n leaves.
+  const tree = (size: string) => ({ size, root: roots[Number(size) - 1]! });
+
+  test("holds for every published consistency proof", () => {
+    expect(consistency.length).toBeGreaterThan(50);
+    for (const v of consistency)
+      expect(oneHistory(tree(v.size1), tree(v.size2), v.path)).toBe(true);
+  });
+
+  test("fails every published rejected consistency proof", () => {
+    const refused = rejected.filter((v) => v.kind === "consistency");
+    expect(refused.length).toBeGreaterThan(5);
+    for (const v of refused)
+      expect(
+        oneHistory({ size: v.size1!, root: v.root1! }, { size: v.size2!, root: v.root2! }, v.path),
+        v.id,
+      ).toBe(false);
+  });
+
+  test("fails a proof read the wrong way round, or a malformed claim", () => {
+    const v = consistency.find((c) => c.size1 === "3" && c.size2 === "7")!;
+    expect(oneHistory(tree("7"), tree("3"), v.path)).toBe(false);
+    expect(oneHistory({ size: "3", root: "zz" }, tree("7"), v.path)).toBe(false);
+    expect(oneHistory(tree("3"), tree("7"), [...v.path.slice(1), "0g".repeat(32)])).toBe(false);
+  });
+
+  test("fails a proof with any byte of a root or hash changed", () => {
+    const proper = consistency.filter((c) => c.size1 !== c.size2);
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...proper),
+        fc.nat(),
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 1, max: 255 }),
+        (v, which, at, flip) => {
+          const earlier = tree(v.size1);
+          const later = tree(v.size2);
+          const parts = [earlier.root, later.root, ...v.path];
+          const i = which % parts.length;
+          const bytes = fromHex(parts[i]!);
+          bytes[at % 32]! ^= flip;
+          parts[i] = toHex(bytes);
+          const [root1, root2, ...path] = parts;
+          expect(oneHistory({ ...earlier, root: root1! }, { ...later, root: root2! }, path)).toBe(
+            false,
+          );
+        },
+      ),
+      runs,
+    );
+  });
+
+  test("equal sizes are one history only with equal roots and no path", () => {
+    expect(oneHistory(tree("5"), tree("5"), [])).toBe(true);
+    expect(oneHistory(tree("5"), { size: "5", root: roots[5]! }, [])).toBe(false);
+    expect(oneHistory(tree("5"), tree("5"), [roots[0]!])).toBe(false);
   });
 });

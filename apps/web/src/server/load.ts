@@ -4,8 +4,15 @@ import { placeIsWellFormed, type PollTopic } from "@abolishus/core/poll-draft-ru
 import { shortCode } from "@abolishus/core/short-codes";
 import { ORPCError } from "@orpc/client";
 
-import { type AnchorRow, anchorRows, type BoardRow, boardRows } from "../board.ts";
-import { ACTIVITY_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import {
+  type AnchorRow,
+  anchorRows,
+  type BoardRow,
+  boardRows,
+  oneHistory,
+  type TreeClaim,
+} from "../board.ts";
+import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
 import type { CardText, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
@@ -245,6 +252,20 @@ export async function resolveShortLink(api: Api, code: string): Promise<ShortLin
  */
 export type Anchors = readonly AnchorRow[] | undefined;
 
+/**
+ * Whether the trees the board page shows are one history, each by our
+ * server's consistency proof checked here (src/board.ts, `oneHistory`).
+ */
+export interface Histories {
+  /**
+   * The head's tree and the latest checkpoint's, the smaller first; or
+   * `undefined` when there is no checkpoint or the head was read empty.
+   */
+  readonly head: boolean | undefined;
+  /** For each checkpoint the anchors show but the last, whether it extends the next (earlier) one. */
+  readonly anchors: readonly boolean[];
+}
+
 export type BoardPage =
   | {
       readonly kind: "board";
@@ -255,6 +276,8 @@ export type BoardPage =
       /** The entries from `from`, checked; empty at the end of the board. */
       readonly rows: readonly BoardRow[];
       readonly anchors: Anchors;
+      /** `undefined` with `anchors`. */
+      readonly histories: Histories | undefined;
     }
   | {
       /** `from` is past the end of the board as `head` gives it. */
@@ -263,6 +286,7 @@ export type BoardPage =
       readonly head: BoardHead;
       readonly from: string;
       readonly anchors: Anchors;
+      readonly histories: Histories | undefined;
     }
   | { readonly kind: "not-found" }
   | {
@@ -277,6 +301,59 @@ export type BoardPage =
 
 const outOfRange = (error: unknown) =>
   error instanceof ORPCError && error.defined && error.code === "OUT_OF_RANGE";
+
+/**
+ * Whether `earlier` and `later` are one history, by the server's consistency
+ * proof between them. Equal sizes need no proof. A server that refuses one
+ * as out of range claims a tree larger than its board, so the claims fail.
+ */
+async function proveOneHistory(
+  api: Api,
+  electionId: string,
+  earlier: TreeClaim,
+  later: TreeClaim,
+): Promise<boolean> {
+  if (earlier.size === later.size) return oneHistory(earlier, later, []);
+  try {
+    const { path } = await api.board.getConsistencyProof({
+      electionId,
+      firstSize: earlier.size,
+      secondSize: later.size,
+    });
+    return oneHistory(earlier, later, path);
+  } catch (error) {
+    if (outOfRange(error)) return false;
+    throw error;
+  }
+}
+
+/**
+ * The histories of the trees the board page shows: at most `ANCHOR_PAGE`
+ * proofs, all asked for at once. They name only sizes every visitor sees, so
+ * they tell our server nothing a visit didn't (T-10). The head and the
+ * checkpoints are read together, so either may be the larger.
+ */
+async function loadHistories(
+  api: Api,
+  electionId: string,
+  head: BoardHead,
+  anchors: readonly AnchorRow[],
+): Promise<Histories> {
+  const shown = anchors.slice(0, ANCHOR_PAGE);
+  const latest = shown[0];
+  const tree = { size: head.treeSize, root: head.root };
+  const [headHistory, anchorHistories] = await Promise.all([
+    latest === undefined || head.treeSize === "0"
+      ? undefined
+      : BigInt(tree.size) <= BigInt(latest.size)
+        ? proveOneHistory(api, electionId, tree, latest)
+        : proveOneHistory(api, electionId, latest, tree),
+    Promise.all(
+      shown.slice(1).map((earlier, i) => proveOneHistory(api, electionId, earlier, shown[i]!)),
+    ),
+  ]);
+  return { head: headHistory, anchors: anchorHistories };
+}
 
 /**
  * A page of the board of `electionId` from position `from` (a canonical
@@ -310,7 +387,10 @@ export async function loadBoardPage(
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   const anchors = anchorRows(electionId, checkpoints);
-  if (first === undefined) return { kind: "beyond", poll: view.poll, head, from, anchors };
+  const histories = () =>
+    anchors === undefined ? undefined : loadHistories(api, electionId, head, anchors);
+  if (first === undefined)
+    return { kind: "beyond", poll: view.poll, head, from, anchors, histories: await histories() };
   // The API may cut a page short by bytes (T-52); the rest is asked for, so
   // every page holds the same window of the board and the next one starts
   // where it ends. Each answer short of the end holds at least one entry, so
@@ -331,7 +411,15 @@ export async function loadBoardPage(
       ? undefined
       : boardRows(electionId, view.boardEntryVersion, BigInt(from), entries);
   if (rows === undefined) return { kind: "unavailable", problem: "undecodable-entries" };
-  return { kind: "board", poll: view.poll, head, from, rows, anchors };
+  return {
+    kind: "board",
+    poll: view.poll,
+    head,
+    from,
+    rows,
+    anchors,
+    histories: await histories(),
+  };
 }
 
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;

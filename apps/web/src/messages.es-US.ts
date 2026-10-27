@@ -607,6 +607,10 @@ export const esUS: Messages = {
   boardRoot: "Raíz del árbol",
   boardUnanchored:
     "Hasta que un punto de control en L1 cubra estos valores, solo cuentan con la palabra de este servidor. Guárdalos: un tablero posterior que no los extienda es evidencia de manipulación.",
+  boardHeadHistory:
+    "La raíz del árbol de arriba y la del punto de control más reciente son una sola historia: esta página comprobó la prueba de consistencia de nuestro servidor de que el árbol menor es el comienzo del mayor.",
+  boardHeadHistoryBroken:
+    "La raíz del árbol de arriba y la del punto de control más reciente no son una sola historia: la prueba de consistencia de nuestro servidor entre ellas falla. Guarda ambas. Un tablero con dos historias es prueba de manipulación.",
   boardLink: "Leer el tablero, entrada por entrada",
   boardPageEyebrow: "Encuesta {prefix}… · Tablero público",
   boardPageTitle: "El tablero de la encuesta",
@@ -661,7 +665,7 @@ export const esUS: Messages = {
   boardAnchorsLede:
     "Después de cada hora que agregó entradas, nuestro servidor toma un punto de control del tablero: cuántas entradas tiene, la cabeza de su cadena y su raíz de Merkle al final de esa hora. El anclaje pone su hash en el contrato de anclaje en Ethereum, y desde entonces una entrada alterada ya no coincide con él. Un punto de control se toma antes de anclarse, y hasta que el anclaje lo tenga, solo cuenta con nuestra palabra.",
   boardAnchorsClaim:
-    "Estos puntos de control vienen de nuestro servidor. Esta página decodifica cada uno, comprueba que nombra esta encuesta y que cada uno anterior no tiene más entradas, y calcula su hash por su cuenta. No comprueba que ninguno esté anclado ni que coincida con el tablero: eso lo determina el verificador, que lee el anclaje por su cuenta.",
+    "Estos puntos de control vienen de nuestro servidor. Esta página decodifica cada uno, comprueba que nombra esta encuesta y que cada uno anterior no tiene más entradas, y calcula su hash por su cuenta. También comprueba las pruebas de consistencia de nuestro servidor de que cada punto de control mostrado extiende el anterior. No comprueba que ninguno esté anclado ni que coincida con las entradas: eso lo determina el verificador, que lee el anclaje y el tablero entero por su cuenta.",
   boardAnchorsList: "Puntos de control, el más reciente primero",
   boardAnchorPeriod: "Después del período {segment}",
   boardAnchorLatest: "El más reciente",
@@ -669,6 +673,10 @@ export const esUS: Messages = {
   boardAnchorHash: "Hash del punto de control, el valor por anclar",
   boardAnchorHead: "Cabeza de la cadena hasta entonces",
   boardAnchorRoot: "Raíz de Merkle hasta entonces",
+  boardAnchorExtends:
+    "Extiende el punto de control después del período {segment}: esta página comprobó la prueba de consistencia de nuestro servidor entre los dos.",
+  boardAnchorBroken:
+    "No extiende el punto de control después del período {segment}: la prueba de consistencia de nuestro servidor entre los dos falla. Guarda ambos. Un tablero con dos historias es prueba de manipulación.",
   boardAnchorsNone: "Todavía no se ha tomado ningún punto de control de este tablero.",
   boardAnchorsMore:
     "Aquí solo se muestran los {count} puntos de control más recientes. El verificador lee cada uno de los anclados, desde el primero.",

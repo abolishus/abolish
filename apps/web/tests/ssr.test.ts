@@ -30,6 +30,7 @@ import { fromHex, toHex } from "../src/values.ts";
 import {
   BALLOT,
   BOARD,
+  brokenProofs,
   CHECKPOINTS,
   CODE,
   CODE_FAILS_ID,
@@ -535,9 +536,57 @@ describe("board page", () => {
         expect(page).toContain(toHex(checkpointHash(checkpoint)));
         expect(page).toContain(toHex(checkpoint.root));
       }
-      expect(page).toContain("that is for the verifier, which reads the anchor itself");
+      expect(page).toContain(
+        "that is for the verifier, which reads the anchor and the whole board",
+      );
       // Fewer than the page asked for, and all of them shown: none earlier.
       expect(page).not.toContain("Only the latest");
+    }
+  });
+
+  test("checks that the head and the checkpoints shown are one history, by the server's consistency proofs (T-24)", async () => {
+    seen.length = 0;
+    const page = (await text(`/polls/${ID}/board?from=25`)).replaceAll("&#x27;", "'");
+    expect(page).toContain("The tree root above and the latest checkpoint's are one history");
+    const extend = [...page.matchAll(/Extends the checkpoint after period (\d+)/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(extend).toEqual([4, 3, 2, 1, 0]);
+    expect(page).not.toContain("not one history");
+    expect(page).not.toContain("Doesn't extend");
+    // One proof per pair of checkpoints shown, asked for by sizes alone; the
+    // head and the latest checkpoint are the same size, so they need none.
+    const proofs = seen.filter((r) => r.path.endsWith("/board/proofs/consistency"));
+    expect(
+      proofs
+        .map((r) => [Number(r.query.get("firstSize")), Number(r.query.get("secondSize"))])
+        .toSorted((x, y) => x[0]! - y[0]!),
+    ).toEqual([
+      [5, 10],
+      [10, 15],
+      [15, 20],
+      [20, 25],
+      [25, 30],
+    ]);
+    for (const r of proofs)
+      expect([...r.query.keys()].toSorted()).toEqual(["electionId", "firstSize", "secondSize"]);
+  });
+
+  test("says so when the server's consistency proofs fail, and still shows the board (T-24)", async () => {
+    brokenProofs.on = true;
+    try {
+      const page = (await text(`/polls/${ID}/board?from=25`)).replaceAll("&#x27;", "'");
+      const broken = [...page.matchAll(/Doesn't extend the checkpoint after period (\d+)/g)].map(
+        (m) => Number(m[1]),
+      );
+      expect(broken).toEqual([4, 3, 2, 1, 0]);
+      expect(page).not.toContain("Extends the checkpoint");
+      expect(page).toContain("evidence of tampering");
+      // Equal sizes need no proof: the head and the latest checkpoint still agree.
+      expect(page).toContain("The tree root above and the latest checkpoint's are one history");
+      expect(page).toContain("Entries 25 to 29 of 30");
+    } finally {
+      brokenProofs.on = false;
     }
   });
 

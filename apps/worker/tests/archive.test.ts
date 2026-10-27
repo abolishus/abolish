@@ -3,6 +3,7 @@ import {
   appendEntry,
   type ArweaveClient,
   archiveLocator,
+  type ContractEventSource,
   readCheckpoints,
   readDefinition,
 } from "@abolishus/core";
@@ -25,9 +26,12 @@ import {
 // part 4b-2b-2b-1): it is scheduled only beside the anchor, runs core's
 // archiveBoards with the locator the anchor holds, logs what it did in
 // counts, and the anchoring job then carries the locator it reached (T-49,
-// T-51). What a run posts and lists is core's tests'
-// (packages/core/tests/archiving.test.ts); the HTTP client is
-// tests/arweave-client.test.ts's.
+// T-51). Its L2 contracts' evidence and runs are read through the source it
+// is given (part 4b-3b-2), and a contract whose source fails is logged by
+// address and why and fails the job. What a run posts and lists is core's
+// tests' (packages/core/tests/archiving.test.ts); the HTTP client is
+// tests/arweave-client.test.ts's, and the source over the chains and the
+// index, with core's run through it, tests/contract-events.test.ts's.
 
 const redisUrl = process.env["REDIS_URL"];
 if (!redisUrl) throw new Error("REDIS_URL is not set");
@@ -87,6 +91,22 @@ class InstantArweave implements ArweaveClient {
   }
 }
 
+/** A source with no game claiming any period yet, or one that is down. */
+class QuietSource implements ContractEventSource {
+  down = false;
+  asked = 0;
+  async evidence() {
+    this.asked++;
+    if (this.down) throw new Error("an L1 or L2 node failed");
+    return undefined;
+  }
+  async events(): Promise<never> {
+    throw new Error("no record asked for events");
+  }
+}
+
+const CONTRACT = new Uint8Array(20).fill(0xc0);
+
 let db: TestDb;
 let app: Sql;
 let connection: Redis;
@@ -96,6 +116,7 @@ let archives: Queue;
 let chain: HeldAnchor;
 let served: Uint8Array;
 const arweave = new InstantArweave();
+const source = new QuietSource();
 const logs: LogLine[] = [];
 
 beforeAll(async () => {
@@ -115,7 +136,13 @@ beforeAll(async () => {
     log: (l) => logs.push(l),
     auditEveryMs: 3_600_000,
     anchor: { chain, everyMs: 3_600_000 },
-    archive: { client: arweave, everyMs: 3_600_000, depth: 1, repostAfter: 100n },
+    archive: {
+      client: arweave,
+      everyMs: 3_600_000,
+      depth: 1,
+      repostAfter: 100n,
+      contractEvents: { source, l2ChainId: 84_532n, contracts: [CONTRACT], clock: CLOCK },
+    },
     now: () => workerNow,
     prefix,
   });
@@ -276,6 +303,48 @@ test("fails a run that refused an object, and still posts the rest", async () =>
     { queue: "{archive}", outcome: "failed", error: "archive-findings", ms: expect.any(Number) },
   ]);
   expect(arweave.txs.size).toBe(before);
+});
+
+test("logs a contract whose source failed and fails the run, still archiving the board", async () => {
+  workerNow = new Date(Number(START) * 1000);
+  // The row the last test left, so only the source fails this run.
+  await db.admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM archive_objects WHERE cid = ${new Uint8Array(36).fill(1)}`;
+  });
+  // Every run so far asked the source for the first anchored period's record.
+  expect(source.asked).toBeGreaterThan(0);
+  source.down = true;
+  try {
+    await archives.add("archive", {});
+    const lines = await outcome("{archive}");
+    expect(lines).toContainEqual({
+      queue: "{archive}",
+      finding: "archive-events",
+      contract: `0x${"c0".repeat(20)}`,
+      reason: "source",
+    });
+    // Never the source's message.
+    expect(JSON.stringify(lines)).not.toContain("node failed");
+    expect(lines.at(-1)).toEqual({
+      queue: "{archive}",
+      outcome: "failed",
+      error: "archive-findings",
+      ms: expect.any(Number),
+    });
+    // The board's run still went on: its objects don't wait on the L2's.
+    expect(lines[0]).toEqual({
+      queue: "{archive}",
+      registered: 0,
+      confirmed: 0,
+      written: 0,
+      posted: 0,
+      refused: 0,
+      locator: 0,
+    });
+  } finally {
+    source.down = false;
+  }
 });
 
 test("after a wipe, takes up the anchor's chain and logs it, and fails a run that can't", async () => {

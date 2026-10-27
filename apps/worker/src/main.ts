@@ -1,6 +1,7 @@
 import {
   anchoredCountedTally,
   BallotAdmissions,
+  type ContractEventArchive,
   CREATE_DAILY_CEILING,
   DestructionBoardings,
   destructionTargets,
@@ -24,6 +25,7 @@ import { HttpArweaveClient } from "./arweave-client.ts";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
+import { ChainContractEvents } from "./contract-events.ts";
 import { POLL_ROOT_ENV, pollRootFromEnv } from "./poll-root-env.ts";
 import { PollRoots } from "./poll-roots.ts";
 import { pollStubDeployment } from "./poll-stub-chain.ts";
@@ -413,6 +415,18 @@ const pollRootConfig = pollRootFromEnv(
 );
 if (pollRootConfig !== undefined && registryConfig === undefined)
   throw new Error("the roots step runs only beside the registry sync");
+// The archive's manifests list the deployment's L2 contracts' evidence and
+// runs (P4-3 part 4b-3b-2), read through the registry sync's nodes and index,
+// so it runs only beside the sync, and the games proving them are on the
+// anchor's L1, which every manifest names.
+if (archiveConfig !== undefined && registryConfig === undefined)
+  throw new Error("the archive runs only beside the registry sync");
+if (
+  archiveConfig !== undefined &&
+  registryConfig !== undefined &&
+  anchorConfig?.chainId !== registryConfig.l1ChainId
+)
+  throw new Error("the archive needs the registry sync's L1 to be the anchor's");
 // The stub step (P2-22 part 4b) pins the registry sync's deployment, so it
 // runs only beside it too.
 const pollStubConfig = pollStubFromEnv(
@@ -421,16 +435,14 @@ const pollStubConfig = pollStubFromEnv(
 if (pollStubConfig !== undefined && registryConfig === undefined)
   throw new Error("the stub step runs only beside the registry sync");
 let pollStubs: WorkerOptions["pollStubs"];
+let contractEvents: ContractEventArchive | undefined;
 if (registryConfig !== undefined) {
   const c = registryConfig;
   let accumulator;
+  const l1 = createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) });
   const l2 = createPublicClient({ transport: http(c.l2RpcUrl, { timeout: 30_000 }) });
   try {
-    const roots = await DisputeGameRoots.connect(
-      createPublicClient({ transport: http(c.l1RpcUrl, { timeout: 30_000 }) }),
-      c.l1ChainId,
-      c.portal,
-    );
+    const roots = await DisputeGameRoots.connect(l1, c.l1ChainId, c.portal);
     accumulator = await ProvenRegistryAccumulator.connect(l2, c.chainId, roots);
   } catch (e) {
     if (e instanceof BaseError) throw new Error("the registry sync couldn't reach its nodes");
@@ -490,6 +502,24 @@ if (registryConfig !== undefined) {
       },
     }),
   };
+  // The archive's source reads the same nodes and index as the sync, so a
+  // contract's records are proven under the games the sync trusts (T-71);
+  // its period ends are the anchor's.
+  if (archiveConfig !== undefined && anchorConfig !== undefined)
+    contractEvents = {
+      source: await ChainContractEvents.connect({
+        l1,
+        l1ChainId: c.l1ChainId,
+        portal: c.portal,
+        l2,
+        l2ChainId: c.chainId,
+        index,
+        indexSchema: c.indexSchema,
+      }),
+      l2ChainId: c.chainId,
+      contracts: [c.electionRegistry, c.trusteeRegistry, c.groupRegistry, c.board].map(bytes),
+      clock: anchorConfig.clock,
+    };
   if (pollRootConfig !== undefined)
     pollRoots = {
       roots: new PollRoots({
@@ -588,6 +618,7 @@ const archive: WorkerOptions["archive"] =
           maxReward: archiveConfig.maxReward,
         }),
         everyMs: archiveConfig.everyMs,
+        ...(contractEvents !== undefined && { contractEvents }),
       };
 
 const worker = await startWorker({

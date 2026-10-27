@@ -394,6 +394,12 @@ export const EmailVerification: Story = {
       await expect(getComputedStyle(box).borderTopWidth).toBe("0px");
       await expect(getComputedStyle(box).borderBottomWidth).toBe("0px");
     }
+    // The answer to the heading comes first, then what counts once, which as
+    // the heading's lede came before it (P2-29, creating a poll's iteration 8).
+    const counts = who.getByText(/Each verified e-mail address counts once/);
+    await expect(item.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      counts.getBoundingClientRect().top,
+    );
   },
 };
 
@@ -505,6 +511,7 @@ export const ReviewPhone: Story = {
       await expect(link.top).toBeLessThan(label.bottom);
       await expect(link.bottom).toBeGreaterThan(label.top);
     }
+    await valuesLineUp(review);
     // The closing time says its date once where both clocks share the day.
     await expect(
       within(review).getByText("November 4, 2026 at 10:00 AM your time (3:00 PM UTC)"),
@@ -516,6 +523,25 @@ export const ReviewPhone: Story = {
     await expect(lines).toBeLessThanOrEqual(3);
   },
 };
+
+/**
+ * Each review row's value lies as far below its row's top as every other
+ * row's, the one row with no "Change" included, which drew its value 20px
+ * higher at 360 and its row 24px shorter from 640px (P2-29, creating a poll's
+ * iteration 8).
+ */
+async function valuesLineUp(review: HTMLElement) {
+  const offsets = within(review)
+    .getAllByRole("term")
+    .map((term) => {
+      const value = term.nextElementSibling;
+      if (term.parentElement === null || value === null) throw new Error("a term with no value");
+      return value.getBoundingClientRect().top - term.parentElement.getBoundingClientRect().top;
+    });
+  await expect(offsets).toHaveLength(6);
+  const [first = 0] = offsets;
+  for (const offset of offsets) await expect(Math.abs(offset - first)).toBeLessThanOrEqual(1);
+}
 
 /** The middle of the first line of `element`'s text, on the screen. */
 function textMiddle(element: Element): number {
@@ -544,6 +570,7 @@ export const ReviewDesktop: Story = {
       await expect(Math.abs(textMiddle(change) - textMiddle(term))).toBeLessThanOrEqual(1);
     }
     await expect(changes).toBe(5);
+    await valuesLineUp(review);
   },
 };
 

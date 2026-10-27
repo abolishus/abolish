@@ -179,7 +179,7 @@ function resultLines(report: Report): string[] {
       : `results per tier, not verified (verdict: ${report.verdict}):`,
   ];
   const { questions } = report;
-  // The line's end and, under definition versions 5 and 6, a line per question.
+  // The line's end and, under definition versions 5 to 7, a line per question.
   const results = (
     indent: string,
     result: {

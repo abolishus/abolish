@@ -28,7 +28,7 @@ import {
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { LiveBallotCopy } from "./ballots.ts";
 import { cellTiers } from "./counted.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import type { PanelledRecord } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import {
   type CellReleasesReport,
@@ -63,8 +63,8 @@ export interface ReleaseOutcome {
 }
 
 export interface ReleaseInputs {
-  /** A live version-6 definition without an author panel. */
-  readonly definition: Extract<VerifiedDefinition, { readonly version: 6 }>;
+  /** A live version-6 or fixed version-7 definition without an author panel. */
+  readonly definition: PanelledRecord;
   readonly definitionHash: Uint8Array;
   /** The registered key set the transcript check returned (3.2 passed). */
   readonly registered: readonly RegisteredKeys[];
@@ -164,7 +164,7 @@ export function releaseChecks(inputs: ReleaseInputs): {
     nullifier: `${c.tier}:${c.nullifier}`,
     ballot: bytesToHex(c.message),
     cell: c.cell,
-    // Definition version 6 has no rolling tier.
+    // Definition version 6 and a fixed version 7 have no rolling tier.
     stepFinalAt: null,
     member: c.member,
     rejected: c.rejected,

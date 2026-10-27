@@ -6,6 +6,7 @@ import {
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
   decodeElectionDefinitionV6,
+  decodeElectionDefinitionV7,
   type ElectionDefinition,
   electionDefinitionV3Hash,
   type ElectionDefinitionV3,
@@ -15,9 +16,15 @@ import {
   encodeElectionDefinitionV4,
   encodeElectionDefinitionV5,
   encodeElectionDefinitionV6,
+  encodeElectionDefinitionV7,
   electionDefinitionV6Hash,
+  electionAuthorStubV7Hash,
+  electionDefinitionV7Hash,
+  electionStubV7Hash,
+  ELECTORATE_MODES,
   membershipVkHash,
   type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
   POLL_CLASSES,
   RECORD_TYPES,
   RESULTS_MODES,
@@ -34,8 +41,9 @@ import {
   runCli,
   verifyBundle,
 } from "../src/index.ts";
+import { readElection } from "../src/admission.ts";
 import { judgeFor } from "../src/ballots.ts";
-import { decodeDefinition } from "../src/definition.ts";
+import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
 import { tallyChecks } from "../src/tallies.ts";
 
 // Format-3 bundles: the election identifier, the pinned board-entry version
@@ -45,8 +53,10 @@ import { tallyChecks } from "../src/tallies.ts";
 // definition-vectors.py, with each one's expected decode error, rule and
 // hash), with versions 3 and 4 from election-definition-v3.json
 // (regional-cells-vectors.py), election-definition-v4.json
-// (definition-v4-vectors.py) and election-definition-v5.json
-// (definition-v5-vectors.py), and the L1 evidence and boards of
+// (definition-v4-vectors.py), election-definition-v5.json
+// (definition-v5-vectors.py), election-definition-v6.json
+// (definition-v6-vectors.py) and election-definition-v7.json
+// (rolling-electorate-vectors.py), and the L1 evidence and boards of
 // l1-anchor.json and board.json.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
@@ -79,11 +89,15 @@ const definitionsV3 = vectorsOf("election-definition-v3.json");
 const definitionsV4 = vectorsOf("election-definition-v4.json");
 const definitionsV5 = vectorsOf("election-definition-v5.json");
 const definitionsV6 = vectorsOf("election-definition-v6.json");
+const definitionsV7 = vectorsOf("election-definition-v7.json");
 // Made before version 5 had a layout, so its file expects `unknown-version`;
 // a release that reads version 5 decodes it under version 5's layout instead.
 const V4_LABELLED_FIVE = "definition-v4-version-five";
-// The same for version 5's layout labelled version 6.
+// The same for version 5's layout labelled version 6, and version 6's
+// labelled version 7.
 const V5_LABELLED_SIX = "definition-v5-version-six";
+const V6_LABELLED_SEVEN = "definition-v6-version-seven";
+const NEXT_LABELLED = [V4_LABELLED_FIVE, V5_LABELLED_SIX, V6_LABELLED_SEVEN];
 const l1File = read("l1-anchor.json") as {
   readonly clock: Readonly<Record<string, string>>;
   readonly electionId: string;
@@ -136,6 +150,7 @@ const vector = (id: string) => {
     ...definitionsV4,
     ...definitionsV5,
     ...definitionsV6,
+    ...definitionsV7,
   ].find((x) => x.id === id);
   if (d === undefined) throw new Error(`no definition ${id}`);
   return d;
@@ -179,8 +194,8 @@ test("the fixtures cover undecodable, ill-formed and well-formed definitions", (
   expect(definitions.some((d) => d.error === undefined && d.illFormed === undefined)).toBe(true);
 });
 
-test("the version-3 to version-6 fixtures cover every outcome too", () => {
-  for (const file of [definitionsV3, definitionsV4, definitionsV5, definitionsV6]) {
+test("the version-3 to version-7 fixtures cover every outcome too", () => {
+  for (const file of [definitionsV3, definitionsV4, definitionsV5, definitionsV6, definitionsV7]) {
     expect(file.some((d) => d.error === "unknown-version")).toBe(true);
     expect(file.some((d) => d.error !== undefined && d.error !== "unknown-version")).toBe(true);
     expect(file.some((d) => d.illFormed !== undefined)).toBe(true);
@@ -194,19 +209,24 @@ test("the version-3 to version-6 fixtures cover every outcome too", () => {
   for (const rule of ["results", "civic-sealed", "author-panel"])
     expect(definitionsV6.some((d) => d.illFormed === rule)).toBe(true);
   expect(definitionsV6.some((d) => d.illFormedQuestion !== undefined)).toBe(true);
+  for (const rule of ["rolling-class", "rolling-tier", "civic-sealed", "author-panel"])
+    expect(definitionsV7.some((d) => d.illFormed === rule)).toBe(true);
+  expect(definitionsV7.some((d) => d.illFormedQuestion !== undefined)).toBe(true);
 });
 
 describe("2.1: the definition decodes strictly and is well formed", () => {
   // An empty definition is rejected with the bundle: bundle hex is never
-  // empty (bundle.test.ts). Definition versions 1, 3, 4, 5 and 6 are read,
-  // each under its own layout, hash and rules.
+  // empty (bundle.test.ts). Definition versions 1 and 3 to 7 are read,
+  // each under its own layout, hash and rules; a rolling version 7 that is
+  // well formed is unverifiable at 2.3 (below).
   for (const d of [
     ...definitions,
     ...definitionsV3,
     ...definitionsV4,
     ...definitionsV5,
     ...definitionsV6,
-  ].filter((x) => x.encoding !== "" && x.id !== V4_LABELLED_FIVE && x.id !== V5_LABELLED_SIX))
+    ...definitionsV7,
+  ].filter((x) => x.encoding !== "" && !NEXT_LABELLED.includes(x.id)))
     test(d.id, () => {
       const r = format3(d.encoding, closed);
       // The definition is a local file: whatever it is, nothing can verify
@@ -270,26 +290,118 @@ describe("2.1: the definition decodes strictly and is well formed", () => {
     });
 });
 
-test("definition version 7 stays unverifiable at its version byte, never failed", () => {
-  // This release reads version 6; a later one reads 7 (T-36).
-  for (const name of ["election-definition-v7.json"]) {
-    const later = vectorsOf(name).filter((d) => {
-      const v = hex(d.encoding)[2];
-      return d.error === undefined && v === 7;
+// A rolling version 7 whose profile fits (docs/spec/verifier.md, 2.3):
+// ballot version 5, spoiled-ballot opening version 3, tally-opening version
+// 1, board-entry version 5, contract-event version 11 (the one with the
+// relayed rolling call) and display-text version 2, sealed and without an
+// author panel.
+const ROLLING_FITTING: Readonly<Record<number, number>> = {
+  [RECORD_TYPES.ballot]: 5,
+  [RECORD_TYPES.spoiledBallotOpening]: 3,
+  [RECORD_TYPES.tallyOpening]: 1,
+  [RECORD_TYPES.boardEntry]: 5,
+  [RECORD_TYPES.contractEvent]: 11,
+  [RECORD_TYPES.displayText]: 2,
+};
+const rollingFor = (versions: Partial<Record<number, number>> = {}) => {
+  const rolling = decodeElectionDefinitionV7(hex(vector("definition-v7-rolling-minimal").encoding));
+  expect(rolling.electorate_mode).toBe(ELECTORATE_MODES.rolling);
+  const pins = { ...ROLLING_FITTING, ...versions };
+  return toHex(
+    encodeElectionDefinitionV7({
+      ...rolling,
+      election_id: hex(l1File.electionId),
+      l1_anchor: hex(closed.anchor),
+      profile: {
+        ...rolling.profile,
+        pins: rolling.profile.pins.map((p) => ({
+          ...p,
+          version: pins[p.record_type] ?? p.version,
+        })),
+      },
+    }),
+  );
+};
+
+describe("a rolling version 7: its rules on 2.1, then 2.3, and the board checks not reached", () => {
+  // Its roots are its steps' and its ballots version 5, which 2.4's rolling
+  // replay and the rolling 5.1 and 5.2 read (P2-17 parts 4c and 4d; T-36).
+  test("a rolling profile that fits is unverifiable at 2.3, never failed", () => {
+    const bytes = rollingFor();
+    const r = format3(bytes, closed);
+    expect(row(r, "2.3")).toEqual({
+      id: "2.3",
+      kind: "election",
+      status: "unverifiable",
+      code: "unsupported-version",
+      at: {},
     });
-    expect(later.length).toBeGreaterThan(0);
-    for (const d of later) {
-      const r = format3(d.encoding, closed);
-      expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+    expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    expect(r.definition).toEqual({
+      hash: toHex(electionDefinitionV7Hash(decodeElectionDefinitionV7(hex(bytes)))),
+    });
+    expect(r.verdictAgainstInputs).toBe("unverifiable");
+    notReached(r);
+  });
+
+  test("one that doesn't fit fails 2.3, as under every release, and the board checks still aren't reached", () => {
+    for (const versions of [
+      // Board-entry version 4 carries no close statement.
+      { [RECORD_TYPES.boardEntry]: 4 },
+      // Contract-event version 10 has no relayed rolling call.
+      { [RECORD_TYPES.contractEvent]: 10 },
+      // A rolling electorate's ballots are version 5.
+      { [RECORD_TYPES.ballot]: 4 },
+    ]) {
+      const r = format3(rollingFor(versions), closed);
       expect(row(r, "2.1").status).not.toBe("fail");
-      expect(r.verdictAgainstInputs).toBe("unverifiable");
+      expect(row(r, "2.3"), JSON.stringify(versions)).toEqual(COMBINATION_FAILS);
+      expect(r.verdictAgainstInputs).toBe("failed");
       notReached(r);
     }
-  }
+  });
+
+  test("the fixtures' well-formed rolling definitions reach 2.3 with their hash, and no board check", () => {
+    const rolling = definitionsV7.filter(
+      (d) =>
+        d.error === undefined &&
+        d.illFormed === undefined &&
+        decodeElectionDefinitionV7(hex(d.encoding)).electorate_mode === ELECTORATE_MODES.rolling,
+    );
+    expect(rolling.length).toBeGreaterThan(0);
+    for (const d of rolling) {
+      const r = format3(d.encoding, closed);
+      expect(row(r, "2.1").status, d.id).not.toBe("fail");
+      expect(row(r, "2.3").status, d.id).not.toBe("pass");
+      expect(r.definition).toEqual({ hash: d.hash });
+      notReached(r);
+    }
+  });
+
+  test("ballot admission refuses it as unsupported, as 2.3 leaves it, whatever its profile", () => {
+    for (const [versions, code] of [
+      [{}, "unsupported-version"],
+      [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
+    ] as const)
+      expect(readElection(hex(rollingFor(versions)), { threshold: 1, keys: [] }, [])).toEqual({
+        ok: false,
+        code,
+      });
+  });
+
+  test("every rule is reported on 2.1 first, a rolling one's own included", () => {
+    for (const id of ["definition-v7-rolling-civic", "definition-v7-rolling-no-groups"]) {
+      const d = vector(id);
+      expect(row(format3(d.encoding, closed), "2.1")).toMatchObject({
+        status: "fail",
+        code: d.illFormed,
+      });
+    }
+  });
 });
 
 test("a layout labelled the next version is read under that version's, and doesn't decode", () => {
-  for (const id of [V4_LABELLED_FIVE, V5_LABELLED_SIX]) {
+  for (const id of NEXT_LABELLED) {
     const r = format3(vector(id).encoding, closed);
     expect(row(r, "2.1")).toMatchObject({ status: "fail", code: "decode" });
     expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
@@ -1037,5 +1149,194 @@ describe("definition version 6 (poll class, results mode and author panel)", () 
       hex(v6For(closed.anchor, { [RECORD_TYPES.ballot]: 255 }, pinnedKey)),
     );
     expect(judgeFor(later, [])).toMatchObject({ code: "unsupported-version" });
+  });
+});
+
+describe("definition version 7 under a fixed electorate (read as version 6)", () => {
+  const minimal = decodeElectionDefinitionV7(hex(vector("definition-v7-fixed-minimal").encoding));
+  expect(minimal.electorate_mode).toBe(ELECTORATE_MODES.fixed);
+  // Version 6's fitting pins with the definition's own version 7 and a
+  // contract-event version that frames the rolling events (2.3).
+  const FITTING: Readonly<Record<number, number>> = {
+    [RECORD_TYPES.ballot]: 4,
+    [RECORD_TYPES.spoiledBallotOpening]: 3,
+    [RECORD_TYPES.tallyOpening]: 1,
+    [RECORD_TYPES.boardEntry]: 5,
+    [RECORD_TYPES.contractEvent]: 11,
+    [RECORD_TYPES.displayText]: 2,
+  };
+  const v7For = (
+    anchor: string,
+    versions: Partial<Record<number, number>> = {},
+    fields: Partial<ElectionDefinitionV7> = {},
+  ) => {
+    const pins = { ...FITTING, ...versions };
+    return toHex(
+      encodeElectionDefinitionV7({
+        ...minimal,
+        election_id: hex(l1File.electionId),
+        l1_anchor: hex(anchor),
+        ...fields,
+        profile: {
+          ...minimal.profile,
+          pins: minimal.profile.pins.map((p) => ({
+            ...p,
+            version: pins[p.record_type] ?? p.version,
+          })),
+        },
+      }),
+    );
+  };
+  const live = { results_mode: RESULTS_MODES.live, live_every: 3600, live_batch: 20 };
+  const authorPanel = {
+    author_threshold: 1,
+    author_keys: [hex("025df0967c2d52df79f732a9b6c44067c454b77ac2105f787b80a453306a81bf0d")],
+    author_transcript_hash: new Uint8Array(32).fill(7),
+  };
+  const NOT_IMPLEMENTED_23 = {
+    id: "2.3",
+    kind: "election",
+    status: "unverifiable",
+    code: "not-implemented",
+  };
+
+  test("the hash is version 7's, over its own encoding, never its version-6 reading's", () => {
+    const bytes = v7For(closed.anchor);
+    const d = decodeElectionDefinitionV7(hex(bytes));
+    const r = format3(bytes, closed);
+    expect(r.definition).toEqual({ hash: toHex(electionDefinitionV7Hash(d)) });
+    expect(row(r, "2.1")).toMatchObject({ status: "unverifiable", code: "not-implemented" });
+    // The same fields as version 6, without the mode and the empty list.
+    const { electorate_mode: _mode, rolling_electorate: _rolling, ...asV6 } = d;
+    const v6 = {
+      ...asV6,
+      profile: {
+        ...asV6.profile,
+        pins: asV6.profile.pins.map((p) =>
+          p.record_type === RECORD_TYPES.electionDefinition ? { ...p, version: 6 } : p,
+        ),
+      },
+    };
+    expect(toHex(electionDefinitionV7Hash(d))).not.toBe(toHex(electionDefinitionV6Hash(v6)));
+    expect(readDefinition(decodeDefinition(hex(bytes)))).toEqual({
+      hash: electionDefinitionV7Hash(d),
+      stubHash: electionStubV7Hash(d),
+      rule: undefined,
+    });
+  });
+
+  test("a sealed poll without an author panel passes 2.3's combination, in every poll class", () => {
+    for (const poll_class of Object.values(POLL_CLASSES))
+      for (const events of [8, 9, 10, 11]) {
+        const r = format3(
+          v7For(closed.anchor, { [RECORD_TYPES.contractEvent]: events }, { poll_class }),
+          closed,
+        );
+        expect(row(r, "2.3"), `${poll_class} ${events}`).toEqual(NOT_IMPLEMENTED_23);
+        expect(row(r, "4.1").code).not.toBe("not-reached");
+        expect(r.verdict).toBe("unverifiable");
+      }
+  });
+
+  test("a live poll and an author panel fail 2.3 as under version 6, and the board checks still run", () => {
+    for (const [fields, versions] of [
+      [live, {}],
+      [live, { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 }],
+      [authorPanel, {}],
+      [authorPanel, { [RECORD_TYPES.tallyOpening]: 3, [RECORD_TYPES.boardEntry]: 7 }],
+    ] as const) {
+      const r = format3(v7For(closed.anchor, versions, fields), closed);
+      expect(row(r, "2.1").status).not.toBe("fail");
+      expect(row(r, "2.3")).toEqual(COMBINATION_FAILS);
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("a live poll passes 2.3's combination only under k seats the release pins as ours", () => {
+    const livePins = { [RECORD_TYPES.tallyOpening]: 2, [RECORD_TYPES.boardEntry]: 6 };
+    const pinnedWith = (ours: number): PinnedPanel[] => [
+      {
+        panelId: toHex(minimal.panel_id),
+        kind: "transitional",
+        seats: Array.from({ length: minimal.panel_size }, (_, i) => ({
+          holder: `seat ${i + 1}`,
+          ours: i < ours,
+        })),
+      },
+    ];
+    for (let ours = 0; ours <= minimal.panel_size; ours++) {
+      const r = format3(v7For(closed.anchor, livePins, live), closed, pinnedWith(ours));
+      expect(row(r, "2.3"), String(ours)).toEqual(
+        ours >= minimal.threshold ? NOT_IMPLEMENTED_23 : COMBINATION_FAILS,
+      );
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+  });
+
+  test("other pins fail 2.3, or leave it unsupported when a later release may read them", () => {
+    for (const [versions, code] of [
+      // Ballot version 5 is a rolling electorate's; a fixed one's is version 4.
+      [{ [RECORD_TYPES.ballot]: 5 }, "profile-combination"],
+      [{ [RECORD_TYPES.ballot]: 3 }, "profile-combination"],
+      [{ [RECORD_TYPES.spoiledBallotOpening]: 2 }, "profile-combination"],
+      [{ [RECORD_TYPES.displayText]: 1 }, "profile-combination"],
+      [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
+      [{ [RECORD_TYPES.contractEvent]: 7 }, "profile-combination"],
+      [{ [RECORD_TYPES.ballot]: 255 }, "unsupported-version"],
+      [{ [RECORD_TYPES.contractEvent]: 12 }, "unsupported-version"],
+    ] as const) {
+      const r = format3(v7For(closed.anchor, versions), closed);
+      expect(row(r, "2.3"), JSON.stringify(versions)).toEqual(
+        code === "profile-combination"
+          ? COMBINATION_FAILS
+          : { id: "2.3", kind: "election", status: "unverifiable", code, at: {} },
+      );
+      expect(row(r, "4.1").code).not.toBe("not-reached");
+    }
+    const r = format3(v7For(closed.anchor, { [RECORD_TYPES.boardEntry]: 8 }), closed);
+    expect(row(r, "2.3")).toMatchObject({ status: "unverifiable", code: "unsupported-version" });
+    notReached(r);
+  });
+
+  test("2.9 reads version 7's receipt keys from L1 state, as version 6's", () => {
+    expect(minimal.receipt_keys.length).toBeGreaterThan(0);
+    expect(row(format3(v7For(closed.anchor), closed), "2.9")).toMatchObject({
+      status: "fail",
+      code: "receipt-key-unregistered",
+    });
+  });
+
+  test("its author panel's run binds version 7's author stub and hash", () => {
+    const d = decodeDefinition(hex(v7For(closed.anchor, {}, authorPanel)));
+    if (d.version !== 7) throw new Error("not version 7");
+    expect(authorRunOf(d)).toEqual({
+      panel: { threshold: 1, keys: authorPanel.author_keys },
+      stubHash: electionAuthorStubV7Hash(d.value),
+      transcriptHash: authorPanel.author_transcript_hash,
+      definitionHash: electionDefinitionV7Hash(d.value),
+    });
+    expect(authorRunOf(decodeDefinition(hex(v7For(closed.anchor))))).toBeUndefined();
+  });
+
+  test("beside an author panel neither a ballot nor a tally opening is judged, as under version 6", () => {
+    const pinnedKey = {
+      membership_vk_hash: membershipVkHash(),
+      electorate: minimal.electorate.map((t) => ({
+        ...t,
+        cells: t.cells.map((c) => ({ ...c, root: 1n })),
+      })),
+    };
+    const record = decodeDefinition(hex(v7For(closed.anchor, {}, pinnedKey)));
+    const withAuthor = decodeDefinition(
+      hex(v7For(closed.anchor, {}, { ...pinnedKey, ...authorPanel })),
+    );
+    expect(judgeFor(withAuthor, [])).toEqual({ status: "unverifiable", code: "not-reached" });
+    expect(tallyChecks(withAuthor, new Uint8Array(32), [], [], [], 5)).toEqual({
+      row: { status: "unverifiable", code: "unsupported-version", at: {} },
+    });
+    expect(tallyChecks(record, new Uint8Array(32), [], undefined, [], 5)).toEqual({
+      row: { status: "pass" },
+      report: [],
+    });
   });
 });

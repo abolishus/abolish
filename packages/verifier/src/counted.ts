@@ -1185,8 +1185,8 @@ function panelTally(
 /**
  * Each cell's tier, in partition order: under definition version 1 the
  * cells are the tiers, under versions 3 to 6 and a fixed version 7 every
- * tier's cells in `electorate` order, and under a rolling version 7 each
- * rolling tier is one cell (election-definition.md, Notes, Tally partition).
+ * tier's cells in `electorate` order (election-definition.md, Notes, Tally
+ * partition).
  */
 export function cellTiers(definition: VerifiedDefinition): readonly number[] {
   switch (definition.version) {
@@ -1198,9 +1198,11 @@ export function cellTiers(definition: VerifiedDefinition): readonly number[] {
     case 6:
       return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     case 7:
-      return definition.value.electorate_mode === ELECTORATE_MODES.rolling
-        ? definition.value.rolling_electorate.map((t) => t.tier)
-        : definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
+      // A rolling version 7 stops at 2.3 (verify.ts) until 2.4's rolling
+      // replay gives its cells (P2-17 part 4c).
+      if (definition.value.electorate_mode === ELECTORATE_MODES.rolling)
+        throw new RangeError("cellTiers: a rolling electorate's cells aren't read yet");
+      return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     default: {
       const unread: never = definition;
       throw new Error(`unread definition version ${String(unread)}`);

@@ -107,11 +107,11 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /**
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
- * versions 3 to 7's cells of every tier, as the definition states them, or
- * a rolling version 7's tiers, each one cell. 2.1's rules keep it from 1 to
- * 256, as `sortTallyOpenings` requires: a non-empty electorate, and under
- * versions 3 to 7 the `cells` rule, which caps the total and gives every
- * tier at least one cell.
+ * versions 3 to 6's and a fixed version 7's cells of every tier, as the
+ * definition states them. 2.1's rules keep it from 1 to 256, as
+ * `sortTallyOpenings` requires: a non-empty electorate, and under versions 3
+ * to 7 the `cells` rule, which caps the total and gives every tier at least
+ * one cell.
  */
 export function partitionSize(definition: VerifiedDefinition): number {
   switch (definition.version) {
@@ -123,9 +123,11 @@ export function partitionSize(definition: VerifiedDefinition): number {
     case 6:
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     case 7:
-      return definition.value.electorate_mode === ELECTORATE_MODES.rolling
-        ? definition.value.rolling_electorate.length
-        : definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
+      // A rolling version 7 stops at 2.3 (verify.ts) until 2.4's rolling
+      // replay gives its cells (P2-17 part 4c).
+      if (definition.value.electorate_mode === ELECTORATE_MODES.rolling)
+        throw new RangeError("partitionSize: a rolling electorate's cells aren't read yet");
+      return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     default: {
       const unread: never = definition;
       throw new Error(`unread definition version ${String(unread)}`);
@@ -162,11 +164,11 @@ export function tallyChecks(
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
-  // Under definition version 6 (and a fixed version 7) tally-opening version 1 opens ballot version
-  // 4's default half, which without an author panel is the whole sharing
-  // (tally.md, Context); beside one the profile pins version 3, whose
-  // partial openings are per panel, and a version-1 opening there would be
-  // judged against the default panel's rules alone (T-37).
+  // Under definition version 6 and a fixed version 7 tally-opening version 1
+  // opens ballot version 4's default half, which without an author panel is
+  // the whole sharing (tally.md, Context); beside one the profile pins
+  // version 3, whose partial openings are per panel, and a version-1 opening
+  // there would be judged against the default panel's rules alone (T-37).
   const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
   // A tally-opening version this verifier doesn't read here, or none pinned
   // (a later tally scheme's record), may be one a later release reads:

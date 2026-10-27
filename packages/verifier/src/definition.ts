@@ -49,7 +49,11 @@ export type VerifiedDefinition =
   | Extract<AnyElectionDefinitionRecord, { readonly version: 5 | 6 }>
   | ElectionDefinitionV7Record;
 
-/** A definition version 6's per-election checks read: version 6, or version 7 (fixed or rolling). */
+/**
+ * A definition version 6's per-election checks read: version 6, or version 7.
+ * Its type admits a rolling version 7, which only `isPanelled` excludes, at
+ * run time: every caller narrows through it first.
+ */
 export type PanelledRecord = Extract<VerifiedDefinition, { readonly version: 6 | 7 }>;
 
 /**

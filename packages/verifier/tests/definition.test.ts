@@ -41,6 +41,7 @@ import {
   runCli,
   verifyBundle,
 } from "../src/index.ts";
+import { readElection } from "../src/admission.ts";
 import { judgeFor } from "../src/ballots.ts";
 import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
 import { tallyChecks } from "../src/tallies.ts";
@@ -375,6 +376,17 @@ describe("a rolling version 7: its rules on 2.1, then 2.3, and the board checks 
       expect(r.definition).toEqual({ hash: d.hash });
       notReached(r);
     }
+  });
+
+  test("ballot admission refuses it as unsupported, as 2.3 leaves it, whatever its profile", () => {
+    for (const [versions, code] of [
+      [{}, "unsupported-version"],
+      [{ [RECORD_TYPES.boardEntry]: 4 }, "profile-combination"],
+    ] as const)
+      expect(readElection(hex(rollingFor(versions)), { threshold: 1, keys: [] }, [])).toEqual({
+        ok: false,
+        code,
+      });
   });
 
   test("every rule is reported on 2.1 first, a rolling one's own included", () => {

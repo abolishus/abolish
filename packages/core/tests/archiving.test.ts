@@ -1,6 +1,10 @@
 import {
   boardEntryHash,
   type Checkpoint,
+  type ContractEventEvidence,
+  decodeContractEventRun,
+  replayEventAccumulator,
+  type RunEvent,
   decodeArchiveLocator,
   decodeArchiveManifest,
   encodeArchiveLocator,
@@ -9,8 +13,8 @@ import {
   objectCid,
   readArchivedObject,
 } from "@abolishus/crypto";
-import { walkArchive } from "@abolishus/verifier";
-import { randomBytes } from "node:crypto";
+import { ACCUMULATOR_SLOT, replayArchive, walkArchive } from "@abolishus/verifier";
+import { createHash, randomBytes } from "node:crypto";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
@@ -20,6 +24,8 @@ import {
   anchorBoards,
   appendEntry,
   archiveBoards,
+  archiveEventProgress,
+  archiveEvidence,
   archiveLocator,
   archiveManifestSequence,
   archiveManifests,
@@ -27,11 +33,14 @@ import {
   type ArchiveOptions,
   ArchiveResumeError,
   type ArchiveRun,
+  archiveRuns,
   archiveTransactions,
   type ArweaveClient,
+  type ContractEventSource,
   readBoard,
   takeCheckpoints,
 } from "../src/index.ts";
+import { l2State, word } from "../../verifier/tests/state.ts";
 import { newElection, type TestDb, testDb } from "./db.ts";
 
 // The worker's archive run (src/archiving.ts, migrations/0046_archive.sql;
@@ -144,6 +153,9 @@ beforeEach(async () => {
   await db.admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
     await tx`DELETE FROM archive_transactions`;
+    await tx`DELETE FROM archive_runs`;
+    await tx`DELETE FROM archive_evidence`;
+    await tx`DELETE FROM archive_event_progress`;
     await tx`DELETE FROM archive_objects`;
     await tx`DELETE FROM archive_manifests`;
     await tx`DELETE FROM board_checkpoints`;
@@ -157,6 +169,9 @@ async function wipe() {
   await db.admin.begin(async (tx) => {
     await tx`SET LOCAL session_replication_role = replica`;
     await tx`DELETE FROM archive_transactions`;
+    await tx`DELETE FROM archive_runs`;
+    await tx`DELETE FROM archive_evidence`;
+    await tx`DELETE FROM archive_event_progress`;
     await tx`DELETE FROM archive_objects`;
     await tx`DELETE FROM archive_manifests`;
   });
@@ -218,7 +233,14 @@ async function walk(
 
 describe("archive tables", () => {
   test("the Drizzle tables are the migrated ones", async () => {
-    for (const table of [archiveManifests, archiveObjects, archiveTransactions]) {
+    for (const table of [
+      archiveManifests,
+      archiveObjects,
+      archiveTransactions,
+      archiveEvidence,
+      archiveRuns,
+      archiveEventProgress,
+    ]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
         SELECT column_name, data_type, is_nullable FROM information_schema.columns
@@ -662,6 +684,9 @@ describe("archiveBoards", () => {
         written: [],
         posted: 0,
         refused: 0,
+        evidence: 0,
+        runs: 0,
+        eventFailures: [],
         locator: undefined,
       });
       expect(arweave.txs.size).toBe(0);
@@ -700,7 +725,10 @@ describe("archiveBoards", () => {
       | { kind: "withhold"; mask: number }
       | { kind: "reorg" }
       | { kind: "wait" }
-      | { kind: "wipe" };
+      | { kind: "wipe" }
+      | { kind: "emit"; contract: number }
+      | { kind: "l2"; blocks: number }
+      | { kind: "l2-down" };
     const step: fc.Arbitrary<Step> = fc.oneof(
       fc.record({
         kind: fc.constant("board" as const),
@@ -714,6 +742,9 @@ describe("archiveBoards", () => {
       fc.constant({ kind: "reorg" as const }),
       fc.constant({ kind: "wait" as const }),
       fc.constant({ kind: "wipe" as const }),
+      fc.record({ kind: fc.constant("emit" as const), contract: fc.integer({ min: 0, max: 3 }) }),
+      fc.record({ kind: fc.constant("l2" as const), blocks: fc.integer({ min: 1, max: 12 }) }),
+      fc.constant({ kind: "l2-down" as const }),
     );
     // A choice of transactions by the bits of `mask`, in posting order.
     const picker = (arweave: ModelArweave, mask: number) => {
@@ -728,18 +759,27 @@ describe("archiveBoards", () => {
           await db.admin.begin(async (tx) => {
             await tx`SET LOCAL session_replication_role = replica`;
             await tx`DELETE FROM archive_transactions`;
+            await tx`DELETE FROM archive_runs`;
+            await tx`DELETE FROM archive_evidence`;
+            await tx`DELETE FROM archive_event_progress`;
             await tx`DELETE FROM archive_objects`;
             await tx`DELETE FROM archive_manifests`;
             await tx`DELETE FROM board_checkpoints`;
           });
           const arweave = new ModelArweave();
+          const l2 = new ModelL2();
           const cids: Uint8Array[] = [];
           const locators: Uint8Array[] = [];
           let named = -1n;
           // The anchor holds the latest locator a run gave, as the anchoring
           // job carries it, and a run after a wipe takes up its chain.
           const runOnce = async () => {
-            const r = await run(arweave, { maxLinks, latestLocator: locators.at(-1) });
+            const r = await run(arweave, {
+              maxLinks,
+              latestLocator: locators.at(-1),
+              ...eventOptions(l2),
+            });
+            l2.failing = false;
             // The locator never falls (archive-chain.ts, locatorManifest).
             const at = r.locator ?? -1n;
             expect(at).toBeGreaterThanOrEqual(named);
@@ -759,18 +799,23 @@ describe("archiveBoards", () => {
             else if (s.kind === "withhold") arweave.withhold(picker(arweave, s.mask));
             else if (s.kind === "reorg") arweave.reorg();
             else if (s.kind === "wipe") await wipe();
+            else if (s.kind === "emit") l2.emit(CONTRACTS[ROLES[s.contract]!]);
+            else if (s.kind === "l2") l2.advance(BigInt(s.blocks));
+            else if (s.kind === "l2-down") l2.failing = true;
             else now += REPOST;
           }
           // Whatever happened, wipes included, once uploads go through the archive settles:
           // the latest locator names the latest manifest, and the walk from
           // it, judging every earlier locator, reports nothing and finds
-          // every object under a transaction whose data reads as it.
+          // every object under a transaction whose data reads as it, and
+          // every contract's archive replays.
+          l2.advance(40n);
           for (let i = 0; i < 50; i++) {
             now += REPOST;
             arweave.mine();
             arweave.advance(DEPTH);
             const r = await runOnce();
-            if (r.registered + r.confirmed + r.posted + r.written.length === 0) break;
+            if (r.registered + r.confirmed + r.posted + r.written.length + r.evidence === 0) break;
           }
           if (cids.length === 0) {
             expect(await archiveLocator(app, DEPLOYMENT)).toBeUndefined();
@@ -791,9 +836,500 @@ describe("archiveBoards", () => {
               expect(readArchivedObject(data!, c, 1 << 20).ok).toBe(true);
             }
           }
+          const { replays } = await replay(arweave, locators);
+          expectReplays(replays, l2);
+          // Every anchored period of every contract has been examined.
+          const [progress] = await app<{ n: string }[]>`
+            SELECT count(*)::text AS n FROM archive_event_progress
+            WHERE segment = (SELECT max(segment) FROM board_checkpoints)`;
+          expect(progress!.n).toBe("4");
         },
       ),
       { numRuns: Math.min(numRuns, 30) },
     );
+  });
+});
+
+// The contract-event evidence and runs (src/archiving.ts, writeContractEvents;
+// migrations/0048_archive_contract_events.sql; docs/spec/archive.md,
+// Contract-event evidence and Contract-event run, Who writes them; P4-3 part
+// 4b-3a; T-71, T-51). The judge is the verifier's own replay
+// (`replayArchive`) over what the model of Arweave holds, from the walk of
+// the latest locator: every record must prove its contract's accumulator,
+// and the runs must replay against every one up to the last event counted.
+// The records are built over states the verifier's tests' trie writer makes
+// (packages/verifier/tests/state.ts), never by the code under test.
+
+const L2 = 84_532n;
+const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
+const CONTRACTS = {
+  "election-registry": new Uint8Array(20).fill(0xc0),
+  "trustee-registry": new Uint8Array(20).fill(0xc1),
+  "group-registry": new Uint8Array(20).fill(0xc2),
+  board: new Uint8Array(20).fill(0xb0),
+};
+const { board: BOARD, "election-registry": REGISTRY } = CONTRACTS;
+/** The L2's first block's timestamp, and the anchor's epoch; a block every 2 seconds. */
+const T0 = 1_800_000_000n;
+/** Ten L2 blocks a period: period `s` ends at block `10 · (s + 1)`. */
+const CLOCK = { epoch: T0, period: 20n };
+const blockTime = (b: bigint) => T0 + 2n * b;
+const equalBytes = (a: Uint8Array, b: Uint8Array) => hex(a) === hex(b);
+
+/**
+ * A model of the L2 and its games: each emitted event goes in a block of its
+ * own after the head, and a respected game claims every fifth block up to
+ * `gamesTo`. A record is the contract's accumulator and count at the first
+ * claimed block at or after a time, over a state built here.
+ */
+class ModelL2 implements ContractEventSource {
+  head = 0n;
+  gamesTo = 1n << 62n;
+  readonly logs = new Map<string, RunEvent[]>();
+  /** Makes the next reads throw, as a node that is down. */
+  failing = false;
+  /** Rewrites the board's record or events before they are given. */
+  tamper: {
+    evidence?: (e: ContractEventEvidence) => ContractEventEvidence;
+    events?: (e: RunEvent[]) => RunEvent[];
+  } = {};
+
+  emit(contract: Uint8Array, data = Uint8Array.of(1), topics = 1) {
+    this.head++;
+    const list = this.logs.get(hex(contract)) ?? [];
+    list.push({
+      l2_block: this.head,
+      l2_timestamp: blockTime(this.head),
+      topics: Array.from({ length: topics }, (_, i) => new Uint8Array(32).fill(list.length + i)),
+      data,
+    });
+    this.logs.set(hex(contract), list);
+  }
+
+  /** Blocks with nothing of ours, so later periods end. */
+  advance(blocks: bigint) {
+    this.head += blocks;
+  }
+
+  counted(contract: Uint8Array, block: bigint) {
+    return (this.logs.get(hex(contract)) ?? []).filter((e) => e.l2_block <= block);
+  }
+
+  async evidence(contract: Uint8Array, after: bigint) {
+    if (this.failing) throw new Error("the L2 node is down");
+    let block = (after - T0 + 1n) / 2n;
+    block = ((block + 4n) / 5n) * 5n;
+    if (block > this.head || block > this.gamesTo) return undefined;
+    const logs = this.counted(contract, block);
+    const state = replayEventAccumulator(
+      L2,
+      contract,
+      logs.map((e) => ({
+        block: e.l2_block,
+        timestamp: e.l2_timestamp,
+        topics: e.topics,
+        data: e.data,
+      })),
+    );
+    const { evidence } = l2State(
+      [
+        {
+          address: contract,
+          storage: [
+            [word(ACCUMULATOR_SLOT), state.accumulator],
+            [word(ACCUMULATOR_SLOT + 1n), word(state.count)],
+          ],
+        },
+      ],
+      block,
+      blockTime(block),
+    );
+    const nodes = [...new Map(evidence.nodes.map((n) => [hex(n), n])).values()].sort((a, b) =>
+      hex(a) < hex(b) ? -1 : 1,
+    );
+    const record: ContractEventEvidence = {
+      l2_chain_id: L2,
+      contract,
+      game_index: block / 5n,
+      game: new Uint8Array(20).fill(0x9a),
+      output_root: evidence.outputRoot,
+      message_passer_storage_root: evidence.messagePasserStorageRoot,
+      header: evidence.header,
+      nodes,
+    };
+    return (equalBytes(contract, BOARD) && this.tamper.evidence?.(record)) || record;
+  }
+
+  async events(contract: Uint8Array, from: bigint, to: bigint) {
+    if (this.failing) throw new Error("the index is down");
+    const list = (this.logs.get(hex(contract)) ?? []).slice(Number(from), Number(to));
+    return (equalBytes(contract, BOARD) && this.tamper.events?.(list)) || list;
+  }
+}
+
+const eventOptions = (l2: ModelL2, o: { maxPeriods?: number } = {}) => ({
+  contractEvents: {
+    source: l2,
+    l2ChainId: L2,
+    contracts: ROLES.map((r) => CONTRACTS[r]),
+    clock: CLOCK,
+    ...o,
+  },
+});
+
+/** The verifier's walk and replay of every contract, from the latest locator. */
+async function replay(arweave: ModelArweave, earlier: Uint8Array[] = []) {
+  const latest = await archiveLocator(app, DEPLOYMENT);
+  if (latest === undefined) throw new Error("no locator");
+  const w = await walkArchive(latest.locator, DEPLOYMENT, arweave.source, {
+    earlier,
+    contracts: ROLES.map((r) => CONTRACTS[r]),
+  });
+  expect(w.findings).toEqual([]);
+  return { walk: w, replays: await replayArchive(w, CONTRACTS, L2, arweave.source) };
+}
+
+/** Every contract's archive replays whole, holding exactly the events its last record counts. */
+function expectReplays(replays: Awaited<ReturnType<typeof replay>>["replays"], l2: ModelL2) {
+  for (const r of replays) {
+    expect(r.evidence.findings).toEqual([]);
+    expect(r.runs.findings).toEqual([]);
+    expect(r.runs.complete).toBe(true);
+    for (const e of r.evidence.records) expect(e.replay).toBeNull();
+    const last = r.evidence.records.at(-1);
+    const held =
+      last === undefined ? 0n : BigInt(l2.counted(r.contract, last.accumulator.block).length);
+    expect(r.held).toBe(held);
+    // By digest: a deep comparison of MiB-long arrays takes minutes.
+    const digest = (d: Uint8Array) => createHash("sha256").update(d).digest("hex");
+    expect(r.records.map((x) => digest(x.data))).toEqual(
+      (l2.logs.get(hex(r.contract)) ?? []).slice(0, Number(held)).map((e) => digest(e.data)),
+    );
+  }
+}
+
+describe("archiveBoards with contract events", () => {
+  test("lists each changed contract's record with its runs, and the verifier's replay holds every one", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    // Period 0 (blocks to 10): the registry twice and the board once; period
+    // 1 (to 20): the board alone; period 2 (to 30): nothing.
+    l2.emit(REGISTRY);
+    l2.emit(BOARD);
+    l2.emit(REGISTRY);
+    l2.advance(10n);
+    l2.emit(BOARD);
+    l2.advance(30n);
+    await board(0, 1, 2);
+    const first = await run(arweave, eventOptions(l2));
+    // The registry's record at period 0; the board's at periods 0 and 1.
+    expect(first).toMatchObject({ evidence: 3, runs: 3, eventFailures: [] });
+    const final = await drain(arweave, eventOptions(l2));
+    expect(final.eventFailures).toEqual([]);
+    const { walk, replays } = await replay(arweave);
+    expect(walk.evidence.map((e) => [hex(e.contract), e.l2Block])).toEqual([
+      [hex(BOARD), 10n],
+      [hex(BOARD), 20n],
+      [hex(REGISTRY), 10n],
+    ]);
+    expect(walk.runs.map((r) => [hex(r.contract), r.first, r.count])).toEqual([
+      [hex(BOARD), 0n, 1],
+      [hex(BOARD), 1n, 1],
+      [hex(REGISTRY), 0n, 2],
+    ]);
+    expectReplays(replays, l2);
+    expect(replays.find((r) => r.role === "board")?.held).toBe(2n);
+    expect(replays.find((r) => r.role === "election-registry")?.held).toBe(2n);
+    // Nothing more is due: the periods are examined once.
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 0, runs: 0, posted: 0 });
+  });
+
+  test("writes a record and its runs only once the period's game exists, and later periods as their boards are anchored", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(20n);
+    l2.gamesTo = 5n;
+    await board(0);
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 0, runs: 0 });
+    l2.gamesTo = 1n << 62n;
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 1, runs: 1 });
+    await drain(arweave, eventOptions(l2));
+    // Periods 1 and 2 are anchored after period 3's events (to block 40).
+    l2.emit(BOARD);
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(3);
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 1, runs: 1 });
+    await drain(arweave, eventOptions(l2));
+    const { walk, replays } = await replay(arweave);
+    const byFirst = [...walk.runs].sort((a, b) => (a.first < b.first ? -1 : 1));
+    expect(byFirst.map((r) => [r.first, r.count])).toEqual([
+      [0n, 1],
+      [1n, 2],
+    ]);
+    expectReplays(replays, l2);
+  });
+
+  test("examines at most maxPeriods periods a run, in order", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    for (let s = 0; s < 3; s++) {
+      l2.emit(BOARD);
+      l2.advance(10n);
+    }
+    l2.advance(10n);
+    await board(0, 1, 2);
+    const o = eventOptions(l2, { maxPeriods: 1 });
+    expect(await run(arweave, o)).toMatchObject({ evidence: 1 });
+    expect(await run(arweave, o)).toMatchObject({ evidence: 1 });
+    expect(await run(arweave, o)).toMatchObject({ evidence: 1 });
+    expect(await run(arweave, o)).toMatchObject({ evidence: 0 });
+    await drain(arweave, o);
+    expectReplays((await replay(arweave)).replays, l2);
+  });
+
+  test("refuses a record or events that don't check, writes nothing of the contract, archives the board, and carries on once they check", async () => {
+    const cases: [string, ModelL2["tamper"], string][] = [
+      [
+        "another accumulator",
+        { evidence: (e) => ({ ...e, output_root: new Uint8Array(32).fill(7) }) },
+        "evidence",
+      ],
+      ["another L2", { evidence: (e) => ({ ...e, l2_chain_id: L2 + 1n }) }, "evidence"],
+      [
+        "a node the proof doesn't use",
+        {
+          evidence: (e) => ({
+            ...e,
+            nodes: [...e.nodes, new Uint8Array(40).fill(0xff)].sort((a, b) =>
+              hex(a) < hex(b) ? -1 : 1,
+            ),
+          }),
+        },
+        "evidence",
+      ],
+      [
+        "nodes out of order",
+        { evidence: (e) => ({ ...e, nodes: [...e.nodes].reverse() }) },
+        "evidence",
+      ],
+      ["an event left out", { events: (e) => e.slice(1) }, "events"],
+      ["an event added", { events: (e) => [...e, e[0]!] }, "events"],
+      [
+        "an event altered",
+        { events: (e) => e.map((x, i) => (i === 0 ? { ...x, data: Uint8Array.of(9) } : x)) },
+        "events",
+      ],
+      ["events reordered", { events: (e) => [...e].reverse() }, "events"],
+      [
+        "an event past the record's block",
+        { events: (e) => e.map((x) => ({ ...x, l2_block: x.l2_block + 1000n })) },
+        "events",
+      ],
+      ["an event with no topic", { events: (e) => e.map((x) => ({ ...x, topics: [] })) }, "events"],
+    ];
+    for (const [what, tamper, code] of cases) {
+      await db.admin.begin(async (tx) => {
+        await tx`SET LOCAL session_replication_role = replica`;
+        for (const t of [
+          "archive_transactions",
+          "archive_runs",
+          "archive_evidence",
+          "archive_event_progress",
+          "archive_objects",
+          "archive_manifests",
+          "board_checkpoints",
+        ])
+          await tx`DELETE FROM ${tx(t)}`;
+      });
+      const arweave = new ModelArweave();
+      const l2 = new ModelL2();
+      l2.emit(BOARD);
+      l2.emit(BOARD);
+      l2.advance(20n);
+      const { taken } = await board(0);
+      l2.tamper = tamper;
+      const r = await run(arweave, eventOptions(l2));
+      expect(r, what).toMatchObject({ evidence: 0, runs: 0, posted: 2 });
+      expect(
+        r.eventFailures.map((f) => [hex(f.contract), f.error.code]),
+        what,
+      ).toEqual([[hex(BOARD), code]]);
+      expect(await count("archive_transactions"), what).toBe(2);
+      // Once the source gives what checks, the period is archived.
+      l2.tamper = {};
+      await drain(arweave, eventOptions(l2));
+      const { replays } = await replay(arweave);
+      expectReplays(replays, l2);
+      expect(replays.find((x) => x.role === "board")?.held, what).toBe(2n);
+      expect((await walk(arweave, cidsOf(taken))).findings, what).toEqual([]);
+    }
+  });
+
+  test("refuses a record dated before the period's end, or proving less than the last", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(30n);
+    await board(0, 1);
+    const honest = l2.evidence.bind(l2);
+    // Period 0's end, asked of a source that answers with block 5's record.
+    l2.evidence = (c, after) => honest(c, equalBytes(c, BOARD) ? after - 10n : after);
+    const early = await run(arweave, eventOptions(l2));
+    expect(early.eventFailures.map((f) => [hex(f.contract), f.error.code])).toEqual([
+      [hex(BOARD), "evidence"],
+    ]);
+    expect(early.eventFailures[0]!.error.message).toMatch(/before/);
+    l2.evidence = honest;
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 1, eventFailures: [] });
+    await board(2);
+    // Period 2 answered with period 0's block: less than the last record.
+    l2.emit(BOARD);
+    l2.advance(10n);
+    l2.evidence = (c, after) => honest(c, equalBytes(c, BOARD) ? T0 + 20n : after);
+    await board(3);
+    const stale = await run(arweave, eventOptions(l2));
+    expect(stale.eventFailures.map((f) => [hex(f.contract), f.error.code])).toEqual([
+      [hex(BOARD), "evidence"],
+    ]);
+    expect(stale.eventFailures[0]!.error.message).toMatch(/before/);
+    // A record dated after the period's end but at a block below the last
+    // record's: period 2 is answered with block 60's record, then period 3
+    // with block 45's.
+    l2.evidence = honest;
+    l2.advance(30n);
+    await board(5);
+    l2.evidence = (c, after) =>
+      honest(c, equalBytes(c, BOARD) && after === T0 + 60n ? T0 + 120n : after);
+    expect(await run(arweave, eventOptions(l2, { maxPeriods: 1 }))).toMatchObject({
+      eventFailures: [],
+    });
+    l2.evidence = (c, after) =>
+      honest(c, equalBytes(c, BOARD) && after === T0 + 80n ? T0 + 90n : after);
+    const less = await run(arweave, eventOptions(l2));
+    expect(less.eventFailures.map((f) => [hex(f.contract), f.error.code])).toEqual([
+      [hex(BOARD), "evidence"],
+    ]);
+    expect(less.eventFailures[0]!.error.message).toMatch(/less/);
+  });
+
+  test("a source that is down holds up no board object, and the contracts carry on when it is back", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(REGISTRY);
+    l2.advance(20n);
+    const { taken } = await board(0);
+    l2.failing = true;
+    const r = await run(arweave, eventOptions(l2));
+    expect(r).toMatchObject({ evidence: 0, posted: 2 });
+    expect(r.eventFailures.map((f) => f.error.code)).toEqual([
+      "source",
+      "source",
+      "source",
+      "source",
+    ]);
+    l2.failing = false;
+    await drain(arweave, eventOptions(l2));
+    const { replays } = await replay(arweave);
+    expectReplays(replays, l2);
+    expect((await walk(arweave, cidsOf(taken))).findings).toEqual([]);
+  });
+
+  test("splits a period's events into runs within MAX_CONTRACT_EVENT_RUN, each as long as it allows", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    // Seventeen events of a MiB and 60 bytes each: fifteen fit in one run, the rest in the next.
+    for (let i = 0; i < 17; i++) l2.emit(BOARD, new Uint8Array(1 << 20).fill(i));
+    l2.advance(20n);
+    await board(1);
+    expect(await run(arweave, eventOptions(l2))).toMatchObject({ evidence: 1, runs: 2 });
+    const runs = await app<{ first: string; count: number; run: Uint8Array }[]>`
+      SELECT first::text, count, run FROM archive_runs ORDER BY first`;
+    expect(runs.map((r) => [r.first, r.count])).toEqual([
+      ["0", 15],
+      ["15", 2],
+    ]);
+    for (const r of runs) {
+      expect(r.run.length).toBeLessThanOrEqual(1 << 24);
+      expect(decodeContractEventRun(new Uint8Array(r.run), 1).events).toHaveLength(r.count);
+    }
+    await drain(arweave, eventOptions(l2));
+    expectReplays((await replay(arweave)).replays, l2);
+  }, 30_000);
+
+  test("after a wipe, writes the same records and runs again and marks them listed rather than list them twice", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.emit(REGISTRY);
+    l2.advance(20n);
+    await board(0);
+    await drain(arweave, eventOptions(l2));
+    const held = await archiveLocator(app, DEPLOYMENT);
+    const before = arweave.txs.size;
+    await wipe();
+    const r = await run(arweave, { latestLocator: held!.locator, ...eventOptions(l2) });
+    expect(r).toMatchObject({ resumed: 1, evidence: 2, runs: 2, posted: 0, written: [] });
+    expect(arweave.txs.size).toBe(before);
+    const unlisted = await app<{ n: string }[]>`
+      SELECT (SELECT count(*) FROM archive_evidence WHERE listed_in IS NULL)
+        + (SELECT count(*) FROM archive_runs WHERE listed_in IS NULL) AS n`;
+    expect(unlisted[0]!.n).toBe("0");
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(3);
+    await drain(arweave, { latestLocator: held!.locator, ...eventOptions(l2) });
+    const { walk, replays } = await replay(arweave, [held!.locator]);
+    expect(walk.evidence).toHaveLength(3);
+    expectReplays(replays, l2);
+  });
+
+  test("what grows stays grown: no record or run changed, relisted or deleted, and no contract's place moved back", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    l2.emit(BOARD);
+    l2.advance(20n);
+    await board(0);
+    await drain(arweave, eventOptions(l2));
+    const owner = await db.as("abolish_migrator");
+    const refused = async (q: PromiseLike<unknown>) => {
+      await expect(q).rejects.toMatchObject({ code: expect.stringMatching(/^(42501|0A000)$/) });
+    };
+    for (const c of [app, owner]) {
+      await refused(c`DELETE FROM archive_runs`);
+      await refused(c`DELETE FROM archive_evidence`);
+      await refused(c`DELETE FROM archive_event_progress`);
+      await refused(c`TRUNCATE archive_runs`);
+      await refused(c`TRUNCATE archive_evidence`);
+      await refused(c`TRUNCATE archive_event_progress`);
+      await refused(c`UPDATE archive_evidence SET listed_in = NULL`);
+      await refused(c`UPDATE archive_runs SET listed_in = NULL`);
+      await refused(c`UPDATE archive_event_progress SET segment = segment - 1`);
+      await refused(c`UPDATE archive_event_progress SET segment = segment + 1, count = count - 1`);
+      await refused(
+        c`UPDATE archive_event_progress SET segment = segment + 1, accumulator = ${new Uint8Array(32)}`,
+      );
+      // A record whose CID isn't its bytes' is refused whoever writes it.
+      await expect(
+        c`INSERT INTO archive_evidence (cid, contract, segment, l2_block, count, record)
+          VALUES (${new Uint8Array(36)}, ${BOARD}, 9, 9, 9, '\\x00')`,
+      ).rejects.toMatchObject({ code: "23514" });
+    }
+    await refused(app`UPDATE archive_evidence SET count = count + 1`);
+    await refused(app`UPDATE archive_runs SET run = '\\x00'`);
+    await refused(owner`UPDATE archive_runs SET run = '\\x00'`);
+  });
+
+  test("refuses malformed contract-event options", async () => {
+    const arweave = new ModelArweave();
+    const l2 = new ModelL2();
+    const bad = (o: object) =>
+      run(arweave, { contractEvents: { ...eventOptions(l2).contractEvents, ...o } });
+    await expect(bad({ l2ChainId: -1n })).rejects.toThrow(RangeError);
+    await expect(bad({ contracts: [new Uint8Array(19)] })).rejects.toThrow(TypeError);
+    await expect(bad({ contracts: [BOARD, BOARD] })).rejects.toThrow(RangeError);
+    await expect(bad({ clock: { epoch: 0n, period: 0n } })).rejects.toThrow(RangeError);
+    await expect(bad({ maxPeriods: 0 })).rejects.toThrow(RangeError);
   });
 });

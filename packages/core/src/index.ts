@@ -29,6 +29,9 @@ export {
   type ArchiveResumeErrorCode,
   type ArchiveRun,
   type ArweaveClient,
+  type ContractEventArchive,
+  ContractEventError,
+  type ContractEventSource,
 } from "./archiving.ts";
 export {
   addModerator,
@@ -186,8 +189,11 @@ export {
   accountSessions,
   accountUsers,
   accountVerifications,
+  archiveEventProgress,
+  archiveEvidence,
   archiveManifests,
   archiveObjects,
+  archiveRuns,
   archiveTransactions,
   boardBallotHashes,
   boardBallotKeys,

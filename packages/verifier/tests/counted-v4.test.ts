@@ -548,6 +548,23 @@ describe("delivery decides the counted set, per panel and seat", () => {
 });
 
 describe("contract-path records under contract-event version 8, once 4.4 passes", () => {
+  // The fixture's definition pins version 9; this one pins version 8, which
+  // frames no version-2 delivery record. 2.3 fails such a profile, and 5.9
+  // still reads what its board holds (docs/spec/verifier.md, 2.3; T-25, T-53).
+  const pins8 = d.profile.pins.map((p) =>
+    p.record_type === RECORD_TYPES.contractEvent ? { ...p, version: 8 } : p,
+  );
+  const definition8 = decodeDefinition(
+    encodeElectionDefinitionV6({ ...d, profile: { ...d.profile, pins: pins8 } }),
+  );
+  const f8 = { definition: definition8, hash: readDefinition(definition8).hash };
+  const alice: Cast = {
+    ...ALICE,
+    hash: ballotHashV4(
+      { definitionHash: f8.hash, cell: ALICE.cell, nullifier: ALICE.nullifier },
+      ALICE.vote,
+    ),
+  };
   const T_D = d.closes_at + BigInt(d.l1_inclusion_bound) + BigInt(PARAMETERS.DELIVERY_WINDOW);
   const contracts = {
     electionRegistry: d.election_registry,
@@ -592,15 +609,15 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
   /** delivery-root.json's first root renamed to this definition: version 1, which ballot version 4 doesn't fix. */
   const root = (t: bigint) => {
     const record = hex((roots.records[0] as { readonly encoding: string }).encoding);
-    record.set(hash, 3);
-    return event("ObligationRootSubmitted", [hash, word(record[35] as number)], record, t);
+    record.set(f8.hash, 3);
+    return event("ObligationRootSubmitted", [f8.hash, word(record[35] as number)], record, t);
   };
 
   test("an obligation root naming this definition is a rejected entry, never a hold on 5.9", () => {
-    const e = election();
-    e.deliver([ALICE], 200);
+    const e = election(f8);
+    e.deliver([alice], 200);
     const at = e.board(200, root(T_D));
-    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+    const r = countedChecks(e.inputs([alice], { eventsPass: true, destruction: false }));
     expect(r.rows.get("5.9")).toEqual({ status: "pass" });
     expect(r.delivery).toEqual({
       excluded: [],
@@ -610,19 +627,19 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
   });
 
   test("one above the floor isn't read, and holds nothing open, whenever it was sent", () => {
-    const e = election();
-    e.deliver([ALICE], 200);
+    const e = election(f8);
+    e.deliver([alice], 200);
     e.board(S_K + 1, root(T_D));
-    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+    const r = countedChecks(e.inputs([alice], { eventsPass: true, destruction: false }));
     expect(r.rows.get("5.9")).toEqual({ status: "pass" });
     expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
   });
 
   test("a contract-path record still waits on 4.4", () => {
-    const e = election();
-    e.deliver([ALICE], 200);
+    const e = election(f8);
+    e.deliver([alice], 200);
     const at = e.board(200, root(T_D));
-    const r = countedChecks(e.inputs([ALICE], { eventsPass: false, destruction: false }));
+    const r = countedChecks(e.inputs([alice], { eventsPass: false, destruction: false }));
     for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3"])
       expect(r.rows.get(id)).toEqual({
         status: "unverifiable",
@@ -632,26 +649,26 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
   });
 
   test("a version-1 receipt through the contract path is a rejected entry, and delivers nothing", () => {
-    const e = election();
-    for (const seat of [1, 2]) e.board(200, e.receipt(ALICE, seat));
-    const shareHash = ALICE.vote.share_hashes[2] as Uint8Array;
+    const e = election(f8);
+    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+    const shareHash = alice.vote.share_hashes[2] as Uint8Array;
     const m = shareReceiptStatement({
-      definition_hash: hash,
-      ballot_hash: ALICE.hash,
+      definition_hash: f8.hash,
+      ballot_hash: alice.hash,
       seat: 3,
       share_hash: shareHash,
     });
     const v1 = encodeShareReceipt(
-      shareReceiptRecord(hash, 3, {
-        ballotHash: ALICE.hash,
+      shareReceiptRecord(f8.hash, 3, {
+        ballotHash: alice.hash,
         shareHash,
         receipt: signStatement(secret(3), "abolish/v1/sig/share-receipt", m),
       }),
     );
-    const at = e.board(200, event("ShareReceiptSubmitted", [hash, ALICE.hash], v1, T_D));
-    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+    const at = e.board(200, event("ShareReceiptSubmitted", [f8.hash, alice.hash], v1, T_D));
+    const r = countedChecks(e.inputs([alice], { eventsPass: true, destruction: false }));
     expect(r.delivery).toEqual({
-      excluded: [{ entry: ALICE.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] }],
+      excluded: [{ entry: alice.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] }],
       records: [],
       rejected: [{ entry: at, decodeError: "profile-mismatch" }],
     });
@@ -752,7 +769,8 @@ describe.each([9, 10, 11, 12] as const)(
       expect(definition9.version).toBe(6);
       expect(pinnedVersion(definition9.value, RECORD_TYPES.contractEvent)).toBe(version);
       expect(profileCombinationRule(definition9.value as typeof d)).toBeUndefined();
-      expect(f9.hash).not.toEqual(hash);
+      // The fixture's own definition pins version 9; every other is another definition.
+      expect(Buffer.from(f9.hash).equals(hash)).toBe(version === 9);
     });
 
     test("a version-2 receipt through the contract path delivers, in time by its L2 timestamp", () => {

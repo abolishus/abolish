@@ -307,7 +307,7 @@ describe("2.3's profile combination under version 7", () => {
     [RECORD_TYPES.spoiledBallotOpening]: 3,
     [RECORD_TYPES.tallyOpening]: 1,
     [RECORD_TYPES.boardEntry]: 5,
-    [RECORD_TYPES.contractEvent]: 8,
+    [RECORD_TYPES.contractEvent]: 9,
     [RECORD_TYPES.displayText]: 2,
   };
   const ROLLING = { ...FITTING, [RECORD_TYPES.ballot]: 5, [RECORD_TYPES.contractEvent]: 11 };
@@ -363,6 +363,10 @@ describe("2.3's profile combination under version 7", () => {
       expect(
         profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: events })),
       ).toBeUndefined();
+    // Version 8 frames no version-4 ballot (T-25, T-53).
+    expect(profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: 8 }))).toBe(
+      "profile-combination",
+    );
     expect(profileCombinationRule(v7(1, livePins, live), fixedTypical.threshold)).toBeUndefined();
     // Ballot version 5 names a step, which a fixed electorate has none of.
     for (const events of [8, 9, 10, 11, 12, 255])

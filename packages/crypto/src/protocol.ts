@@ -465,11 +465,6 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]
 // never both, so it fits wherever version 11 does, and is the only one that
 // fits beside a registry that logs the kind ([[contracts]], Event tables
 // (version 12); [[P2-16]] part 5e-4).
-// Version 8 frames no version-4 ballot or version-2 delivery record, so a
-// profile pinning it beside ballot version 4 fails 4.4 at the first one
-// boarded through the contract path; failing it here instead waits on
-// verifier-ballots-v4.json and its kin moving to version 9 ([[P2-16]] part
-// 5e, before rule 9 serves version 6).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
 ]);
@@ -483,6 +478,14 @@ const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9, 10, 11, 12]);
 // T-50, T-53). A later version this package doesn't know isn't listed: it
 // may name the event, so it is unsupported, never a failure (T-36).
 const NO_RELAYED_ROLLING: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+// The contract-event versions whose tables frame no version-4 ballot or
+// version-2 delivery record: beside ballot version 4 the first one boarded
+// through the contract path fails 4.4, and its voters have no direct
+// submission the board's events archive, so 2.3 fails such a profile, as it
+// must before the election registry serves definition version 6
+// ([[contracts]], Event tables (version 9); [[P2-16]] part 5e-5; T-25, T-53).
+// As above, a later version this package doesn't know isn't listed (T-36).
+const NO_BALLOT_V4: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 
 /**
  * The ballot version a definition version pins, under its electorate mode
@@ -512,7 +515,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * verifier admits it: P2-17 part 4, and a rolling profile that fits is
  * `unsupported-version` until then); ballot version 5 also needs
  * contract-event version 11 or 12, the only ones whose tables name the
- * relayed rolling ballot, and fails beside version 8, 9 or 10 (T-25, T-50, T-53); what follows of version 6
+ * relayed rolling ballot, and fails beside version 8, 9 or 10 (T-25, T-50, T-53),
+ * and ballot version 4 needs version 9 to 12, which frame it, and fails
+ * beside version 8 (T-25, T-53); what follows of version 6
  * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
  * a version-6 definition with an author panel fails, as does tally-opening
  * version 3, which only it pins, until the author transcript's chosen-byte
@@ -662,7 +667,8 @@ export function profileCombinationRule(
     (opening !== 1 || carriesDestruction) &&
     carriesClose &&
     (!knownEvents || WHOLE_EVENTS.has(events)) &&
-    (unknownBallot || ballot !== 5 || !NO_RELAYED_ROLLING.has(events));
+    (unknownBallot || ballot !== 5 || !NO_RELAYED_ROLLING.has(events)) &&
+    (unknownBallot || ballot !== 4 || !NO_BALLOT_V4.has(events));
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)

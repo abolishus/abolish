@@ -1,8 +1,14 @@
-import { DELIVERY_WINDOW } from "@abolishus/crypto";
+import { DELIVERY_WINDOW, PARAMETERS } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { passedOnDevice, postingCutoff, postingLapsed } from "../src/lapse.ts";
+import {
+  passedOnDevice,
+  POSTING_BALLOT_MARGIN,
+  postingCutoff,
+  postingCutoffs,
+  postingLapsed,
+} from "../src/lapse.ts";
 
 // The posting cutoff `c_D = t_D − F` ([[delivery]], Client rule 4), and when
 // the client judges it passed: by the L2's finalized head and this device's
@@ -60,5 +66,37 @@ describe("a lapsed posting", () => {
   test("refuses a clock that isn't a finite number", () => {
     for (const now of [Number.NaN, Number.POSITIVE_INFINITY])
       expect(() => passedOnDevice(0n, now)).toThrow(RangeError);
+  });
+});
+
+describe("the client's own posting cutoffs", () => {
+  test("c_B is min(c_D, closes_at − POSTING_BALLOT_MARGIN), c_L is c_B − MAX_SEQUENCER_DRIFT, c_E is closes_at − 1,800 (fast-check)", () => {
+    fc.assert(
+      fc.property(u64, fc.bigInt({ min: 0n, max: 2n ** 32n - 1n }), u64, (closes, bound, f) => {
+        const cD = postingCutoff(closes, bound, f);
+        const margin = closes - POSTING_BALLOT_MARGIN;
+        const { ballot, force } = postingCutoffs(closes, bound, f);
+        expect(ballot).toBe(cD < margin ? cD : margin);
+        expect(force).toBe(ballot - BigInt(PARAMETERS.MAX_SEQUENCER_DRIFT));
+        expect(postingCutoffs(closes, bound, f).lastOffer).toBe(closes - 1_800n);
+        // Never past the close, nor past `c_D`.
+        expect(ballot).toBeLessThan(closes);
+        expect(ballot).toBeLessThanOrEqual(cD);
+      }),
+      { numRuns },
+    );
+  });
+
+  test("are read from the close with the deployed values, never from c_D", () => {
+    const closes = 1_792_000_000n;
+    expect(postingCutoffs(closes, 3_600n, 46_800n)).toEqual({
+      ballot: closes - 3_600n,
+      force: closes - 5_400n,
+      lastOffer: closes - 1_800n,
+    });
+    // An `F` past the delivery window brings `c_D` before the margin.
+    const cD = postingCutoff(closes, 0n, DELIVERY_WINDOW + 7_200n);
+    expect(cD).toBe(closes - 7_200n);
+    expect(postingCutoffs(closes, 0n, DELIVERY_WINDOW + 7_200n).ballot).toBe(cD);
   });
 });

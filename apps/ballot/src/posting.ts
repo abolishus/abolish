@@ -225,17 +225,26 @@ interface Pending {
  * relay ([[posting-relay]], Outcome), answering `recorded` only once the
  * board's `SharePosted` events carry every one's exact bytes at the L2's
  * finalized head. Otherwise it ends once the client would fall back: the
- * relay refused one, its patience or its send cutoff `c_D −
+ * relay refused one, its patience or its send cutoff `c_L −
  * POSTING_SEND_MARGIN` passed, a sent posting is neither recorded nor seen
  * at the latest head after `POSTING_FORCE_AFTER + POSTING_SEEN` and has no
  * qualifying deposit on L1 whose block's time plus `forcedInclusion` (`F`)
- * is still ahead, or the client's deadline `c_P = c_D − POSTING_CLIENT_MARGIN` passed; and
+ * is still ahead, or the client's deadline `c_P = c_L − POSTING_CLIENT_MARGIN` passed; and
  * answers `relayed` if any posting was sent at all, since the relay may
  * then have read its `m_i` whatever it answered, else `unreachable`
  * (Outcome, last item; T-15). A board or L1 read is given up at `c_P`
  * between its requests, and each request is the caller's to bound (`timedFetch`),
  * so the run ends within one request of `c_P` (T-25, T-50). `cutoff`
- * is the poll's `c_D`, in seconds. A deadline counts as passed once this
+ * is the poll's force cutoff `c_L` (`PostingCutoffs.force`), in seconds,
+ * never `c_D`: a run that ends at `c_P` leaves the voter's wallet the whole
+ * `POSTING_CLIENT_MARGIN` to send and force a posting before `c_L`, and a
+ * posting recorded later than the close helps no ballot of this client's
+ * ([[posting-relay]], The ballot's own deadline). A run that starts with the
+ * send cutoff already passed by this device's clock is a **late** run,
+ * best effort: no deposit can then be forced in time, but an honest relay
+ * with a live sequencer still records a posting in minutes, so it sends and
+ * resends until `lastOffer`, the last-offer cutoff `c_E`, which is also its
+ * deadline (The ballot's own deadline, A late relay run; T-25). A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
  * (T-25). A read that fails or throws records nothing.
@@ -245,11 +254,13 @@ export async function postThroughRelay(
   postings: readonly Uint8Array[],
   cutoff: bigint,
   forcedInclusion: bigint,
+  lastOffer: bigint,
 ): Promise<PostAnswer> {
-  const deadline = cutoff - POSTING_CLIENT_MARGIN;
-  const sendCutoff = cutoff - POSTING_SEND_MARGIN;
   const seconds = () => BigInt(Math.floor(io.now() / 1000));
   const started = seconds();
+  const late = started > cutoff - POSTING_SEND_MARGIN;
+  const deadline = late ? lastOffer : cutoff - POSTING_CLIENT_MARGIN;
+  const sendCutoff = late ? lastOffer : cutoff - POSTING_SEND_MARGIN;
   const pending: Pending[] = postings.map((posting) => ({
     posting,
     sentAt: undefined,

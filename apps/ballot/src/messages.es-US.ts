@@ -322,6 +322,9 @@ export const esUS: Messages = {
   postingPostExplained:
     "Las partes que faltan van al registro público con la clave de su sello exterior, para que los custodios puedan abrirlas sin haberlas tomado. Tu voto sigue siendo secreto hoy, pero esas partes pierden su protección a largo plazo: quien más adelante rompa el cifrado de hoy podrá leerlas, y si se publican suficientes partes de tu boleta para abrirla, podrá leer tu boleta entera. Esto no se puede deshacer.",
   postingPost: "Publicar en público y después enviar",
+  postingLateTitle: "La encuesta cierra pronto",
+  postingLate:
+    "Publicar ahora es un intento sin garantía: nada puede asegurar que las partes que faltan lleguen a tiempo al registro público. Si el registro no las muestra diez minutos antes del cierre de la encuesta, tu boleta no se envía, y las partes quedan públicas para nada.",
   postingDeclineTitle: "Dejar esta boleta",
   postingDeclineExplained:
     "Este dispositivo borra las partes que guardó para estos custodios, y esta boleta no contará. Quien pasó las partes todavía podría ponerla en el tablero, donde reemplazaría tu boleta anterior sin contar, así que responde otra vez mientras la encuesta esté abierta.",
@@ -344,7 +347,7 @@ export const esUS: Messages = {
     "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Rechaza cualquier solicitud que siga abierta en tu billetera, espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",
   walletForcedTitle: "Tu billetera forzó la publicación a través de Ethereum",
   walletForced:
-    "La red no tomó a tiempo la publicación de tu billetera, o el nodo de tu billetera la rechazó, así que tu billetera la envió a través de Ethereum, que la red tiene que incluir. Cuenta las partes que faltan como publicadas: llegan al registro público antes del plazo de entrega de la encuesta, lo que puede tardar algunas horas, y dejar esta boleta no las puede recuperar. Mantén esta página abierta, y no la recargues ni abras esta boleta en otra pestaña: después del plazo de publicación de la encuesta, eso borra lo que este dispositivo guardó para ellas, y tu boleta ya no se puede enviar desde aquí. Publica desde tu billetera otra vez solo cuando el registro ya pueda mostrarlas: este dispositivo las busca primero, y envía tu boleta cuando las encuentra.",
+    "La red no tomó a tiempo la publicación de tu billetera, o el nodo de tu billetera la rechazó, así que tu billetera la envió a través de Ethereum, que la red tiene que incluir. Cuenta las partes que faltan como publicadas: llegan al registro público antes de la última hora de la encuesta, salvo que toda la red se detenga, y dejar esta boleta no las puede recuperar. Mantén esta página abierta, y no la recargues ni abras esta boleta en otra pestaña: después del cierre de la encuesta, eso borra lo que este dispositivo guardó para ellas, y tu boleta ya no se puede enviar desde aquí. Publica desde tu billetera otra vez solo cuando el registro ya pueda mostrarlas: este dispositivo las busca primero, y envía tu boleta cuando las encuentra.",
   walletRejectedTitle: "Tu billetera no envió nada",
   walletRejected:
     "Se rechazó una solicitud en tu billetera, así que no se envió nada más desde ella. Si tu billetera ya te había mostrado la publicación, ella y su nodo vieron las partes que faltan, y puede que también el nodo con el que este dispositivo lee el tablero. Escoge otra vez abajo.",
@@ -359,7 +362,7 @@ export const esUS: Messages = {
     "Este dispositivo no encontró ninguna billetera de Ethereum a la cual preguntar. Agrega una a este navegador, o abre la boleta en un navegador que tenga una, y publica desde tu billetera otra vez.",
   walletLateTitle: "Ya pasó el tiempo para publicar",
   walletLate:
-    "Ya pasó el límite para publicar de la encuesta, así que esta vez no se envió nada desde tu billetera y ya no se puede publicar nada más para esta boleta.",
+    "La encuesta cierra demasiado pronto para que una publicación desde tu billetera llegue a tiempo al registro público, así que esta vez no se envió nada desde tu billetera.",
   walletFailedTitle: "Tu billetera no respondió",
   walletFailed:
     "Tu billetera o su nodo no respondió a tiempo, o respondió con un error. Puede que haya recibido las partes que faltan, así que cuéntalas como entregadas. Rechaza cualquier solicitud que siga abierta en tu billetera y luego intenta otra vez en un minuto.",

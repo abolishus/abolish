@@ -1,16 +1,17 @@
-// A contract's event accumulator proven under the newest L2 output root a
-// dispute game on L1 claims (docs/spec/contracts.md, Event accumulator,
-// Output root), as the worker's registry sync reads it (apps/worker
-// src/output-roots.ts), over this package's own JSON-RPC client. The L1 node
-// names, at its finalized head, the games of the type the L2's portal
-// respects; the L2 node serves the claimed block's header, the message
-// passer's storage root and the contract's account and storage proofs,
-// which the verifier's own reader checks against the root. So the L2 node
-// is trusted for nothing but availability (T-71, T-34). The L1 node is
-// trusted for its `eth_call` answers about the games, as the worker's is:
-// a game's root claim and block are immutables in its code, which no
-// storage proof reaches. An unresolved game is its proposer's word until it
-// resolves (T-71).
+// A contract's event accumulator proven under an L2 output root a dispute
+// game on L1 claims (docs/spec/contracts.md, Event accumulator, Output root),
+// as the worker's registry sync reads it (apps/worker src/output-roots.ts),
+// over this package's own JSON-RPC client. The L1 node names, at its
+// finalized head, the games of the type the L2's portal respects; the L2 node
+// serves the claimed block's header, the message passer's storage root and
+// the contract's account and storage proofs, which the verifier's own reader
+// checks against the root. So the L2 node is trusted for nothing but
+// availability (T-71, T-34). The L1 node is trusted for its `eth_call`
+// answers about the games, as the worker's is: they aren't proven against the
+// finalized state yet (a game's root claim and block are immutables in its
+// code, which an account proof reaches through the code hash). An unresolved
+// game is its proposer's word until it resolves, and a game the guardian has
+// blacklisted or retired is still taken (T-71).
 
 import type { ProvenEventAccumulator } from "@abolishus/crypto";
 import {
@@ -98,19 +99,22 @@ const address = (w: Uint8Array) => w.slice(12);
 
 /**
  * Of the newest `MAX_GAMES_SCANNED` games at the L1 node's finalized head,
- * the one claiming the highest L2 block among those of the type the portal
- * respects there, from the factory the portal names, that haven't been
- * shown false; undefined if there is none. The type is the portal's, never
- * configured, since a type anyone can create without a proof would let
- * anyone post a root (T-71). Every read is at that block, so a game created
- * or resolved later doesn't move the answer within one read. The highest
- * block rather than the newest game, so honest roots of old blocks posted
- * later can't move the proof back.
+ * those of the type the portal respects there, from the factory the portal
+ * names, that haven't been shown false, highest claimed L2 block first. The
+ * type is the portal's, never configured, since a type anyone can create
+ * without a proof would let anyone post a root (T-71). Every read is at that
+ * block, so a game created or resolved later doesn't move the answer within
+ * one read. Highest block first, so honest roots of old blocks posted later
+ * can't move the proof back; and a list, so a reader can pass over a claim
+ * no node proves (a block far ahead, a false root) for the next, rather than
+ * let whoever posts one stop it until the game is shown false. A game whose
+ * own reads fail (another implementation of the type, say) or that claims a
+ * block past a `u64` is passed over.
  */
-export async function respectedOutputRoot(
+export async function respectedOutputRoots(
   l1: Rpc,
   portal: Uint8Array,
-): Promise<ClaimedOutputRoot | undefined> {
+): Promise<ClaimedOutputRoot[]> {
   const { number: at } = await finalizedHeader(l1);
   const [factoryWord] = await call(l1, portal, "disputeGameFactory()", [], at, [160]);
   const [respected] = await call(l1, portal, "respectedGameType()", [], at, [32]);
@@ -119,7 +123,7 @@ export async function respectedOutputRoot(
   const [countWord] = await call(l1, factory, "gameCount()", [], at, [256]);
   const count = uint(countWord as Uint8Array);
   const last = count > MAX_GAMES_SCANNED ? count - MAX_GAMES_SCANNED : 0n;
-  let best: ClaimedOutputRoot | undefined;
+  const claims: ClaimedOutputRoot[] = [];
   for (let i = count; i > last; i--) {
     const [gameType, , proxy] = await call(
       l1,
@@ -131,17 +135,22 @@ export async function respectedOutputRoot(
     );
     if (uint(gameType as Uint8Array) !== respectedType) continue;
     const game = address(proxy as Uint8Array);
-    const [status] = await call(l1, game, "status()", [], at, [8]);
-    if (uint(status as Uint8Array) === CHALLENGER_WINS) continue;
-    const [root] = await call(l1, game, "rootClaim()", [], at, [256]);
-    const [block] = await call(l1, game, "l2SequenceNumber()", [], at, [256]);
-    const l2Block = uint(block as Uint8Array);
+    let status: Uint8Array, root: Uint8Array, block: Uint8Array;
+    try {
+      [status] = (await call(l1, game, "status()", [], at, [8])) as [Uint8Array];
+      [root] = (await call(l1, game, "rootClaim()", [], at, [256])) as [Uint8Array];
+      [block] = (await call(l1, game, "l2SequenceNumber()", [], at, [256])) as [Uint8Array];
+    } catch (e) {
+      if (e instanceof RpcError) continue;
+      throw e;
+    }
+    if (uint(status) === CHALLENGER_WINS) continue;
+    const l2Block = uint(block);
     // No L2 block is numbered past a `u64`, so no such claim can be proven.
     if (l2Block >= 1n << 64n) continue;
-    if (best === undefined || l2Block > best.l2Block)
-      best = { outputRoot: Uint8Array.from(root as Uint8Array), l2Block };
+    claims.push({ outputRoot: Uint8Array.from(root), l2Block });
   }
-  return best;
+  return claims.sort((a, b) => (a.l2Block > b.l2Block ? -1 : a.l2Block < b.l2Block ? 1 : 0));
 }
 
 /**

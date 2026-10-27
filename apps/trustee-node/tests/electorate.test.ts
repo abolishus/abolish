@@ -331,7 +331,7 @@ describe("l1OutputRootAccumulator", () => {
       l2: l2Node(one.records).rpc,
       registry,
     });
-    await expect(accumulator()).rejects.toThrow(RpcError);
+    await expect(accumulator(0n)).rejects.toThrow(RpcError);
     expect(asked).toEqual(["eth_chainId"]);
   });
 });

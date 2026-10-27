@@ -8,7 +8,7 @@ import {
   GameBlockError,
   MAX_GAMES_SCANNED,
   MESSAGE_PASSER,
-  respectedOutputRoot,
+  respectedOutputRoots,
 } from "../src/output-root.ts";
 import { type Rpc, RpcError } from "../src/rpc.ts";
 import { type Chain, hex, startChain, word } from "./anvil.ts";
@@ -228,8 +228,10 @@ const game = (type: bigint, n: number, status = 0n): Game => ({
   status,
 });
 
-describe("respectedOutputRoot", () => {
-  test("names the portal's type's game not shown false, every read at the finalized head", async () => {
+const blocks = (claims: readonly ClaimedOutputRoot[]) => claims.map((c) => c.l2Block);
+
+describe("respectedOutputRoots", () => {
+  test("names the portal's type's games not shown false, every read at the finalized head", async () => {
     const { rpc, calls } = l1Of([
       game(PINNED, 1, 2n),
       game(PINNED, 2, 0n),
@@ -238,10 +240,10 @@ describe("respectedOutputRoot", () => {
       game(PINNED, 4, 1n),
       game(0n, 5),
     ]);
-    expect(await respectedOutputRoot(rpc, PORTAL)).toEqual({
-      outputRoot: game(PINNED, 2).root,
-      l2Block: 200n,
-    });
+    expect(await respectedOutputRoots(rpc, PORTAL)).toEqual([
+      { outputRoot: game(PINNED, 2).root, l2Block: 200n },
+      { outputRoot: game(PINNED, 1).root, l2Block: 100n },
+    ]);
     const finalized = (await chain.rpc.call("eth_getBlockByNumber", ["finalized", false])) as {
       number: string;
     };
@@ -249,25 +251,22 @@ describe("respectedOutputRoot", () => {
     for (const c of calls) expect(c.block).toBe(finalized.number);
   });
 
-  test("takes the game claiming the highest block, not the newest, so old roots can't move it back", async () => {
+  test("lists the highest claimed block first, not the newest game, so old roots can't move it back", async () => {
     const { rpc } = l1Of([game(PINNED, 1), game(PINNED, 5), game(PINNED, 2), game(PINNED, 3)]);
-    expect(await respectedOutputRoot(rpc, PORTAL)).toEqual({
-      outputRoot: game(PINNED, 5).root,
-      l2Block: 500n,
-    });
+    expect(blocks(await respectedOutputRoots(rpc, PORTAL))).toEqual([500n, 300n, 200n, 100n]);
   });
 
   test("follows the type the portal respects, never another", async () => {
     const games = [game(PINNED, 1), game(1n, 2), game(PINNED, 3)];
-    expect((await respectedOutputRoot(l1Of(games, 1n).rpc, PORTAL))?.l2Block).toBe(200n);
-    expect(await respectedOutputRoot(l1Of(games, 0n).rpc, PORTAL)).toBeUndefined();
+    expect(blocks(await respectedOutputRoots(l1Of(games, 1n).rpc, PORTAL))).toEqual([200n]);
+    expect(await respectedOutputRoots(l1Of(games, 0n).rpc, PORTAL)).toEqual([]);
   });
 
   test("passes over a claim of a block past a u64, which no proof can reach", async () => {
     const far = { ...game(PINNED, 2), l2: 1n << 64n };
-    expect((await respectedOutputRoot(l1Of([game(PINNED, 1), far]).rpc, PORTAL))?.l2Block).toBe(
+    expect(blocks(await respectedOutputRoots(l1Of([game(PINNED, 1), far]).rpc, PORTAL))).toEqual([
       100n,
-    );
+    ]);
   });
 
   test("reads back at most MAX_GAMES_SCANNED games", async () => {
@@ -276,30 +275,46 @@ describe("respectedOutputRoot", () => {
       ...Array.from({ length: Number(MAX_GAMES_SCANNED) }, (_, i) => game(7n, i + 2)),
     ];
     const { rpc, calls } = l1Of(games);
-    expect(await respectedOutputRoot(rpc, PORTAL)).toBeUndefined();
+    expect(await respectedOutputRoots(rpc, PORTAL)).toEqual([]);
     expect(calls.filter((c) => c.fn === "gameAtIndex(uint256)")).toHaveLength(
       Number(MAX_GAMES_SCANNED),
     );
     // One fewer game puts the first among those read back.
-    expect((await respectedOutputRoot(l1Of(games.slice(0, -1)).rpc, PORTAL))?.l2Block).toBe(100n);
+    expect(blocks(await respectedOutputRoots(l1Of(games.slice(0, -1)).rpc, PORTAL))).toEqual([
+      100n,
+    ]);
   });
 
   test("an empty factory names no root", async () => {
-    expect(await respectedOutputRoot(l1Of([]).rpc, PORTAL)).toBeUndefined();
+    expect(await respectedOutputRoots(l1Of([]).rpc, PORTAL)).toEqual([]);
   });
 
-  test("refuses an answer no contract of that interface returns", async () => {
+  test("passes over a game whose own reads fail, so one can't stop the read", async () => {
+    const games = [game(PINNED, 1), game(PINNED, 2)];
+    for (const [fn, bad] of [
+      ["status()", hex(word(256n))],
+      ["rootClaim()", "0x01"],
+      ["l2SequenceNumber()", "0x"],
+    ] as const)
+      expect(
+        await respectedOutputRoots(
+          l1Of(games, PINNED, (f) => (f === fn ? bad : undefined)).rpc,
+          PORTAL,
+        ),
+        fn,
+      ).toEqual([]);
+  });
+
+  test("refuses an answer about the portal or factory no contract of that interface returns", async () => {
     const games = [game(PINNED, 1)];
     for (const [fn, bad] of [
       ["respectedGameType()", hex(word(1n << 32n))],
       ["disputeGameFactory()", hex(word(1n << 160n))],
-      ["status()", hex(word(256n))],
       ["gameAtIndex(uint256)", hex(word(PINNED))],
-      ["rootClaim()", "0x01"],
       ["gameCount()", 7],
     ] as const)
       await expect(
-        respectedOutputRoot(l1Of(games, PINNED, (f) => (f === fn ? bad : undefined)).rpc, PORTAL),
+        respectedOutputRoots(l1Of(games, PINNED, (f) => (f === fn ? bad : undefined)).rpc, PORTAL),
         fn,
       ).rejects.toThrow(RpcError);
   });

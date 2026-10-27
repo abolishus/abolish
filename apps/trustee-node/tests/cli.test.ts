@@ -275,6 +275,8 @@ describe("run with the group registry", () => {
   const PORTAL = `0x${"90".repeat(20)}`;
   const FACTORY = `0x${"fa".repeat(20)}`;
   const GAME = `0x${"9a".repeat(20)}`;
+  // A newer game claiming a block far ahead, which no node proves: passed over.
+  const AHEAD = `0x${"9b".repeat(20)}`;
   const tier = tierOf("one-group");
   let chain: Node;
   let deployer: string;
@@ -333,11 +335,14 @@ describe("run with the group registry", () => {
     const answers = new Map([
       [`${PORTAL}:disputeGameFactory()`, word(BigInt(FACTORY))],
       [`${PORTAL}:respectedGameType()`, word(621n)],
-      [`${FACTORY}:gameCount()`, word(1n)],
-      [`${FACTORY}:gameAtIndex(uint256)`, word(621n) + word(1n) + word(BigInt(GAME))],
+      [`${FACTORY}:gameCount()`, word(2n)],
+      [`${FACTORY}:gameAtIndex(uint256)`, ""],
       [`${GAME}:status()`, word(0n)],
       [`${GAME}:rootClaim()`, hex(outputRoot)],
       [`${GAME}:l2SequenceNumber()`, word(ROOT_BLOCK + 100n)],
+      [`${AHEAD}:status()`, word(0n)],
+      [`${AHEAD}:rootClaim()`, word(7n)],
+      [`${AHEAD}:l2SequenceNumber()`, word(1n << 40n)],
     ]);
     const selectors = new Map(
       [...answers.keys()].map((k) => {
@@ -357,7 +362,13 @@ describe("run with the group registry", () => {
         res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
       if (body.method === "eth_call") {
         const [{ to, data }] = body.params as [{ to: string; data: string }];
-        const answer = answers.get(`${to}:${selectors.get(data.slice(2, 10))}`);
+        const signature = selectors.get(data.slice(2, 10));
+        const answer =
+          signature === "gameAtIndex(uint256)"
+            ? word(621n) +
+              word(1n) +
+              word(BigInt(BigInt(`0x${data.slice(10)}`) === 0n ? GAME : AHEAD))
+            : answers.get(`${to}:${signature}`);
         if (answer !== undefined) return reply(`0x${answer}`);
       }
       reply(await chain.rpc.call(body.method, body.params));

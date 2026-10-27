@@ -34,7 +34,7 @@ import {
   contractSequence,
   GameBlockError,
   l2Finalized,
-  respectedOutputRoot,
+  respectedOutputRoots,
   type Rpc,
   RpcError,
 } from "@abolishus/node";
@@ -57,11 +57,11 @@ const GROUP_EVENTS = [
 ].map((s) => keccak256(toBytes(s)));
 
 /**
- * The group registry's accumulator and count proven at some L2 block, or
- * undefined if no root can be had yet. `l1OutputRootAccumulator` in
- * production.
+ * The group registry's accumulator and count proven at an L2 block at or
+ * after `atLeast`, or undefined if no root there can be had yet.
+ * `l1OutputRootAccumulator` in production.
  */
-export type RegistryAccumulator = () => Promise<ProvenEventAccumulator | undefined>;
+export type RegistryAccumulator = (atLeast: bigint) => Promise<ProvenEventAccumulator | undefined>;
 
 export interface L2ElectorateOptions extends GroupRegistryRelease {
   /** The seat's own L2 node, deriving its finalized chain from L1. */
@@ -75,10 +75,12 @@ export interface L2ElectorateOptions extends GroupRegistryRelease {
 }
 
 /**
- * The registry's accumulator under the newest output root a respected game
- * on the seat's L1 node claims (`respectedOutputRoot`), proven from the
- * seat's L2 node (`accumulatorUnderRoot`); undefined when no game of the
- * respected type is among the newest.
+ * The registry's accumulator under the output root of the highest block at
+ * or after `atLeast` that a respected game on the seat's L1 node claims
+ * (`respectedOutputRoots`) and the seat's L2 node proves
+ * (`accumulatorUnderRoot`); undefined when there is none. A claim that
+ * doesn't prove is passed over for the next, so whoever posts a false root
+ * or a block far ahead can't stop the check until the game is shown false.
  */
 export function l1OutputRootAccumulator(options: {
   readonly l1: Rpc;
@@ -90,11 +92,20 @@ export function l1OutputRootAccumulator(options: {
   readonly registry: Uint8Array;
 }): RegistryAccumulator {
   const { l1, l1ChainId, portal, l2, registry } = options;
-  return async () => {
+  return async (atLeast) => {
     // A node on another L1 could name any games at the portal's address.
     if ((await chainId(l1)) !== l1ChainId) throw new RpcError("the L1 node is on another chain");
-    const root = await respectedOutputRoot(l1, portal);
-    return root && accumulatorUnderRoot(l2, root, registry);
+    for (const root of await respectedOutputRoots(l1, portal)) {
+      if (root.l2Block < atLeast) break;
+      try {
+        return await accumulatorUnderRoot(l2, root, registry);
+      } catch (e) {
+        if (e instanceof OutputRootError || e instanceof GameBlockError || e instanceof RpcError)
+          continue;
+        throw e;
+      }
+    }
+    return undefined;
   };
 }
 
@@ -117,8 +128,10 @@ export function l2ElectorateCheck(options: L2ElectorateOptions): ElectorateCheck
       // T-71: a node on another chain could show any contract's logs at the
       // pinned address, and a self-paid group's need no signature.
       if ((await chainId(l2)) !== release.chainId) return false;
+      // Finality isn't what makes the log safe (the proven root is), but
+      // the root's own L2 block may not be final either.
       if (top < fromBlock || top > (await l2Finalized(l2))) return false;
-      const proven = await accumulator();
+      const proven = await accumulator(top);
       if (proven === undefined || proven.block < top) return false;
       // T-71: the whole log to the proven block, every event of the
       // registry, must be the one the accumulator commits to; the recount
@@ -138,7 +151,8 @@ export function l2ElectorateCheck(options: L2ElectorateOptions): ElectorateCheck
         e instanceof OutputRootError ||
         e instanceof GameBlockError ||
         // A log the node serves outside what the accumulator can step over
-        // (a timestamp past a `u64`, say) is the node's, never the seat's.
+        // (a timestamp past a `u64`, say). It also turns a fault of the
+        // seat's own into a refusal, which fails closed.
         e instanceof RangeError
       )
         return false;

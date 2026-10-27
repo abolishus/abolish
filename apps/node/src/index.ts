@@ -42,7 +42,7 @@ export {
   GameBlockError,
   MAX_GAMES_SCANNED,
   MESSAGE_PASSER,
-  respectedOutputRoot,
+  respectedOutputRoots,
 } from "./output-root.ts";
 export {
   DEFAULT_MAX_ELECTION_BYTES,

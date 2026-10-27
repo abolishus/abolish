@@ -14,11 +14,15 @@
 // the subset a board carries. This decides only what they show: whether
 // they are the registry's own, and all of them, is the caller's to know
 // (the accumulator's replay, 4.4), so a pass here is a pass over those
-// records, never 2.4's pass on its own. Tier 1 and Tier 2 tiers and rolling
-// electorates are left unverifiable: a Tier 1 group's leaves are the
+// records, never 2.4's pass on its own. A rolling electorate's tiers
+// (definition version 7 under `electorate_mode` 2, P2-17) are replayed the
+// same way through close, by `rollingTierEvents`, and each one's opening
+// state, its rolling tier tree at `root_l2_block`, compared with its `root`
+// and `group_size`; the step roots its ballots name are 5.1's. Tier 1 and
+// Tier 2 tiers are left unverifiable: a Tier 1 group's leaves are the
 // additions the deployment's count takes, which needs the registry's whole
-// Tier 1 and Tier 2 history ([[vouching]]), Tier 2 has no addition path yet
-// (P3-4), and a rolling tier's roots are its steps' (P2-17).
+// Tier 1 and Tier 2 history ([[vouching]]), and Tier 2 has no addition path
+// yet (P3-4).
 
 import {
   type AnyElectionDefinitionRecord,
@@ -26,8 +30,11 @@ import {
   type ContractEventVersion,
   type ElectionDefinitionV7Record,
   ELECTORATE_MODES,
+  type GroupRegistryPins,
   pinnedVersion,
   RECORD_TYPES,
+  rollingTierEvents,
+  RollingTierTree,
   statedTierElectorate,
   type TierElectorate,
   TierMembershipError,
@@ -58,7 +65,11 @@ export type ElectorateFailure =
   | "group-tier"
   /** A listed group's records break its strict replay ([[contracts]], Group registry, Verification). */
   | "group-history"
-  /** A recounted region, cell root or member count differs from the definition's. */
+  /**
+   * A recounted region, cell root or member count differs from the
+   * definition's, or a rolling tier's root or `group_size` from its opening
+   * state.
+   */
   | "electorate";
 
 export type ElectorateOutcome =
@@ -75,11 +86,10 @@ export type ElectorateOutcome =
   | {
       readonly status: "unverifiable";
       /**
-       * `tier-unsupported` for a Tier 1 or Tier 2 tier, `rolling` for a
-       * rolling electorate, `unsupported-version` for a contract-event pin
-       * this release doesn't read.
+       * `tier-unsupported` for a Tier 1 or Tier 2 tier, `unsupported-version`
+       * for a contract-event pin this release doesn't read.
        */
-      readonly code: "tier-unsupported" | "rolling" | "unsupported-version";
+      readonly code: "tier-unsupported" | "unsupported-version";
       readonly at: ElectorateAt | Record<string, never>;
     };
 
@@ -101,11 +111,12 @@ const isReadable = (v: number | undefined): v is ContractEventVersion =>
  * A fixed tier as the recount reads it, and the definition's statement of
  * it: version 1's one group per tier is a tier of one group in one region,
  * stated as one cell whose root and members are the tier's `root` and
- * `group_size`, so both layouts are recounted by one code.
+ * `group_size`, so both layouts are recounted by one code. A rolling
+ * electorate lists no fixed tier.
  */
 function fixedTiers(
   definition: AnyElectionDefinitionRecord | ElectionDefinitionV7Record,
-): readonly TierElectorate[] | "rolling" {
+): readonly TierElectorate[] {
   if (definition.version === 1)
     return definition.value.electorate.map((t) => ({
       tier: t.tier,
@@ -114,16 +125,15 @@ function fixedTiers(
       regions: [t.group_size],
       cells: [{ root: t.root, members: t.group_size }],
     }));
-  if (definition.version === 7 && definition.value.electorate_mode !== ELECTORATE_MODES.fixed)
-    return "rolling";
   return definition.value.electorate;
 }
 
 /**
- * 2.4's recount of every fixed tier of `definition` from `records`, the
- * group registry's records in order of `n` (others' are ignored), under
- * `release`. The first tier, in the definition's order, that fails gives the
- * outcome; otherwise the first that can't be decided; otherwise it passes.
+ * 2.4's recount of every tier of `definition` from `records`, the group
+ * registry's records in order of `n` (others' are ignored), under `release`:
+ * a fixed tier's regions and cells, a rolling tier's opening state. The
+ * first tier, in the definition's order, that fails gives the outcome;
+ * otherwise the first that can't be decided; otherwise it passes.
  * `definition` must be well formed (2.1): its tiers' groups ascend and
  * name regions it has. Throws `TypeError` or `RangeError` for malformed
  * arguments.
@@ -134,21 +144,22 @@ export function electorateCheck(
   release: GroupRegistryRelease,
 ): ElectorateOutcome {
   const d = definition.value;
-  const tiers = fixedTiers(definition);
-  if (tiers === "rolling") return { status: "unverifiable", code: "rolling", at: {} };
   const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
   if (!isReadable(version)) return { status: "unverifiable", code: "unsupported-version", at: {} };
   // T-71: a registry the release doesn't pin is anyone's, and a self-paid
   // group in it needs no registrar's signature, so its records prove nothing.
   if (d.l2_chain_id !== release.chainId || !equal(d.group_registry, release.registry))
     return { status: "fail", code: "group-registry", at: {} };
-  const pins = {
+  const pins: GroupRegistryPins = {
     version,
     chainId: release.chainId,
     registry: release.registry,
     registrars: release.registrars,
     threshold: release.threshold,
   };
+  if (definition.version === 7 && definition.value.electorate_mode !== ELECTORATE_MODES.fixed)
+    return rollingCheck(definition, records, pins);
+  const tiers = fixedTiers(definition);
   let undecided: ElectorateOutcome | undefined;
   for (const [i, tier] of tiers.entries()) {
     let recount: TierElectorate;
@@ -167,6 +178,50 @@ export function electorateCheck(
     }
     const mismatch = compare(tier, recount, i);
     if (mismatch !== undefined) return mismatch;
+  }
+  return undecided ?? { status: "pass" };
+}
+
+/**
+ * The same for a rolling electorate: each tier's listed groups replayed
+ * strictly through close, so a record between `root_l2_block` and the close
+ * that breaks a group's history fails the definition as `group-history`
+ * (verifier 2.4; [[membership]], Rolling checks), and the tier's opening
+ * state, its rolling tier tree over the events in blocks up to
+ * `root_l2_block`, compared with its `root` and `group_size` (`electorate`).
+ * No first-occurrence rule, and a tier stating `Z_32` and 0 opens with no
+ * live member (T-13, T-16, T-06, T-71).
+ */
+function rollingCheck(
+  definition: ElectionDefinitionV7Record,
+  records: readonly ContractEventRecord[],
+  pins: GroupRegistryPins,
+): ElectorateOutcome {
+  const d = definition.value;
+  let undecided: ElectorateOutcome | undefined;
+  for (const [i, tier] of d.rolling_electorate.entries()) {
+    let events: ReturnType<typeof rollingTierEvents>;
+    try {
+      events = rollingTierEvents(
+        records,
+        { tier: tier.tier, root_l2_block: tier.root_l2_block, groups: tier.groups },
+        d.closes_at,
+        pins,
+      );
+    } catch (e) {
+      if (!(e instanceof TierMembershipError)) throw e;
+      const failed = failure(e, i);
+      if (failed.status === "fail") return failed;
+      undecided ??= failed;
+      continue;
+    }
+    const opening = new RollingTierTree(tier.groups);
+    for (const e of events) {
+      if (e.blockNumber > tier.root_l2_block) break; // events are in chain order
+      opening.apply(e);
+    }
+    if (opening.root() !== tier.root || BigInt(opening.memberCount) !== tier.group_size)
+      return { status: "fail", code: "electorate", at: { tier: i } };
   }
   return undecided ?? { status: "pass" };
 }

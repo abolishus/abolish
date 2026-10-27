@@ -245,7 +245,7 @@ export const OnlyItemsStayPut: Story = {
     await expect(canvas.queryByRole("button", { name: /^Move question/ })).toBeNull();
     // The same for an option left on its own, which can't be removed either.
     await userEvent.click(only.getByRole("button", { name: "Remove option 2 of question 1" }));
-    await expect(only.queryByRole("button", { name: /option 1 of question 1$/ })).toBeNull();
+    await expect(only.queryByRole("button", { name: /option 1 of question 1/ })).toBeNull();
   },
 };
 

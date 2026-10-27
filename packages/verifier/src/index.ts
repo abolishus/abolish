@@ -56,6 +56,13 @@ export {
   PINNED_MARGIN,
   type PanelAvailabilityReport,
 } from "./availability.ts";
+export {
+  type ElectorateAt,
+  electorateCheck,
+  type ElectorateFailure,
+  type ElectorateOutcome,
+  type GroupRegistryRelease,
+} from "./electorate.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {

@@ -88,6 +88,7 @@ import {
 import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
+import { l2ElectorateCheck } from "./electorate.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
 import { type BoardOpenings, boardOpenings } from "./openings.ts";
@@ -120,11 +121,26 @@ const json = (v: unknown) =>
   JSON.parse(JSON.stringify(v, (_, x) => (typeof x === "bigint" ? x.toString() : x))) as unknown;
 
 /**
- * [[verifier]] 2.4 isn't built yet (P2-13 part 3), and a node must refuse a
- * stub it can't check (stub.ts), so a deployed node refuses every stub with
- * `stub-electorate` until it is.
+ * A node must refuse a stub it can't check (stub.ts), so one configured
+ * without `availability.groupRegistry` refuses every stub with
+ * `stub-electorate`.
  */
 const NO_ELECTORATE_CHECK: ElectorateCheck = () => Promise.resolve(false);
+
+/** [[verifier]] 2.4 over the seat's L2 node, where the configuration names the group registry. */
+function electorateOf(config: NodeConfig): ElectorateCheck {
+  const a = config.availability;
+  const g = a?.groupRegistry;
+  if (a === undefined || g === undefined) return NO_ELECTORATE_CHECK;
+  return l2ElectorateCheck({
+    l2: rpcClient(a.l2),
+    chainId: config.l2ChainId,
+    registry: g.address,
+    fromBlock: g.fromBlock,
+    registrars: g.registrars,
+    threshold: g.threshold,
+  });
+}
 
 /**
  * Nor is the registration read from finalized L2 (P2-13 part 3), so the
@@ -203,13 +219,14 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
   if (!Buffer.from(identityKey(identitySecret)).equals(Buffer.from(own)))
     throw new ConfigError("identity key: not the key of the configured seat");
   const store = await FileStore.open(config.store);
+  const electorate = electorateOf(config);
   const seat = new CeremonySeat({
     panel: config.panel,
     l2ChainId: config.l2ChainId,
     trusteeRegistry: config.trusteeRegistry,
     index: config.seat,
     identitySecret,
-    electorate: NO_ELECTORATE_CHECK,
+    electorate,
     store,
   });
   const node = new TrusteeNode({
@@ -228,7 +245,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
   }
   let endpoint;
   try {
-    endpoint = await intakeEndpoint(config, seat, store, io);
+    endpoint = await intakeEndpoint(config, seat, electorate, store, io);
   } catch (e) {
     // Nothing runs, so nothing may stay listening.
     if (availability !== undefined) await closeDuties(availability);
@@ -294,6 +311,7 @@ async function closeDuties({ server, channel }: Duties): Promise<void> {
 async function intakeEndpoint(
   config: NodeConfig,
   seat: CeremonySeat,
+  electorate: ElectorateCheck,
   store: SeatStore,
   io: CliIo,
 ): Promise<Endpoint | undefined> {
@@ -306,7 +324,7 @@ async function intakeEndpoint(
     trusteeRegistry: config.trusteeRegistry,
     index: config.seat,
     ceremony: seat,
-    electorate: NO_ELECTORATE_CHECK,
+    electorate,
     registration: NO_REGISTRATION_CHECK,
     store,
     now: () => BigInt(Math.floor(Date.now() / 1000)),

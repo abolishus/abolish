@@ -1,0 +1,287 @@
+import { keccak_256 } from "@noble/hashes/sha3.js";
+import { readFileSync } from "node:fs";
+import { expect } from "vite-plus/test";
+import {
+  type ContractEventRecord,
+  decodeElectionDefinition,
+  decodeElectionDefinitionV5,
+  type ElectionDefinition,
+  type ElectionDefinitionV5,
+  encodeGroupAddition,
+  encodeGroupRemoval,
+  groupAdditionDigest,
+  groupRegistryDomainSeparator,
+  groupRemovalDigest,
+  signGroupApproval,
+  type TierElectorate,
+} from "@abolishus/crypto";
+import type { GroupRegistryRelease } from "../src/index.ts";
+
+// The group registry's log as the registry emits it, for 2.4's recount
+// (docs/spec/verifier.md, Electorate) here and the trustee node's electorate
+// check. Each tier is one of regional-cells.json's, from an independent
+// Python implementation of the fold, the first-occurrence rule and cell
+// trees, logged under group-registry.json's test registrars; every stated
+// region, root and count is the vectors', never the code under test's
+// (T-13, T-16, T-71).
+
+const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
+export const read = <T>(name: string) =>
+  JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as T;
+
+type RawEvent =
+  | { readonly add: string }
+  | { readonly addRange: readonly [string, string] }
+  | { readonly remove: string };
+
+const cellsVectors = read<{
+  readonly tiers: readonly {
+    readonly id: string;
+    readonly groups: readonly {
+      readonly groupId: string;
+      readonly region: number;
+      readonly events: readonly RawEvent[];
+    }[];
+    readonly regions: readonly string[];
+    readonly cells: readonly { readonly root: string; readonly members: string }[];
+  }[];
+}>("regional-cells.json");
+export const registryVectors = read<{
+  readonly domain: { readonly chainId: number; readonly verifyingContract: string };
+  readonly registrars: {
+    readonly threshold: number;
+    readonly secretKeys: readonly string[];
+    readonly addresses: readonly string[];
+  };
+}>("group-registry.json");
+// Topic 0 of each group-registry event, from the independent generator of
+// contract-event-v6.json, so the logs built below are the registry's.
+const eventVectors = read<{
+  readonly events: readonly { readonly signature: string; readonly topic0: string }[];
+}>("contract-event-v6.json");
+export const definitionOf = (file: string, id: string) => {
+  const found = read<{ vectors: readonly { id: string; encoding?: string }[] }>(file).vectors.find(
+    (v) => v.id === id,
+  )?.encoding;
+  if (found === undefined) throw new Error(`no vector ${id}`);
+  return hex(found);
+};
+
+export const decimal = (s: string | undefined) => {
+  if (s === undefined || !/^(?:0|[1-9][0-9]*)$/.test(s)) throw new Error(`not a decimal: ${s}`);
+  return BigInt(s);
+};
+export const hex = (s: string | undefined) => {
+  if (s === undefined || !/^(?:[0-9a-f]{2})*$/.test(s)) throw new Error(`not hex: ${s}`);
+  return Uint8Array.from(Buffer.from(s, "hex"));
+};
+export const word = (v: bigint) => hex(v.toString(16).padStart(64, "0"));
+const abiBytes = (b: Uint8Array) => {
+  const padded = new Uint8Array(Math.ceil(b.length / 32) * 32);
+  padded.set(b);
+  return Uint8Array.from([...word(32n), ...word(BigInt(b.length)), ...padded]);
+};
+const topic0 = (signature: string) => {
+  const found = eventVectors.events.find((e) => e.signature === signature);
+  if (found === undefined) throw new Error(`no event ${signature}`);
+  expect(Buffer.from(keccak_256(new TextEncoder().encode(signature))).toString("hex")).toBe(
+    found.topic0,
+  );
+  return hex(found.topic0);
+};
+export const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
+
+export const registry = hex(registryVectors.domain.verifyingContract);
+export const chainId = BigInt(registryVectors.domain.chainId);
+export const release: GroupRegistryRelease = {
+  chainId,
+  registry,
+  registrars: registryVectors.registrars.addresses.map(hex),
+  threshold: registryVectors.registrars.threshold,
+};
+const domain = groupRegistryDomainSeparator(chainId, registry);
+const keys = registryVectors.registrars.secretKeys.map(hex);
+export const ROOT_BLOCK = 100n;
+
+// Every type 0x0001 to 0x0009 pinned, the contract event at version 8, as a
+// poll the website creates pins them.
+export const POLL_PINS = (
+  [
+    [1, 5],
+    [2, 3],
+    [3, 2],
+    [4, 1],
+    [5, 1],
+    [6, 1],
+    [7, 5],
+    [8, 8],
+    [9, 2],
+  ] as const
+).map(([record_type, version]) => ({ record_type, version }));
+
+const typicalV5 = decodeElectionDefinitionV5(
+  definitionOf("election-definition-v5.json", "definition-v5-typical"),
+);
+export const v5 = (electorate: readonly TierElectorate[]) => ({
+  version: 5 as const,
+  value: {
+    ...typicalV5,
+    l2_chain_id: chainId,
+    group_registry: registry,
+    electorate: [...electorate],
+    profile: { protocol_major: 1, pins: POLL_PINS },
+  } satisfies ElectionDefinitionV5,
+});
+const typicalV1 = decodeElectionDefinition(
+  definitionOf("election-definition.json", "definition-typical"),
+);
+export const v1 = (electorate: ElectionDefinition["electorate"]) => ({
+  version: 1 as const,
+  value: {
+    ...typicalV1,
+    l2_chain_id: chainId,
+    group_registry: registry,
+    electorate,
+    profile: {
+      protocol_major: 1,
+      pins: POLL_PINS.map((p) => (p.record_type === 1 ? { ...p, version: 1 } : p)),
+    },
+  } satisfies ElectionDefinition,
+});
+
+/** A registry event before it is logged: `logs` numbers and blocks them. */
+export type Event =
+  | { readonly kind: "created"; readonly groupId: bigint; readonly tier: number }
+  | { readonly kind: "added"; readonly groupId: bigint; readonly record: Uint8Array }
+  | { readonly kind: "removed"; readonly groupId: bigint; readonly record: Uint8Array }
+  | {
+      readonly kind: "pinned";
+      readonly threshold: number;
+      readonly registrars: readonly Uint8Array[];
+    };
+
+const approve = (digest: Uint8Array, t = release.threshold) =>
+  keys.slice(0, t).map((k, i) => signGroupApproval(digest, i + 1, new Uint8Array(k)));
+
+export function added(
+  groupId: bigint,
+  firstIndex: bigint,
+  commitments: readonly bigint[],
+  t?: number,
+): Extract<Event, { kind: "added" }> {
+  const digest = groupAdditionDigest(domain, { groupId, tier: 0, firstIndex, commitments });
+  const record = encodeGroupAddition({
+    groupId,
+    firstIndex,
+    commitments,
+    approvals: approve(digest, t),
+  });
+  return { kind: "added", groupId, record };
+}
+
+export function removed(groupId: bigint, size: bigint, indices: readonly bigint[]): Event {
+  const digest = groupRemovalDigest(domain, { groupId, tier: 0, size, indices });
+  const record = encodeGroupRemoval({ groupId, size, indices, approvals: approve(digest) });
+  return { kind: "removed", groupId, record };
+}
+
+export function additions(groupId: bigint, commitments: readonly bigint[]): Event[] {
+  const out: Event[] = [];
+  for (let i = 0; i < commitments.length; i += 256)
+    out.push(added(groupId, BigInt(i), commitments.slice(i, i + 256)));
+  return out;
+}
+
+/** The registry's log of `events`, numbered from `n` in order, at `block` unless given. */
+export function logs(
+  events: readonly (Event & { readonly block?: bigint })[],
+  n = 0,
+): ContractEventRecord[] {
+  return events.map((e, i) => {
+    const block = e.block ?? 10n;
+    const base = {
+      contract: registry,
+      n: BigInt(n + i),
+      l2_block: block,
+      l2_timestamp: 1_760_000_000n + block * 2n,
+    };
+    if (e.kind === "created")
+      return {
+        ...base,
+        topics: [topic0("GroupCreated(uint64,uint8)"), word(e.groupId), word(BigInt(e.tier))],
+        data: new Uint8Array(0),
+      };
+    if (e.kind === "added")
+      return {
+        ...base,
+        topics: [
+          topic0("MembersAdded(uint64,uint64,bytes)"),
+          word(e.groupId),
+          word(new DataView(e.record.buffer).getBigUint64(8, false)),
+        ],
+        data: abiBytes(e.record),
+      };
+    if (e.kind === "removed")
+      return {
+        ...base,
+        topics: [topic0("MembersRemoved(uint64,bytes)"), word(e.groupId)],
+        data: abiBytes(e.record),
+      };
+    return {
+      ...base,
+      topics: [topic0("RegistrarsPinned(uint8,address[])")],
+      data: Uint8Array.from([
+        ...word(BigInt(e.threshold)),
+        ...word(64n),
+        ...word(BigInt(e.registrars.length)),
+        ...e.registrars.flatMap((r) => [...new Uint8Array(12), ...r]),
+      ]),
+    };
+  });
+}
+
+const values = (events: readonly RawEvent[]) =>
+  events.flatMap((e) => {
+    if ("add" in e) return [decimal(e.add)];
+    if ("addRange" in e) {
+      const [start, count] = e.addRange.map(decimal) as [bigint, bigint];
+      return Array.from({ length: Number(count) }, (_, i) => start + BigInt(i));
+    }
+    throw new Error("a removal: not a strict history");
+  });
+
+// Every tier of regional-cells.json a strict replay accepts (no forbidden
+// commitment or stray removal), logged as the registry logs it.
+export const tiers = cellsVectors.tiers
+  .filter((t) =>
+    t.groups.every((g) =>
+      g.events.every((e) => !("remove" in e) && !("add" in e && decimal(e.add) <= 1n)),
+    ),
+  )
+  .map((t) => {
+    const groups = t.groups.map((g) => ({
+      id: decimal(g.groupId),
+      region: g.region,
+      leaves: values(g.events),
+    }));
+    const events: Event[] = [
+      { kind: "pinned", threshold: release.threshold, registrars: release.registrars },
+      ...groups.map((g): Event => ({ kind: "created", groupId: g.id, tier: 0 })),
+      ...groups.flatMap((g) => additions(g.id, g.leaves)),
+    ];
+    const electorate: TierElectorate = {
+      tier: 0,
+      root_l2_block: ROOT_BLOCK,
+      groups: [...groups]
+        .sort((a, b) => (a.id < b.id ? -1 : 1))
+        .map((g) => ({ group_id: g.id, region: g.region })),
+      regions: t.regions.map(decimal),
+      cells: t.cells.map((c) => ({ root: decimal(c.root), members: decimal(c.members) })),
+    };
+    return { id: t.id, groups, events, records: logs(events), electorate };
+  });
+export const tierOf = (id: string) => {
+  const found = tiers.find((t) => t.id === id);
+  if (found === undefined) throw new Error(`no tier ${id}`);
+  return found;
+};

@@ -54,6 +54,29 @@ const TALLY = z.strictObject({
   operator: z.string().min(1),
 });
 
+// The group registry and its registrars as the release's deployment record
+// pins them ([[deployment]], `registrars` and `registrar_threshold`), for the
+// electorate check: ascending addresses, at least two, and a threshold no
+// single key meets (T-62, T-71).
+const GROUP_REGISTRY = z
+  .strictObject({
+    address: hexOf(20),
+    fromBlock: decimal(64),
+    registrars: z.array(hexOf(20)).min(2).max(16),
+    threshold: z.number().int().min(2),
+  })
+  .refine(
+    (g) =>
+      g.registrars.every(
+        (r, i) => i === 0 || Buffer.compare(g.registrars[i - 1] as Uint8Array, r) < 0,
+      ),
+    { message: "must be in strictly ascending order", path: ["registrars"] },
+  )
+  .refine((g) => g.threshold <= g.registrars.length, {
+    message: "must be at most the number of registrars",
+    path: ["threshold"],
+  });
+
 const AVAILABILITY = z.strictObject({
   l1: z.string().min(1),
   l1ChainId: decimal(64),
@@ -90,6 +113,7 @@ const AVAILABILITY = z.strictObject({
     host: z.string().min(1).default("127.0.0.1"),
   }),
   tally: TALLY.optional(),
+  groupRegistry: GROUP_REGISTRY.optional(),
 });
 
 const INTAKE = z
@@ -179,6 +203,20 @@ export interface AvailabilityConfig {
   readonly serve: { readonly port: number; readonly host: string };
   /** The tally duty's channel, or undefined: the node then runs no tally duty. */
   readonly tally: TallyConfig | undefined;
+  /**
+   * The group registry the electorate check reads, or undefined: the node
+   * then refuses every stub (`stub-electorate`).
+   */
+  readonly groupRegistry: GroupRegistryConfig | undefined;
+}
+
+/** The group registry, from its deployment block, and the registrars the release pins. */
+export interface GroupRegistryConfig {
+  readonly address: Uint8Array;
+  readonly fromBlock: bigint;
+  /** In ascending order, as the registry's `RegistrarsPinned` logs them. */
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
 }
 
 /**
@@ -310,6 +348,7 @@ function availabilityOf(
     blocks: a.blocks,
     serve: a.serve,
     tally: a.tally && tallyOf(a.tally, seat, panel),
+    groupRegistry: a.groupRegistry,
   };
 }
 

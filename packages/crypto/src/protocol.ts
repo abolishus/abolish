@@ -29,6 +29,7 @@ import {
   electionDefinitionRule,
   type ElectionDefinitionRule,
   electionDefinitionV5Rule,
+  ELECTORATE_MODES,
   RESULTS_MODES,
 } from "./election-definition.ts";
 import { H } from "./group.ts";
@@ -346,7 +347,9 @@ const isBoardEntryVersion = (v: number | undefined): v is BoardEntryVersion =>
 // partition of cells, and questions need a ballot with one range proof per
 // question, and an author half needs a ballot that carries both sharings
 // (docs/spec/election-definition.md, Notes; verifier 2.3; T-14, T-16, T-28,
-// T-34). Definition version 1 pins ballot version 1.
+// T-34). Definition version 1 pins ballot version 1, and version 7 ballot
+// version 4 under a fixed electorate and version 5, which names its step,
+// under a rolling one (`ballotFor`).
 const DEFINITION_BALLOT: ReadonlyMap<number, number> = new Map([
   [3, 2],
   [4, 2],
@@ -355,11 +358,11 @@ const DEFINITION_BALLOT: ReadonlyMap<number, number> = new Map([
 ]);
 // Ballot versions whose delivery records reach the board as share receipts
 // and complaints (docs/spec/delivery.md, Versions).
-const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
+const DELIVERED_BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5]);
 // The spoiled-ballot opening version that opens each ballot version's cores
 // (docs/spec/challenge.md, Versions): opening version 1 opens version 1's,
 // opening version 2 those of versions 2 and 3, which name a cell, and
-// opening version 3 those of version 4, both halves. A profile
+// opening version 3 those of versions 4 and 5, both halves. A profile
 // pinning another beside them is refused: a ballot that can't be challenged
 // can't be checked as cast-as-intended (T-42, T-47).
 const CORE_OPENING: ReadonlyMap<number, number> = new Map([
@@ -367,17 +370,20 @@ const CORE_OPENING: ReadonlyMap<number, number> = new Map([
   [2, 2],
   [3, 2],
   [4, 3],
+  [5, 3],
 ]);
 // The spoiled-ballot opening versions this package reads (challenge.ts's
 // SPOILED_BALLOT_OPENING), written out because importing it here would be an
 // import cycle; a test ties the two.
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
-// for the same reason. Version 4 pairs only with definition version 6.
-// Ballot.ts reads version 5 too, which only definition version 7 pins: 2.3
-// learns both in P2-17 part 4, and until then judges a version-5 pin as
-// unknown, as the verifier's 2.3 vectors, written before version 5 had a
-// layout, expect.
+// for the same reason. Version 4 pairs only with definition version 6 and
+// version 7's fixed electorate. Ballot.ts reads version 5 too, which only
+// version 7's rolling electorate pins: 2.3 reads it beside version 7 alone
+// (`profileCombinationRule`), and it joins this set when the verifier
+// admits it (P2-17 part 4); until then a version-5 pin beside an earlier
+// definition is judged as unknown, unsupported where nothing else fails, as
+// the verifier's 2.3 vectors, written before version 5 had a layout, expect.
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
@@ -399,6 +405,25 @@ export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
 ]);
 // The versions 2.3 passes: those whose tables name every event.
 const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9]);
+// The contract-event versions whose tables name no relayed rolling ballot:
+// beside ballot version 5 they leave a rolling poll's voters no direct
+// submission the board's events archive (8 and 9) or none forced through L1
+// (10), so 2.3 fails such a profile, whether or not this package reads the
+// version ([[contracts]], Event tables (version 10) and (version 11); T-25,
+// T-50, T-53). A later version this package doesn't know isn't listed: it
+// may name the event, so it is unsupported, never a failure (T-36).
+const NO_RELAYED_ROLLING: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+/**
+ * The ballot version a definition version pins, under its electorate mode
+ * for version 7; undefined for a mode version 7 doesn't have, which only an
+ * untyped caller can pass (the decoder refuses it).
+ */
+function ballotFor(definition: number, d: object): number | undefined {
+  if (definition !== 7) return DEFINITION_BALLOT.get(definition) ?? 1;
+  const mode = "electorate_mode" in d ? d.electorate_mode : undefined;
+  return mode === ELECTORATE_MODES.fixed ? 4 : mode === ELECTORATE_MODES.rolling ? 5 : undefined;
+}
 
 /** Why 2.3's profile combination refuses a definition's pins. */
 export type ProfileCombinationRule = "profile-combination" | "unsupported-version";
@@ -407,10 +432,17 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * 2.3's `profile-combination` (docs/spec/verifier.md, 2.3), for the verifier
  * and for any client that must refuse an election bound to fail it
  * (docs/spec/delivery.md, Versions): definition versions 1, 3 and 4 pin
- * display-text version 1 and versions 5 and 6 display-text version 2;
+ * display-text version 1 and versions 5 to 7 display-text version 2;
  * definition version 1 pins ballot version 1, versions 3 and 4 ballot
- * version 2, version 5 ballot version 3 and version 6 ballot version 4, and
- * each of those ballot versions pairs with those definition versions only;
+ * version 2, version 5 ballot version 3, version 6 ballot version 4 and
+ * version 7 ballot version 4 under `electorate_mode` 1 (fixed) and ballot
+ * version 5 under 2 (rolling), and each of those ballot versions pairs with
+ * those definitions only (ballot version 5 beside a definition before
+ * version 7 is still a version this package doesn't know, below, until the
+ * verifier admits it: P2-17 part 4); ballot version 5 also needs contract-event version
+ * 11, the only one whose tables name the relayed rolling ballot, and fails
+ * beside version 8, 9 or 10 (T-25, T-50, T-53); what follows of version 6
+ * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
  * a version-6 definition with an author panel fails, as does tally-opening
  * version 3, which only it pins, until the author transcript's chosen-byte
  * channel is closed or accepted (T-17); a live version-6 definition fails
@@ -419,10 +451,10 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * until a tally-opening version fixes the nodes' withholding check: T-16,
  * T-45, docs/spec/tally.md, Live results, What a node does), and must pin
  * tally-opening version 2 and board-entry version 6, which no sealed
- * definition may pin; ballot versions 1 to 4 need a board-entry
+ * definition may pin; ballot versions 1 to 5 need a board-entry
  * version that carries share receipts and complaints (3, 4 or 5) and the
  * spoiled-ballot opening version that opens their cores (1 for version 1, 2
- * for versions 2 and 3, 3 for version 4); and tally-opening version 1 needs one that carries
+ * for versions 2 and 3, 3 for versions 4 and 5); and tally-opening version 1 needs one that carries
  * destruction statements (4 or 5, docs/spec/tally.md, Destruction), so an
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
@@ -441,10 +473,10 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * the rule (T-36), but a client that must refuse such an election treats
  * any result but `undefined` as a refusal: it can't cast to a board it
  * can't read. So are, when the profile fails on no other ground, a ballot
- * version this package doesn't know under definition version 3, 4 or 5
+ * version this package doesn't know under definition version 3 to 7
  * (a later release may define it to name a cell or carry questions), and a
- * spoiled-ballot opening version it doesn't read beside ballot version 2 or
- * 3 (a later release may read it to open their cores); one this package
+ * spoiled-ballot opening version it doesn't read beside ballot version 2 to
+ * 5 (a later release may read it to open their cores); one this package
  * reads that doesn't open their cores fails. A ballot, tally-opening or
  * contract-event type pinned twice or not at all is `profile-combination` too, and a board-entry
  * type pinned twice or not at all `unsupported-version`, so in those cases a
@@ -459,7 +491,8 @@ export function profileCombinationRule(
     | ElectionDefinitionV3
     | ElectionDefinitionV4
     | ElectionDefinitionV5
-    | ElectionDefinitionV6,
+    | ElectionDefinitionV6
+    | ElectionDefinitionV7,
   oursSeats = 0,
 ): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
@@ -468,17 +501,19 @@ export function profileCombinationRule(
   const opening = pinnedVersion(d, RECORD_TYPES.tallyOpening);
   if (ballot === undefined || opening === undefined) return "profile-combination";
   const definition = pinnedVersion(d, RECORD_TYPES.electionDefinition);
-  // A definition version this function doesn't know the pairings of (7
-  // until P2-17 part 4 defines them) never falls back to another version's rules, and
-  // neither does a version-6 pin on a value without version 6's fields.
-  if (definition === undefined || ![1, 3, 4, 5, 6].includes(definition))
+  // A definition version this function doesn't know the pairings of never
+  // falls back to another version's rules, and neither does a version-6 or
+  // version-7 pin on a value without that version's fields.
+  if (definition === undefined || ![1, 3, 4, 5, 6, 7].includes(definition))
     return "profile-combination";
   // The value's own fields and its pin must agree, either way round: a
   // version-6 value judged by another version's rules would skip its
-  // results mode and author panel.
-  if ((definition === 6) !== "results_mode" in d) return "profile-combination";
+  // results mode and author panel, and a version-7 value its electorate
+  // mode, which picks its ballot version.
+  if (definition >= 6 !== "results_mode" in d || (definition === 7) !== "electorate_mode" in d)
+    return "profile-combination";
   let live = false;
-  if (definition === 6 && "results_mode" in d) {
+  if (definition >= 6 && "results_mode" in d) {
     // An author panel fails until the author transcript's chosen-byte
     // channel is closed or accepted ([[ceremony]], Author panel, Residuals;
     // T-17), and so, until the nodes' withholding check exists, does a live
@@ -506,7 +541,7 @@ export function profileCombinationRule(
   if (opening === 3) return "profile-combination";
   // Definition versions 1, 3 and 4 have one question, so display-text
   // version 1; version 2 carries questions and pairs with definition
-  // versions 5 and 6. A display-text version this
+  // versions 5 to 7. A display-text version this
   // package doesn't know fails rather than being unsupported: a later one
   // comes with a later definition version that pins it, so releases never
   // split on it (T-34, T-36, T-41).
@@ -514,13 +549,16 @@ export function profileCombinationRule(
   if (pinnedVersion(d, RECORD_TYPES.displayText) !== displayText) return "profile-combination";
   // A ballot version this package doesn't know may be one a later release
   // reads as naming its cell or carrying questions, so under definition
-  // version 3, 4, 5 or 6 it is judged last, as unsupported (T-36). Under
+  // version 3 to 7 it is judged last, as unsupported (T-36). Under
   // version 1 it isn't judged here: verifier 5.x refuses its records.
-  const wanted = DEFINITION_BALLOT.get(definition) ?? 1;
-  const unknownBallot = !BALLOT_VERSIONS.has(ballot);
+  const wanted = ballotFor(definition, d);
+  if (wanted === undefined) return "profile-combination";
+  // Ballot version 5 is read beside version 7, whose rolling electorate
+  // pins it, and nowhere else yet (BALLOT_VERSIONS).
+  const unknownBallot = !BALLOT_VERSIONS.has(ballot) && !(ballot === 5 && definition === 7);
   if (!unknownBallot && ballot !== wanted) return "profile-combination";
   const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
-  const coreOpening = CORE_OPENING.get(ballot);
+  const coreOpening = unknownBallot ? undefined : CORE_OPENING.get(ballot);
   if (coreOpening !== undefined && spoiled === undefined) return "profile-combination";
   // Ballot version 1's cores are opened by opening version 1 only. Ballot
   // versions 2 and 3's by opening version 2, and one this package doesn't
@@ -552,7 +590,8 @@ export function profileCombinationRule(
     (!DELIVERED_BALLOT_VERSIONS.has(ballot) || carriesDelivery) &&
     (opening !== 1 || carriesDestruction) &&
     carriesClose &&
-    (!knownEvents || WHOLE_EVENTS.has(events));
+    (!knownEvents || WHOLE_EVENTS.has(events)) &&
+    (unknownBallot || ballot !== 5 || !NO_RELAYED_ROLLING.has(events));
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)

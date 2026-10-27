@@ -25,6 +25,7 @@ import { decodeSharePosting } from "@abolishus/crypto";
 
 import { MAX_ANSWER, readJson } from "./answer.ts";
 import type { Deployment } from "./deployment.ts";
+import { WALLET_HOLD_MARGIN } from "./lapse.ts";
 import type { Fetch, LoadedDeposits, LoadedPostings } from "./load.ts";
 import type { PostAnswer } from "./open.tsx";
 
@@ -253,7 +254,11 @@ interface Pending {
  * deadline, A late relay run, Sending after a run; T-15, T-25). A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
- * (T-25). A read that fails or throws records nothing.
+ * (T-25). In a late run, which has nothing to fall back to in time, a
+ * head's time counts only within `WALLET_HOLD_MARGIN` of this device's
+ * clock, as for the wallet's sends and the offer, so an endpoint answering
+ * a far-future head can't end it before it sends (T-25). A read that fails
+ * or throws records nothing.
  */
 export async function postThroughRelay(
   io: PostingIo,
@@ -285,6 +290,12 @@ export async function postThroughRelay(
   const unrecorded = (): PostAnswer => (read ? "relayed" : "unreachable");
   // The later of the device's clock and the last head's time read.
   const time = () => (seconds() > chainTime ? seconds() : chainTime);
+  // A later time only ends the waiting sooner; in a late run, only within
+  // `WALLET_HOLD_MARGIN` of this device's clock (T-25).
+  const heard = (timestamp: bigint) => {
+    if (timestamp > chainTime && (!isLate || timestamp <= seconds() + WALLET_HOLD_MARGIN))
+      chainTime = timestamp;
+  };
   const find = (head: "finalized" | "latest") =>
     io
       .find(head, from, () => time() > deadline)
@@ -293,7 +304,7 @@ export async function postThroughRelay(
     const final = await find("finalized");
     if (final.ok) {
       from = final.block + 1n;
-      if (final.timestamp > chainTime) chainTime = final.timestamp;
+      heard(final.timestamp);
       for (const p of pending)
         if (final.records.some((record) => equalBytes(record, p.posting))) recorded.add(p);
     }
@@ -325,8 +336,7 @@ export async function postThroughRelay(
       // there only keeps the client waiting, to `c_P` at most.
       const latest = await find("latest");
       if (latest.ok) {
-        // A later time only ends the waiting sooner.
-        if (latest.timestamp > chainTime) chainTime = latest.timestamp;
+        heard(latest.timestamp);
         for (const p of waited)
           if (latest.records.some((record) => equalBytes(record, p.posting))) p.seen = true;
       }
@@ -338,7 +348,7 @@ export async function postThroughRelay(
           .deposits(started, () => time() > deadline)
           .catch((): LoadedDeposits => ({ ok: false, problem: "unreachable" }));
         if (l1.ok) {
-          if (l1.timestamp > chainTime) chainTime = l1.timestamp;
+          heard(l1.timestamp);
           for (const p of waited) {
             const landed = l1.landed[pending.indexOf(p)];
             if (!p.seen && p.lands === undefined && landed !== undefined)

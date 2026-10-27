@@ -555,10 +555,18 @@ describe("postFromWallet", () => {
       },
     };
     let postings: readonly Uint8Array[] = [];
-    // The ballot cutoff `c_B`, and the force cutoff `c_L`, the same unless given.
-    const run = (ps: readonly Uint8Array[], cutoff: bigint, force = cutoff) => {
+    // The ballot cutoff `c_B`, and the force cutoff `c_L`, the same unless
+    // given, and the last-offer cutoff `c_E` where the voter was told a late
+    // run is best effort.
+    const run = (ps: readonly Uint8Array[], cutoff: bigint, force = cutoff, lastOffer?: bigint) => {
       postings = ps;
-      return postFromWallet(io, ps, ps, { ballot: cutoff, force });
+      return postFromWallet(
+        io,
+        ps,
+        ps,
+        { ballot: cutoff, force },
+        lastOffer === undefined ? undefined : { lastOffer },
+      );
     };
     return { io, run, sends, deposits, estimates, reads, l1Reads, elapsed: () => t() - START };
   }
@@ -901,6 +909,68 @@ describe("postFromWallet", () => {
     expect(forged.sends).toHaveLength(1);
   });
 
+  test("a run past c_B where the voter was told is a late run: it sends until c_E, deposits nothing, and ends once its sends are answered (T-25)", async () => {
+    // A censoring sequencer: nothing reaches the safe head, and nothing is forced.
+    const w = world({ safe: () => [] });
+    expect(await w.run([A, B], START - 1n, START - 1_801n, START + 1_800n)).toBe("sent");
+    expect(w.sends.map(({ call, at }) => [call, at])).toEqual([
+      [A, 0n],
+      [B, 0n],
+    ]);
+    expect(w.deposits).toEqual([]);
+    expect(w.l1Reads).toEqual([]);
+    // No `WALLET_WAIT` for the record: the election's lock is let go at once.
+    expect(w.elapsed()).toBe(0n);
+    // A posting already recorded isn't sent.
+    const done = world({ finalized: () => [A] });
+    expect(await done.run([A, B], START - 1n, START - 1_801n, START + 1_800n)).toBe("sent");
+    expect(done.sends.map(({ call }) => call)).toEqual([B]);
+    const all = world({ finalized: () => [A, B] });
+    expect(await all.run([A, B], START - 1n, START - 1_801n, START + 1_800n)).toBe("recorded");
+    expect(all.sends).toEqual([]);
+  });
+
+  test("a late run sends nothing past c_E, by the device's clock or a head's time", async () => {
+    const byClock = world({});
+    expect(await byClock.run([A], START - 100n, START - 100n, START - 1n)).toBe("late");
+    expect(byClock.sends).toEqual([]);
+    const byChain = world({ chainAhead: 10n });
+    expect(await byChain.run([A], START - 100n, START - 100n, START + 5n)).toBe("late");
+    expect(byChain.sends).toEqual([]);
+    // A head far past the device's clock is ignored, as before c_B.
+    const forged = world({ chainAhead: WALLET_HOLD_MARGIN + 1n });
+    expect(await forged.run([A], START - 100n, START - 100n, START + 100n)).toBe("sent");
+    expect(forged.sends).toHaveLength(1);
+  });
+
+  test("a head's time past c_B makes a run late too, before anything was sent", async () => {
+    const w = world({ chainAhead: 10n });
+    expect(await w.run([A], START + 5n, START + 5n, START + 1_000n)).toBe("sent");
+    expect(w.sends).toHaveLength(1);
+    expect(w.elapsed()).toBe(0n);
+  });
+
+  test("a late run holds a send back on a sighting for its whole wait, and never past c_E (T-13)", async () => {
+    const seen = world({ latest: (t) => (t < POLL ? [A] : []) });
+    const lastOffer = START + WALLET_WAIT + 3n * POLL;
+    expect(await seen.run([A], START - 1n, START - 1n, lastOffer)).toBe("sent");
+    expect(seen.sends).toHaveLength(1);
+    expect(seen.sends[0]?.at).toBeGreaterThanOrEqual(WALLET_WAIT);
+    expect(seen.sends[0]?.at).toBeLessThan(WALLET_WAIT + POLL);
+    // Held to c_E: nothing sent, and the run ends there.
+    const held = world({ latest: () => [A] });
+    expect(await held.run([A], START - 1n, START - 1n, START + 3n * POLL)).toBe("late");
+    expect(held.sends).toEqual([]);
+    expect(held.elapsed()).toBeLessThanOrEqual(4n * POLL);
+  });
+
+  test("a late run forces nothing, not even a send the wallet's node refused, and gives the build's endpoint nothing", async () => {
+    const w = world({ answer: () => refusal("refused", "estimate") });
+    expect(await w.run([A], START - 1n, START - 1_801n, START + 1_800n)).toBe("refused");
+    expect(w.deposits).toEqual([]);
+    expect(w.estimates).toEqual([]);
+  });
+
   test("answers what stopped the first send, and sent once one went", async () => {
     for (const answer of ["rejected", "refused", "wrong-chain", "failed"]) {
       const w = world({ answer: () => refusal(answer) });
@@ -936,7 +1006,7 @@ describe("postFromWallet", () => {
     expect(stops.at(-1)?.()).toBe(true);
   });
 
-  test("never recorded unless the finalized head carries every posting, never sending one twice or past the cutoff", async () => {
+  test("never recorded unless the finalized head carries every posting, never sending one twice or past its cutoff", async () => {
     await fc.assert(
       fc.asyncProperty(
         fc.array(fc.uniqueArray(fc.integer({ min: 0, max: 2 }), { maxLength: 3 }), {
@@ -970,7 +1040,18 @@ describe("postFromWallet", () => {
         fc.boolean(),
         fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
         fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }),
-        async (finals, safes, latests, answers, depositAnswers, estimates, cutoffIn, drift) => {
+        fc.option(fc.bigInt({ min: 0n, max: 2n * WALLET_WAIT }), { nil: undefined }),
+        async (
+          finals,
+          safes,
+          latests,
+          answers,
+          depositAnswers,
+          estimates,
+          cutoffIn,
+          drift,
+          lateBy,
+        ) => {
           const postings = [A, B, Uint8Array.of(0, 13, 1, 0xcc)];
           const at = (rounds: number[][], t: bigint) =>
             (rounds[Math.min(Number(t / POLL), rounds.length - 1)] ?? []).map(
@@ -999,11 +1080,24 @@ describe("postFromWallet", () => {
           });
           const cutoff = START + cutoffIn;
           const force = cutoff - drift;
-          const result = await w.run(postings, cutoff, force);
+          // `c_E`, where the voter was told a late run is best effort.
+          const lastOffer = lateBy === undefined ? undefined : cutoff + lateBy;
+          const result = await w.run(postings, cutoff, force, lastOffer);
           if (result === "recorded") for (const p of postings) expect(final).toContainEqual(p);
-          // Each posting sent at most once, and only by the cutoff.
+          // Each posting sent at most once, and only by `c_B`, or in a late
+          // run, one with nothing sent by `c_B`, by `c_E`.
           expect(new Set(w.sends.map(({ call }) => call)).size).toBe(w.sends.length);
-          for (const { at: sentAt } of w.sends) expect(START + sentAt).toBeLessThanOrEqual(cutoff);
+          const late = w.sends.some(({ at }) => START + at > cutoff);
+          if (late) {
+            expect(lastOffer).toBeDefined();
+            for (const { at: sentAt } of w.sends) {
+              expect(START + sentAt).toBeGreaterThan(cutoff);
+              expect(START + sentAt).toBeLessThanOrEqual(lastOffer ?? 0n);
+            }
+            // Nothing forced, and the build's endpoint given nothing.
+            expect(w.deposits).toEqual([]);
+            expect(w.estimates).toEqual([]);
+          }
           // Each deposited at most once, and only with a deposit's span left
           // before the force cutoff: one whose estimate the wallet's node refused
           // once given it, at once, with the build's own estimate; one whose

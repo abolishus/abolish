@@ -17,6 +17,15 @@ export const POSTING_SEND_TIME = 600n;
 export const POSTING_LATE_FINALITY = 1_200n;
 
 /**
+ * Seconds a head's time may be ahead of this device's clock and still count
+ * toward a cutoff (`WALLET_HOLD_MARGIN`, [[posting-relay]], Own wallet): two
+ * wallet requests' time, for the account and chain before a send. An
+ * endpoint answering a head further ahead could refuse every send, or end a
+ * late relay run before it sends (T-25).
+ */
+export const WALLET_HOLD_MARGIN = 600n;
+
+/**
  * `c_D = t_D − F` for a poll closing at `closesAt` with `l1InclusionBound`,
  * under the release's `forcedInclusion` (`F`), in seconds.
  */

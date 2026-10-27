@@ -67,6 +67,7 @@ import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { startApi } from "./api.ts";
 import { type Anvil, startAnvil } from "./anvil.ts";
 import { archiveObjects } from "./archive.ts";
+import { contractEventObjects } from "./contract-events.ts";
 import { type LocalArweave, startArweave } from "./arweave.ts";
 import {
   castingFor,
@@ -96,6 +97,7 @@ import {
 } from "./election.ts";
 import {
   checkBallots,
+  checkArchivedEvents,
   checkControl,
   checkExpectations,
   checkSelected,
@@ -820,11 +822,21 @@ async function run(
   // posted to the local Arweave through the worker's client, listed in
   // manifest 0 once confirmed, and the locator naming it sent alone after
   // the seal's anchor, as the worker's final anchor is (docs/spec/archive.md,
-  // Locator; T-51).
+  // Locator; T-51). Beside them, the L2 contracts' evidence and runs for
+  // each anchored period, read through the worker's source once every L2
+  // event of the run is emitted (docs/spec/archive.md, Who writes them).
+  const l2Contracts = [l2.electionRegistry, l2.trusteeRegistry, l2.groupRegistry, l2.board];
+  const contractEvents = await contractEventObjects(
+    anvil,
+    l2Anvil,
+    { l1ChainId: L1_CHAIN_ID, l2ChainId: L2_CHAIN_ID, contracts: l2Contracts },
+    Array.from({ length: seal - first + 1 }, (_, i) => end(first + i)),
+  );
   const archived = await archiveObjects(
     arweave,
     elections.flatMap((e) => segmentObjects(e.entries).flatMap((o) => [o.object, o.hashes])),
     { l1ChainId: L1_CHAIN_ID, anchor: anchor.address },
+    contractEvents,
   );
   await locateAt(anvil, anchor, archived.locator, end(seal) + ANCHOR_DELAY + 1n);
   log(
@@ -837,7 +849,7 @@ async function run(
 
   log(`stage 7: segments ${first} to ${seal} (the seal) anchored for each election`);
   log(
-    `stage 8: ${archived.objects.length} segment objects and entry-hash lists posted to a local Arweave at ${arweave.url} through the worker's client and listed in manifest 0, whose locator the anchor holds`,
+    `stage 8: ${archived.objects.length} segment objects and entry-hash lists, and the L2 contracts' ${archived.evidence.length} evidence records and ${archived.runs.length} runs of ${[...contractEvents.counts.values()].reduce((a, b) => a + b, 0n)} events, posted to a local Arweave at ${arweave.url} through the worker's client and listed in manifest 0, whose locator the anchor holds`,
   );
 
   // Stage 4's later checks: each receipt of the poll judged as its voter's
@@ -964,30 +976,59 @@ async function run(
           ...accumulatorSlots(),
         ]);
         const fromArweave = join(OUT, "honest", "bundle-from-arweave");
-        writeBundle(
-          fromArweave,
-          e,
-          clock,
-          {
-            ...evidenceFor,
-            header: archiveL1.header,
-            nodes: archiveL1.nodes,
-            blocks: await headers(anvil, archiveL1.number),
-            logs: await allAnchorLogs(anvil, anchor.address),
-          },
-          "none",
-        );
+        const archiveInputs = {
+          ...evidenceFor,
+          header: archiveL1.header,
+          nodes: archiveL1.nodes,
+          blocks: await headers(anvil, archiveL1.number),
+          logs: await allAnchorLogs(anvil, anchor.address),
+        };
+        writeBundle(fromArweave, e, clock, archiveInputs, "none");
         const fromArchive = ["--arweave", arweave.url];
+        // 4.4's replay must hold every event each L2 contract emitted, from
+        // the archive's evidence and runs alone (T-71).
+        const held = Object.fromEntries(
+          (
+            [
+              ["election-registry", l2.electionRegistry],
+              ["trustee-registry", l2.trusteeRegistry],
+              ["group-registry", l2.groupRegistry],
+              ["board", l2.board],
+            ] as const
+          ).map(([role, a]) => [role, contractEvents.counts.get(hex(a)) ?? 0n]),
+        );
         failures.push(
           ...verify(
             fromArweave,
             (r) => [
               ...checkExpectations(r, "arweave", HONEST_BALLOTS, { passes: ["4.3"] }),
               ...tallyRows("honest (arweave)")(r),
+              ...checkArchivedEvents("honest (arweave)", r, held),
             ],
             fromArchive,
           ),
         );
+        // A control: the same, with the node withholding the election
+        // registry's run. Its records are proven but its events aren't held,
+        // so 4.4 is unverifiable at the registry, never failed (T-53).
+        const registryRun = archived.runs.find((r) => hex(r.contract) === hex(l2.electionRegistry));
+        if (registryRun === undefined)
+          throw new Error("the election registry's events aren't archived");
+        await arweave.withhold(registryRun.transaction);
+        const withheldRun = join(OUT, "honest", "control-withheld-run");
+        writeBundle(withheldRun, e, clock, archiveInputs, "none");
+        failures.push(
+          ...verify(
+            withheldRun,
+            (r) =>
+              checkControl("withheld-run", r, {
+                "4.3": { status: "pass" },
+                "4.4": { status: "unverifiable", code: "run-gap" },
+              }),
+            fromArchive,
+          ),
+        );
+        await arweave.release(registryRun.transaction);
         // A control: the same, with the node withholding the voting window's
         // segment object. The archive is then short and the copy stops at
         // that run: unverifiable from Arweave, never failed (T-53).

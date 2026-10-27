@@ -232,3 +232,35 @@ export function checkControl(
 ): string[] {
   return checkRows(`control ${name}`, run, expected);
 }
+
+/**
+ * Why 4.4's replay of the archive differs from `held`, each L2 contract's
+ * event count by role; empty if it doesn't. Every record the archive lists
+ * must be proven and reproduced by the runs, which reach its count with no
+ * gap, so each contract holds every event it emitted (docs/spec/verifier.md,
+ * 4.4, step 6; T-71). 4.4 itself stays unverifiable while the root is the
+ * record's word, so a run that passes this pins what its row can't.
+ */
+export function checkArchivedEvents(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  held: Readonly<Record<string, bigint>>,
+): string[] {
+  const replay = run.report.archive?.replay;
+  if (replay === undefined) return [`${name}: the report has no replay of the archive`];
+  const problems = replay.findings.length > 0 ? [`${name}: the replay reports findings`] : [];
+  const roles = replay.contracts.map((c) => c.role);
+  if (roles.join() !== Object.keys(held).join())
+    problems.push(
+      `${name}: the replay covers ${roles.join(", ")}, not ${Object.keys(held).join(", ")}`,
+    );
+  for (const c of replay.contracts) {
+    if (c.held !== held[c.role]?.toString())
+      problems.push(`${name}: ${c.role} holds ${c.held} events, not ${held[c.role] ?? "none"}`);
+    if (c.evidence.findings.length > 0 || c.evidence.records.some((r) => r.replay !== null))
+      problems.push(`${name}: ${c.role}'s evidence doesn't all replay`);
+    if (!c.runs.complete || c.runs.findings.length > 0)
+      problems.push(`${name}: ${c.role}'s runs aren't complete`);
+  }
+  return problems;
+}

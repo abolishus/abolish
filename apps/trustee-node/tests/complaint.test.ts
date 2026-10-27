@@ -226,7 +226,8 @@ function postingOf(
 const BAD = posted("bad-share", 2);
 
 interface Harness {
-  readonly duty: (store?: MemoryStore) => ComplaintDuty;
+  /** The duty over the harness, with `outside` as its budget outside the scope if given. */
+  readonly duty: (store?: MemoryStore, outside?: number) => ComplaintDuty;
   readonly store: MemoryStore;
   readonly sent: { record: string; cutoff: bigint }[];
   recorded: Uint8Array[];
@@ -249,7 +250,7 @@ function harness(seat: number, board: readonly ViewBallot[]): Harness {
     finalizedAt: POSTINGS_RECORDED + 1n,
     now: POSTINGS_RECORDED + 1n,
     failSend: false,
-    duty: (store = h.store) =>
+    duty: (store = h.store, outside) =>
       new ComplaintDuty({
         store,
         election,
@@ -257,6 +258,7 @@ function harness(seat: number, board: readonly ViewBallot[]): Harness {
         now: () => h.now,
         ballots: () => Promise.resolve(h.ballots),
         contract,
+        ...(outside === undefined ? {} : { outside }),
       }),
   };
   const contract: ComplaintPath = {
@@ -272,6 +274,14 @@ function harness(seat: number, board: readonly ViewBallot[]): Harness {
   };
   return h;
 }
+
+/** The duty done: `total` batches owed and `outside` outside the scope, `outsideMissing` of them never recorded. */
+const done = (total: number, outside = 0, outsideMissing = 0): ComplaintDutyStatus => ({
+  state: "recorded",
+  total,
+  outside,
+  outsideMissing,
+});
 
 /** The one batch sent, decoded and checked: the seat's signature, and each entry's proof against `posting`. */
 function checkSent(h: Harness, seat: number, ballot: ReturnType<typeof ballotOf>, p: Posted) {
@@ -373,7 +383,7 @@ describe("ComplaintDuty", () => {
     h.recorded = [new Uint8Array([1, 2, 3])];
     expect((await restarted.step()).state).toBe("sent");
     h.recorded = [batch];
-    expect(await restarted.step()).toEqual({ state: "recorded", total: 1 });
+    expect(await restarted.step()).toEqual(done(1));
     expect(h.sent).toHaveLength(3);
   });
 
@@ -442,7 +452,7 @@ describe("ComplaintDuty", () => {
             first ??= hex(stored!);
             expect(hex(stored!)).toBe(first);
             if (status instanceof Error) expect([s.fail, owed]).toEqual([true, true]);
-            else if (!owed) expect(status).toEqual({ state: "recorded", total: 0 });
+            else if (!owed) expect(status).toEqual(done(0));
           }
           // Every batch sent is the one stored, and complains about bad-share alone.
           for (const sent of h.sent) {
@@ -455,7 +465,7 @@ describe("ComplaintDuty", () => {
     );
   });
 
-  describe("owes nothing, and signs nothing, for", () => {
+  describe("owes nothing, and signs nothing outside its scope either, for", () => {
     const bad = ballotOf("bad-share", 160n);
     const honest = ballotOf("plurality", 160n);
     const cases: readonly [
@@ -507,8 +517,12 @@ describe("ComplaintDuty", () => {
         },
       ],
       [
-        "a failing posting of a ballot the seat doesn't hold",
-        { seat: 2, board: [], postings: () => [postingOf(BAD, bad)] },
+        "a failing posting of a ballot neither its view nor its sources hold",
+        {
+          seat: 2,
+          board: [],
+          postings: () => [postingOf(BAD, ballotOf("bad-share", 160n, 7n))],
+        },
       ],
       [
         "a record that doesn't decode",
@@ -523,9 +537,9 @@ describe("ComplaintDuty", () => {
       const h = harness(c.seat, c.board);
       h.postings = c.postings();
       h.ballots = [bad.record, honest.record];
-      expect(await h.duty().step()).toEqual({ state: "recorded", total: 0 });
+      expect(await h.duty().step()).toEqual(done(0));
       expect(h.sent).toEqual([]);
-      expect(await h.store.list(DELIVERIES)).toEqual(["complaints"]);
+      expect(await h.store.list(DELIVERIES)).toEqual(["complaints", "complaints-outside"]);
     });
   });
 
@@ -601,7 +615,211 @@ describe("ComplaintDuty", () => {
     expect((await h.duty().step()).state).toBe("waiting-postings");
     await h.store.putOnce(`intake/${"51".repeat(32)}/${hex(bad.hash)}`, new Uint8Array([1]));
     h.now = POSTINGS_RECORDED + 1n;
-    expect(await h.duty().step()).toEqual({ state: "recorded", total: 0 });
+    expect(await h.duty().step()).toEqual(done(0));
     expect(h.sent).toEqual([]);
+  });
+
+  describe("outside its scope (delivery.md, What a node owes in complaints, SHOULD)", () => {
+    // Another seat-2 ballot whose posted shares fail: the vectors' bad-seal.
+    const SEAL = posted("bad-seal", 2);
+
+    /** Batch `i` sent, its signature and each entry's proof checked, as the ballot hashes it complains about. */
+    function sentBatch(h: Harness, i: number, held: readonly ReturnType<typeof ballotOf>[]) {
+      const sent = h.sent[i]!;
+      expect(sent.cutoff).toBe(C_K);
+      const batch = decodeShareComplaintBatch(unhex(sent.record), 1);
+      expect(
+        verifyStatement(
+          identityKey(electionFor(2).signingSecret),
+          "abolish/v1/sig/share-complaint-batch",
+          shareComplaintBatchStatement(batch),
+          batch.signature,
+        ),
+      ).toBe(true);
+      for (const c of batch.complaints) {
+        const ballot = held.find((b) => hex(b.hash) === hex(c.ballot_hash))!;
+        // Its proof checks against the ballot's own posted ciphertext, whichever it is.
+        expect(
+          [BAD, SEAL].map(
+            (p) =>
+              checkComplaint(
+                { definitionHash: DEFINITION },
+                2,
+                keyPair(2).publicKey,
+                ballot.vote.vss,
+                ballot.vote.share_hashes,
+                { ciphertext: p.ciphertext, m: p.m },
+                c.proof,
+              ).ok,
+          ),
+        ).toContain(true);
+      }
+      return batch.complaints.map((c) => hex(c.ballot_hash));
+    }
+
+    test("complains about a failing posting of a ballot withheld from its view, held from its sources (T-54)", async () => {
+      // The seat attested no extent, so its view held none of the board's
+      // ballots; the contract's record of this one is in its sources now.
+      const withheld = ballotOf("bad-share", 160n);
+      const h = harness(2, []);
+      h.postings = [postingOf(BAD, withheld)];
+      h.ballots = [withheld.record];
+      expect(await h.duty().step()).toEqual({
+        state: "outside-sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      });
+      expect(sentBatch(h, 0, [withheld])).toEqual([hex(withheld.hash)]);
+      expect(await h.store.list(DELIVERIES)).toEqual(["complaints", "complaints-outside"]);
+      // Stored once: a restart over a source that no longer gives the ballot resends the same bytes.
+      h.ballots = [];
+      expect((await h.duty().step()).state).toBe("outside-sent");
+      expect(h.sent[1]).toEqual(h.sent[0]);
+      h.recorded = [unhex(h.sent[0]!.record)];
+      expect(await h.duty().step()).toEqual(done(0, 1));
+      expect(h.sent).toHaveLength(2);
+    });
+
+    test("sends nothing outside its scope until every batch it owes is recorded", async () => {
+      const owed = ballotOf("bad-share", 160n);
+      const withheld = ballotOf("bad-share", 160n, 1n);
+      const h = harness(2, [owed.copy]);
+      h.postings = [postingOf(BAD, owed), postingOf(BAD, withheld)];
+      h.ballots = [owed.record, withheld.record];
+      expect(await h.duty().step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
+      expect(await h.duty().step()).toEqual({ state: "sent", batches: 1, recorded: 0, total: 1 });
+      expect(await h.store.list(DELIVERIES)).toEqual(["complaints"]);
+      expect(h.sent.map((x) => sentBatch({ ...h, sent: [x] }, 0, [owed]))).toEqual([
+        [hex(owed.hash)],
+        [hex(owed.hash)],
+      ]);
+      h.recorded = [unhex(h.sent[0]!.record)];
+      expect(await h.duty().step()).toEqual({
+        state: "outside-sent",
+        batches: 1,
+        recorded: 0,
+        total: 1,
+      });
+      expect(sentBatch(h, 2, [withheld])).toEqual([hex(withheld.hash)]);
+    });
+
+    test("never complains about a ballot it receipted, one of its view or one in its scope", async () => {
+      const receipted = ballotOf("bad-share", 160n);
+      const superseded = ballotOf("bad-seal", 150n, 1n);
+      const newer = ballotOf("plurality", 170n, 1n);
+      const h = harness(2, [superseded.copy, newer.copy]);
+      h.postings = [postingOf(BAD, receipted), postingOf(SEAL, superseded)];
+      h.ballots = [receipted.record, superseded.record, newer.record];
+      // Decided at `c_I` before the postings are in, then shown receipted,
+      // as above.
+      h.now = POSTINGS_RECORDED;
+      expect((await h.duty().step()).state).toBe("waiting-postings");
+      await h.store.putOnce(
+        `intake/${"51".repeat(32)}/${hex(receipted.hash)}`,
+        new Uint8Array([1]),
+      );
+      h.now = POSTINGS_RECORDED + 1n;
+      expect(await h.duty().step()).toEqual(done(0));
+      expect(h.sent).toEqual([]);
+    });
+
+    test("spends its budget one ballot per voter a round, each voter's newest first (T-52)", async () => {
+      // Voter 0 posts against two ballots of its own; voter 1 against one.
+      const older = ballotOf("bad-seal", 150n);
+      const newest = ballotOf("bad-share", 170n);
+      const other = ballotOf("bad-share", 160n, 1n);
+      const all = [older, newest, other];
+      const run = async (outside: number | undefined) => {
+        const h = harness(2, []);
+        h.postings = [postingOf(SEAL, older), postingOf(BAD, newest), postingOf(BAD, other)];
+        h.ballots = all.map((b) => b.record);
+        const status = await h.duty(undefined, outside).step();
+        return { status, sent: h.sent.length === 0 ? [] : sentBatch(h, 0, all) };
+      };
+      const first = [hex(newest.hash), hex(other.hash)].sort()[0]!;
+      expect((await run(1)).sent).toEqual([first]);
+      expect((await run(2)).sent.sort()).toEqual([hex(newest.hash), hex(other.hash)].sort());
+      expect((await run(undefined)).sent.sort()).toEqual(all.map((b) => hex(b.hash)).sort());
+      expect(await run(0)).toEqual({ status: done(0), sent: [] });
+    });
+
+    test("past t_K sends nothing more, and a batch outside the scope never recorded is no alarm", async () => {
+      const withheld = ballotOf("bad-share", 160n);
+      const h = harness(2, []);
+      h.postings = [postingOf(BAD, withheld)];
+      h.ballots = [withheld.record];
+      await h.duty().step();
+      h.now = T_K + 1n;
+      expect(await h.duty().step()).toEqual(done(0, 1, 1));
+      expect(h.sent).toHaveLength(1);
+      // Never decided by `t_K`: nothing is decided past it.
+      const late = harness(2, []);
+      late.postings = h.postings;
+      late.ballots = h.ballots;
+      late.now = T_K + 1n;
+      expect(await late.duty().step()).toEqual(done(0));
+      expect(await late.store.list(DELIVERIES)).toEqual(["complaints"]);
+    });
+
+    test("whatever it holds and its budget, it complains only about failing postings in time outside its view, at most its budget and one per voter before a second (T-52, T-15)", async () => {
+      const candidates = [
+        { b: ballotOf("bad-share", 160n, 1n), p: BAD, fails: true },
+        { b: ballotOf("bad-seal", 150n, 1n), p: SEAL, fails: true },
+        { b: ballotOf("bad-share", 160n, 2n), p: BAD, fails: true },
+        { b: ballotOf("plurality", 160n, 3n), p: posted("plurality", 2), fails: false },
+        { b: ballotOf("bad-seal", 160n, 4n), p: SEAL, fails: true },
+      ];
+      await fc.assert(
+        fc.asyncProperty(
+          fc.subarray([0, 1, 2, 3, 4]),
+          fc.subarray([0, 1, 2, 3, 4]),
+          fc.subarray([0, 1, 2, 3, 4]),
+          fc.nat({ max: 4 }),
+          async (held, late, viewed, outside) => {
+            const h = harness(
+              2,
+              viewed.map((i) => candidates[i]!.b.copy),
+            );
+            h.postings = candidates.map((c, i) =>
+              postingOf(c.p, c.b, late.includes(i) ? T_D + 1n : T_D),
+            );
+            h.ballots = held.map((i) => candidates[i]!.b.record);
+            // Past the wait for a scope ballot its sources don't give.
+            h.now = C_K - RELEASE_WINDOWS.margin;
+            // The scope's own complaints first, recorded once sent: what
+            // comes after is outside the scope.
+            const duty = h.duty(undefined, outside);
+            let status = await duty.step();
+            if (status.state === "sent") {
+              h.recorded = h.sent.map((x) => unhex(x.record));
+              h.sent.length = 0;
+              status = await duty.step();
+            }
+            expect(["recorded", "outside-sent"]).toContain(status.state);
+            const eligible = candidates.filter(
+              (c, i) => c.fails && held.includes(i) && !late.includes(i) && !viewed.includes(i),
+            );
+            const all = candidates.map((c) => c.b);
+            const sent = h.sent.length === 0 ? [] : sentBatch(h, 0, all);
+            expect(h.sent.length).toBeLessThanOrEqual(1);
+            expect(sent.length).toBe(Math.min(outside, eligible.length));
+            for (const s of sent) expect(eligible.map((c) => hex(c.b.hash))).toContain(s);
+            // Voter 1 has two eligible ballots: its second comes only once every other voter has one.
+            const voters = new Set(
+              eligible.map((c) => decodeBallot(c.b.record, 1).nullifier.toString()),
+            );
+            const ones = sent.map((s) =>
+              decodeBallot(
+                eligible.find((c) => hex(c.b.hash) === s)!.b.record,
+                1,
+              ).nullifier.toString(),
+            );
+            expect(new Set(ones).size).toBe(Math.min(sent.length, voters.size));
+          },
+        ),
+        { numRuns },
+      );
+    });
   });
 });

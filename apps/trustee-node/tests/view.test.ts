@@ -736,6 +736,11 @@ describe("the complaint duty's ballot source", () => {
       state: "waiting-ballots",
       missing: 1,
     });
-    expect(await duty(complaintBallots).step()).toEqual({ state: "recorded", total: 0 });
+    expect(await duty(complaintBallots).step()).toEqual({
+      state: "recorded",
+      total: 0,
+      outside: 0,
+      outsideMissing: 0,
+    });
   });
 });

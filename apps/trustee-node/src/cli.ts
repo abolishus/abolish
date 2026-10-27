@@ -88,7 +88,7 @@ import {
 import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
-import { l2ElectorateCheck } from "./electorate.ts";
+import { l1OutputRootAccumulator, l2ElectorateCheck } from "./electorate.ts";
 import { l2RegistrationCheck } from "./registration.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
@@ -133,13 +133,21 @@ function electorateOf(config: NodeConfig): ElectorateCheck {
   const a = config.availability;
   const g = a?.groupRegistry;
   if (a === undefined || g === undefined) return NO_ELECTORATE_CHECK;
+  const l2 = rpcClient(a.l2);
   return l2ElectorateCheck({
-    l2: rpcClient(a.l2),
+    l2,
     chainId: config.l2ChainId,
     registry: g.address,
     fromBlock: g.fromBlock,
     registrars: g.registrars,
     threshold: g.threshold,
+    accumulator: l1OutputRootAccumulator({
+      l1: rpcClient(a.l1),
+      l1ChainId: a.l1ChainId,
+      portal: a.portal,
+      l2,
+      registry: g.address,
+    }),
   });
 }
 

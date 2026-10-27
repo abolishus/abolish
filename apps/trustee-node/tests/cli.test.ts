@@ -1,18 +1,23 @@
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   cidText,
+  contractEventLog,
   encodeElectionDefinition,
   identityKey,
   kemKeygen,
   objectCar,
   objectCid,
   panelId,
+  replayEventAccumulator,
 } from "@abolishus/crypto";
+import { contractSequence, MESSAGE_PASSER } from "@abolishus/node";
+import { ACCUMULATOR_SLOT } from "@abolishus/verifier";
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { cli, dutyWiring } from "../src/cli.ts";
 import { L1AnchorError } from "../src/l1.ts";
@@ -257,16 +262,26 @@ describe("run with the group registry", () => {
   // the vectors' registry address on an Anvil node of their chain by code
   // that logs its calldata: `k ‖ k topics ‖ data`, for k of 1 to 3. The
   // records' approvals bind that chain and address, so the recount accepts
-  // them only there.
+  // them only there. Its accumulator, replayed here over the logs as Anvil
+  // holds them, is written to its storage, and a dispute game on a scripted
+  // L1 (Anvil's own answers but for the portal's, factory's and game's
+  // `eth_call`s) claims an output root of a block after it, computed as a
+  // proposer posts it (part 3c).
   // PUSH1 0 CALLDATALOAD PUSH1 0xf8 SHR (k), the data copied to memory from
   // byte 1 + 32k, then LOG1, LOG2 or LOG3 over the topics at 1, 33 and 65.
   const EMITTER =
     "0x60003560f81c80602002600101803603808260003790509080600114602d5780600214603757600314604457005b50600135906000a1005b50602135600135826000a2005b604135602135600135836000a300";
   const BOARD = `0x${"b0".repeat(20)}`;
   const PORTAL = `0x${"90".repeat(20)}`;
+  const FACTORY = `0x${"fa".repeat(20)}`;
+  const GAME = `0x${"9a".repeat(20)}`;
+  // A newer game claiming a block far ahead, which no node proves: passed over.
+  const AHEAD = `0x${"9b".repeat(20)}`;
   const tier = tierOf("one-group");
   let chain: Node;
   let deployer: string;
+  let l1: Server;
+  let l1Url: string;
 
   beforeAll(async () => {
     chain = await anvil(chainId, true);
@@ -281,10 +296,91 @@ describe("run with the group registry", () => {
         { from: deployer, to: address, data: `0x${data.toString("hex")}`, gas: "0x200000" },
       ]);
     }
+    // A block more, so every emitting transaction is mined before the log is read.
+    await chain.rpc.call("anvil_mine", ["0x1"]);
+    const latest = BigInt((await chain.rpc.call("eth_blockNumber", [])) as string);
+    const sequence = await contractSequence(chain.rpc, registry, 0n, latest);
+    const state = replayEventAccumulator(chainId, registry, sequence.map(contractEventLog));
+    const slot = (n: bigint) => `0x${n.toString(16).padStart(64, "0")}`;
+    await chain.rpc.call("anvil_setStorageAt", [
+      address,
+      slot(ACCUMULATOR_SLOT),
+      `0x${hex(state.accumulator)}`,
+    ]);
+    await chain.rpc.call("anvil_setStorageAt", [
+      address,
+      slot(ACCUMULATOR_SLOT + 1n),
+      slot(state.count),
+    ]);
     // Past the tier's block and Anvil's finality depth, so the tier is final.
     await chain.rpc.call("anvil_mine", [`0x${(ROOT_BLOCK + 200n).toString(16)}`]);
+    // Below the latest block, whose proofs Anvil answers from its current state.
+    const at = `0x${(ROOT_BLOCK + 100n).toString(16)}`;
+    const block = (await chain.rpc.call("eth_getBlockByNumber", [at, false])) as {
+      stateRoot: string;
+      hash: string;
+    };
+    const passer = (await chain.rpc.call("eth_getProof", [`0x${hex(MESSAGE_PASSER)}`, [], at])) as {
+      storageHash: string;
+    };
+    const outputRoot = keccak_256(
+      Buffer.concat([
+        new Uint8Array(32),
+        Buffer.from(block.stateRoot.slice(2), "hex"),
+        Buffer.from(passer.storageHash.slice(2), "hex"),
+        Buffer.from(block.hash.slice(2), "hex"),
+      ]),
+    );
+    const word = (n: bigint) => n.toString(16).padStart(64, "0");
+    const answers = new Map([
+      [`${PORTAL}:disputeGameFactory()`, word(BigInt(FACTORY))],
+      [`${PORTAL}:respectedGameType()`, word(621n)],
+      [`${FACTORY}:gameCount()`, word(2n)],
+      [`${FACTORY}:gameAtIndex(uint256)`, ""],
+      [`${GAME}:status()`, word(0n)],
+      [`${GAME}:rootClaim()`, hex(outputRoot)],
+      [`${GAME}:l2SequenceNumber()`, word(ROOT_BLOCK + 100n)],
+      [`${AHEAD}:status()`, word(0n)],
+      [`${AHEAD}:rootClaim()`, word(7n)],
+      [`${AHEAD}:l2SequenceNumber()`, word(1n << 40n)],
+    ]);
+    const selectors = new Map(
+      [...answers.keys()].map((k) => {
+        const signature = k.split(":")[1] as string;
+        return [hex(keccak_256(new TextEncoder().encode(signature)).slice(0, 4)), signature];
+      }),
+    );
+    l1 = createServer(async (req, res) => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      const body = JSON.parse(Buffer.concat(chunks).toString()) as {
+        id: number;
+        method: string;
+        params: unknown[];
+      };
+      const reply = (result: unknown) =>
+        res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id, result }));
+      if (body.method === "eth_call") {
+        const [{ to, data }] = body.params as [{ to: string; data: string }];
+        const signature = selectors.get(data.slice(2, 10));
+        const answer =
+          signature === "gameAtIndex(uint256)"
+            ? word(621n) +
+              word(1n) +
+              word(BigInt(BigInt(`0x${data.slice(10)}`) === 0n ? GAME : AHEAD))
+            : answers.get(`${to}:${signature}`);
+        if (answer !== undefined) return reply(`0x${answer}`);
+      }
+      reply(await chain.rpc.call(body.method, body.params));
+    });
+    l1.listen(0, "127.0.0.1");
+    await once(l1, "listening");
+    l1Url = `http://127.0.0.1:${(l1.address() as AddressInfo).port}`;
   }, 60_000);
-  afterAll(() => chain?.process.kill());
+  afterAll(() => {
+    chain?.process.kill();
+    l1?.close();
+  });
 
   test("passes a stub whose tier the registry's finalized log makes, and refuses one it doesn't", async () => {
     const { panel, secrets } = panelOf(3, 2);
@@ -335,7 +431,7 @@ describe("run with the group registry", () => {
             coordinator: url,
             pollSeconds: 3600,
             availability: {
-              l1: chain.url.href,
+              l1: l1Url,
               l1ChainId: chainId.toString(),
               l2: chain.url.href,
               anchor: `0x${"a1".repeat(20)}`,

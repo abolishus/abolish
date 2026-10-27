@@ -24,6 +24,7 @@ export {
   AVAILABILITY_ATTESTATION_SUBMITTED,
   AVAILABILITY_COMPLAINT_SUBMITTED,
   contractLogs,
+  contractSequence,
   DEFINITION_REGISTERED,
   ELECTION_CREATED,
   L2Error,
@@ -35,6 +36,14 @@ export {
   type Registration,
   registration,
 } from "./l2.ts";
+export {
+  accumulatorUnderRoot,
+  type ClaimedOutputRoot,
+  GameBlockError,
+  MAX_GAMES_SCANNED,
+  MESSAGE_PASSER,
+  respectedOutputRoots,
+} from "./output-root.ts";
 export {
   DEFAULT_MAX_ELECTION_BYTES,
   mirrorThen,

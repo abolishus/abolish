@@ -83,6 +83,7 @@ export async function l2Finalized(rpc: Rpc): Promise<bigint> {
 }
 
 const WORD = /^0x[0-9a-fA-F]{64}$/u;
+const QUANTITY_64 = /^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u;
 
 /**
  * The logs `address` emitted from `fromBlock` to `toBlock` matching
@@ -98,6 +99,61 @@ export async function contractLogs(
   fromBlock: bigint,
   toBlock: bigint,
 ): Promise<ContractEventRecord[]> {
+  return (await readLogs(rpc, address, topics, fromBlock, toBlock)).map((l) => l.record);
+}
+
+/**
+ * Every log `address` emitted from `fromBlock` to `toBlock`, as
+ * contract-event records numbered from 0 in the node's order, each with its
+ * block's timestamp, for the accumulator's replay
+ * (`checkEventAccumulatorProof`). The timestamp is the log's
+ * `blockTimestamp` where the node gives one, and otherwise its block's, one
+ * request per block. Nothing here is trusted: the replay against a proven
+ * accumulator fails a log dropped, added, reordered or given another block
+ * or time, so the node can only make it fail. Dropped as `contractLogs`
+ * drops them, and so is a log with no topic, which no contract of ours
+ * emits.
+ */
+export async function contractSequence(
+  rpc: Rpc,
+  address: Uint8Array,
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<ContractEventRecord[]> {
+  const logs = await readLogs(rpc, address, [], fromBlock, toBlock);
+  const times = new Map<bigint, bigint>();
+  const records: ContractEventRecord[] = [];
+  for (const { record, blockTimestamp } of logs) {
+    if (record.topics.length === 0) continue;
+    let time = blockTimestamp ?? times.get(record.l2_block);
+    if (time === undefined) {
+      const block = (await rpc.call("eth_getBlockByNumber", [
+        `0x${record.l2_block.toString(16)}`,
+        false,
+      ])) as { number?: unknown; timestamp?: unknown } | null;
+      if (u64Quantity(block?.number, "eth_getBlockByNumber") !== record.l2_block)
+        throw new RpcError("eth_getBlockByNumber: another block");
+      time = u64Quantity(block?.timestamp, "eth_getBlockByNumber");
+      times.set(record.l2_block, time);
+    }
+    records.push({ ...record, n: BigInt(records.length), l2_timestamp: time });
+  }
+  return records;
+}
+
+function u64Quantity(value: unknown, what: string): bigint {
+  if (typeof value !== "string" || !QUANTITY_64.test(value))
+    throw new RpcError(`${what}: not a u64 quantity`);
+  return BigInt(value);
+}
+
+async function readLogs(
+  rpc: Rpc,
+  address: Uint8Array,
+  topics: readonly (Uint8Array | readonly Uint8Array[])[],
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<{ record: ContractEventRecord; blockTimestamp: bigint | undefined }[]> {
   const logs = await rpc.call("eth_getLogs", [
     {
       address: hex(address),
@@ -107,13 +163,14 @@ export async function contractLogs(
     },
   ]);
   if (!Array.isArray(logs)) throw new RpcError("eth_getLogs: not a list");
-  const records: ContractEventRecord[] = [];
+  const out: { record: ContractEventRecord; blockTimestamp: bigint | undefined }[] = [];
   for (const log of logs) {
     const l = (log ?? {}) as {
       address?: unknown;
       topics?: unknown;
       data?: unknown;
       blockNumber?: unknown;
+      blockTimestamp?: unknown;
       removed?: unknown;
     };
     const blockNumber = l.blockNumber;
@@ -127,21 +184,27 @@ export async function contractLogs(
       typeof l.data !== "string" ||
       !/^0x(?:[0-9a-fA-F]{2})*$/u.test(l.data) ||
       typeof blockNumber !== "string" ||
-      !/^0x(?:0|[1-9a-fA-F][0-9a-fA-F]{0,15})$/u.test(blockNumber) ||
+      !QUANTITY_64.test(blockNumber) ||
       BigInt(blockNumber) < fromBlock ||
       BigInt(blockNumber) > toBlock
     )
       continue;
-    records.push({
-      contract: Uint8Array.from(address),
-      n: 0n,
-      l2_block: BigInt(blockNumber),
-      l2_timestamp: 0n,
-      topics: (l.topics as string[]).map((t) => hexToBytes(t.slice(2))),
-      data: hexToBytes(l.data.slice(2)),
+    out.push({
+      record: {
+        contract: Uint8Array.from(address),
+        n: 0n,
+        l2_block: BigInt(blockNumber),
+        l2_timestamp: 0n,
+        topics: (l.topics as string[]).map((t) => hexToBytes(t.slice(2))),
+        data: hexToBytes(l.data.slice(2)),
+      },
+      blockTimestamp:
+        typeof l.blockTimestamp === "string" && QUANTITY_64.test(l.blockTimestamp)
+          ? BigInt(l.blockTimestamp)
+          : undefined,
     });
   }
-  return records;
+  return out;
 }
 
 /** An election as the election registry created and registered it. */

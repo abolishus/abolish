@@ -131,7 +131,7 @@ function recordOf(s: Sent): Uint8Array {
 /** The board's events, one per L2 block (number = timestamp − T_A + 1,000), proven at `proven`. */
 function board(
   sent: readonly Sent[],
-  proven: { readonly timestamp: bigint; readonly cut?: number; readonly version?: 8 | 9 },
+  proven: { readonly timestamp: bigint; readonly cut?: number; readonly version?: 8 | 9 | 10 | 11 },
 ) {
   const logs = sent.map((s, n) => {
     const payload = recordOf(s);
@@ -427,31 +427,35 @@ describe("the ballot extent", { timeout: 120_000 }, () => {
   });
 });
 
-describe("contract-event version 9", { timeout: 120_000 }, () => {
-  // Version 9 names the availability events as version 8 does, so 4.6
-  // judges the same records alike under either pin ([[contracts]], Event
-  // tables (version 9); T-36).
-  const under9 = (sent: readonly Sent[]) =>
-    availabilityChecks(
-      inputs(sent, { eventVersion: 9, l2: board(sent, { timestamp: T_A + 10n, version: 9 }) }),
-    );
+describe.each([9, 10, 11] as const)(
+  "contract-event version %i",
+  { timeout: 120_000 },
+  (version) => {
+    // Versions 9 to 11 name the availability events as version 8 does, so
+    // 4.6 judges the same records alike under each pin ([[contracts]], Event
+    // tables (versions 9 to 11); T-36).
+    const underVersion = (sent: readonly Sent[]) =>
+      availabilityChecks(
+        inputs(sent, { eventVersion: version, l2: board(sent, { timestamp: T_A + 10n, version }) }),
+      );
 
-  test("a panel holding its threshold is judged as under version 8", () => {
-    const sent = [attest(1), complain(3), attest(2, T_A)];
-    const r = under9(sent);
-    expect(r).toEqual(availabilityChecks(inputs(sent)));
-    expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
-  });
-
-  test("one attestation short of the threshold fails unavailable, as under version 8", () => {
-    const sent = [attest(1), complain(2)];
-    expect(under9(sent).row).toEqual({
-      status: "fail",
-      code: "unavailable",
-      at: { point: 1, panel: 1 },
+    test("a panel holding its threshold is judged as under version 8", () => {
+      const sent = [attest(1), complain(3), attest(2, T_A)];
+      const r = underVersion(sent);
+      expect(r).toEqual(availabilityChecks(inputs(sent)));
+      expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
     });
-  });
-});
+
+    test("one attestation short of the threshold fails unavailable, as under version 8", () => {
+      const sent = [attest(1), complain(2)];
+      expect(underVersion(sent).row).toEqual({
+        status: "fail",
+        code: "unavailable",
+        at: { point: 1, panel: 1 },
+      });
+    });
+  },
+);
 
 describe("evidence that isn't held is unverifiable, never a failure", () => {
   test("before s_A's anchoring deadline on finalized L1", () => {
@@ -536,17 +540,19 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
       status: "unverifiable",
       code: "not-reached",
     });
-    expect(availabilityChecks(inputs([], { eventVersion: 10 })).row).toEqual({
+    expect(availabilityChecks(inputs([], { eventVersion: 12 })).row).toEqual({
       status: "unverifiable",
       code: "unsupported-version",
       at: {},
     });
   });
 
-  test("a version-8 archive under a version-9 pin doesn't decode, nor a version-9 one under version 8", () => {
+  test("an archive of one version doesn't decode under another's pin", () => {
     for (const [pinned, archived] of [
       [9, 8],
       [8, 9],
+      [10, 9],
+      [11, 10],
     ] as const)
       expect(
         availabilityChecks(

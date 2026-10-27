@@ -272,7 +272,9 @@ describe("exportAccount", () => {
       hex(otherPoll.electionId),
       otherHandle,
       "someone else",
-      (seq + 1000n).toString(),
+      // Quoted, as the export writes it: bare, its digits could turn up in a
+      // random hex value (an address, a hash) and fail the test by chance.
+      `"${(seq + 1000n).toString()}"`,
       hex(otherRegistry),
       "moderator-two",
     ])

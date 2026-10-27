@@ -518,7 +518,10 @@ export interface CountedCell {
  * once it has judged openings against it (docs/spec/verifier.md, Results
  * from the counted tally): the same checks in the same order, so it gives
  * exactly what `checkTally` gives over the ballots summed into `cells`
- * (T-29). Every aggregate must have the election's shape, one row of `k`
+ * (T-29). The cells must be summed from the counted set (`aggregateCell`),
+ * never read back from storage: nothing here ties an aggregate or a count to
+ * the ballots, and an overcount loosens `tally-range`. Every aggregate must
+ * have the election's shape, one row of `k`
  * elements per option, and every count be a whole number of ballots; a cell
  * that doesn't is the caller's error, never an opening's failure.
  */

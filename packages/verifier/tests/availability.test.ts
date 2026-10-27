@@ -381,7 +381,7 @@ describe("the ballot extent", { timeout: 120_000 }, () => {
     const both = availabilityChecks(
       inputs([attest(1), attest(2), byAuthor(1), byAuthor(3)], { panels: [DEFAULT, author] }),
     );
-    expect(both.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+    expect(both.row).toEqual(PENDING);
     expect(both.report?.ballotExtent.panels?.map((p) => [p.panel, p.holds, p.attested])).toEqual([
       [1, true, [1, 2]],
       [2, true, [1, 3]],

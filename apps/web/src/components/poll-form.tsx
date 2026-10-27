@@ -1185,8 +1185,11 @@ export function PollFormPage({
                   onChange={(e) => change({ ...form, description: e.target.value })}
                 />
               </div>
+              {/* Side by side, the place's hint runs to three lines and the
+                  topic's to one, so each field sits at its column's foot and
+                  the two line up (P2-29, creating a poll's iteration 13). */}
               <div className="grid gap-6 sm:grid-cols-2">
-                <div className="grid content-start gap-2">
+                <div className="flex flex-col gap-2">
                   <Label htmlFor={fieldId.place} className="text-base font-semibold">
                     {t("pollFormPlaceLabel")}
                     <Optional t={t} />
@@ -1199,13 +1202,13 @@ export function PollFormPage({
                     id={fieldId.place}
                     dir="auto"
                     autoComplete="off"
-                    className={FIELD}
+                    className={cn(FIELD, "mt-auto")}
                     {...described(errors, fieldId.place, `${fieldId.place}-help`)}
                     value={form.place}
                     onChange={(e) => change({ ...form, place: e.target.value })}
                   />
                 </div>
-                <div className="grid content-start gap-2">
+                <div className="flex flex-col gap-2">
                   <Label htmlFor={fieldId.topic} className="text-base font-semibold">
                     {t("pollFormTopicLabel")}
                     <Optional t={t} />
@@ -1215,7 +1218,7 @@ export function PollFormPage({
                   </p>
                   <NativeSelect
                     id={fieldId.topic}
-                    className="w-full"
+                    className="mt-auto w-full"
                     aria-describedby={`${fieldId.topic}-help`}
                     value={form.topic}
                     onChange={(e) => change({ ...form, topic: topicOf(e.target.value) })}

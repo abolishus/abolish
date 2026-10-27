@@ -673,6 +673,28 @@ export const SectionLedesDesktop: Story = {
 };
 
 /**
+ * Side by side, the place's three-line hint pushed its field 40px below the
+ * topic's one-line hint's select; the labels and the fields now line up
+ * (P2-29, creating a poll's iteration 13).
+ */
+export const PlaceAndTopicLineUpDesktop: Story = {
+  args: { client: savedDraft(), id: ID },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(1280);
+    const place = (await canvas.findByRole("textbox", { name: /^Place/ })).getBoundingClientRect();
+    const topic = canvas.getByRole("combobox", { name: /^Topic/ }).getBoundingClientRect();
+    await expect(topic.left).toBeGreaterThan(place.right);
+    await expect(topic.top).toBe(place.top);
+    await expect(topic.height).toBe(place.height);
+    const placeLabel = canvas.getByText(/^Place/, { selector: "label" }).getBoundingClientRect();
+    const topicLabel = canvas.getByText(/^Topic/, { selector: "label" }).getBoundingClientRect();
+    await expect(topicLabel.top).toBe(placeLabel.top);
+  },
+};
+
+/**
  * The problems after a refused save lie the same distance apart whether they
  * wrap or not: at 360 two that wrapped sat 16px apart and one-line ones 28px
  * (P2-29, creating a poll's iteration 10).

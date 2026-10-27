@@ -934,7 +934,7 @@ describe("the group registry's log", () => {
         if (!loaded.ok) throw new Error(loaded.problem);
         expect(loaded.block).toBe(HEAD);
         expect(loaded.timestamp).toBe(0x68f00000n);
-        expect(loaded.records.map((r) => decodeContractEvent(r, 8))).toEqual(
+        expect(loaded.records.map((r) => decodeContractEvent(r, 12))).toEqual(
           logs.map((l, n) => ({
             contract: Uint8Array.from(Buffer.from(GROUP_REGISTRY.slice(2), "hex")),
             n: BigInt(n),

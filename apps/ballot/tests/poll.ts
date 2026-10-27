@@ -249,7 +249,7 @@ export function boardWith(commitments: readonly bigint[]): Uint8Array[] {
           election_id: definition.election_id,
           index: BigInt(i + 1),
           segment: 0,
-          payload: encodeContractEvent(r, 8),
+          payload: encodeContractEvent(r, 12),
         },
         5,
       ),
@@ -262,14 +262,14 @@ export const OTHER_GROUP = 2n;
 
 /**
  * The whole group registry as the page reads it from the L2, as
- * contract-event records of version 8: `OTHER_GROUP` created at Tier 0,
+ * contract-event records of version 12: `OTHER_GROUP` created at Tier 0,
  * then `groupLog(commitments)`.
  */
 export function registryWith(commitments: readonly bigint[]): Uint8Array[] {
   return [
     log(0n, [topic0("GroupCreated(uint64,uint8)"), word(OTHER_GROUP), word(0n)], new Uint8Array(0)),
     ...groupLog(commitments),
-  ].map((r) => encodeContractEvent(r, 8));
+  ].map((r) => encodeContractEvent(r, 12));
 }
 
 /** The board as the API serves it. */

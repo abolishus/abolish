@@ -658,361 +658,371 @@ describe("contract-path records under contract-event version 8, once 4.4 passes"
   });
 });
 
-describe("contract-path records under contract-event version 9, once 4.4 passes", () => {
-  // Version 9 frames the version-2 delivery records ballot version 4 fixes,
-  // so a single one through the contract path delivers or excludes as a
-  // board-path one does, judged by its L2 timestamp, and so does each pair
-  // or entry of a version-2 batch, reported with its index; a version-2 root
-  // may deliver or exclude any ballot of its panel by leaves 5.9 doesn't read
-  // yet, so it leaves the rows undecided (docs/spec/verifier.md, Counted set
-  // and tally, steps 2 and 3; P2-16 parts 5d-3c-1 and 5d-3c-2; T-25, T-53).
-  const pins9 = d.profile.pins.map((p) =>
-    p.record_type === RECORD_TYPES.contractEvent ? { ...p, version: 9 } : p,
-  );
-  const definition9 = decodeDefinition(
-    encodeElectionDefinitionV6({ ...d, profile: { ...d.profile, pins: pins9 } }),
-  );
-  const f9 = { definition: definition9, hash: readDefinition(definition9).hash };
-  const { delivery: T_D, complaint: T_K } = deliveryDeadlines(
-    d.closes_at,
-    BigInt(d.l1_inclusion_bound),
-  );
-  // The `admitted` case's ballots, hashed under this definition: delivery
-  // reads their hashes, never their proofs.
-  const under9 = (b: Cast): Cast => ({
-    ...b,
-    hash: ballotHashV4({ definitionHash: f9.hash, cell: b.cell, nullifier: b.nullifier }, b.vote),
-  });
-  const alice = under9(ALICE);
-  const contracts = {
-    electionRegistry: d.election_registry,
-    trusteeRegistry: d.trustee_registry,
-    groupRegistry: d.group_registry,
-    board: d.board,
-  };
-  const topic0 = (name: string) => {
-    const signature = CONTRACT_EVENT_SIGNATURES[9].board.find((x) => x.startsWith(`${name}(`));
-    if (signature === undefined) throw new Error(`no board event ${name}`);
-    return keccak_256(text(signature));
-  };
-  const abiBytes = (record: Uint8Array) => {
-    const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
-    out[31] = 0x20;
-    for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
-    out.set(record, 64);
-    return out;
-  };
-  const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
-  /** The board's event `name` carrying `record` under version 9, emitted in an L2 block at `t`. */
-  const event = (name: string, topics: readonly Uint8Array[], record: Uint8Array, t: bigint) => {
-    const payload = encodeContractEvent(
-      {
-        contract: d.board,
-        n: 0n,
-        l2_block: 1n,
-        l2_timestamp: t,
-        topics: [topic0(name), ...topics],
-        data: abiBytes(record),
-      },
-      9,
+describe.each([9, 10, 11] as const)(
+  "contract-path records under contract-event version %i, once 4.4 passes",
+  (version) => {
+    // Versions 9 to 11 frame the version-2 delivery records ballot version 4 fixes,
+    // so a single one through the contract path delivers or excludes as a
+    // board-path one does, judged by its L2 timestamp, and so does each pair
+    // or entry of a version-2 batch, reported with its index; a version-2 root
+    // may deliver or exclude any ballot of its panel by leaves 5.9 doesn't read
+    // yet, so it leaves the rows undecided (docs/spec/verifier.md, Counted set
+    // and tally, steps 2 and 3; P2-16 parts 5d-3c-1 and 5d-3c-2; T-25, T-53).
+    const pins9 = d.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.contractEvent ? { ...p, version } : p,
     );
-    const checked = checkContractEvent(decodeContractEvent(payload, 9), contracts, 9);
-    if (!checked.ok || checked.event.event !== name) throw new Error(`fixture: ${name} fails`);
-    return payload;
-  };
-  const receiptEvent = (e: ReturnType<typeof election>, seat: number, t: bigint) =>
-    event("ShareReceiptSubmitted", [f9.hash, alice.hash], e.receipt(alice, seat), t);
-  const batches = read("delivery-batch-v2.json") as {
-    readonly records: readonly { readonly id: string; readonly encoding: string }[];
-  };
-  /** delivery-batch-v2.json's record `id` renamed to this definition, under its event. */
-  const batch = (id: string, name: string, t: bigint) => {
-    const r = batches.records.find((x) => x.id === id);
-    if (r === undefined) throw new Error(`no record ${id}`);
-    const record = hex(r.encoding);
-    record.set(f9.hash, 3);
-    return event(name, [f9.hash, word(record[36] as number)], record, t);
-  };
-  const run = (e: ReturnType<typeof election>, eventsPass = true) =>
-    countedChecks(e.inputs([alice], { eventsPass, destruction: false }));
-  const undecided = (r: ReturnType<typeof countedChecks>, at: number) => {
-    for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3"])
-      expect(r.rows.get(id), id).toEqual({
-        status: "unverifiable",
-        code: "not-implemented",
-        at: { entry: at },
-      });
-  };
-
-  test("the fixture pins contract-event version 9, and 2.3's combination lets it", () => {
-    expect(definition9.version).toBe(6);
-    expect(pinnedVersion(definition9.value, RECORD_TYPES.contractEvent)).toBe(9);
-    expect(profileCombinationRule(definition9.value as typeof d)).toBeUndefined();
-    expect(f9.hash).not.toEqual(hash);
-  });
-
-  test("a version-2 receipt through the contract path delivers, in time by its L2 timestamp", () => {
-    const e = election(f9);
-    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
-    e.board(200, receiptEvent(e, 3, T_D));
-    const r = run(e);
-    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
-  });
-
-  test("one sent after t_D is late, whatever segment boarded it, and excludes the ballot", () => {
-    const e = election(f9);
-    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
-    const at = e.board(200, receiptEvent(e, 3, T_D + 1n));
-    expect(run(e).delivery).toEqual({
-      excluded: [{ entry: alice.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] }],
-      records: [{ entry: at, code: "delivery-late", panel: DEFAULT, seat: 3 }],
-      rejected: [],
+    const definition9 = decodeDefinition(
+      encodeElectionDefinitionV6({ ...d, profile: { ...d.profile, pins: pins9 } }),
+    );
+    const f9 = { definition: definition9, hash: readDefinition(definition9).hash };
+    const { delivery: T_D, complaint: T_K } = deliveryDeadlines(
+      d.closes_at,
+      BigInt(d.l1_inclusion_bound),
+    );
+    // The `admitted` case's ballots, hashed under this definition: delivery
+    // reads their hashes, never their proofs.
+    const under9 = (b: Cast): Cast => ({
+      ...b,
+      hash: ballotHashV4({ definitionHash: f9.hash, cell: b.cell, nullifier: b.nullifier }, b.vote),
     });
-  });
+    const alice = under9(ALICE);
+    const contracts = {
+      electionRegistry: d.election_registry,
+      trusteeRegistry: d.trustee_registry,
+      groupRegistry: d.group_registry,
+      board: d.board,
+    };
+    const topic0 = (name: string) => {
+      const signature = CONTRACT_EVENT_SIGNATURES[version].board.find((x) =>
+        x.startsWith(`${name}(`),
+      );
+      if (signature === undefined) throw new Error(`no board event ${name}`);
+      return keccak_256(text(signature));
+    };
+    const abiBytes = (record: Uint8Array) => {
+      const out = new Uint8Array(64 + Math.ceil(record.length / 32) * 32);
+      out[31] = 0x20;
+      for (let i = 63, n = record.length; n > 0; i--, n = Math.floor(n / 256)) out[i] = n % 256;
+      out.set(record, 64);
+      return out;
+    };
+    const word = (n: number) => Uint8Array.from({ length: 32 }, (_, i) => (i === 31 ? n : 0));
+    /** The board's event `name` carrying `record` under `version`, emitted in an L2 block at `t`. */
+    const event = (name: string, topics: readonly Uint8Array[], record: Uint8Array, t: bigint) => {
+      const payload = encodeContractEvent(
+        {
+          contract: d.board,
+          n: 0n,
+          l2_block: 1n,
+          l2_timestamp: t,
+          topics: [topic0(name), ...topics],
+          data: abiBytes(record),
+        },
+        version,
+      );
+      const checked = checkContractEvent(decodeContractEvent(payload, version), contracts, version);
+      if (!checked.ok || checked.event.event !== name) throw new Error(`fixture: ${name} fails`);
+      return payload;
+    };
+    const receiptEvent = (e: ReturnType<typeof election>, seat: number, t: bigint) =>
+      event("ShareReceiptSubmitted", [f9.hash, alice.hash], e.receipt(alice, seat), t);
+    const batches = read("delivery-batch-v2.json") as {
+      readonly records: readonly { readonly id: string; readonly encoding: string }[];
+    };
+    /** delivery-batch-v2.json's record `id` renamed to this definition, under its event. */
+    const batch = (id: string, name: string, t: bigint) => {
+      const r = batches.records.find((x) => x.id === id);
+      if (r === undefined) throw new Error(`no record ${id}`);
+      const record = hex(r.encoding);
+      record.set(f9.hash, 3);
+      return event(name, [f9.hash, word(record[36] as number)], record, t);
+    };
+    const run = (e: ReturnType<typeof election>, eventsPass = true) =>
+      countedChecks(e.inputs([alice], { eventsPass, destruction: false }));
+    const undecided = (r: ReturnType<typeof countedChecks>, at: number) => {
+      for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3"])
+        expect(r.rows.get(id), id).toEqual({
+          status: "unverifiable",
+          code: "not-implemented",
+          at: { entry: at },
+        });
+    };
 
-  test("a version-2 record waits on 4.4", () => {
-    const e = election(f9);
-    e.deliver([alice], 200);
-    const at = e.board(200, receiptEvent(e, 3, T_D));
-    for (const [id, o] of run(e, false).rows)
-      expect(o, id).toEqual({ status: "unverifiable", code: "not-reached", at: { entry: at } });
-  });
-
-  test("above the floor a version-2 record sent by t_K holds the rows open, one sent after it doesn't", () => {
-    const held = election(f9);
-    held.deliver([alice], 200);
-    const at = held.board(S_K + 1, receiptEvent(held, 3, T_K));
-    undecided(run(held), at);
-    const late = election(f9);
-    late.deliver([alice], 200);
-    late.board(S_K + 1, receiptEvent(late, 3, T_K + 1n));
-    expect(run(late).rows.get("5.9")).toEqual({ status: "pass" });
-    expect(run(late).delivery).toEqual({ excluded: [], records: [], rejected: [] });
-  });
-
-  test("above the floor a version-1 record isn't read: it delivers nothing wherever it sits", () => {
-    const e = election(f9);
-    e.deliver([alice], 200);
-    const shareHash = alice.vote.share_hashes[2] as Uint8Array;
-    const m = shareReceiptStatement({
-      definition_hash: f9.hash,
-      ballot_hash: alice.hash,
-      seat: 3,
-      share_hash: shareHash,
+    test("the fixture pins its contract-event version, and 2.3's combination lets it", () => {
+      expect(definition9.version).toBe(6);
+      expect(pinnedVersion(definition9.value, RECORD_TYPES.contractEvent)).toBe(version);
+      expect(profileCombinationRule(definition9.value as typeof d)).toBeUndefined();
+      expect(f9.hash).not.toEqual(hash);
     });
-    const v1 = encodeShareReceipt(
-      shareReceiptRecord(f9.hash, 3, {
-        ballotHash: alice.hash,
-        shareHash,
-        receipt: signStatement(secret(3), "abolish/v1/sig/share-receipt", m),
-      }),
-    );
-    e.board(S_K + 1, event("ShareReceiptSubmitted", [f9.hash, alice.hash], v1, T_D));
-    expect(run(e).rows.get("5.9")).toEqual({ status: "pass" });
-    expect(run(e).delivery).toEqual({ excluded: [], records: [], rejected: [] });
-  });
 
-  test("a version-2 root leaves the rows undecided, whichever panel it names", () => {
-    for (const id of ["receipt-root-default", "receipt-root-author"] as const) {
-      const e = election(f9);
-      e.deliver([alice], 200);
-      const at = e.board(200, batch(id, "ObligationRootSubmitted", T_D));
-      undecided(run(e), at);
-    }
-  });
-
-  /** Seat `seat` of `panel`'s version-2 receipt batch for `ballots`, signed by `signer`'s key, under its event at `t`. */
-  const receiptBatch = (
-    ballots: readonly Cast[],
-    panel: SeatPanel,
-    seat: number,
-    t: bigint,
-    signer = seat,
-  ) => {
-    const [b] = batchShareReceiptsV2(
-      secret(signer),
-      f9.hash,
-      panel,
-      seat,
-      ballots
-        .map((x) => ({
-          ballot_hash: x.hash,
-          share_hash:
-            (panel === DEFAULT ? x.vote.share_hashes : x.vote.author_share_hashes)[seat - 1] ??
-            new Uint8Array(32),
-        }))
-        .sort((x, y) => Buffer.compare(x.ballot_hash, y.ballot_hash)),
-    );
-    if (b === undefined) throw new Error("fixture: no batch");
-    return event(
-      "ShareReceiptBatchSubmitted",
-      [f9.hash, word(seat)],
-      encodeShareReceiptBatchV2(b),
-      t,
-    );
-  };
-  // A ballot hash no selected ballot has, so its pair decides nothing.
-  const elsewhere: Cast = { ...alice, hash: sha256(text("counted-v4.test a ballot not selected")) };
-
-  test("a version-2 receipt batch delivers its seat for every ballot it pairs, in time by its L2 timestamp", () => {
-    const e = election(f9);
-    for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
-    e.board(200, receiptBatch([alice, elsewhere], DEFAULT, 3, T_D));
-    const r = run(e);
-    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
-  });
-
-  test("a batch's failing pair is reported with its index in the batch, its panel and seat", () => {
-    const pairOf = (ballots: readonly Cast[]) =>
-      [...ballots]
-        .sort((x, y) => Buffer.compare(x.hash, y.hash))
-        .findIndex((x) => x.hash === alice.hash);
-    const both = [alice, elsewhere];
-    for (const [make, code, signer] of [
-      // Signed by seat 2's key: it doesn't verify under seat 3's, so no one's.
-      [(t: bigint) => receiptBatch(both, DEFAULT, 3, t, 2), "share-receipt", null],
-      [(t: bigint) => receiptBatch(both, DEFAULT, 3, t + 1n), "delivery-late", undefined],
-    ] as const) {
+    test("a version-2 receipt through the contract path delivers, in time by its L2 timestamp", () => {
       const e = election(f9);
       for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
-      const at = e.board(200, make(T_D));
-      expect(run(e).delivery, code).toEqual({
+      e.board(200, receiptEvent(e, 3, T_D));
+      const r = run(e);
+      expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+      expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    });
+
+    test("one sent after t_D is late, whatever segment boarded it, and excludes the ballot", () => {
+      const e = election(f9);
+      for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+      const at = e.board(200, receiptEvent(e, 3, T_D + 1n));
+      expect(run(e).delivery).toEqual({
         excluded: [{ entry: alice.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] }],
+        records: [{ entry: at, code: "delivery-late", panel: DEFAULT, seat: 3 }],
+        rejected: [],
+      });
+    });
+
+    test("a version-2 record waits on 4.4", () => {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const at = e.board(200, receiptEvent(e, 3, T_D));
+      for (const [id, o] of run(e, false).rows)
+        expect(o, id).toEqual({ status: "unverifiable", code: "not-reached", at: { entry: at } });
+    });
+
+    test("above the floor a version-2 record sent by t_K holds the rows open, one sent after it doesn't", () => {
+      const held = election(f9);
+      held.deliver([alice], 200);
+      const at = held.board(S_K + 1, receiptEvent(held, 3, T_K));
+      undecided(run(held), at);
+      const late = election(f9);
+      late.deliver([alice], 200);
+      late.board(S_K + 1, receiptEvent(late, 3, T_K + 1n));
+      expect(run(late).rows.get("5.9")).toEqual({ status: "pass" });
+      expect(run(late).delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    });
+
+    test("above the floor a version-1 record isn't read: it delivers nothing wherever it sits", () => {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const shareHash = alice.vote.share_hashes[2] as Uint8Array;
+      const m = shareReceiptStatement({
+        definition_hash: f9.hash,
+        ballot_hash: alice.hash,
+        seat: 3,
+        share_hash: shareHash,
+      });
+      const v1 = encodeShareReceipt(
+        shareReceiptRecord(f9.hash, 3, {
+          ballotHash: alice.hash,
+          shareHash,
+          receipt: signStatement(secret(3), "abolish/v1/sig/share-receipt", m),
+        }),
+      );
+      e.board(S_K + 1, event("ShareReceiptSubmitted", [f9.hash, alice.hash], v1, T_D));
+      expect(run(e).rows.get("5.9")).toEqual({ status: "pass" });
+      expect(run(e).delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    });
+
+    test("a version-2 root leaves the rows undecided, whichever panel it names", () => {
+      for (const id of ["receipt-root-default", "receipt-root-author"] as const) {
+        const e = election(f9);
+        e.deliver([alice], 200);
+        const at = e.board(200, batch(id, "ObligationRootSubmitted", T_D));
+        undecided(run(e), at);
+      }
+    });
+
+    /** Seat `seat` of `panel`'s version-2 receipt batch for `ballots`, signed by `signer`'s key, under its event at `t`. */
+    const receiptBatch = (
+      ballots: readonly Cast[],
+      panel: SeatPanel,
+      seat: number,
+      t: bigint,
+      signer = seat,
+    ) => {
+      const [b] = batchShareReceiptsV2(
+        secret(signer),
+        f9.hash,
+        panel,
+        seat,
+        ballots
+          .map((x) => ({
+            ballot_hash: x.hash,
+            share_hash:
+              (panel === DEFAULT ? x.vote.share_hashes : x.vote.author_share_hashes)[seat - 1] ??
+              new Uint8Array(32),
+          }))
+          .sort((x, y) => Buffer.compare(x.ballot_hash, y.ballot_hash)),
+      );
+      if (b === undefined) throw new Error("fixture: no batch");
+      return event(
+        "ShareReceiptBatchSubmitted",
+        [f9.hash, word(seat)],
+        encodeShareReceiptBatchV2(b),
+        t,
+      );
+    };
+    // A ballot hash no selected ballot has, so its pair decides nothing.
+    const elsewhere: Cast = {
+      ...alice,
+      hash: sha256(text("counted-v4.test a ballot not selected")),
+    };
+
+    test("a version-2 receipt batch delivers its seat for every ballot it pairs, in time by its L2 timestamp", () => {
+      const e = election(f9);
+      for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+      e.board(200, receiptBatch([alice, elsewhere], DEFAULT, 3, T_D));
+      const r = run(e);
+      expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+      expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    });
+
+    test("a batch's failing pair is reported with its index in the batch, its panel and seat", () => {
+      const pairOf = (ballots: readonly Cast[]) =>
+        [...ballots]
+          .sort((x, y) => Buffer.compare(x.hash, y.hash))
+          .findIndex((x) => x.hash === alice.hash);
+      const both = [alice, elsewhere];
+      for (const [make, code, signer] of [
+        // Signed by seat 2's key: it doesn't verify under seat 3's, so no one's.
+        [(t: bigint) => receiptBatch(both, DEFAULT, 3, t, 2), "share-receipt", null],
+        [(t: bigint) => receiptBatch(both, DEFAULT, 3, t + 1n), "delivery-late", undefined],
+      ] as const) {
+        const e = election(f9);
+        for (const seat of [1, 2]) e.board(200, e.receipt(alice, seat));
+        const at = e.board(200, make(T_D));
+        expect(run(e).delivery, code).toEqual({
+          excluded: [
+            { entry: alice.entry, missing: [{ panel: DEFAULT, seat: 3 }], complaints: [] },
+          ],
+          records: [
+            {
+              entry: at,
+              pair: pairOf(both),
+              code,
+              panel: DEFAULT,
+              seat: 3,
+              ...(signer !== undefined && { signer }),
+            },
+          ],
+          rejected: [],
+        });
+      }
+    });
+
+    test("an author seat's batch without an author panel is delivery-seat at its pair and delivers nothing", () => {
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const at = e.board(200, receiptBatch([alice], AUTHOR, 1, T_D));
+      expect(run(e).delivery).toEqual({
+        excluded: [],
+        records: [{ entry: at, pair: 0, code: "delivery-seat", panel: AUTHOR, seat: 1 }],
+        rejected: [],
+      });
+    });
+
+    test("a version-2 complaint batch's entry with no posting is void at its index and excludes nothing", () => {
+      const { proof } = decodeShareComplaint(recordOf("complaint-default"), 2);
+      const entries = [alice, elsewhere]
+        .map((x) => ({ ballot_hash: x.hash, proof }))
+        .sort((x, y) => Buffer.compare(x.ballot_hash, y.ballot_hash));
+      const [b] = batchShareComplaintsV2(secret(2), f9.hash, DEFAULT, 2, entries);
+      if (b === undefined) throw new Error("fixture: no batch");
+      const e = election(f9);
+      e.deliver([alice], 200);
+      const at = e.board(
+        200,
+        event(
+          "ShareComplaintBatchSubmitted",
+          [f9.hash, word(2)],
+          encodeShareComplaintBatchV2(b),
+          T_D,
+        ),
+      );
+      const r = run(e);
+      expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+      expect(r.delivery).toEqual({
+        excluded: [],
         records: [
           {
             entry: at,
-            pair: pairOf(both),
-            code,
+            pair: entries.findIndex((x) => x.ballot_hash === alice.hash),
+            code: "complaint-void",
             panel: DEFAULT,
-            seat: 3,
-            ...(signer !== undefined && { signer }),
+            seat: 2,
           },
         ],
         rejected: [],
       });
-    }
-  });
-
-  test("an author seat's batch without an author panel is delivery-seat at its pair and delivers nothing", () => {
-    const e = election(f9);
-    e.deliver([alice], 200);
-    const at = e.board(200, receiptBatch([alice], AUTHOR, 1, T_D));
-    expect(run(e).delivery).toEqual({
-      excluded: [],
-      records: [{ entry: at, pair: 0, code: "delivery-seat", panel: AUTHOR, seat: 1 }],
-      rejected: [],
     });
-  });
 
-  test("a version-2 complaint batch's entry with no posting is void at its index and excludes nothing", () => {
-    const { proof } = decodeShareComplaint(recordOf("complaint-default"), 2);
-    const entries = [alice, elsewhere]
-      .map((x) => ({ ballot_hash: x.hash, proof }))
-      .sort((x, y) => Buffer.compare(x.ballot_hash, y.ballot_hash));
-    const [b] = batchShareComplaintsV2(secret(2), f9.hash, DEFAULT, 2, entries);
-    if (b === undefined) throw new Error("fixture: no batch");
-    const e = election(f9);
-    e.deliver([alice], 200);
-    const at = e.board(
-      200,
-      event(
-        "ShareComplaintBatchSubmitted",
-        [f9.hash, word(2)],
-        encodeShareComplaintBatchV2(b),
-        T_D,
-      ),
-    );
-    const r = run(e);
-    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-    expect(r.delivery).toEqual({
-      excluded: [],
-      records: [
-        {
-          entry: at,
-          pair: entries.findIndex((x) => x.ballot_hash === alice.hash),
-          code: "complaint-void",
-          panel: DEFAULT,
-          seat: 2,
-        },
-      ],
-      rejected: [],
+    test("the vectors' batches, renamed to this definition, pair no selected ballot and decide nothing", () => {
+      for (const [id, name] of [
+        ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+        ["receipt-batch-author", "ShareReceiptBatchSubmitted"],
+        ["complaint-batch-default", "ShareComplaintBatchSubmitted"],
+      ] as const) {
+        const e = election(f9);
+        e.deliver([alice], 200);
+        e.board(200, batch(id, name, T_D));
+        const r = run(e);
+        expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
+        expect(r.delivery, id).toEqual({ excluded: [], records: [], rejected: [] });
+      }
     });
-  });
 
-  test("the vectors' batches, renamed to this definition, pair no selected ballot and decide nothing", () => {
-    for (const [id, name] of [
-      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
-      ["receipt-batch-author", "ShareReceiptBatchSubmitted"],
-      ["complaint-batch-default", "ShareComplaintBatchSubmitted"],
-    ] as const) {
+    test("above the floor a version-2 batch sent by t_K holds the rows open", () => {
       const e = election(f9);
       e.deliver([alice], 200);
-      e.board(200, batch(id, name, T_D));
-      const r = run(e);
-      expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
-      expect(r.delivery, id).toEqual({ excluded: [], records: [], rejected: [] });
-    }
-  });
+      const at = e.board(S_K + 1, receiptBatch([alice], DEFAULT, 3, T_K));
+      undecided(run(e), at);
+    });
 
-  test("above the floor a version-2 batch sent by t_K holds the rows open", () => {
-    const e = election(f9);
-    e.deliver([alice], 200);
-    const at = e.board(S_K + 1, receiptBatch([alice], DEFAULT, 3, T_K));
-    undecided(run(e), at);
-  });
+    test("one naming another definition above the floor isn't read, whenever it was sent by t_K", () => {
+      const other = sha256(text("counted-v4.test another definition"));
+      for (const [id, name] of [
+        ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+        ["receipt-root-author", "ObligationRootSubmitted"],
+      ] as const) {
+        const e = election(f9);
+        e.deliver([alice], 200);
+        const r9 = batches.records.find((x) => x.id === id);
+        if (r9 === undefined) throw new Error(`no record ${id}`);
+        const record = hex(r9.encoding);
+        record.set(other, 3);
+        e.board(S_K + 1, event(name, [other, word(record[36] as number)], record, T_K));
+        const r = run(e);
+        expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
+        expect(r.delivery, id).toEqual({ excluded: [], records: [], rejected: [] });
+      }
+    });
 
-  test("one naming another definition above the floor isn't read, whenever it was sent by t_K", () => {
-    const other = sha256(text("counted-v4.test another definition"));
-    for (const [id, name] of [
-      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
-      ["receipt-root-author", "ObligationRootSubmitted"],
-    ] as const) {
-      const e = election(f9);
-      e.deliver([alice], 200);
-      const r9 = batches.records.find((x) => x.id === id);
-      if (r9 === undefined) throw new Error(`no record ${id}`);
-      const record = hex(r9.encoding);
-      record.set(other, 3);
-      e.board(S_K + 1, event(name, [other, word(record[36] as number)], record, T_K));
-      const r = run(e);
-      expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
-      expect(r.delivery, id).toEqual({ excluded: [], records: [], rejected: [] });
-    }
-  });
+    test("one naming another definition is stray, listed by the check, and holds nothing", () => {
+      const other = sha256(text("counted-v4.test another definition"));
+      for (const [id, name] of [
+        ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
+        ["receipt-root-author", "ObligationRootSubmitted"],
+      ] as const) {
+        const e = election(f9);
+        e.deliver([alice], 200);
+        const r9 = batches.records.find((x) => x.id === id);
+        if (r9 === undefined) throw new Error(`no record ${id}`);
+        const record = hex(r9.encoding);
+        record.set(other, 3);
+        const at = e.board(200, event(name, [other, word(record[36] as number)], record, T_D));
+        const r = run(e);
+        expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
+        expect(r.delivery?.excluded, id).toEqual([]);
+        expect(r.delivery?.records, id).toEqual([
+          { entry: at, code: "delivery-stray", panel: record[35], seat: record[36] },
+        ]);
+      }
+    });
 
-  test("one naming another definition is stray, listed by the check, and holds nothing", () => {
-    const other = sha256(text("counted-v4.test another definition"));
-    for (const [id, name] of [
-      ["receipt-batch-default", "ShareReceiptBatchSubmitted"],
-      ["receipt-root-author", "ObligationRootSubmitted"],
-    ] as const) {
-      const e = election(f9);
-      e.deliver([alice], 200);
-      const r9 = batches.records.find((x) => x.id === id);
-      if (r9 === undefined) throw new Error(`no record ${id}`);
-      const record = hex(r9.encoding);
-      record.set(other, 3);
-      const at = e.board(200, event(name, [other, word(record[36] as number)], record, T_D));
-      const r = run(e);
-      expect(r.rows.get("5.9"), id).toEqual({ status: "pass" });
-      expect(r.delivery?.excluded, id).toEqual([]);
-      expect(r.delivery?.records, id).toEqual([
-        { entry: at, code: "delivery-stray", panel: record[35], seat: record[36] },
-      ]);
-    }
-  });
-
-  test("under a version-8 pin, a version-9 record doesn't decode and carries nothing (4.4's to report)", () => {
-    const e = election();
-    e.deliver([ALICE], 200);
-    e.board(200, receiptEvent(election(f9), 3, T_D));
-    const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
-    expect(r.rows.get("5.9")).toEqual({ status: "pass" });
-    expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
-  });
-});
+    test("under a version-8 pin, a record of this version doesn't decode and carries nothing (4.4's to report)", () => {
+      const e = election();
+      e.deliver([ALICE], 200);
+      e.board(200, receiptEvent(election(f9), 3, T_D));
+      const r = countedChecks(e.inputs([ALICE], { eventsPass: true, destruction: false }));
+      expect(r.rows.get("5.9")).toEqual({ status: "pass" });
+      expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
+    });
+  },
+);
 
 describe("6.3 under definition version 6", () => {
   // L_δ is the last block at or before closes_at + δ (an hour): the second.

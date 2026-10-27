@@ -366,7 +366,8 @@ def main(out):
     assert check_answer(k0, rh0, a4) == ("ok", "receipt", receipt4)
 
     padding = []
-    for n in [MIN_ENVELOPE, (1 << 14) - 1, 1 << 14, (1 << 14) + 1, (1 << 21) + 1, 1 << 22, (1 << 22) + 1, MAX_DELIVERY]:
+    edges = sorted({MIN_ENVELOPE} | {n + d for b in PAD_BUCKETS for d in (-1, 0, 1) for n in [b] if MIN_ENVELOPE <= n + d <= MAX_DELIVERY})
+    for n in edges:
         padding.append({"envelopeLength": n, "paddedLength": padded_length(n)})
 
     def request_case(description, code, record, seat=1, opener=1):
@@ -393,6 +394,9 @@ def main(out):
     runs_past = sealed_plain(u32(0) * 3 + u32((1 << 14) - 12) + bytes((1 << 14) - 16), "runs-past")
     off_bucket = enc_request(kem_key_hash(seats[1]), b0[35 : 35 + CT_LEN], b0[ct_dh_at : ct_dh_at + 32], b0[sealed_at:] + b"\x00")
     aad_other = sealed_plain(plain1, "aad-other-key", aad_key_hash=other_hash)
+    below_bucket = enc_request(kem_key_hash(seats[1]), b0[35 : 35 + CT_LEN], b0[ct_dh_at : ct_dh_at + 32], b0[sealed_at:][: (1 << 13) + TAG_LEN])
+    share_ct = bytes.fromhex(c1["ciphertext"])
+    copied = b0[:35] + share_ct[: CT_LEN + 32] + b0[ct_dh_at + 32 :]
     rejected_requests = [
         request_case("A trailing byte", "sealed-malformed", b0 + b"\x00"),
         request_case("One byte short", "sealed-malformed", b0[:-1]),
@@ -401,10 +405,12 @@ def main(out):
         request_case("ct_dh is the identity", "sealed-malformed", b0[:ct_dh_at] + bytes(32) + b0[ct_dh_at + 32 :]),
         request_case("ct_dh isn't a canonical encoding", "sealed-malformed", b0[:ct_dh_at] + b"\xff" * 32 + b0[ct_dh_at + 32 :]),
         request_case("sealed's length is one byte past a bucket and its tag", "sealed-malformed", off_bucket),
+        request_case("sealed's length is below the smallest bucket and its tag", "sealed-malformed", below_bucket),
         request_case("A key hash the node holds no secret for", "sealed-key", b0[:3] + other_hash + b0[35:]),
         request_case("Seat 1's request at seat 2's node", "sealed-key", b0, seat=1, opener=2),
         request_case("Seat 1's request relabelled with seat 2's key hash, at seat 2's node", "sealed-decrypt", b0[:3] + kem_key_hash(seats[2]) + b0[35:], seat=2, opener=2),
         request_case("Sealed to seat 1's key with the aad naming another key hash", "sealed-decrypt", aad_other),
+        request_case("ct_mlkem and ct_dh copied from intake.json's ciphertext to seat 1", "sealed-decrypt", copied),
         request_case("A bit flipped in ct_mlkem", "sealed-decrypt", flip(b0, 35)),
         request_case("A bit flipped in sealed", "sealed-decrypt", flip(b0, sealed_at + 4)),
         request_case("A bit flipped in the tag", "sealed-decrypt", flip(b0, len(b0) - 1)),
@@ -451,10 +457,20 @@ def main(out):
         answer_case("A refusal code in upper case", "answer-body", sealed_answer(enc_answer_plain(2, b"INTAKE-CLOSED"), "upper-code")),
         answer_case("A refusal code of 65 bytes", "answer-body", sealed_answer(enc_answer_plain(2, b"a" * 65), "long-code")),
         answer_case("A refusal code ending in a hyphen", "answer-body", sealed_answer(enc_answer_plain(2, b"intake-"), "hyphen-code")),
+        answer_case("A refusal code starting with a hyphen", "answer-body", sealed_answer(enc_answer_plain(2, b"-intake"), "leading-hyphen-code")),
+        answer_case("A refusal code with two hyphens together", "answer-body", sealed_answer(enc_answer_plain(2, b"intake--closed"), "double-hyphen-code")),
         answer_case("Busy with a body", "answer-body", sealed_answer(enc_answer_plain(3, b"x"), "busy-body")),
         answer_case("A padding byte that isn't zero", "answer-body", sealed_answer(raw_plain(3, 0, b"", b"\x01"), "nonzero-padding")),
     ]
     assert len(raw_plain(3, 0, b"", b"\x01")) == ANSWER_PLAIN
+    accepted_answers = []
+    for description, kind, body, label in [
+        ("A refusal carrying the node's own sealed-envelope code", "refused", b"sealed-envelope", "sealed-envelope"),
+        ("A receipt body of exactly MAX_ANSWER_BODY bytes, accepted here: the share-receipt check comes after", "receipt", filler("sealed-delivery/longest-body", MAX_ANSWER_BODY), "longest-body"),
+    ]:
+        ab, ainter = make_answer(k0, rh0, enc_answer_plain(OUTCOMES[kind], body), f"sealed-delivery-answer-case/{label}")
+        assert check_answer(k0, rh0, ab) == ("ok", kind, body)
+        accepted_answers.append({"description": description, "request": "ok-seat-1", "outcome": kind, "body": body.hex(), "sealing": ainter, "record": ab.hex()})
 
     doc = {
         "format": "abolish-sealed-delivery-vectors/1",
@@ -489,6 +505,7 @@ def main(out):
         },
         "padding": padding,
         "rejectedRequests": rejected_requests,
+        "acceptedAnswers": accepted_answers,
         "rejectedAnswers": rejected_answers,
     }
     pathlib.Path(out, "sealed-delivery.json").write_text(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")

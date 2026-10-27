@@ -906,4 +906,5 @@ The honest vectors' `outputRoot` is the game's `rootClaim` and their block numbe
 - `versionTwoReceipt`: an answer to `ok-seat-1-small`'s request carrying `intake-v4.json`'s `intake-ok-default-1` receipt as a version-2 record, with its `sealing`.
 - `padding`: `envelopeLength` and the `paddedLength` the padding gives it.
 - `rejectedRequests`: `description`, `code` (`sealed-malformed`, `sealed-key`, `sealed-decrypt` or `sealed-envelope`), `seat`, `openedBy` (the seat whose node checks it, holding only that seat's secret) and `record`.
+- `acceptedAnswers`: answers to `ok-seat-1-small`'s request that pass the Answer check beyond the deliveries' own: `description`, `request`, `outcome`, `body`, `sealing` and `record`.
 - `rejectedAnswers`: `description`, `code` (`answer-malformed`, `answer-decrypt` or `answer-body`), `request` (the `intakeCase` of the delivery whose `K` and `requestHash` check it) and `record`.

@@ -899,6 +899,13 @@ describe("2.3's profile combination", () => {
       ).toBe("profile-combination");
   });
 
+  test("ballot version 5 beside definition version 1 fails, and an unknown one isn't judged here", () => {
+    // Version 5 names a step, which only a rolling version 7 has; an unknown
+    // version is left to the verifier's 5.x, which refuses its records.
+    expect(profileCombinationRule(pinning(5, 5, 1))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 255, 1))).toBeUndefined();
+  });
+
   test("ballot version 1 pairs only with opening version 1, which opens its cores", () => {
     expect(profileCombinationRule(pinning(5, 1, 1))).toBeUndefined();
     // Opening version 2 opens cells' cores; one this package doesn't know

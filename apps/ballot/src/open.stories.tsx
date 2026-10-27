@@ -223,8 +223,8 @@ interface Voter {
   readonly keptReceipt: RecordReceiptOutcome;
   /** Whether the build has every delivery route (`delivers`). */
   readonly delivers: boolean;
-  /** This device's casts before the cast. */
-  readonly held: CastsRead;
+  /** This device's casts before the cast, or in each tier as asked. */
+  readonly held: CastsRead | ((tier: number) => CastsRead);
   /** What recording the cast answers. */
   readonly recorded: RecordCastOutcome | "not-asked";
   /** The ballot route's answers in turn, the last one repeating. */
@@ -423,7 +423,7 @@ function source(
   let sent = 0;
   let erasures = 0;
   let records = 0;
-  const casts = fn<ElectionSource["casts"]>(() =>
+  const casts = fn<ElectionSource["casts"]>((_, tier) =>
     Promise.resolve(
       sent > 0 && heldAfterSend !== undefined
         ? heldAfterSend
@@ -432,7 +432,9 @@ function source(
           : records > 0 && heldAfterRecord !== undefined
             ? // Each read hands out copies, as readCasts does, so zeroing one changes no other.
               structuredClone(heldAfterRecord)
-            : held,
+            : typeof held === "function"
+              ? held(tier)
+              : held,
     ),
   );
   const eraseShares = fn<ElectionSource["eraseShares"]>(() => {
@@ -2538,6 +2540,33 @@ export const AnsweredOfAnotherPoll: Story = {
     const canvas = within(canvasElement);
     await expect(await canvas.findByRole("heading", { level: 1, name: FIRST })).toBeVisible();
     await expect(canvas.queryByRole("heading", { name: ANSWERED })).toBeNull();
+  },
+};
+
+export const AnsweredThenUnsentInALaterTier: Story = {
+  name: "A cast never sent in a later tier is offered before the earlier tier's answered one",
+  args: {
+    source: unsentSource(
+      { ...RECORDED_POLL, tiers: [1, 2] },
+      {
+        held: (tier) => ({
+          kind: "read",
+          casts:
+            tier === 1
+              ? [BOARDED_RECORDED]
+              : [{ ballot: RECORDED, l1Number: 7n, shares: RECORDED_SHARES }],
+        }),
+      },
+    ),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      await canvas.findByRole("heading", { level: 1, name: ANSWER_OR_SEND }),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("heading", { name: ANSWERED })).toBeNull();
+    await expect(mocks(args.source).casts).toHaveBeenCalledWith(fromHex(ELECTION_ID), 1);
+    await expect(mocks(args.source).casts).toHaveBeenCalledWith(fromHex(ELECTION_ID), 2);
   },
 };
 

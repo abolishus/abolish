@@ -365,6 +365,7 @@ const answered: Story["play"] = async ({ canvasElement }) => {
   // The board's unsigned word, never "counted" (T-26).
   await expect(canvas.getByText(/the public board took it/)).toBeVisible();
   await expect(canvas.queryByText(/counted/)).toBeNull();
+  await expect(canvas.getByText(/it is the board's word/)).toBeVisible();
   // Nothing of how the voter answered is shown or kept (T-18).
   await expect(canvas.getByText(/doesn't keep how you answered/)).toBeVisible();
   await expect(canvas.getByRole("heading", { name: "If someone pressured you" })).toBeVisible();

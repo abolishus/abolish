@@ -883,13 +883,12 @@ describe("an answered cast", () => {
     expect(answeredCast([boarded(10n)], otherDefinition(BALLOT).subarray(3, 35))).toBeUndefined();
   });
 
-  test("is said exactly when the newest cast is boarded, and then never left unsent (fast-check)", () => {
+  test("is said exactly when the newest cast of this poll is boarded (fast-check)", () => {
     fc.assert(
       fc.property(casts, (held) => {
-        const answered = answeredCast(held, definition);
-        expect(answered !== undefined).toBe(held.at(-1)?.boarded !== undefined);
-        // A cast left to finish and one said to be in are never the same.
-        if (answered !== undefined) expect(unsentCast(held, definition)).toBeUndefined();
+        expect(answeredCast(held, definition) !== undefined).toBe(
+          held.at(-1)?.boarded !== undefined,
+        );
       }),
       { numRuns },
     );

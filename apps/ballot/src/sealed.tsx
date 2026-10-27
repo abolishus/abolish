@@ -354,8 +354,9 @@ export function Sent({
  * (`answeredCast`): changing the answers starts the questions from nothing
  * chosen, since the device keeps how the voter answered nowhere, and a new
  * ballot replaces the earlier one ([[revoting]]). The board's answer was
- * never signed, so the screen claims no more than that it took the ballot
- * (T-26), and shows its tracking code for the voter to find on the board.
+ * never signed, so the screen claims no more than that it took the ballot,
+ * says it is the board's word and shows the tracking code for the voter to
+ * find on the board from another device (T-26).
  */
 export function Answered({
   poll,
@@ -387,6 +388,9 @@ export function Answered({
         />
         <Hash value={trackingCode} label={t("trackingCodeLabel")} />
       </div>
+      <Part title={t("sentUnsignedTitle")}>
+        <p className="m-0">{t("sentUnsigned")}</p>
+      </Part>
       <Part title={t("answeredFreshTitle")}>
         <p className="m-0">{t("answeredFresh")}</p>
       </Part>

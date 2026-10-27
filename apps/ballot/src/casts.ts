@@ -515,9 +515,10 @@ export function unsentCast(
  * rather than on the questions (P2-25 part 3): the device's own record,
  * never the server's word on whether this voter answered (T-10, T-11).
  * Only the newest: a later cast the board never confirmed is `unsentCast`'s
- * to finish, and one the voter declined or whose shares were erased may
- * never count, so neither is said to be in. `undefined` too for a newest
- * cast that isn't a version-3 record naming `definitionHash`.
+ * to finish, and under one the voter declined or whose shares were erased
+ * the screen would have to say which ballot stands, so the poll opens on
+ * the questions as before. `undefined` too for a newest cast that isn't a
+ * version-3 record naming `definitionHash`.
  */
 export function answeredCast(
   casts: readonly CastRecord[],

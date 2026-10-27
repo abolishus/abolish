@@ -68,6 +68,7 @@ const PAGES = [
   "/discover",
   "/discover?q=park",
   "/how-it-works",
+  "/verify",
   "/polls",
   `/polls/${ID}`,
   `/polls/${QUESTIONS_ID}`,

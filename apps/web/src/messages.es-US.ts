@@ -207,6 +207,102 @@ export const esUS: Messages = {
   howWeakTurnoutLimit: "Cada resultado indica su nivel y cuántos podían votar.",
   howSource:
     "El protocolo, su modelo de amenazas (con cada entrada mencionada arriba) y el código fuente están publicados abiertamente en github.com/abolishus/abolish.",
+  navVerify: "Verifícalo tú",
+  recountEyebrow: "Verifícalo tú",
+  recountTitle: "Vuelve a contar una encuesta sin nosotros",
+  recountLede:
+    "El verificador es un programa de código abierto que cualquiera puede ejecutar. Lee el tablero de una encuesta, sus anclajes en Ethereum y sus pruebas, revisa cada una y da la misma respuesta sin importar quién lo ejecute. Nunca le pide nada a nuestros servidores.",
+  recountNotYetTitle: "Todavía no para las encuestas de este sitio",
+  recountNotYetBody:
+    "Nuestros servidores todavía no anclan los tableros en Ethereum, así que el verificador no encuentra ninguna encuesta nuestra que revisar. Hasta que el anclaje funcione, la página del tablero de cada encuesta revisa lo que puede de lo que dice nuestro servidor, y el verificador revisa una elección de prueba en una cadena local con cada cambio a nuestro código.",
+  recountRunMark: "Ejecútalo",
+  recountRunTitle: "Cuatro comandos, un veredicto por encuesta",
+  recountRunLede:
+    "Necesitas Git, Node.js y Vite+, las herramientas con las que se compila el código. El verificador todavía no se publica como un programa para instalar, así que se ejecuta desde una copia del código fuente.",
+  recountStep1Title: "Consigue el código fuente",
+  recountStep1Body: "Copia el código e instala lo que necesita, en las versiones exactas que fija.",
+  recountStep2Title: "Copia los tableros",
+  recountStep2Body:
+    "El nodo comunitario lee cada punto de control anclado en Ethereum y copia desde IPFS los archivos del tablero que nombra, revisando cada bloque contra su dirección.",
+  recountStep3Title: "Verifica cada encuesta",
+  recountStep3Body:
+    "Para cada encuesta que nombran los anclajes, el nodo reúne sus datos de las dos cadenas y de los tableros copiados, ejecuta el verificador y guarda los datos y el informe uno al lado del otro.",
+  recountStep4Title: "Revisa una de nuevo por separado",
+  recountStep4Body:
+    "El verificador solo, con los datos que reunió el nodo, hace las mismas revisiones. Imprime un informe y un resumen, y su código de salida es el veredicto.",
+  recountValueL1:
+    "Un nodo de Ethereum en el que confíes para decir qué bloque es definitivo. Lo mejor es uno tuyo.",
+  recountValueL2:
+    "Un nodo de la red en la que se registran las encuestas, en el que se confía por los registros que guarda.",
+  recountValueGateway:
+    "Cualquier pasarela de IPFS, o la del propio nodo. Se revisa cada bloque que envía.",
+  recountValueAnchor:
+    "La dirección del ancla del tablero, tal como la fija una versión del código.",
+  recountValueRegistry:
+    "La dirección del registro de elecciones, tal como la fija una versión del código.",
+  recountValuePoll: "El ID de la encuesta, en hexadecimal en minúsculas.",
+  recountExitCaption: "Qué significa el código de salida",
+  recountExitCode: "Código",
+  recountExitVerdict: "Veredicto",
+  recountExit0: "Verificada",
+  recountExit0Means: "Pasaron todas las revisiones.",
+  recountExit20: "Fallida",
+  recountExit20Means: "Falló una revisión. El informe dice cuál y por qué.",
+  recountExit21: "No verificable",
+  recountExit21Means:
+    "Algo no se pudo revisar, como una copia que falta o un dato que nada prueba. Nunca cuenta como aprobado.",
+  recountExit22: "Rechazada",
+  recountExit22Means: "Los datos estaban mal formados, así que no hay informe.",
+  recountExit64: "Uso",
+  recountExit64Means: "El comando no era uno de los que acepta, o se le pidió su ayuda.",
+  recountExitOther:
+    "Cualquier otro código es una falla del propio verificador y no dice nada de la encuesta.",
+  recountChecksMark: "Qué revisa",
+  recountChecksTitle: "{count} grupos de revisiones, del código al conteo",
+  recountChecksLede:
+    "Cada uno está descrito en la especificación del verificador, que basta para escribir tu propio verificador en cualquier lenguaje. Una revisión que no puede hacer se informa, nunca se da por aprobada.",
+  recountCheck1Title: "La app de votación y los contratos",
+  recountCheck1Body:
+    "La app de votación que sirve un sitio es una versión firmada, y cada contrato que usa la encuesta es la compilación de esa versión a partir de código revisado.",
+  recountCheck2Title: "La definición de la encuesta",
+  recountCheck2Body:
+    "Sus preguntas, respuestas, plazo, electorado y custodios son los que se registraron antes de que abriera, y nada de eso cambió desde entonces.",
+  recountCheck3Title: "La ceremonia de claves",
+  recountCheck3Body:
+    "Las claves de los custodios se crearon en público, cada prueba de su registro es válida y participaron suficientes puestos.",
+  recountCheck4Title: "El tablero, sus anclajes y el archivo",
+  recountCheck4Body:
+    "Cada entrada está en su lugar en una sola cadena sin cortes, cada punto de control coincide con su anclaje en Ethereum y el archivo guarda lo que nombran los anclajes.",
+  recountCheck5Title: "Las boletas",
+  recountCheck5Body:
+    "Cada boleta prueba que su votante está en el electorado sin decir quién es, contiene un conjunto válido de respuestas y llegó dentro del plazo de la encuesta.",
+  recountCheck6Title: "Volver a votar y boletas revisadas",
+  recountCheck6Body:
+    "Solo puede contar la boleta más reciente de cada votante, y nunca se cuenta una boleta abierta para revisar la app.",
+  recountCheck7Title: "El conteo",
+  recountCheck7Body:
+    "Los totales se calculan de nuevo solo con las boletas contadas, y cada apertura publicada de un total debe coincidir con ellos.",
+  recountCheck8Title: "El informe",
+  recountCheck8Body:
+    "Los resultados se dan por nivel, nunca sumados entre niveles, con los conteos pequeños señalados y todo lo que no pudo revisar en una lista.",
+  recountTrustMark: "En qué confía",
+  recountTrustTitle: "En qué confía y en qué no",
+  recountTrustLede:
+    "Un resultado vale lo que valen los datos con los que se revisó, así que el informe nombra cada dato que nada probó, y el veredicto no llega a verificada mientras haya alguno.",
+  recountTrustServers: "Nuestros servidores",
+  recountTrustServersMeans:
+    "En nada. El verificador nunca pide nada a nuestros servidores ni dominios, salvo, cuando le pides revisar una app de votación servida, la propia app, que luego juzga byte por byte.",
+  recountTrustL1: "Tu nodo de Ethereum",
+  recountTrustL1Means:
+    "En qué bloque es definitivo. Los anclajes y todo lo demás que se lee de Ethereum se prueban contra ese bloque.",
+  recountTrustL2: "Tu nodo de la red de la encuesta",
+  recountTrustL2Means:
+    "En los registros que guarda hasta su bloque definitivo, como la definición de la encuesta. Lo que una prueba no cubre se nombra en el informe.",
+  recountTrustGateways: "Pasarelas de IPFS",
+  recountTrustGatewaysMeans:
+    "En nada sobre el tablero: cada bloque se revisa contra su dirección, así que una pasarela solo puede dejar de responder. Sí ve qué bloques lees, y por tanto qué encuesta.",
+  recountSource:
+    "El código fuente del verificador está en packages/verifier y su especificación en docs/spec/verifier.md, ambos publicados en github.com/abolishus/abolish.",
   dgTitle: "{section}: paso {step} de {total}",
   dgFake: "Para falsificar uno",
   dgFake0: "otra llave de acceso",

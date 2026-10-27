@@ -199,6 +199,7 @@ describe("every page", () => {
     `/account/polls/${"a".repeat(32)}/setup`,
     "/account/verify",
     "/how-it-works",
+    "/verify",
     "/discover",
     `/by/${PROFILE_HANDLE}`,
     "/nowhere",
@@ -1753,6 +1754,28 @@ describe("how it works", () => {
   });
 });
 
+describe("verify it yourself", () => {
+  test("says the anchor isn't running before any command, without asking the API", async () => {
+    seen.length = 0;
+    const response = await get("/verify");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
+    expect(current).toHaveLength(2);
+    for (const link of current) expect(link).toContain('href="/verify"');
+    for (const id of ["run", "checks", "trust"]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(html).toContain(`href="#${id}"`);
+    }
+    // Nothing here is a sample run: what doesn't work yet comes first.
+    const notYet = html.indexOf("Our servers don&#x27;t anchor boards to Ethereum yet");
+    expect(notYet).toBeGreaterThan(0);
+    expect(notYet).toBeLessThan(html.indexOf("git clone"));
+    expect(html).toContain("packages/verifier/src/bin.ts");
+    expect(seen).toHaveLength(0);
+  });
+});
+
 describe("failures", () => {
   test("a short link while the API is unreachable fails uncached, quoting no error", async () => {
     stub.down = true;
@@ -1908,14 +1931,15 @@ const KB = 1024;
  * home the stream's cards beside its trust scene.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 170, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 168, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 202, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 165, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 166, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 192, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 248, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 168, css: 40, fonts: 58 },
+  "/": { html: 10, js: 175, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 206, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 196, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 171, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

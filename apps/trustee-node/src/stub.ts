@@ -9,7 +9,7 @@ import {
   DecodeError,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
-  definitionMembers,
+  forcedPathElectionOf,
   type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionRule,
@@ -84,12 +84,7 @@ export function stubDefinitionHash(stub: Stub, transcriptHash: Uint8Array): Uint
 
 /** What the capacity check reads from a stub (versions 1 and 5: one panel, no author seats). */
 export function stubDemand(stub: ElectionDefinition | ElectionDefinitionV5): ForcedPathElection {
-  return {
-    members: definitionMembers(stub),
-    seats: stub.panel_size,
-    closesAt: stub.closes_at,
-    l1InclusionBound: BigInt(stub.l1_inclusion_bound),
-  };
+  return forcedPathElectionOf(stub);
 }
 
 /** What the node's release and deployment pin. */

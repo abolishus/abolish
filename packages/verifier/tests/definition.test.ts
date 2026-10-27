@@ -325,7 +325,7 @@ const rollingFor = (versions: Partial<Record<number, number>> = {}) => {
 
 describe("a rolling version 7: its rules on 2.1, then 2.3, and the board checks not reached", () => {
   // Its roots are its steps' and its ballots version 5, which 2.4's rolling
-  // replay and the rolling 5.1 and 5.2 read (P2-17 parts 4c and 4d; T-36).
+  // replay and the rolling 5.1 and 5.2 read (P2-17 part 4d-2; T-36).
   test("a rolling profile that fits is unverifiable at 2.3, never failed", () => {
     const bytes = rollingFor();
     const r = format3(bytes, closed);
@@ -431,13 +431,15 @@ describe("2.3: the profile's versions fit together", () => {
   // questions, definition version 5, and ballot version 4, which carries an
   // author half, definition version 6 (these are version 1). Tally-opening
   // version 2 needs board-entry version 6, a live poll's, so it never fits
-  // here. Ballot version 5 stands for a version this verifier doesn't know,
-  // with neither need: a later release judges it.
+  // here. Ballot version 5, which names a step, needs a rolling version 7.
+  // Ballot version 255 stands for a version this verifier doesn't know, with
+  // neither need: a later release judges it.
   const table: readonly (readonly [number, number, number, boolean])[] = [
     [5, 1, 1, true],
     [5, 1, 2, false],
-    [5, 5, 1, true],
-    [5, 5, 2, false],
+    [5, 255, 1, true],
+    [5, 5, 1, false],
+    [5, 255, 2, false],
     [5, 2, 1, false],
     [5, 2, 2, false],
     [5, 3, 1, false],
@@ -448,13 +450,13 @@ describe("2.3: the profile's versions fit together", () => {
     // whatever else fits, as they did for want of delivery or destruction.
     [4, 1, 1, false],
     [4, 1, 2, false],
-    [4, 5, 2, false],
+    [4, 255, 2, false],
     [3, 1, 1, false],
     [3, 1, 2, false],
-    [3, 5, 2, false],
+    [3, 255, 2, false],
     [1, 1, 1, false],
     [1, 1, 2, false],
-    [1, 5, 2, false],
+    [1, 255, 2, false],
   ];
   for (const [board, ballot, opening, fits] of table)
     test(`board entry ${board}, ballot ${ballot}, tally opening ${opening}: ${fits ? "fits" : "fails"}`, () => {
@@ -756,17 +758,19 @@ describe("definition versions 3 and 4 (regional cells)", () => {
     // Ballot version 4 carries an author half, which definition version 6 alone has.
     [5, 4, 1, "profile-combination"],
     [5, 4, 3, "profile-combination"],
-    // Ballot version 5 stands for one a later release may define as naming
+    // Ballot version 5 names a step, which a rolling version 7 alone has.
+    [5, 5, 2, "profile-combination"],
+    // Ballot version 255 stands for one a later release may define as naming
     // its cell: unsupported, never failed, whatever the opening (T-36).
-    [5, 5, 1, "unsupported-version"],
-    [5, 5, 2, "unsupported-version"],
+    [5, 255, 1, "unsupported-version"],
+    [5, 255, 2, "unsupported-version"],
     [5, 2, 1, "profile-combination"],
     [5, 2, 2, "not-implemented"],
     [5, 2, 255, "unsupported-version"],
     // Board-entry versions without the close statement fail whatever else
     // fits, a later ballot or opening version included ([[close]], Version).
     [4, 2, 2, "profile-combination"],
-    [4, 5, 2, "profile-combination"],
+    [4, 255, 2, "profile-combination"],
     [3, 2, 255, "profile-combination"],
     [1, 2, 1, "profile-combination"],
     // A board that can't carry delivery fails whatever the opening.
@@ -874,12 +878,14 @@ describe("definition version 5 (questions)", () => {
     [5, 1, 1, 2, "profile-combination"],
     [5, 3, 2, 1, "profile-combination"],
     [5, 3, 2, 3, "profile-combination"],
-    // Ballot version 4 pairs with definition version 6 alone; version 5
-    // stands for one a later release may define to carry questions.
+    // Ballot version 4 pairs with definition version 6 alone, and version 5
+    // with a rolling version 7; version 255 stands for one a later release
+    // may define to carry questions.
     [5, 4, 2, 2, "profile-combination"],
-    [5, 5, 2, 2, "unsupported-version"],
+    [5, 5, 2, 2, "profile-combination"],
+    [5, 255, 2, 2, "unsupported-version"],
     [5, 3, 255, 2, "unsupported-version"],
-    [4, 5, 2, 2, "profile-combination"],
+    [4, 255, 2, 2, "profile-combination"],
   ];
   for (const [board, ballot, spoiled, text, code] of table)
     test(`board entry ${board}, ballot ${ballot}, opening ${spoiled}, display text ${text}: ${code}`, () => {

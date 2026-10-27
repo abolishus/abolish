@@ -378,7 +378,11 @@ def build(constants):
     bundle("ballot-v4", "Definition version 5 pinning ballot version 4, which carries an author half and pairs with definition version 6 alone: 2.3 fails profile-combination, and 5.1 to 5.5, 5.7 and 6.2 are unsupported, as for version 2.", d_b4, t_b4, e_b4, [1, 2, 3], [t_b4, (b_a, None)], "unsupported")
 
     d_b5, t_b5, e_b5 = election_for("v5-ballot-5", [1, 2, 3], profile=pins_for(ballot=5))
-    bundle("ballot-v5", "Definition version 5 pinning ballot version 5, which a later release may define to carry questions: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+    bundle("ballot-v5", "Definition version 5 pinning ballot version 5, a rolling electorate's: 2.3 fails profile-combination, and 5.1 to 5.5, 5.7 and 6.2 are unsupported, as for version 2.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+
+    # Version 255 stands for a ballot version no release reads.
+    d_bu, t_bu, e_bu = election_for("v5-ballot-unread", [1, 2, 3], profile=pins_for(ballot=255))
+    bundle("ballot-unread", "Definition version 5 pinning ballot version 255, which a later release may define to carry questions: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_bu, t_bu, e_bu, [1, 2, 3], [t_bu, (b_a, None)], "unsupported")
 
     return {"panels": panels, "proofs": proofs, "checks": checks, "bundles": bundles, "eid": eid, "cells": cells}
 
@@ -462,9 +466,9 @@ def assemble(constants, proofs_path, out_dir):
         else:
             assert ceremony_rows["3.2"]["status"] == "fail", bnd["id"]
         pins = dict(d["profile"]["pins"])
-        # 1.3: ballot versions 1 to 3 are proved under the one pinned key; a
+        # 1.3: ballot versions 1 to 5 are proved under the one pinned key; a
         # later version may pin another (docs/spec/verifier.md, Procedure).
-        vk_fails = pins[BALLOT_TYPE] in (1, 2, 3) and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
+        vk_fails = pins[BALLOT_TYPE] in (1, 2, 3, 4, 5) and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
         rows = {
             "1.3": outcome("fail", "membership-key", {}) if vk_fails else NOT_IMPLEMENTED,
             "2.3": vc.combination(d),
@@ -552,10 +556,11 @@ def assemble(constants, proofs_path, out_dir):
     assert by["ballot-v1"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v2"]["expected"]["2.3"]["code"] == "profile-combination"
     assert by["ballot-v4"]["expected"]["2.3"]["code"] == "profile-combination"
-    assert by["ballot-v5"]["expected"]["2.3"] == UNSUPPORTED
+    assert by["ballot-v5"]["expected"]["2.3"]["code"] == "profile-combination"
+    assert by["ballot-unread"]["expected"]["2.3"] == UNSUPPORTED
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
     assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-1"]["expected"]["6.2"] == NOT_REACHED
-    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
+    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-unread"]["expected"]["6.2"] == UNSUPPORTED
     assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == outcome("pass")
 
     doc = {

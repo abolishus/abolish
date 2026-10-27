@@ -287,7 +287,7 @@ export function readElection(
   if (combination !== undefined) return refuse(combination);
   // As 2.3 reads it: a rolling electorate's ballots wait on 2.4's rolling
   // replay and the rolling 5.1 and 5.2, whatever crypto's combination says
-  // of its profile (P2-17 parts 4c and 4d; T-36).
+  // of its profile (P2-17 part 4d-2; T-36).
   if (isRolling(record)) return refuse("unsupported-version");
   const { rows, registered, authorRegistered } = ceremonyChecks(
     d,

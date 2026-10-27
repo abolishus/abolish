@@ -246,7 +246,8 @@ describe("refuses every ballot of an election the verifier can't admit ballots f
     ["other-key", "not-reached"],
     ["root-zero", "not-reached"],
     ["ballot-v2", "profile-combination"],
-    ["ballot-v5-other-key", "unsupported-version"],
+    ["ballot-v5-other-key", "profile-combination"],
+    ["ballot-unread-other-key", "unsupported-version"],
   ])("%s: %s", (id, code) => {
     expect(refusal(byId(id))).toBe(code);
   });

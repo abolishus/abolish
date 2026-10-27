@@ -613,8 +613,7 @@ describe("2.3's profile combination", () => {
     expect([...SPOILED_OPENING_VERSIONS].sort(ascending)).toEqual(
       Object.keys(SPOILED_BALLOT_OPENING.versions).map(Number).sort(ascending),
     );
-    // Ballot version 5 joins 2.3's set with definition version 7 (P2-17 part 4).
-    expect([...BALLOT_VERSIONS, 5].sort(ascending)).toEqual(
+    expect([...BALLOT_VERSIONS].sort(ascending)).toEqual(
       Object.keys(BALLOT.versions).map(Number).sort(ascending),
     );
   });
@@ -639,9 +638,11 @@ describe("2.3's profile combination", () => {
     // has, and version 4 an author half, which definition version 6 alone has.
     expect(profileCombinationRule(v3(3))).toBe("profile-combination");
     expect(profileCombinationRule(v3(4))).toBe("profile-combination");
+    // Ballot version 5 names a step, which only a rolling electorate has.
+    expect(profileCombinationRule(v3(5))).toBe("profile-combination");
     // A ballot version this package doesn't know may be a later release's
     // cell-naming ballot: unsupported, never failed (T-36).
-    expect(profileCombinationRule(v3(5))).toBe("unsupported-version");
+    expect(profileCombinationRule(v3(6))).toBe("unsupported-version");
     // Ballot version 2 is the only one that could fit, and only opening
     // version 2 opens its cores, so it is refused beside opening version 1
     // or 3 (docs/spec/challenge.md, Versions; T-42). One this package doesn't
@@ -706,7 +707,8 @@ describe("2.3's profile combination", () => {
     expect(profileCombinationRule(v4(1))).toBe("profile-combination");
     expect(profileCombinationRule(v4(3))).toBe("profile-combination");
     expect(profileCombinationRule(v4(4))).toBe("profile-combination");
-    expect(profileCombinationRule(v4(5))).toBe("unsupported-version");
+    expect(profileCombinationRule(v4(5))).toBe("profile-combination");
+    expect(profileCombinationRule(v4(6))).toBe("unsupported-version");
     expect(profileCombinationRule(v4(2))).toBe("profile-combination");
     const v4Board = (board: number) => ({
       ...v4(2),
@@ -849,10 +851,14 @@ describe("2.3's profile combination", () => {
       expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: ballot }))).toBe(
         "profile-combination",
       );
-    // Ballot version 4 pairs with definition version 6 only; a ballot version
-    // it doesn't know may be a later release's question ballot.
-    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 4 }))).toBe("profile-combination");
-    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 5 }))).toBe("unsupported-version");
+    // Ballot version 4 pairs with definition version 6 only, and version 5
+    // with a rolling version 7; a ballot version it doesn't know may be a
+    // later release's question ballot.
+    for (const ballot of [4, 5])
+      expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: ballot }))).toBe(
+        "profile-combination",
+      );
+    expect(profileCombinationRule(v5({ [RECORD_TYPES.ballot]: 6 }))).toBe("unsupported-version");
     // Display-text version 1 has no questions; an unknown one fails too.
     for (const displayText of [1, 3, undefined])
       expect(profileCombinationRule(v5({ [RECORD_TYPES.displayText]: displayText }))).toBe(
@@ -891,6 +897,13 @@ describe("2.3's profile combination", () => {
           withPins(pinning(5, 1, 1), { [RECORD_TYPES.electionDefinition]: definition }),
         ),
       ).toBe("profile-combination");
+  });
+
+  test("ballot version 5 beside definition version 1 fails, and an unknown one isn't judged here", () => {
+    // Version 5 names a step, which only a rolling version 7 has; an unknown
+    // version is left to the verifier's 5.x, which refuses its records.
+    expect(profileCombinationRule(pinning(5, 5, 1))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 255, 1))).toBeUndefined();
   });
 
   test("ballot version 1 pairs only with opening version 1, which opens its cores", () => {

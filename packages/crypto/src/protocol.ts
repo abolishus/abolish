@@ -442,13 +442,11 @@ const CORE_OPENING: ReadonlyMap<number, number> = new Map([
 export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3]);
 // The ballot versions this package reads (ballot.ts's BALLOT), written out
 // for the same reason. Version 4 pairs only with definition version 6 and
-// version 7's fixed electorate. Ballot.ts reads version 5 too, which only
-// version 7's rolling electorate pins: 2.3 reads it beside version 7 alone
-// (`profileCombinationRule`), and it joins this set when the verifier
-// admits it (P2-17 part 4); until then a version-5 pin beside an earlier
-// definition is judged as unknown, unsupported where nothing else fails, as
-// the verifier's 2.3 vectors, written before version 5 had a layout, expect.
-export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4]);
+// version 7's fixed electorate, and version 5 only with version 7's rolling
+// electorate, so beside any other definition a version-5 pin fails, as a
+// version-4 pin beside definition version 5 does: no later release can read
+// it there (P2-17 part 4d-1; T-36).
+export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
 // Only versions 8 to 12 name every board event (the close rule's, the
@@ -510,11 +508,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version 2, version 5 ballot version 3, version 6 ballot version 4 and
  * version 7 ballot version 4 under `electorate_mode` 1 (fixed) and ballot
  * version 5 under 2 (rolling), and each of those ballot versions pairs with
- * those definitions only (ballot version 5 beside a definition before
- * version 7 is still a version this package doesn't know, below, until the
- * verifier admits it: P2-17 part 4, and a rolling profile that fits is
- * `unsupported-version` until then); ballot version 5 also needs
- * contract-event version 11 or 12, the only ones whose tables name the
+ * those definitions only (a rolling profile that fits is
+ * `unsupported-version` until the verifier reads its step roots: P2-17 part
+ * 4d-2); ballot version 5 also needs contract-event version 11 or 12, the only ones whose tables name the
  * relayed rolling ballot, and fails beside version 8, 9 or 10 (T-25, T-50, T-53),
  * and ballot version 4 needs version 9 to 12, which frame it, and fails
  * beside version 8 (T-25, T-53); what follows of version 6
@@ -634,9 +630,7 @@ export function profileCombinationRule(
   // version 1 it isn't judged here: verifier 5.x refuses its records.
   const wanted = ballotFor(definition, d);
   if (wanted === undefined) return "profile-combination";
-  // Ballot version 5 is read beside version 7, whose rolling electorate
-  // pins it, and nowhere else yet (BALLOT_VERSIONS).
-  const unknownBallot = !BALLOT_VERSIONS.has(ballot) && !(ballot === 5 && definition === 7);
+  const unknownBallot = !BALLOT_VERSIONS.has(ballot);
   if (!unknownBallot && ballot !== wanted) return "profile-combination";
   const spoiled = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
   const coreOpening = unknownBallot ? undefined : CORE_OPENING.get(ballot);
@@ -687,12 +681,10 @@ export function profileCombinationRule(
   // 6.2 can't be checked, never a failure (T-36).
   if (spoiled !== undefined && !SPOILED_OPENING_VERSIONS.has(spoiled)) return "unsupported-version";
   if (!knownEvents) return "unsupported-version";
-  // A rolling profile that fits waits on the verifier's rolling checks
-  // (2.4's replay through close, 5.1 and 5.2 against step roots: P2-17
-  // parts 4c and 4d), when ballot version 5 joins BALLOT_VERSIONS: until
-  // then it is unverifiable, never passed (T-36). Beside definition version
-  // 1 an unknown ballot version isn't judged here, as above.
-  if (ballot === 5 && !unknownBallot) return "unsupported-version";
+  // A rolling profile that fits waits on the verifier's 5.1 and 5.2 against
+  // step roots (P2-17 part 4d-2): until then it is unverifiable, never passed
+  // (T-36). Only a rolling definition gets here with ballot version 5.
+  if (ballot === 5) return "unsupported-version";
   return undefined;
 }
 

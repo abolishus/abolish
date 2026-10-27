@@ -129,7 +129,7 @@ def v6_reading(d):
 
 
 def combination(d):
-    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll fits with display-text 2, ballot 4, spoiled-ballot opening 3, contract-event 9, and tally-opening 1 and board-entry 5 without an author panel, or tally-opening 3 and board-entry 7 with one (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll fails whatever it pins, here as with an author panel; a ballot version this verifier doesn't read is unsupported once no other pin fails (version 5, a rolling electorate's, is read beside version 7, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
+    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll fits with display-text 2, ballot 4, spoiled-ballot opening 3, contract-event 9, and tally-opening 1 and board-entry 5 without an author panel, or tally-opening 3 and board-entry 7 with one (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll fails whatever it pins, here as with an author panel; a ballot version this verifier doesn't read is unsupported once no other pin fails (version 5, a rolling electorate's, is read, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
     pins = dict(d["profile"]["pins"])
     if d["results_mode"] != d6.SEALED:
         return COMBINATION_FAILS
@@ -139,7 +139,7 @@ def combination(d):
     events = pins[vb.CONTRACT_EVENT_TYPE]
     if any(pins[t] != v for t, v in wanted.items()) or events <= 8:
         return COMBINATION_FAILS
-    if pins[BALLOT_TYPE] not in (1, 2, 3, 4) and not (pins[BALLOT_TYPE] == 5 and vc.own_version(d) == 7):
+    if pins[BALLOT_TYPE] not in (1, 2, 3, 4, 5):
         return UNSUPPORTED
     if pins[BALLOT_TYPE] != 4:
         return COMBINATION_FAILS
@@ -495,14 +495,12 @@ def build(constants, version=6):
     bundle("ballot-v3", "Definition version 6 pinning ballot version 3, which carries no author half: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b3, t_b3, e_b3, [1, 2, 3], [t_b3, (b_a, None)], "unsupported")
 
     d_b5, t_b5, e_b5 = election_for("v6-ballot-5", [1, 2, 3], profile=pins(ballot=5))
-    if version == 6:
-        bundle("ballot-v5", "Definition version 6 pinning ballot version 5, which this release doesn't read: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
-    else:
-        bundle(
-            "ballot-v5",
-            "Definition version 7 under a fixed electorate pinning ballot version 5, a rolling electorate's: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.",
-            d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported",
-        )
+    named = "Definition version 6" if version == 6 else "Definition version 7 under a fixed electorate"
+    bundle("ballot-v5", f"{named} pinning ballot version 5, a rolling electorate's: 2.3 fails profile-combination, and, as for any ballot version but the definition's own and version 1, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_b5, t_b5, e_b5, [1, 2, 3], [t_b5, (b_a, None)], "unsupported")
+
+    # Version 255 stands for a ballot version no release reads.
+    d_bu, t_bu, e_bu = election_for("v6-ballot-unread", [1, 2, 3], profile=pins(ballot=255))
+    bundle("ballot-unread", f"{named} pinning ballot version 255, which a later release may read: 2.3, 5.1 to 5.5, 5.7 and 6.2 are unsupported.", d_bu, t_bu, e_bu, [1, 2, 3], [t_bu, (b_a, None)], "unsupported")
 
     if version == 7:
         # The same election read as version 6. Its hash and stubs are
@@ -621,9 +619,9 @@ def assemble(constants, proofs_path, out_dir, version=6):
             # A transcript made for another stub fails 3.1 before 3.2 is reached.
             assert "fail" in (ceremony_rows["3.1"]["status"], ceremony_rows["3.2"]["status"]), (bnd["id"], ceremony_rows)
         pins = dict(d["profile"]["pins"])
-        # 1.3: ballot versions 1 to 4 are proved under the one pinned key; a
+        # 1.3: ballot versions 1 to 5 are proved under the one pinned key; a
         # later version may pin another (docs/spec/verifier.md, Procedure).
-        vk_fails = pins[BALLOT_TYPE] in (1, 2, 3, 4) and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
+        vk_fails = pins[BALLOT_TYPE] in (1, 2, 3, 4, 5) and d["membership_vk_hash"] != MEMBERSHIP_VK_HASH
         rows = {
             "1.3": outcome("fail", "membership-key", {}) if vk_fails else NOT_IMPLEMENTED,
             "2.3": combination(d),
@@ -719,13 +717,13 @@ def assemble(constants, proofs_path, out_dir, version=6):
     assert by["other-key"]["expected"]["1.3"]["code"] == "membership-key"
     assert by["ballot-v1"]["expected"]["2.3"] == COMBINATION_FAILS
     assert by["ballot-v3"]["expected"]["2.3"] == COMBINATION_FAILS
-    assert by["ballot-v5"]["expected"]["2.3"] == (UNSUPPORTED if version == 6 else COMBINATION_FAILS)
+    assert by["ballot-v5"]["expected"]["2.3"] == COMBINATION_FAILS and by["ballot-unread"]["expected"]["2.3"] == UNSUPPORTED
     if version == 7:
         assert by["v6-reading"]["ballots"] == {"admitted": 1, "rejected": [{"entry": 2, "code": "ballot-stray"}], "repeats": []}
         assert by["v6-stub"]["expected"]["3.1"] == outcome("fail", "ceremony-signature", {"entry": 0}) and by["v6-stub"]["expected"]["5.1"] == NOT_REACHED
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED
     assert by["admitted"]["expected"]["6.2"] == outcome("pass") and by["opening-2"]["expected"]["6.2"] == NOT_REACHED
-    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED
+    assert by["ballot-v5"]["expected"]["6.2"] == UNSUPPORTED and by["ballot-unread"]["expected"]["6.2"] == UNSUPPORTED
     assert by["quorum"]["expected"]["7.4"] == NOT_REACHED and by["admitted"]["expected"]["7.4"] == outcome("pass")
 
     doc = {

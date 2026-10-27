@@ -411,10 +411,10 @@ type BoardInputs =
       readonly l1: L1Evidence;
     };
 
-/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 to 4). */
+/** Whether the definition's ballots are proved under the one membership key this release pins (ballot versions 1 to 5). */
 function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
   const pinned = pinnedVersion(d, RECORD_TYPES.ballot);
-  return pinned === 1 || pinned === 2 || pinned === 3 || pinned === 4;
+  return pinned === 1 || pinned === 2 || pinned === 3 || pinned === 4 || pinned === 5;
 }
 
 /**
@@ -538,7 +538,7 @@ function fromDefinition(
   // replay computes, and its ballots are version 5, which 5.1 and 5.2 don't
   // read yet: a later release verifies it, so a profile that fits is
   // unverifiable, never failed, and the board checks have no election to
-  // run for until then (P2-17 parts 4c and 4d; T-36). One that doesn't fit
+  // run for until then (P2-17 part 4d-2; T-36). One that doesn't fit
   // fails 2.3 under every release, as any other definition's does.
   if (isRolling(record)) return stopped("2.3", combination ?? UNSUPPORTED, hash);
   return {
@@ -1059,8 +1059,8 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
           )),
       // 1.3 also covers the keys inside the verifier contracts the election
       // uses, which aren't read yet: it can fail here, never pass. Only
-      // ballot versions 1 to 4's key (one key: a version-2 to version-4
-      // ballot proves membership of its cell's tree under it) is pinned here; a version
+      // ballot versions 1 to 5's key (one key: a version-2 to version-5
+      // ballot proves membership of its cell's or step's tree under it) is pinned here; a version
       // this verifier doesn't read may have a key a later release pins, so
       // releases agree (T-36).
       ...(definition.definition !== undefined &&

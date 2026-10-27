@@ -606,7 +606,14 @@ function ReviewList({
             {r.value}
           </dd>
           <dd className="col-start-2 row-start-1 m-0 sm:col-start-3">
-            {r.field === undefined ? null : (
+            {/* A row nothing on the page changes keeps the link's room, so its
+                value sits where every other row's does rather than 20px
+                higher (P2-29, creating a poll's iteration 8). */}
+            {r.field === undefined ? (
+              <span aria-hidden="true" className="invisible inline-flex min-h-12 items-center">
+                {t("pollFormReviewChange")}
+              </span>
+            ) : (
               <a
                 href={`#${r.field}`}
                 onClick={(event) => onJump(event, r.field ?? "")}
@@ -1279,25 +1286,26 @@ export function PollFormPage({
             </div>
           </Section>
 
-          <Section
-            title={t("pollFormWhoTitle")}
-            id="poll-form-who"
-            lede={
-              <p className="m-0">
+          <Section title={t("pollFormWhoTitle")} id="poll-form-who">
+            {/* The answer to the heading first, then what counts once: as the
+                heading's lede, the six lines of the latter came before the
+                answer and, beside the heading from 768px, left it under an
+                empty band (P2-29, creating a poll's iteration 8). */}
+            <div className="grid gap-3">
+              {/* Rules only between tiers: around the one tier there is today
+                  they drew an empty row above the next section's rule
+                  (iteration 7). */}
+              <ul className="m-0 grid list-none divide-y divide-border p-0">
+                {form.tiers.map((tier) => (
+                  <li key={tier} className="py-3 text-base font-semibold first:pt-0 last:pb-0">
+                    {whoName(t, tier, phoneVerification)}
+                  </li>
+                ))}
+              </ul>
+              <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
                 {t(phoneVerification ? "pollFormWhoLede_phone" : "pollFormWhoLede_email")}
               </p>
-            }
-          >
-            {/* Rules only between tiers: around the one tier there is today they
-                drew an empty row above the next section's rule (P2-29,
-                creating a poll's iteration 7). */}
-            <ul className="m-0 grid list-none divide-y divide-border p-0">
-              {form.tiers.map((tier) => (
-                <li key={tier} className="py-3 text-base font-semibold first:pt-0 last:pb-0">
-                  {whoName(t, tier, phoneVerification)}
-                </li>
-              ))}
-            </ul>
+            </div>
           </Section>
 
           <Section

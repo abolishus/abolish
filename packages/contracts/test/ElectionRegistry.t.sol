@@ -185,12 +185,12 @@ contract ElectionRegistryTest is TestBase {
         _assertParameters(lib.hash(enc), d);
     }
 
-    /// Versions 3 to 5 (docs/spec/contracts.md, Parameters): the cells are
-    /// every tier's `cells`, tier by tier; version 5 records each question
-    /// and their total. Version 6 is refused (Profile below), so no author
-    /// panel is ever recorded yet.
+    /// Versions 3 to 6 (docs/spec/contracts.md, Parameters): the cells are
+    /// every tier's `cells`, tier by tier; versions 5 and 6 record each
+    /// question and their total. Rule 9 refuses a version-6 author panel
+    /// (Profile below), so none is ever recorded yet.
     function test_RecordsEachVersionsParameters() public {
-        for (uint8 version = 3; version <= 5; version++) {
+        for (uint8 version = 3; version <= 6; version++) {
             bytes32 id = _create();
             ElectionDefinitionLib.Definition memory d =
                 RegistryFixture.templateV(registry, id, version);
@@ -244,12 +244,14 @@ contract ElectionRegistryTest is TestBase {
 
     /// The profile the registry serves for each definition version it
     /// decodes, by pin (type 0x0001 to 0x0009), written from the spec: 0
-    /// where any version is admitted. Version 6 has none.
+    /// where any version is admitted. Version 6's is for a sealed poll
+    /// without an author panel, as `templateV` makes.
     function _served(uint8 version) internal pure returns (uint8[9] memory v) {
         if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 12, 1];
         if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 12, 1];
         if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 12, 1];
-        return [5, 3, 2, 0, 0, 0, 5, 12, 2];
+        if (version == 5) return [5, 3, 2, 0, 0, 0, 5, 12, 2];
+        return [6, 4, 3, 0, 0, 0, 5, 12, 2];
     }
 
     function _templateOf(bytes32 id, uint8 version)
@@ -263,10 +265,11 @@ contract ElectionRegistryTest is TestBase {
     }
 
     /// Every served profile registers, whatever the pins the check leaves to
-    /// the verifier (the receipt, ceremony transcript and tally opening).
+    /// the verifier (the receipt and ceremony transcript, and a tally opening
+    /// other than versions 2 and 3: 1, or 4 and 5, which no release reads).
     function test_RegistersEachServedProfile() public {
-        uint8[4] memory versions = [1, 3, 4, 5];
-        for (uint256 i; i < 4; i++) {
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        for (uint256 i; i < 5; i++) {
             for (uint8 other = 1; other <= 3; other++) {
                 bytes32 id = _create();
                 ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
@@ -276,7 +279,7 @@ contract ElectionRegistryTest is TestBase {
                 }
                 d.pinVersions[3] = other;
                 d.pinVersions[4] = other;
-                d.pinVersions[5] = other;
+                d.pinVersions[5] = other == 1 ? 1 : other + 2;
                 bytes memory enc = RegistryFixture.approve(lib, trustees, d);
                 vm.prank(CREATOR);
                 registry.registerDefinition(enc);
@@ -297,8 +300,8 @@ contract ElectionRegistryTest is TestBase {
     /// versions that don't open the ballot's cores; and display-text versions
     /// without the definition's questions (T-25, T-50, T-42, T-53).
     function test_RefusesEachPinTheDeploymentDoesntServe() public {
-        uint8[4] memory versions = [1, 3, 4, 5];
-        for (uint256 i; i < 4; i++) {
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        for (uint256 i; i < 5; i++) {
             uint8[9] memory served = _served(versions[i]);
             for (uint256 t = 1; t < 9; t++) {
                 if (served[t] == 0) continue;
@@ -321,12 +324,13 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// Definitions below version 6 carry no poll class, so rule 8 never asks
-    /// their panel's kind: each registers under a panel whose kind is 0, as
-    /// the trustee registry reports for one it doesn't know.
-    function test_VersionsBelow6NeedNoKind() public {
-        uint8[4] memory versions = [1, 3, 4, 5];
-        for (uint256 i; i < 4; i++) {
+    /// Definitions below version 6 carry no poll class, and the version-6
+    /// template is an everyday poll (class 1), so rule 8 never asks their
+    /// panel's kind: each registers under a panel whose kind is 0, as the
+    /// trustee registry reports for one it doesn't know.
+    function test_NonCivicDefinitionsNeedNoKind() public {
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        for (uint256 i; i < 5; i++) {
             bytes32 id = _create();
             ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
             assertEq(trustees.kindOf(d.panelId), 0, "no kind");
@@ -337,31 +341,70 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// A version-6 definition is refused at its ballot pin whatever it pins:
-    /// its ballot version 4 carries the author half, which the board can't
-    /// check yet (docs/spec/contracts.md, Registration; P2-16 part 5).
-    function test_RefusesEveryVersion6Definition() public {
-        for (uint8 v = 1; v <= 7; v++) {
-            bytes32 id = _create();
-            ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 6);
-            d.pinVersions[1] = v;
-            d.pinVersions[2] = 3;
-            d.pinVersions[8] = 2;
-            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
-            _expectRefused(
-                CREATOR,
-                enc,
-                abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(2), v)
-            );
-            _assertNoParameters(lib.hash(enc));
+    /// Tally-opening versions 2 (a live poll's) and 3 (an author panel's) are
+    /// refused under every definition version, since this registry serves
+    /// neither a live poll nor an author panel and 2.3 fails both beside
+    /// every other profile (T-16, T-17, T-31).
+    function test_RefusesTallyOpeningVersions2And3() public {
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        for (uint256 i; i < 5; i++) {
+            for (uint8 v = 2; v <= 3; v++) {
+                bytes32 id = _create();
+                ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
+                d.pinVersions[5] = v;
+                bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+                _expectRefused(
+                    CREATOR,
+                    enc,
+                    abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(6), v)
+                );
+                _assertNoParameters(lib.hash(enc));
+            }
+        }
+    }
+
+    /// A live version-6 poll, or one with an author panel, is refused at its
+    /// board-entry pin whatever board-entry version it pins: verifier 2.3 fails it beside
+    /// board-entry version 5, and the versions it needs (6 for a live poll's
+    /// running openings, 7 for an author panel's approvals) aren't served
+    /// (docs/spec/contracts.md, Registration, rule 9; T-16, T-17), so no
+    /// author key set is recorded through `registerDefinition` either.
+    function test_RefusesALiveVersion6PollOrAnAuthorPanel() public {
+        for (uint8 v = 1; v <= 8; v++) {
+            for (uint256 which; which < 3; which++) {
+                bytes32 id = _create();
+                ElectionDefinitionLib.Definition memory d =
+                    RegistryFixture.templateV(registry, id, 6);
+                d.pinVersions[6] = v;
+                if (which != 1) {
+                    d.resultsMode = 2;
+                    d.liveEvery = 1;
+                    d.liveBatch = 20;
+                }
+                if (which != 0) {
+                    d.authorThreshold = 2;
+                    d.authorKeys = new ElectionDefinitionLib.P256Key[](3);
+                    for (uint256 i; i < 3; i++) {
+                        d.authorKeys[i] = RegistryFixture.key(i);
+                    }
+                    d.authorTranscriptHash = sha256(abi.encode("author transcript", id));
+                }
+                bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+                _expectRefused(
+                    CREATOR,
+                    enc,
+                    abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(7), v)
+                );
+                _assertNoParameters(lib.hash(enc));
+            }
         }
     }
 
     /// Any profile: registered exactly when every served pin is the served
     /// version, else refused at the first wrong one in type order.
     function testFuzz_ProfileServedExactly(uint256 which, uint8[9] memory pins) public {
-        uint8[4] memory versions = [1, 3, 4, 5];
-        uint8 version = versions[_bound(which, 0, 3)];
+        uint8[5] memory versions = [1, 3, 4, 5, 6];
+        uint8 version = versions[_bound(which, 0, 4)];
         uint8[9] memory served = _served(version);
         bytes32 id = _create();
         ElectionDefinitionLib.Definition memory d = _templateOf(id, version);
@@ -370,7 +413,8 @@ contract ElectionRegistryTest is TestBase {
             // Mostly the served version, so registrations happen too.
             uint8 v = pins[t] % 4 == 0 ? uint8(_bound(pins[t], 1, 255)) : d.pinVersions[t];
             d.pinVersions[t] = v;
-            if (expected.length == 0 && served[t] != 0 && v != served[t]) {
+            bool refused = served[t] != 0 ? v != served[t] : t == 5 && (v == 2 || v == 3);
+            if (expected.length == 0 && refused) {
                 expected = abi.encodeWithSelector(
                     ElectionRegistry.ProfileNotServed.selector, uint16(t + 1), v
                 );
@@ -394,7 +438,7 @@ contract ElectionRegistryTest is TestBase {
             ElectionDefinitionLib.Rule.Cells,
             ElectionDefinitionLib.Rule.ReceiptKeys,
             ElectionDefinitionLib.Rule.Selections,
-            ElectionDefinitionLib.Rule.AuthorPanel
+            ElectionDefinitionLib.Rule.Results
         ];
         for (uint8 version = 3; version <= 6; version++) {
             bytes32 id = _create();
@@ -403,7 +447,7 @@ contract ElectionRegistryTest is TestBase {
             if (version == 3) d.tiers[0].cells[1].members = 1999;
             if (version == 4) d.receiptKeys = new ElectionDefinitionLib.P256Key[](0);
             if (version == 5) d.questions[1].minSelections = 3;
-            if (version == 6) d.authorKeys[2] = d.authorKeys[0];
+            if (version == 6) d.liveEvery = 1;
             bytes memory enc = RegistryFixture.approve(lib, trustees, d);
             _expectRefused(
                 CREATOR,

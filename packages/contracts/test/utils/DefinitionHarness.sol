@@ -265,7 +265,7 @@ contract MockTrusteeRegistry is ITrusteeRegistry {
     }
 
     /// No test registers an author panel through the mock: rule 9 refuses
-    /// every version-6 definition before the call, and the author panel's
+    /// every author panel before the call, and the author panel's
     /// tests run against a real trustee registry.
     function checkAuthorRegistration(bytes calldata, uint256[2][] calldata, uint8)
         external

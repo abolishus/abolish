@@ -648,10 +648,13 @@ contract ElectionRegistry is EventAccumulator {
     /// definition's version (docs/spec/contracts.md, Election registry,
     /// Registration, rule 9), checked by record type in ascending order: the
     /// ballot version the board checks for it (1 for definition version 1, 2
-    /// for 3 and 4, 3 for 5; none for 6, whose ballot version 4 the board
-    /// can't check), the spoiled-ballot opening version that opens that
-    /// ballot's cores, board-entry version 5, the only one that allows the
-    /// close statement, contract-event version 12, whose tables name every
+    /// for 3 and 4, 3 for 5, 4 for 6), the spoiled-ballot opening version that
+    /// opens that ballot's cores, a tally-opening version other than 2 and 3,
+    /// board-entry version 5, the only one that
+    /// allows the close statement, for a sealed definition without an author
+    /// panel and none for any other (a live poll's running openings need
+    /// version 6 and an author panel's approvals version 7, which verifier 2.3
+    /// fails here: T-16, T-17), contract-event version 12, whose tables name every
     /// event of the board (the close rule's, the batches', the obligation
     /// root's and the availability records'), of the group registry (its
     /// Tier 1 additions and its self-paid groups and additions) and the
@@ -662,8 +665,8 @@ contract ElectionRegistry is EventAccumulator {
     /// the verifier reads (T-25, T-50, T-42, T-53). `profile-types` fixed the
     /// pins as 0x0001 to 0x0009 in order.
     /// Virtual only so the tests can reach the author panel's registration,
-    /// which no definition this rule serves can, before part 5e of P2-16
-    /// serves definition version 6; nothing in this contract overrides it.
+    /// which no definition this rule serves can until P2-16 part 5e-5d serves
+    /// board-entry version 7; nothing in this contract overrides it.
     function _requireServedProfile(ElectionDefinitionLib.Definition memory def)
         internal
         pure
@@ -671,15 +674,30 @@ contract ElectionRegistry is EventAccumulator {
     {
         uint8 v = def.version;
         uint8[] memory pins = def.pinVersions;
-        // 0: definition version 6, whose ballot version 4 the board can't check.
-        uint8 ballot = v == 1 ? 1 : v == 3 || v == 4 ? 2 : v == 5 ? 3 : 0;
-        if (ballot == 0 || pins[1] != ballot) revert ProfileNotServed(0x0002, pins[1]);
-        // Opening version 2 opens the cores of ballot versions 2 and 3.
-        if (pins[2] != (ballot == 1 ? 1 : 2)) revert ProfileNotServed(0x0003, pins[2]);
-        if (pins[6] != 5) revert ProfileNotServed(0x0007, pins[6]);
+        uint8 ballot = v == 1 ? 1 : v == 3 || v == 4 ? 2 : v == 5 ? 3 : 4;
+        if (pins[1] != ballot) revert ProfileNotServed(0x0002, pins[1]);
+        // Opening version 2 opens the cores of ballot versions 2 and 3, and
+        // version 3 those of ballot version 4.
+        if (pins[2] != (ballot == 1 ? 1 : ballot == 4 ? 3 : 2)) {
+            revert ProfileNotServed(0x0003, pins[2]);
+        }
+        // Tally-opening version 2 fixes a live poll's running opening and
+        // version 3 sums an author panel's half, and this registry serves
+        // neither, so 2.3 fails both beside any profile it serves; a version
+        // no release reads yet is left to 2.3, which reports it unverifiable.
+        if (pins[5] == 2 || pins[5] == 3) revert ProfileNotServed(0x0006, pins[5]);
+        // Below definition version 6 `resultsMode` and `authorThreshold` are 0,
+        // and at version 6 a live poll's `resultsMode` is above `SEALED`.
+        if (
+            pins[6] != 5 || def.resultsMode > ElectionDefinitionLib.SEALED
+                || def.authorThreshold != 0
+        ) {
+            revert ProfileNotServed(0x0007, pins[6]);
+        }
         if (pins[7] != 12) revert ProfileNotServed(0x0008, pins[7]);
-        // Display-text version 2 carries definition version 5's questions.
-        if (pins[8] != (v == 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
+        // Display-text version 2 carries the questions of definition versions
+        // 5 and 6.
+        if (pins[8] != (v >= 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
     }
 
     function _requireThisDeployment(ElectionDefinitionLib.Definition memory def) private view {

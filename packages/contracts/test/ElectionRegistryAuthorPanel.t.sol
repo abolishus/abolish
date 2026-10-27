@@ -266,32 +266,58 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
         );
     }
 
-    /// The deployed registry checks the kind before rule 9, so a civic
-    /// definition under a transitional panel is refused for its panel even
-    /// while rule 9 serves no version-6 definition.
-    function test_TheDeployedRegistryRefusesACivicPollUnderATransitionalPanel() public {
-        registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
-        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
-        d.pollClass = 2;
-        _withoutAuthorPanel(d);
-        bytes memory enc = _approve(d);
-        _expectCallRefused(
-            abi.encodeCall(ElectionRegistry.registerDefinition, (enc)),
-            abi.encodeWithSelector(ElectionRegistry.CivicPanelNotIndependent.selector, panel, 2)
-        );
+    /// The deployed registry serves a sealed civic poll without an author
+    /// panel (rule 9, board-entry version 5) and registers it only under an
+    /// independent panel: under a transitional one it is refused for its
+    /// panel, recording nothing (T-14).
+    function test_TheDeployedRegistryServesACivicPollOnlyUnderAnIndependentPanel() public {
+        for (uint8 kind = 1; kind <= 2; kind++) {
+            trustees = AuthorPanelFixture.trusteeRegistry(kind);
+            registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
+            (bytes32 id, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+            d.pollClass = 2;
+            d.pinVersions[6] = 5;
+            _withoutAuthorPanel(d);
+            bytes memory enc = _approve(d);
+            if (kind == 1) {
+                vm.prank(CREATOR);
+                registry.registerDefinition(enc);
+                assertEq(registry.definitionHashOf(id), lib.hash(enc), "registered");
+            } else {
+                _expectCallRefused(
+                    abi.encodeCall(ElectionRegistry.registerDefinition, (enc)),
+                    abi.encodeWithSelector(
+                        ElectionRegistry.CivicPanelNotIndependent.selector, panel, 2
+                    )
+                );
+                _assertNothingRecorded(enc);
+            }
+        }
     }
 
-    /// The deployed registry refuses every version-6 definition at rule 9,
-    /// before the author panel's checks or `AuthorRegistrationMissing`, so it
-    /// records no author key set until part 5e serves version 6.
+    /// The deployed registry refuses every author panel at rule 9's
+    /// board-entry pin, before the author panel's checks or
+    /// `AuthorRegistrationMissing`, so it records no author key set until
+    /// P2-16 part 5e-5d serves board-entry version 7.
     function test_TheDeployedRegistryRefusesItAtRule9() public {
         registry = new ElectionRegistry(RegistryFixture.deployment(address(trustees)));
         (, bytes memory enc) = _approved(2, 3);
         bytes memory reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
         bytes memory unserved =
-            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0002), 4);
+            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 7);
         _expectRefused(enc, reg, unserved);
         _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
+        // Pinning board-entry version 5 doesn't help it: the author panel
+        // itself is refused there, so its key set is never recorded (T-17).
+        (, ElectionDefinitionLib.Definition memory d) = _definition(2, 3);
+        d.pinVersions[6] = 5;
+        enc = _approve(d);
+        reg = _authorRegistration(enc, _authorSeats(_range(1, 3)), _range(1, 2));
+        unserved =
+            abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(0x0007), 5);
+        _expectRefused(enc, reg, unserved);
+        _expectCallRefused(abi.encodeCall(ElectionRegistry.registerDefinition, (enc)), unserved);
+        _assertNothingRecorded(enc);
     }
 
     // --- checks 1 to 5 -------------------------------------------------------------

@@ -9,9 +9,10 @@ import {RegistryFixture} from "./RegistryFixture.sol";
 import {TrusteeFixture, TrusteeHarness} from "./TrusteeFixture.sol";
 import {Vm} from "./Vm.sol";
 
-/// The election registry with rule 9 serving definition version 6, as part 5e
-/// of P2-16 will: until then the deployed registry refuses every version-6
-/// definition at its ballot pin, before any author panel check, so the tests
+/// The election registry with rule 9 serving every version-6 profile, author
+/// panels with board-entry version 7 among them, as part 5e-5d of P2-16 will:
+/// until then the deployed registry refuses every author panel at its
+/// board-entry pin, before any author panel check, so the tests
 /// reach the author panel's registration only through this override. Every
 /// other rule is the deployed contract's.
 contract ServingVersion6Registry is ElectionRegistry {
@@ -51,7 +52,7 @@ library AuthorPanelFixture {
     }
 
     /// A version-6 definition for election `id` with a `k`-of-`n` author panel
-    /// of keys `1·G` to `n·G`, pinning what part 5e serves (ballot 4, opening
+    /// of keys `1·G` to `n·G`, pinning what part 5e-5d serves (ballot 4, opening
     /// 3, board entry 7, contract event 12, display text 2), under the trustee
     /// registry's default panel.
     function definition(ElectionRegistry registry, bytes32 id, uint8 k, uint8 n)
@@ -66,6 +67,7 @@ library AuthorPanelFixture {
         d.pinVersions[7] = 12;
         d.pinVersions[8] = 2;
         d.authorThreshold = k;
+        d.authorTranscriptHash = sha256(abi.encode("author transcript", id));
         d.authorKeys = new ElectionDefinitionLib.P256Key[](n);
         for (uint256 i; i < n; i++) {
             (uint256 x, uint256 y) = vm.publicKeyP256(i + 1);

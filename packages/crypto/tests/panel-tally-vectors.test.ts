@@ -13,18 +13,22 @@ import {
   decodePanelSummedShareMessage,
   decodePartialOpening,
   element,
+  ELECTORATE_MODES,
   encodePartialOpening,
   GROUP_ORDER,
   identityKey,
   list,
   openCell,
   openPanelSummedShares,
+  type PanelSummedShareDefinition,
   openPartialCell,
   panelDestructionStatementMessage,
   panelTallyRules,
   type PartialCellCheck,
   type PartialOpening,
   partialOpeningMessage,
+  RECORD_TYPES,
+  sealPanelSummedShares,
   type PartialTallyCheck,
   type PartialTallyElection,
   type Share,
@@ -33,6 +37,7 @@ import {
   sortPartialOpenings,
   type TallyRules,
   tallyRules,
+  UnsupportedVersionError,
 } from "../src/index.ts";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import { kemKeyPairWith } from "../src/share-encryption.ts";
@@ -372,6 +377,63 @@ describe("panel-tally.json: summed-share messages, version 2", () => {
       hex(v.encoding),
     );
     expect(got.ok ? "ok" : got.code).toBe(v.result);
+  });
+
+  test("under a fixed version-7 reading of the definition, a message binds its version-7 hash", () => {
+    // Version 7's fields with an empty rolling list, pinning itself as 7
+    // (docs/spec/election-definition.md, Layout (version 7)).
+    const d7 = {
+      version: 7 as const,
+      value: {
+        ...definition.value,
+        profile: {
+          ...definition.value.profile,
+          pins: definition.value.profile.pins.map((p) =>
+            p.record_type === RECORD_TYPES.electionDefinition ? { ...p, version: 7 } : p,
+          ),
+        },
+        electorate_mode: ELECTORATE_MODES.fixed,
+        rolling_electorate: [],
+      },
+    };
+    const v = vectors.summedShares.messages[0];
+    if (v === undefined) throw new Error("no case");
+    const aggregate = aggregates(v.panel)[v.cell];
+    if (aggregate === undefined) throw new Error("no cell");
+    const open = (d: PanelSummedShareDefinition, bytes: Uint8Array) =>
+      openPanelSummedShares(
+        {
+          definition: d,
+          panel: v.panel,
+          aggregates: aggregates(v.panel),
+          registered: sets[v.panel],
+        },
+        { index: v.recipient, secretKey: kem(v.panel, v.recipient).kem.secretKey },
+        bytes,
+      );
+    const sealed = sealPanelSummedShares(
+      { definition: d7, cell: v.cell, panel: v.panel, aggregate },
+      sets[v.panel],
+      { index: v.sender, signingSecret: kem(v.panel, v.sender).secret },
+      v.recipient,
+      shares(v.summed),
+    );
+    expect(open(d7, sealed)).toEqual({
+      ok: true,
+      cell: v.cell,
+      sender: v.sender,
+      summed: shares(v.summed),
+    });
+    // Neither reading's message opens under the other's hash (T-37).
+    expect(open(definition, sealed).ok).toBe(false);
+    expect(open(d7, hex(v.encoding)).ok).toBe(false);
+    const rolling = {
+      ...d7,
+      value: { ...d7.value, electorate_mode: ELECTORATE_MODES.rolling },
+    };
+    expect(() => open(rolling, sealed)).toThrow(UnsupportedVersionError);
+    // A record labelled with another version than its value's pin.
+    expect(() => open({ version: 6, value: d7.value }, sealed)).toThrow(UnsupportedVersionError);
   });
 
   test("a version-2 message needs the panel's own transcript's key set", () => {

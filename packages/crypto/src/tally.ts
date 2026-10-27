@@ -16,6 +16,7 @@ import {
   electionDefinitionRule,
   electionDefinitionV3Rule,
   electionDefinitionV4Rule,
+  type ElectionDefinitionV5,
   electionDefinitionV5Rule,
   type ElectionDefinitionV6,
 } from "./election-definition.ts";
@@ -24,7 +25,9 @@ import { PARAMETERS } from "./parameters.ts";
 import {
   type AnyElectionDefinitionRecord,
   type ElectionDefinitionV7Record,
+  type PanelledDefinition,
   panelledFacts,
+  type PanelledFacts,
   UnsupportedVersionError,
 } from "./protocol.ts";
 import { RECORD_TYPES } from "./record.ts";
@@ -168,15 +171,21 @@ export function tallyRules(
     case 5:
     case 6:
     case 7: {
-      const wellFormed =
-        definition.version === 5
-          ? electionDefinitionV5Rule(definition.value) === undefined
-          : panelledOf(definition).wellFormed;
-      if (!wellFormed) throw new RangeError("tallyRules: the definition isn't well-formed");
-      if (definition.version !== 5 && definition.value.author_keys.length !== 0)
-        throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
+      const notWellFormed = () => new RangeError("tallyRules: the definition isn't well-formed");
+      let d: ElectionDefinitionV5 | PanelledDefinition;
+      if (definition.version === 5) {
+        if (electionDefinitionV5Rule(definition.value) !== undefined) throw notWellFormed();
+        d = definition.value;
+      } else {
+        // Read from its one decoded copy, which its rules were judged on.
+        const facts = panelledOf(definition);
+        if (!facts.wellFormed) throw notWellFormed();
+        if (facts.value.author_keys.length !== 0)
+          throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
+        d = facts.value;
+      }
       const questions = Object.freeze(
-        definition.value.questions.map((q) =>
+        d.questions.map((q) =>
           Object.freeze({
             optionCount: q.option_count,
             minSelections: q.min_selections,
@@ -186,7 +195,7 @@ export function tallyRules(
       );
       return Object.freeze({
         optionCount: questions.reduce((t, q) => t + q.optionCount, 0),
-        ...rules(definition.value),
+        ...rules(d),
         questions,
       });
     }
@@ -205,7 +214,7 @@ function panelledOf(
   definition:
     | { readonly version: 6; readonly value: ElectionDefinitionV6 }
     | ElectionDefinitionV7Record,
-): ReturnType<typeof panelledFacts> {
+): PanelledFacts {
   const facts = panelledFacts(definition.value);
   if (facts.version !== definition.version)
     throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
@@ -234,9 +243,9 @@ export function panelTallyRules(
       RECORD_TYPES.electionDefinition,
       (definition as { readonly version: number }).version,
     );
-  const d = definition.value;
-  if (!panelledOf(definition).wellFormed)
-    throw new RangeError("panelTallyRules: the definition isn't well-formed");
+  const facts = panelledOf(definition);
+  if (!facts.wellFormed) throw new RangeError("panelTallyRules: the definition isn't well-formed");
+  const d = facts.value;
   if (d.author_keys.length === 0)
     throw new RangeError("panelTallyRules: the definition has no author panel");
   if (panel !== 1 && panel !== 2) throw new RangeError("panelTallyRules: panel is 1 or 2");

@@ -301,41 +301,52 @@ export type ElectionDefinitionV7Record = {
   readonly value: ElectionDefinitionV7;
 };
 
-/**
- * What version 6's per-election checks take from a definition, under its own
- * version's encoding: its hash, its author stub hash and whether it is well
- * formed. Version 7 under a fixed electorate is read as version 6 is, with
- * version 7's hashes and rules ([[verifier]] 2.3: what holds of version 6's
- * poll class, results mode and author panel holds for version 7, and a fixed
- * version 7 pins ballot version 4). The version is the value's own pin, and
- * that version's encoder takes exactly its fields, so no value is hashed
- * under another version's layout. Any other
- * version, and a rolling version 7, whose ballots are version 5 and whose
- * roots are its steps', is `UnsupportedVersionError` (T-36). The package
- * entry point doesn't export it.
- */
-export function panelledFacts(d: PanelledDefinition): {
-  readonly version: 6 | 7;
+/** `panelledFacts`'s answer: the decoded copy, labelled with its version, and what is read from it. */
+export type PanelledFacts = (
+  | { readonly version: 6; readonly value: ElectionDefinitionV6 }
+  | ElectionDefinitionV7Record
+) & {
   readonly hash: Uint8Array;
   readonly authorStubHash: Uint8Array;
   readonly wellFormed: boolean;
-} {
-  const own = pinnedVersion(d, RECORD_TYPES.electionDefinition);
-  if (own === 6)
+};
+
+/**
+ * What version 6's per-election checks take from a definition, under its own
+ * version's encoding: one decoded copy of it, its hash, its author stub hash
+ * and whether it is well formed. Version 7 under a fixed electorate is read
+ * as version 6 is, with version 7's hashes and rules ([[verifier]] 2.3: what
+ * holds of version 6's poll class, results mode and author panel holds for
+ * version 7, and a fixed version 7 pins ballot version 4). The copy is
+ * decoded from the value's encoding under the layout its fields have, and the
+ * decoder refuses one whose own pin is another version, so no value is hashed
+ * under another version's layout, and every check reads the copy, whatever
+ * the caller's object returns on a later read. Any other version, and a
+ * rolling version 7, whose ballots are version 5 and whose roots are its
+ * steps', is `UnsupportedVersionError` (T-36). The package entry point
+ * doesn't export it.
+ */
+export function panelledFacts(given: PanelledDefinition): PanelledFacts {
+  if (!("electorate_mode" in given)) {
+    const d = decodeElectionDefinitionV6(encodeElectionDefinitionV6(given));
     return {
       version: 6,
+      value: d,
       hash: electionDefinitionV6Hash(d),
       authorStubHash: electionAuthorStubV6Hash(d),
       wellFormed: electionDefinitionV6Rule(d) === undefined,
     };
-  if (own === 7 && "electorate_mode" in d && d.electorate_mode === ELECTORATE_MODES.fixed)
-    return {
-      version: 7,
-      hash: electionDefinitionV7Hash(d),
-      authorStubHash: electionAuthorStubV7Hash(d),
-      wellFormed: electionDefinitionV7Rule(d) === undefined,
-    };
-  throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, own);
+  }
+  const d = decodeElectionDefinitionV7(encodeElectionDefinitionV7(given));
+  if (d.electorate_mode !== ELECTORATE_MODES.fixed)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, 7);
+  return {
+    version: 7,
+    value: d,
+    hash: electionDefinitionV7Hash(d),
+    authorStubHash: electionAuthorStubV7Hash(d),
+    wellFormed: electionDefinitionV7Rule(d) === undefined,
+  };
 }
 
 /**

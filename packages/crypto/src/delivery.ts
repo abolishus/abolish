@@ -49,14 +49,7 @@ import {
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
-import {
-  decodeElectionDefinitionV6,
-  decodeElectionDefinitionV7,
-  encodeElectionDefinitionV6,
-  encodeElectionDefinitionV7,
-  type PanelledDefinition,
-  panelledFacts,
-} from "./protocol.ts";
+import { type PanelledDefinition, panelledFacts } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import { type BallotPath, ballotWindow } from "./close-statement.ts";
@@ -2866,15 +2859,10 @@ export function checkDeliveryV2(
     return checkDeliveryV2With(e, ballots, entries, roots);
   }
   // One decoded copy of its bytes, so every check below reads the same
-  // definition, whatever the caller's object returns on a later read. Its
-  // layout is version 7's when it carries the electorate mode; either
-  // decoder then refuses a value whose own pin is another version.
-  const d: PanelledDefinition =
-    "electorate_mode" in definition
-      ? decodeElectionDefinitionV7(encodeElectionDefinitionV7(definition))
-      : decodeElectionDefinitionV6(encodeElectionDefinitionV6(definition));
-  // Refuses any version but 6 and a fixed 7 (T-36).
-  const facts = panelledFacts(d);
+  // definition, whatever the caller's object returns on a later read; any
+  // version but 6 and a fixed 7 is refused (T-36).
+  const facts = panelledFacts(definition);
+  const d = facts.value;
   const transcript = checkedTranscriptHash(e.registered.default);
   if (
     !(e.definitionHash instanceof Uint8Array) ||

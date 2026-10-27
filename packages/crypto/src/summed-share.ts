@@ -285,12 +285,17 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
  * and the partition's cells (T-37).
  */
 function panelContextOf(definition: PanelSummedShareDefinition, panel: 1 | 2): DefinitionContext {
-  // Refuses another version, a definition that isn't well-formed and one
-  // without an author panel (T-28, T-36).
-  const rules = panelTallyRules(definition, panel);
-  const d = definition.value;
+  // Its one decoded copy, labelled with its own version, gives every value
+  // below, so the rules and the hash are one definition's.
+  const facts = panelledFacts(definition.value);
+  if (facts.version !== definition.version)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+  const d = facts.value;
+  // Refuses a definition that isn't well-formed and one without an author
+  // panel (T-28, T-36).
+  const rules = panelTallyRules(facts, panel);
   return {
-    definitionHash: panelledFacts(d).hash,
+    definitionHash: facts.hash,
     panel,
     ceremonyTranscriptHash: Uint8Array.from(
       panel === 1 ? d.ceremony_transcript_hash : d.author_transcript_hash,

@@ -488,12 +488,15 @@ export function panelBallotElectionWith(
 
 function panelElection(
   caller: string,
-  definition: PanelledDefinition,
+  given: PanelledDefinition,
   registered: readonly RegisteredKeys[],
   author: { readonly keys: readonly RegisteredKeys[] } | { readonly seats: readonly number[] },
 ): PanelBallotElection {
-  // Refuses any version but 6 and a fixed 7.
-  const facts = panelledFacts(definition);
+  // Refuses any version but 6 and a fixed 7; everything below reads its one
+  // decoded copy, so no getter can show one check one definition and the
+  // hash another (T-34, T-36).
+  const facts = panelledFacts(given);
+  const definition = facts.value;
   const pinned = pinnedVersion(definition, RECORD_TYPES.ballot);
   if (pinned !== 4) throw new UnsupportedVersionError(RECORD_TYPES.ballot, pinned);
   if (!facts.wellFormed) throw new RangeError(`${caller}: the definition isn't well-formed`);
@@ -501,7 +504,7 @@ function panelElection(
   // Well-formed, so `author_threshold` and `author_keys` are both empty or a
   // panel of 1 ≤ k_A ≤ n_A ≤ MAX_TRUSTEES (author-panel).
   const authorPanelSize = definition.author_keys.length;
-  if ("keys" in author && !approvedFor(definition, author.keys))
+  if ("keys" in author && !approvedUnder(definition, () => facts.authorStubHash, author.keys))
     throw new RangeError(
       authorPanelSize === 0
         ? `${caller}: the definition has no author panel`
@@ -552,8 +555,8 @@ export function approvedFor(
   definition: PanelledDefinition,
   keys: readonly RegisteredKeys[],
 ): boolean {
-  const { authorStubHash } = panelledFacts(definition);
-  return approvedUnder(definition, () => authorStubHash, keys);
+  const facts = panelledFacts(definition);
+  return approvedUnder(facts.value, () => facts.authorStubHash, keys);
 }
 
 /** Internal: `approvedFor` for a definition version 7, whose author stub hash is version 7's. */

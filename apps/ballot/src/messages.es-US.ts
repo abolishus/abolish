@@ -350,6 +350,9 @@ export const esUS: Messages = {
   postingHandedTitle: "Las partes que faltan todavía pueden llegar al tablero",
   postingHanded:
     "Este intento o uno anterior entregó las partes que faltan a nuestro servicio de publicación o a tu billetera, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar.",
+  postingWatchingTitle: "Esta página envía tu boleta cuando estén publicadas",
+  postingWatching:
+    "Mantenla abierta: en cuanto el registro público muestre las partes que faltan, esta página enviará tu boleta, hasta el {when}, diez minutos antes del cierre de la encuesta. Todavía puedes intentar otra vez o dejar la boleta.",
   walletSentTitle: "La publicación de tu billetera todavía no está en el tablero",
   walletSent:
     "Tu billetera envió las partes que faltan, o todavía puede enviarlas, así que cuéntalas como publicadas: todavía pueden llegar al registro público, y dejar esta boleta no las puede recuperar. Rechaza cualquier solicitud que siga abierta en tu billetera, espera unos minutos y publica desde tu billetera otra vez: este dispositivo las busca primero, y pide a tu billetera solo lo que no está.",

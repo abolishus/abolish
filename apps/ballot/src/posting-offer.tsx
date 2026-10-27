@@ -53,6 +53,9 @@ const SAYS_GIVEN: ReadonlySet<WalletAnswer> = new Set(["forced", "sent"]);
  * choice not already late says (T-25, T-50). `closed` says the last-offer
  * cutoff `c_E` passed: nothing is offered for posting, and the voter is
  * told the ballot can be sent only if delivery succeeds before the close.
+ * `watching` is when the page's wait for parts a run handed out ends, the
+ * send cutoff `c_S`, while it waits: the ballot is then sent as soon as the
+ * record shows them, without the voter choosing again (Sending after a run).
  */
 export function PostingOffer({
   poll,
@@ -70,6 +73,7 @@ export function PostingOffer({
   lateWallet = false,
   halt = false,
   closed = false,
+  watching,
 }: {
   poll: FramePoll;
   trackingCode: string;
@@ -88,6 +92,7 @@ export function PostingOffer({
   lateWallet?: boolean;
   halt?: boolean;
   closed?: boolean;
+  watching?: string | undefined;
 }) {
   const t = useTranslate(catalogs);
   const walletNote = wallet === undefined ? undefined : WALLET_NOTES[wallet];
@@ -129,6 +134,15 @@ export function PostingOffer({
         <div className="mt-6">
           <Note tone="warn" title={t(walletNote.title)}>
             <p className="m-0">{t(walletNote.detail)}</p>
+          </Note>
+        </div>
+      )}
+      {watching === undefined ? null : (
+        <div className="mt-6">
+          <Note title={t("postingWatchingTitle")}>
+            <p className="m-0" role="status">
+              {t("postingWatching", { when: watching })}
+            </p>
           </Note>
         </div>
       )}

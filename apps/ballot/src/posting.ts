@@ -245,13 +245,14 @@ interface Pending {
  * best effort: no deposit can then be forced in time, but an honest relay
  * with a live sequencer still records a posting within about twenty
  * minutes. It runs only where `late` is given, once the voter was told so
- * (else it answers `unreachable` and sends nothing), sends and resends
- * until `late.lastOffer`, the last-offer cutoff `c_E`, and then, with no
- * fallback on a posting no head shows, reads the finalized head until
- * `late.send`, the send cutoff `c_S`, past which a record no longer sends
- * the ballot; one started past `c_E` sends nothing and reads the finalized
- * head once, for a posting an earlier run handed out (The ballot's own
- * deadline, A late relay run, Sending after a run; T-15, T-25). A deadline counts as passed once this
+ * (else it answers `unreachable` and sends nothing), and sends, resends and
+ * reads the finalized head until `late.lastOffer`, the last-offer cutoff
+ * `c_E`, which is its deadline, with no fallback on a posting no head
+ * shows; what it handed out is then the page's wait to read for, without
+ * the election's lock (`waitForRecord`); one started past `c_E` sends
+ * nothing and reads the finalized head once, for a posting an earlier run
+ * handed out (The ballot's own deadline, A late relay run, Sending after a
+ * run; T-15, T-25, T-52). A deadline counts as passed once this
  * device's clock or a head's time read passes it: relying on the relay a
  * little less long only leaves the voter more time to post themselves
  * (T-25). In a late run, which has nothing to fall back to in time, a
@@ -265,14 +266,14 @@ export async function postThroughRelay(
   postings: readonly Uint8Array[],
   cutoff: bigint,
   forcedInclusion: bigint,
-  late?: { readonly lastOffer: bigint; readonly send: bigint },
+  late?: { readonly lastOffer: bigint },
 ): Promise<PostAnswer> {
   const seconds = () => BigInt(Math.floor(io.now() / 1000));
   const started = seconds();
   const isLate = started > cutoff - POSTING_SEND_MARGIN;
   // A late run the voter wasn't told of hands nothing out (T-15).
   if (isLate && late === undefined) return "unreachable";
-  const deadline = isLate ? (late?.send ?? 0n) : cutoff - POSTING_CLIENT_MARGIN;
+  const deadline = isLate ? (late?.lastOffer ?? 0n) : cutoff - POSTING_CLIENT_MARGIN;
   const sendCutoff = isLate ? (late?.lastOffer ?? 0n) : cutoff - POSTING_SEND_MARGIN;
   const pending: Pending[] = postings.map((posting) => ({
     posting,
@@ -311,8 +312,6 @@ export async function postThroughRelay(
     const left = pending.filter((p) => !recorded.has(p));
     if (left.length === 0) return "recorded";
     if (time() > deadline) return unrecorded();
-    // A late run past `c_E` waits only for what it handed out.
-    if (isLate && !read && time() > sendCutoff) return unrecorded();
     for (const p of left) {
       if (p.sentAt !== undefined) continue;
       const now = time();
@@ -330,7 +329,7 @@ export async function postThroughRelay(
     // Still waited on: seen at the latest head, or its deposit still to reach L2.
     const held = (p: Pending) => p.seen || (p.lands !== undefined && time() < p.lands);
     // A late run has nothing to fall back to in time, so it waits for the
-    // record to its deadline whatever the heads show.
+    // record to its deadline, `c_E`, whatever the heads show.
     if (!isLate && !waited.every(held)) {
       // Looked for at the latest head only once its wait is over: a sighting
       // there only keeps the client waiting, to `c_P` at most.
@@ -359,6 +358,96 @@ export async function postThroughRelay(
       if (!waited.every(held)) return unrecorded();
     }
     await io.sleep(POSTING_POLL_MS);
+  }
+}
+
+/** What the wait after a run needs from the page, the network and the clocks, injectable for tests. */
+export interface RecordWaitIo {
+  /**
+   * The posting records of the cast's seats still unreceipted, made afresh
+   * for each read from what this device keeps (the page's `postable`): none
+   * once every seat is receipted, `undefined` once the cast is no longer
+   * there to send (declined, erased, or its records unreadable). The wait
+   * zeroes them once it has read for them.
+   */
+  postings(): Promise<readonly Uint8Array[] | undefined>;
+  /**
+   * `loadPostings` for the ballot `postings` name, at the L2's finalized
+   * head, from block `from` (the board's deployment when absent), given up
+   * as soon as `stop` says so.
+   */
+  find(
+    postings: readonly Uint8Array[],
+    from: bigint | undefined,
+    stop: () => boolean,
+  ): Promise<LoadedPostings>;
+  /** This device's clock, in milliseconds since the epoch. */
+  now(): number;
+  /** Waits `ms` milliseconds. */
+  sleep(ms: number): Promise<void>;
+  /** Whether the page gave the wait up: the voter left the offer, or another run started. */
+  ended(): boolean;
+}
+
+/**
+ * How the wait after a run ended: every seat receipted or its posting
+ * `recorded`, with the send cutoff not passed; the cutoff `lapsed`; the cast
+ * `gone`; or `ended` by the page.
+ */
+export type RecordWait = "recorded" | "lapsed" | "gone" | "ended";
+
+/**
+ * Sending after a run ([[posting-relay]], The ballot's own deadline): once a
+ * run handed postings out and ended without every one recorded, the page
+ * waits for them, with no lock, no offer and no posting of its own (T-25,
+ * T-52). Every `POSTING_POLL_MS`, a run's read cadence and no more often,
+ * it makes the cast's posting records afresh (`io.postings`), so a seat
+ * another tab receipted since is no longer waited for and a cast declined or
+ * erased since ends the wait, and reads the finalized head from where the
+ * last read ended for their exact bytes. It answers `recorded` once each one
+ * is among the records read, while neither this device's clock nor a head's
+ * time is past `send`, the send cutoff `c_S`, past which a record no longer
+ * sends the ballot (`lapsed`). As in a late run and the offer, a head's time
+ * counts only within `WALLET_HOLD_MARGIN` of this device's clock: an
+ * endpoint whose head runs further ahead can't end the wait, and one within
+ * it can only bring `c_S` sooner, which hiding the event already lets it do
+ * (T-25). The records the board carries are public, so the ones read are
+ * kept between reads; the page's records hold each `m_i` and are zeroed
+ * after each read (T-18). A read that fails or throws records nothing.
+ */
+export async function waitForRecord(io: RecordWaitIo, send: bigint): Promise<RecordWait> {
+  const seconds = () => BigInt(Math.floor(io.now() / 1000));
+  let chainTime = 0n;
+  const passed = () => seconds() > send || chainTime > send;
+  const stop = () => io.ended() || passed();
+  let from: bigint | undefined;
+  const onBoard: Uint8Array[] = [];
+  for (;;) {
+    // The run that handed them out has just read the head.
+    await io.sleep(POSTING_POLL_MS);
+    if (io.ended()) return "ended";
+    if (passed()) return "lapsed";
+    const postings = await io.postings();
+    if (postings === undefined) return "gone";
+    try {
+      if (io.ended()) return "ended";
+      if (postings.length > 0) {
+        const final = await io
+          .find(postings, from, stop)
+          .catch((): LoadedPostings => ({ ok: false, problem: "unreachable" }));
+        if (io.ended()) return "ended";
+        if (final.ok) {
+          from = final.block + 1n;
+          if (final.timestamp > chainTime && final.timestamp <= seconds() + WALLET_HOLD_MARGIN)
+            chainTime = final.timestamp;
+          onBoard.push(...final.records);
+        }
+      }
+      if (postings.every((p) => onBoard.some((record) => equalBytes(record, p))))
+        return passed() ? "lapsed" : "recorded";
+    } finally {
+      for (const p of postings) p.fill(0);
+    }
   }
 }
 

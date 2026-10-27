@@ -62,6 +62,7 @@ import {
   postThroughRelay,
   sendPosting,
   timedFetch,
+  waitForRecord,
 } from "./posting.ts";
 import type { Recoverer } from "./recover.tsx";
 import { recover } from "./recovery.ts";
@@ -346,7 +347,7 @@ const source: ElectionSource = {
               postings,
               cutoffs.force,
               STAGING.forcedInclusion,
-              late ? { lastOffer: cutoffs.lastOffer, send: cutoffs.send } : undefined,
+              late ? { lastOffer: cutoffs.lastOffer } : undefined,
             );
           } finally {
             for (const call of calls) call.fill(0);
@@ -400,6 +401,38 @@ const source: ElectionSource = {
           } finally {
             for (const call of calls) call.fill(0);
           }
+        },
+        // The wait after a run reads only the board, through this build's
+        // own L2 endpoint, each request bounded as a run's are (T-25).
+        awaitPosted(
+          postings: () => Promise<readonly Uint8Array[] | undefined>,
+          send: bigint,
+          ended: () => boolean,
+        ) {
+          const fetchFn = timedFetch((url, init) => fetch(url, init));
+          return waitForRecord(
+            {
+              postings,
+              find: (records, from, stop) => {
+                const { definitionHash, ballotHash } = postingTopics(records);
+                return loadPostings(
+                  STAGING,
+                  definitionHash,
+                  ballotHash,
+                  fetchFn,
+                  "finalized",
+                  from,
+                  undefined,
+                  undefined,
+                  stop,
+                );
+              },
+              now: () => Date.now(),
+              sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+              ended,
+            },
+            send,
+          );
         },
       }),
   // One lock per election across this origin's tabs; a browser without Web

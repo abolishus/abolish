@@ -347,6 +347,9 @@ const enUS = {
   postingHandedTitle: "The missing parts may still reach the board",
   postingHanded:
     "This try or an earlier one gave the missing parts to our posting relay or to your wallet, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back.",
+  postingWatchingTitle: "This page sends your ballot once they're posted",
+  postingWatching:
+    "Keep it open: as soon as the public record shows the missing parts, this page sends your ballot, until {when}, ten minutes before the poll closes. You can still try again or leave the ballot.",
   walletSentTitle: "Your wallet's posting isn't on the board yet",
   walletSent:
     "Your wallet sent the missing parts, or may still send them, so count them as posted: they may still reach the public record, and leaving this ballot can't take them back. Decline any request still open in your wallet, wait a few minutes, then post from your wallet again: this device looks for them first, and asks your wallet only for what isn't there.",

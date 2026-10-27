@@ -1784,7 +1784,8 @@ export const PostingOfferWithdrawnByTheHead: Story = {
     const canvas = within(canvasElement);
     const of = mocks(args.source);
     await castInto(canvas, OFFER);
-    await expect(canvas.getByText("It's too late to post the missing parts")).toBeVisible();
+    // Withdrawn once the read lands, the offer shown meanwhile.
+    await expect(await canvas.findByText("It's too late to post the missing parts")).toBeVisible();
     await expect(canvas.queryByRole("button", { name: "Post publicly, then send" })).toBeNull();
     await expect(of.chainTime).toHaveBeenCalled();
     await expect(of.post).not.toHaveBeenCalled();
@@ -1814,6 +1815,26 @@ export const PostingOfferKeptPastAFarFutureHead: Story = {
     ).toBeVisible();
     await expect(of.post).toHaveBeenCalledOnce();
     await expect(of.post.mock.calls[0]?.[4]).toBe(true);
+  },
+};
+
+export const PostingOfferShownWhileTheHeadHangs: Story = {
+  name: "An L2 endpoint that never answers the head's read doesn't keep the voter from the offer",
+  args: {
+    source: offerSource({
+      posted: ["recorded"],
+      now: Number(ELECTION.closesAt - 2_000n) * 1000,
+    }),
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    const of = mocks(args.source);
+    of.chainTime.mockReturnValue(new Promise(() => {}));
+    await castInto(canvas, OFFER);
+    await expect(of.chainTime).toHaveBeenCalled();
+    // Trying the trustees again and leaving stay within reach (T-25, T-18).
+    await expect(canvas.getByRole("button", { name: "Try the trustees again" })).toBeVisible();
+    await expect(canvas.getByRole("button", { name: "Leave this ballot" })).toBeVisible();
   },
 };
 

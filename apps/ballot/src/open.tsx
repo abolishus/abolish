@@ -29,7 +29,7 @@ import type { ElectionLock } from "./lock.ts";
 import type { Loaded, LoadedBoard, LoadedChainTime, LoadProblem } from "./load.ts";
 import { catalogs, type Messages } from "./messages.ts";
 import { Declined, PostingOffer } from "./posting-offer.tsx";
-import { POSTING_SEND_MARGIN } from "./posting.ts";
+import { POSTING_REQUEST_MS, POSTING_SEND_MARGIN } from "./posting.ts";
 import type { ProverArtifactError, ProverArtifacts } from "./prover-artifacts.ts";
 import type { ProvingProgress } from "./prover-client.ts";
 import { Proving, ProvingRefused, type ProvingProblem, type ProvingSteps } from "./proving.tsx";
@@ -707,15 +707,29 @@ export function Ballot({
   // The latest finalized head's time read near the last-offer cutoff `c_E`,
   // counted only within `WALLET_HOLD_MARGIN` of this device's clock, as for
   // the wallet's sends: an endpoint answering a far-future head can't take
-  // the offer away (T-25).
+  // the offer away (T-25). Kept in state too, so an offer already shown is
+  // withdrawn once a read finds the head past `c_E`.
   const head = useRef(0n);
-  /** Reads the finalized head's time, only once `c_E` may have passed by it. */
+  const [, setHead] = useState(0n);
+  /**
+   * Reads the finalized head's time, only once `c_E` may have passed by it,
+   * and gives up after `POSTING_REQUEST_MS`: an endpoint that never answers
+   * mustn't keep the voter from the offer's other choices (T-25).
+   */
   async function readHead() {
     if (!passedOnDevice(cutoffs().lastOffer - WALLET_HOLD_MARGIN, source.now())) return;
-    const time = await source.chainTime().catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const time = await Promise.race([
+      source.chainTime().catch(() => undefined),
+      new Promise<undefined>((resolve) => {
+        timer = setTimeout(() => resolve(undefined), POSTING_REQUEST_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
     const ahead = BigInt(Math.floor(source.now() / 1000)) + WALLET_HOLD_MARGIN;
-    if (time?.ok === true && time.timestamp > head.current && time.timestamp <= ahead)
+    if (time?.ok === true && time.timestamp > head.current && time.timestamp <= ahead) {
       head.current = time.timestamp;
+      setHead(time.timestamp);
+    }
   }
   /**
    * Whether the offer is withdrawn: the last-offer cutoff `c_E` passed by
@@ -1289,7 +1303,8 @@ export function Ballot({
       if (current()) setStep({ kind: "sending" });
       return send(checked.sending);
     }
-    await readHead();
+    // Not waited on: a head past `c_E` withdraws the offer once it is read.
+    void readHead();
     return { kind: "offer", sending: checked.sending };
   }
 
@@ -1320,7 +1335,7 @@ export function Ballot({
         // The head's time read before the run: one past `c_E` withdraws the offer.
         await readHead();
         if (offerClosed()) return { ...offered };
-        const posted = await postChecked(sending, (postings) =>
+        const posted = await postChecked(sending, offered, (postings) =>
           posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
             (): PostAnswer => "unreachable",
           ),
@@ -1332,7 +1347,7 @@ export function Ballot({
         // ([[posting-relay]], Outcome), so the voter's own wallet may now
         // be offered beside trying the relay again.
         const relayed = answer === "relayed";
-        await readHead();
+        void readHead();
         return fellBack(checked, { relayed, handed: handed || relayed });
       },
       handed
@@ -1397,7 +1412,7 @@ export function Ballot({
     run(async (current) => {
       await readHead();
       if (offerClosed()) return { ...offered };
-      const posted = await postChecked(sending, (postings) =>
+      const posted = await postChecked(sending, offered, (postings) =>
         postingOwn(electionId, sending.ballot, postings, cutoffs()).catch(
           (): WalletAnswer => "failed",
         ),
@@ -1405,7 +1420,7 @@ export function Ballot({
       if ("kind" in posted) return posted;
       const { checked, answer } = posted;
       if (answer === "recorded") return sendPosted(checked, current);
-      await readHead();
+      void readHead();
       return { ...back(answer), sending: checked };
     }, back("failed"));
   }
@@ -1415,13 +1430,18 @@ export function Ballot({
    * changed since the offer, then `through` given the records, from the
    * check through the posting under the election's lock: a tab that keeps
    * a receipt for a seat between them would have this one post a receipted
-   * seat (Client rule 2; T-15). The records are zeroed once it settles.
+   * seat (Client rule 2; T-15). The records are zeroed once it settles. An
+   * offer withdrawn while the lock was waited for (`offerClosed`) posts
+   * nothing and returns to `offered`.
    */
   async function postChecked<A extends PostAnswer | WalletAnswer>(
     sending: Sending,
+    offered: Step,
     through: (postings: readonly Uint8Array[]) => Promise<A>,
   ): Promise<{ readonly checked: Sending; readonly answer: A | "recorded" } | Step> {
     return locked(async () => {
+      // Another tab's run may hold the lock past `c_E` (T-15).
+      if (offerClosed()) return { ...offered };
       const checked = await postable(sending);
       if ("kind" in checked) return checked;
       try {

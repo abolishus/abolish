@@ -1,10 +1,13 @@
 import { readFileSync } from "node:fs";
 
 import { encodeCheckpoint } from "@abolishus/crypto";
+import { ORPCError } from "@orpc/client";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { activityBars, type AnchorRow, anchorRows, boardRows } from "../src/board.ts";
+import { activityBars, type AnchorRow, anchorRows, boardRows, oneHistory } from "../src/board.ts";
+import type { Api } from "../src/server/api.ts";
+import { loadHistories } from "../src/server/load.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -33,9 +36,27 @@ interface BoardVector {
   entries: string[];
   checkpoints: CheckpointVector[];
 }
+interface ConsistencyVector {
+  size1: string;
+  size2: string;
+  path: string[];
+}
+interface RejectedVector {
+  id: string;
+  kind: string;
+  size1?: string;
+  size2?: string;
+  root1?: string;
+  root2?: string;
+  path: string[];
+}
 const file = JSON.parse(
   readFileSync(new URL("../../../docs/spec/vectors/board.json", import.meta.url), "utf8"),
-) as { entries: EntryVector[]; boards: BoardVector[] };
+) as {
+  entries: EntryVector[];
+  boards: BoardVector[];
+  tree: { roots: string[]; consistency: ConsistencyVector[]; rejected: RejectedVector[] };
+};
 const decodable = file.entries.filter((v) => v.value !== undefined);
 const undecodable = file.entries.filter((v) => v.value === undefined);
 const board = (id: string) => {
@@ -295,5 +316,168 @@ describe("activityBars", () => {
       }),
       runs,
     );
+  });
+});
+
+describe("oneHistory", () => {
+  const { roots, consistency, rejected } = file.tree;
+  // `roots[n - 1]` is the root of the vectors' tree of its first n leaves.
+  const tree = (size: string) => ({ size, root: roots[Number(size) - 1]! });
+
+  test("holds for every published consistency proof", () => {
+    expect(consistency.length).toBeGreaterThan(50);
+    for (const v of consistency)
+      expect(oneHistory(tree(v.size1), tree(v.size2), v.path)).toBe(true);
+  });
+
+  test("fails every published rejected consistency proof", () => {
+    const refused = rejected.filter((v) => v.kind === "consistency");
+    expect(refused.length).toBeGreaterThan(5);
+    for (const v of refused)
+      expect(
+        oneHistory({ size: v.size1!, root: v.root1! }, { size: v.size2!, root: v.root2! }, v.path),
+        v.id,
+      ).toBe(false);
+  });
+
+  test("fails a proof read the wrong way round, or a malformed claim", () => {
+    const v = consistency.find((c) => c.size1 === "3" && c.size2 === "7")!;
+    expect(oneHistory(tree("7"), tree("3"), v.path)).toBe(false);
+    expect(oneHistory({ size: "3", root: "zz" }, tree("7"), v.path)).toBe(false);
+    expect(oneHistory(tree("3"), tree("7"), [...v.path.slice(1), "0g".repeat(32)])).toBe(false);
+  });
+
+  test("fails a proof with any byte of a root or hash changed", () => {
+    const proper = consistency.filter((c) => c.size1 !== c.size2);
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...proper),
+        fc.nat(),
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 1, max: 255 }),
+        (v, which, at, flip) => {
+          const earlier = tree(v.size1);
+          const later = tree(v.size2);
+          const parts = [earlier.root, later.root, ...v.path];
+          const i = which % parts.length;
+          const bytes = fromHex(parts[i]!);
+          bytes[at % 32]! ^= flip;
+          parts[i] = toHex(bytes);
+          const [root1, root2, ...path] = parts;
+          expect(oneHistory({ ...earlier, root: root1! }, { ...later, root: root2! }, path)).toBe(
+            false,
+          );
+        },
+      ),
+      runs,
+    );
+  });
+
+  test("equal sizes are one history only with equal roots and no path", () => {
+    expect(oneHistory(tree("5"), tree("5"), [])).toBe(true);
+    expect(oneHistory(tree("5"), { size: "5", root: roots[5]! }, [])).toBe(false);
+    expect(oneHistory(tree("5"), tree("5"), [roots[0]!])).toBe(false);
+  });
+});
+
+describe("loadHistories", () => {
+  const { roots, consistency } = file.tree;
+  const ELECTION = "ab".repeat(32);
+  const tree = (size: number) => ({ size: String(size), root: roots[size - 1]! });
+  // Checkpoints as `anchorRows` gives them, latest first; only sizes and roots matter here.
+  const anchors = (...sizes: number[]): AnchorRow[] =>
+    sizes.map((size, i) => ({
+      ...tree(size),
+      segment: 100 - i,
+      head: "00".repeat(32),
+      hash: "00".repeat(32),
+    }));
+  // The vectors' tree as a server holding `held` entries serves its proofs.
+  const api = (held: number, asked: [string, string][]) =>
+    ({
+      board: {
+        getConsistencyProof: ({ electionId, firstSize, secondSize }: Record<string, string>) => {
+          expect(electionId).toBe(ELECTION);
+          asked.push([firstSize!, secondSize!]);
+          if (Number(secondSize) > held)
+            return Promise.reject(new ORPCError("OUT_OF_RANGE", { defined: true }));
+          const found = consistency.find((c) => c.size1 === firstSize && c.size2 === secondSize);
+          return Promise.resolve({ path: found!.path });
+        },
+      },
+    }) as unknown as Api;
+
+  test("asks for the smaller tree first, whichever of the head and the latest checkpoint it is", async () => {
+    for (const [headSize, latest] of [
+      [9, 6],
+      [4, 6],
+    ] as const) {
+      const asked: [string, string][] = [];
+      const head = {
+        treeSize: String(headSize),
+        chainHead: "00".repeat(32),
+        root: tree(headSize).root,
+      };
+      const histories = await loadHistories(
+        api(13, asked),
+        ELECTION,
+        head,
+        anchors(latest, 3, 3, 1),
+      );
+      expect(histories).toEqual({ head: true, anchors: [true, true, true] });
+      expect(asked).toHaveLength(3);
+      expect(asked).toEqual(
+        expect.arrayContaining([
+          [String(Math.min(headSize, latest)), String(Math.max(headSize, latest))],
+          ["3", "6"],
+          ["1", "3"],
+        ]),
+      );
+    }
+  });
+
+  test("counts a refused proof, a wrong root and an empty head as two histories", async () => {
+    const asked: [string, string][] = [];
+    const head = { treeSize: "13", chainHead: "00".repeat(32), root: tree(13).root };
+    // The server holds 12 entries but claims a head of 13: it can't prove it.
+    const refused = await loadHistories(api(12, asked), ELECTION, head, anchors(10, 8));
+    expect(refused).toEqual({ head: false, anchors: [true] });
+    const forged = [{ ...anchors(10)[0]!, root: roots[3]! }, ...anchors(8)];
+    expect(await loadHistories(api(13, asked), ELECTION, head, forged)).toEqual({
+      head: false,
+      anchors: [false],
+    });
+    const empty = { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) };
+    expect(await loadHistories(api(13, asked), ELECTION, empty, anchors(5))).toEqual({
+      head: false,
+      anchors: [],
+    });
+    expect(asked.some(([first]) => first === "0")).toBe(false);
+  });
+
+  test("asks for nothing without checkpoints, and at most the shown ones' proofs", async () => {
+    const asked: [string, string][] = [];
+    const head = { treeSize: "13", chainHead: "00".repeat(32), root: tree(13).root };
+    expect(await loadHistories(api(13, asked), ELECTION, head, [])).toEqual({
+      head: undefined,
+      anchors: [],
+    });
+    expect(asked).toEqual([]);
+    const all = await loadHistories(
+      api(13, asked),
+      ELECTION,
+      head,
+      anchors(13, 12, 11, 10, 9, 8, 7, 6),
+    );
+    expect(all).toEqual({ head: true, anchors: [true, true, true, true, true] });
+    expect(asked).toHaveLength(5);
+  });
+
+  test("passes on a failure other than out of range", async () => {
+    const failing = {
+      board: { getConsistencyProof: () => Promise.reject(new Error("down")) },
+    } as unknown as Api;
+    const head = { treeSize: "13", chainHead: "00".repeat(32), root: tree(13).root };
+    await expect(loadHistories(failing, ELECTION, head, anchors(10))).rejects.toThrow("down");
   });
 });

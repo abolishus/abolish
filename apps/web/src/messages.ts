@@ -600,6 +600,10 @@ const enUS = {
   boardRoot: "Tree root",
   boardUnanchored:
     "Until an L1 checkpoint covers these values, they are only this server's word. Keep them: a later board that doesn't extend them is evidence of tampering.",
+  boardHeadHistory:
+    "The tree root above and the latest checkpoint's are one history: this page checked that the smaller tree is the start of the larger, by our server's consistency proof, or by the same root at the same size.",
+  boardHeadHistoryBroken:
+    "The tree root above and the latest checkpoint's are not one history: our server couldn't prove that the smaller tree is the start of the larger. Keep both. One board with two histories is evidence of tampering.",
   boardLink: "Read the board, entry by entry",
   boardPageEyebrow: "Poll {prefix}… · Public board",
   boardPageTitle: "The poll's board",
@@ -653,7 +657,7 @@ const enUS = {
   boardAnchorsLede:
     "After each hour that added entries, our server takes a checkpoint of the board: how many entries it holds, its chain head and its Merkle root at the end of that hour. Anchoring puts its hash into the anchor contract on Ethereum, and from then on an altered entry no longer matches it. A checkpoint is taken before it is anchored, and until the anchor holds it, it is only our word.",
   boardAnchorsClaim:
-    "These checkpoints come from our server. This page decodes each one, checks that it names this poll and that each earlier one holds no more entries, and computes its hash itself. It doesn't check that any of them is anchored, or that it matches the board: that is for the verifier, which reads the anchor itself.",
+    "These checkpoints come from our server. This page decodes each one, checks that it names this poll and that each earlier one holds no more entries, and computes its hash itself. It also checks our server's consistency proofs that each checkpoint shown extends the one before it. It doesn't check that any of them is anchored, or that it matches the entries: that is for the verifier, which reads the anchor and the whole board itself.",
   boardAnchorsList: "Checkpoints, latest first",
   boardAnchorPeriod: "After period {segment}",
   boardAnchorLatest: "Latest",
@@ -661,6 +665,10 @@ const enUS = {
   boardAnchorHash: "Checkpoint hash, the value to anchor",
   boardAnchorHead: "Chain head by then",
   boardAnchorRoot: "Merkle root by then",
+  boardAnchorExtends:
+    "Extends the checkpoint after period {segment}: this page checked it, by our server's consistency proof between the two, or by the same root at the same size.",
+  boardAnchorBroken:
+    "Doesn't extend the checkpoint after period {segment}: our server couldn't prove that it does. Keep both. One board with two histories is evidence of tampering.",
   boardAnchorsNone: "No checkpoint has been taken of this board yet.",
   boardAnchorsMore:
     "Only the latest {count} checkpoints are shown here. The verifier reads every anchored one, from the first.",

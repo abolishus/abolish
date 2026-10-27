@@ -8,6 +8,7 @@
 // verifier's check, over the whole board.
 
 import {
+  BOARD_TREE,
   boardEntryHash,
   type BoardEntryVersion,
   checkpointHash,
@@ -15,6 +16,7 @@ import {
   decodeBoardEntry,
   decodeCheckpoint,
   RECORD_TYPES,
+  verifyConsistency,
 } from "@abolishus/crypto";
 
 import { fromHex, toHex } from "./values.ts";
@@ -178,4 +180,35 @@ export function activityBars(anchors: readonly AnchorRow[], asked: number): read
     });
   }
   return bars.reverse();
+}
+
+/** A tree of one board as the server claims it, from a checkpoint or the head. */
+export interface TreeClaim {
+  /** Its entries, as a canonical decimal `u64`. */
+  readonly size: string;
+  readonly root: string;
+}
+
+/**
+ * Whether `earlier`'s tree is a prefix of `later`'s, by `path`, the server's
+ * consistency proof between their sizes (docs/spec/board.md, Consistency
+ * proofs), checked with @abolishus/crypto. Two trees of one board that fail
+ * this are two histories of it, which no honest server can claim (T-24). A
+ * malformed claim or path fails too; equal sizes need an empty path and
+ * equal roots.
+ */
+export function oneHistory(earlier: TreeClaim, later: TreeClaim, path: readonly string[]): boolean {
+  try {
+    return verifyConsistency(
+      BOARD_TREE,
+      BigInt(earlier.size),
+      BigInt(later.size),
+      fromHex(earlier.root),
+      fromHex(later.root),
+      path.map(fromHex),
+    );
+  } catch (error) {
+    if (error instanceof RangeError || error instanceof SyntaxError) return false;
+    throw error;
+  }
 }

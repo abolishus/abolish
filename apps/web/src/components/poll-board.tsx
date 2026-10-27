@@ -14,7 +14,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@abolishus/ui/ui/pagination";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check, X } from "lucide-react";
 
 import {
   type ActivityBar,
@@ -25,7 +25,7 @@ import {
 } from "../board.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
-import type { BoardHead } from "../server/load.ts";
+import type { BoardHead, Histories } from "../server/load.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
 export interface PollBoardProps {
@@ -39,6 +39,8 @@ export interface PollBoardProps {
   pageSize: number;
   /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
   anchors: readonly AnchorRow[] | undefined;
+  /** Whether the head and the anchors shown are one history; `undefined` with `anchors`. */
+  histories: Histories | undefined;
   /** How many checkpoints the page asked for: as many back means there may be earlier ones. */
   activityPage: number;
   /** How many of them the anchors show. */
@@ -73,6 +75,7 @@ export function PollBoard({
   rows,
   pageSize,
   anchors,
+  histories,
   activityPage,
   anchorPage,
 }: PollBoardProps) {
@@ -129,6 +132,11 @@ export function PollBoard({
               </>
             )}
             <p className="m-0 max-w-prose text-sm text-muted-foreground">{t("boardUnanchored")}</p>
+            {histories?.head === undefined ? null : (
+              <History ok={histories.head}>
+                {t(histories.head ? "boardHeadHistory" : "boardHeadHistoryBroken")}
+              </History>
+            )}
           </div>
         </div>
       </PageHeader>
@@ -282,6 +290,13 @@ export function PollBoard({
                   </div>
                   <Hash value={anchor.head} label={t("boardAnchorHead")} />
                   <Hash value={anchor.root} label={t("boardAnchorRoot")} />
+                  {histories?.anchors[i] === undefined ? null : (
+                    <History ok={histories.anchors[i]}>
+                      {t(histories.anchors[i] ? "boardAnchorExtends" : "boardAnchorBroken", {
+                        segment: anchors[i + 1]?.segment ?? 0,
+                      })}
+                    </History>
+                  )}
                 </div>
               </li>
             ))}
@@ -294,6 +309,32 @@ export function PollBoard({
         ) : null}
       </Section>
     </div>
+  );
+}
+
+/**
+ * One consistency proof's verdict, in words with a mark beside them. A
+ * failed one is evidence and says so (T-24); the colour only repeats the words.
+ */
+function History({ ok, children }: { ok: boolean; children: string }) {
+  const Icon = ok ? Check : X;
+  return (
+    <p
+      data-history={ok ? "one" : "broken"}
+      className={
+        ok
+          ? "m-0 flex max-w-prose items-start gap-2 text-sm"
+          : "m-0 flex max-w-prose items-start gap-2 border-l-2 border-destructive ps-3 text-sm font-medium"
+      }
+    >
+      <Icon
+        aria-hidden="true"
+        className={
+          ok ? "mt-0.5 size-4 shrink-0 text-recorded" : "mt-0.5 size-4 shrink-0 text-destructive"
+        }
+      />
+      <span>{children}</span>
+    </p>
   );
 }
 

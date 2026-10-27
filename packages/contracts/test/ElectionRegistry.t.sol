@@ -187,8 +187,8 @@ contract ElectionRegistryTest is TestBase {
 
     /// Versions 3 to 6 (docs/spec/contracts.md, Parameters): the cells are
     /// every tier's `cells`, tier by tier; versions 5 and 6 record each
-    /// question and their total. Rule 9 refuses a version-6 author panel
-    /// (Profile below), so none is ever recorded yet.
+    /// question and their total. A version-6 author panel's are recorded
+    /// through `registerDefinitionWithAuthorPanel` (ElectionRegistryAuthorPanel.t.sol).
     function test_RecordsEachVersionsParameters() public {
         for (uint8 version = 3; version <= 6; version++) {
             bytes32 id = _create();
@@ -342,9 +342,9 @@ contract ElectionRegistryTest is TestBase {
     }
 
     /// Tally-opening versions 2 (a live poll's) and 3 (an author panel's) are
-    /// refused under every definition version, since this registry serves
-    /// neither a live poll nor an author panel and 2.3 fails both beside
-    /// every other profile (T-16, T-17, T-31).
+    /// refused under every definition version without an author panel, since
+    /// this registry serves no live poll and 2.3 fails both beside every
+    /// profile without either (T-16, T-17, T-31).
     function test_RefusesTallyOpeningVersions2And3() public {
         uint8[5] memory versions = [1, 3, 4, 5, 6];
         for (uint256 i; i < 5; i++) {
@@ -363,13 +363,14 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// A live version-6 poll, or one with an author panel, is refused at its
-    /// board-entry pin whatever board-entry version it pins: verifier 2.3 fails it beside
-    /// board-entry version 5, and the versions it needs (6 for a live poll's
-    /// running openings, 7 for an author panel's approvals) aren't served
-    /// (docs/spec/contracts.md, Registration, rule 9; T-16, T-17), so no
-    /// author key set is recorded through `registerDefinition` either.
-    function test_RefusesALiveVersion6PollOrAnAuthorPanel() public {
+    /// A live version-6 poll, with or without an author panel, is refused at
+    /// its board-entry pin whatever board-entry version it pins: verifier 2.3
+    /// fails it beside board-entry version 5, and the version it needs for its
+    /// running openings (6) isn't served. A sealed author panel is refused at
+    /// any board-entry version but 7, which carries its approvals, and at 7
+    /// `registerDefinition` refuses it for its missing author key set
+    /// (docs/spec/contracts.md, Registration, rule 9; T-16, T-17, T-25).
+    function test_RefusesALiveVersion6PollOrAnAuthorPanelsWrongBoardEntry() public {
         for (uint8 v = 1; v <= 8; v++) {
             for (uint256 which; which < 3; which++) {
                 bytes32 id = _create();
@@ -388,12 +389,19 @@ contract ElectionRegistryTest is TestBase {
                         d.authorKeys[i] = RegistryFixture.key(i);
                     }
                     d.authorTranscriptHash = sha256(abi.encode("author transcript", id));
+                    d.pinVersions[5] = 3;
                 }
                 bytes memory enc = RegistryFixture.approve(lib, trustees, d);
                 _expectRefused(
                     CREATOR,
                     enc,
-                    abi.encodeWithSelector(ElectionRegistry.ProfileNotServed.selector, uint16(7), v)
+                    which == 1 && v == 7
+                        ? abi.encodeWithSelector(
+                            ElectionRegistry.AuthorRegistrationMissing.selector
+                        )
+                        : abi.encodeWithSelector(
+                                ElectionRegistry.ProfileNotServed.selector, uint16(7), v
+                            )
                 );
                 _assertNoParameters(lib.hash(enc));
             }

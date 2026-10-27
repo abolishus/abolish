@@ -9,24 +9,6 @@ import {RegistryFixture} from "./RegistryFixture.sol";
 import {TrusteeFixture, TrusteeHarness} from "./TrusteeFixture.sol";
 import {Vm} from "./Vm.sol";
 
-/// The election registry with rule 9 serving every version-6 profile, author
-/// panels with board-entry version 7 among them, as part 5e-5d of P2-16 will:
-/// until then the deployed registry refuses every author panel at its
-/// board-entry pin, before any author panel check, so the tests
-/// reach the author panel's registration only through this override. Every
-/// other rule is the deployed contract's.
-contract ServingVersion6Registry is ElectionRegistry {
-    constructor(Deployment memory dep) ElectionRegistry(dep) {}
-
-    function _requireServedProfile(ElectionDefinitionLib.Definition memory def)
-        internal
-        pure
-        override
-    {
-        if (def.version != 6) super._requireServedProfile(def);
-    }
-}
-
 /// Version-6 definitions with author panels and their signed registrations,
 /// for the unit and invariant tests of the author panel's registration
 /// (docs/spec/contracts.md, Author panel registration). The default panel is
@@ -52,8 +34,8 @@ library AuthorPanelFixture {
     }
 
     /// A version-6 definition for election `id` with a `k`-of-`n` author panel
-    /// of keys `1·G` to `n·G`, pinning what part 5e-5d serves (ballot 4, opening
-    /// 3, board entry 7, contract event 12, display text 2), under the trustee
+    /// of keys `1·G` to `n·G`, pinning what rule 9 serves it (ballot 4, opening
+    /// 3, tally opening 3, board entry 7, contract event 12, display text 2), under the trustee
     /// registry's default panel.
     function definition(ElectionRegistry registry, bytes32 id, uint8 k, uint8 n)
         internal
@@ -63,6 +45,7 @@ library AuthorPanelFixture {
         d = withDefaultPanel(registry, RegistryFixture.templateV(registry, id, 6));
         d.pinVersions[1] = 4;
         d.pinVersions[2] = 3;
+        d.pinVersions[5] = 3;
         d.pinVersions[6] = 7;
         d.pinVersions[7] = 12;
         d.pinVersions[8] = 2;

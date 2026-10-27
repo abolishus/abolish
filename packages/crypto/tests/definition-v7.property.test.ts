@@ -359,13 +359,13 @@ describe("2.3's profile combination under version 7", () => {
 
   test("a fixed electorate fits with ballot version 4 and version 6's pins", () => {
     expect(profileCombinationRule(v7(1))).toBeUndefined();
-    for (const events of [9, 10, 11])
+    for (const events of [9, 10, 11, 12])
       expect(
         profileCombinationRule(v7(1, { [RECORD_TYPES.contractEvent]: events })),
       ).toBeUndefined();
     expect(profileCombinationRule(v7(1, livePins, live), fixedTypical.threshold)).toBeUndefined();
     // Ballot version 5 names a step, which a fixed electorate has none of.
-    for (const events of [8, 9, 10, 11, 255])
+    for (const events of [8, 9, 10, 11, 12, 255])
       expect(
         profileCombinationRule(
           v7(1, { [RECORD_TYPES.ballot]: 5, [RECORD_TYPES.contractEvent]: events }),
@@ -376,6 +376,10 @@ describe("2.3's profile combination under version 7", () => {
   test("a rolling electorate pins ballot version 5 beside contract-event version 11, unverifiable until the rolling checks are read", () => {
     expect(profileCombinationRule(v7(2))).toBe("unsupported-version");
     expect(profileCombinationRule(v7(2, livePins, live), rollingTypical.threshold)).toBe(
+      "unsupported-version",
+    );
+    // Version 12 names the relayed rolling ballot as version 11 does.
+    expect(profileCombinationRule(v7(2, { [RECORD_TYPES.contractEvent]: 12 }))).toBe(
       "unsupported-version",
     );
     // A later version this package doesn't know may name the relayed
@@ -390,7 +394,7 @@ describe("2.3's profile combination under version 7", () => {
       );
     // Ballot version 4 carries no step, so a rolling poll's ballots couldn't
     // name the root their proofs used.
-    for (const events of [8, 9, 11])
+    for (const events of [8, 9, 11, 12])
       expect(
         profileCombinationRule(
           v7(2, { [RECORD_TYPES.ballot]: 4, [RECORD_TYPES.contractEvent]: events }),
@@ -401,7 +405,7 @@ describe("2.3's profile combination under version 7", () => {
   test("ballot version 5 beside version 6 is still a ballot version 2.3 doesn't know", () => {
     // As the verifier's 2.3 vectors, written before version 5 had a
     // layout, expect: the events rule and its cores' opening aren't read.
-    for (const events of [8, 9, 10, 11]) {
+    for (const events of [8, 9, 10, 11, 12]) {
       const d = withPins(asV6(v7(1)), {
         [RECORD_TYPES.ballot]: 5,
         [RECORD_TYPES.contractEvent]: events,

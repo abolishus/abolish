@@ -2,7 +2,10 @@
 """Independent generator for docs/spec/vectors/verifier-openings-v3.json.
 
 Elections for the verifier's spoiled-ballot openings under definition
-version 6, whose openings are version 3 and open both halves of ballot
+version 6, or, for docs/spec/vectors/verifier-openings-v3-definition-v7.json,
+the same election under definition version 7 with a fixed electorate, which
+the verifier reads as version 6 under version 7's own hash (docs/spec/verifier.md,
+2.3), whose openings are version 3 and open both halves of ballot
 version 4's cores (docs/spec/verifier.md, Spoiled-ballot openings; 6.2;
 challenge.md, Opening version 3): each is an election definition, a clock, a
 board copy and the panel a bundle pins, with the rows 2.3 and 6.2 a verifier
@@ -24,13 +27,15 @@ client's openings, over share-encryption-v4-vectors.py's ciphertexts) and
 verifier-openings-vectors.py (the floor and the record reader).
 
 The ballots' membership proofs are randomised, so their records are read
-from the committed verifier-ballots-v4.json (its "admitted" case) and checked
-against the ballots rebuilt here; nothing else needs a prover. Every other
-value comes from fixed labels (test data, never keys).
+from the committed verifier-ballots-v4.json (its "admitted" case), or
+verifier-ballots-v4-definition-v7.json for version 7, and checked against
+the ballots rebuilt here; nothing else needs a prover. Every other value
+comes from fixed labels (test data, never keys).
 
-Usage: python3 -I -B verifier-openings-v3-vectors.py <constants> <out-dir>,
-where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json;
-then `vp check --fix` (the committed file is formatted).
+Usage: python3 -I -B verifier-openings-v3-vectors.py <constants> <out-dir> [7],
+where <constants> is packages/crypto/test-vectors/iden3/poseidon_constants.json
+and a final `7` makes the definition-version-7 file; then `vp check --fix`
+(the committed file is formatted).
 """
 
 import importlib.util
@@ -157,14 +162,16 @@ def expected(d, e, keys, entries, clock):
     return outcome("fail", first["code"] if "code" in first else first["breaks"][0]["code"], where), report
 
 
-def main(constants, out_dir):
-    s = vb4.build(constants)
+def main(constants, out_dir, version=6):
+    s = vb4.build(constants, version)
     src = next(b for b in s["bundles"] if b["id"] == "admitted")
     d, t, ev = src["definition"], src["transcript"], src["election"]
     panel = s["panels"]["panel-4"]
     eid = s["eid"]
     assert d["election_id"] == eid and not d["author_keys"]
-    committed = next(c for c in json.loads((VECTORS / "verifier-ballots-v4.json").read_text())["cases"] if c["id"] == "admitted")
+    assert vc.own_version(d) == version
+    source = "verifier-ballots-v4.json" if version == 6 else "verifier-ballots-v4-definition-v7.json"
+    committed = next(c for c in json.loads((VECTORS / source).read_text())["cases"] if c["id"] == "admitted")
     records = [vc.decode_entry(x, BOARD_VERSION)["payload"] for x in vo.split(bytes.fromhex(committed["board"]))]
     assert records[0] == t
     ballots = [p[0] for p in src["board"][1:]]
@@ -298,6 +305,8 @@ def main(constants, out_dir):
     cases = []
 
     def case(id_, description, segments, want_status):
+        if version == 7:
+            description = description.replace("Definition version 6", "Definition version 7 under a fixed electorate")
         entries = board(segments)
         ceremony_rows, _ = vc.expected(panel, d, entries, panel, BOARD_VERSION)
         assert ceremony_rows["3.2"] == outcome("pass"), id_
@@ -392,24 +401,44 @@ def main(constants, out_dir):
     )
     case("none", "Ballots and no opening: 6.2 passes.", [(0, ["t", rec_a]), (4, [rec_t2])], "pass")
 
+    if version == 7:
+        # The same election read as version 6: its fields without the mode
+        # and the empty list, pinning definition version 6. An honest opening
+        # made for that reading binds its hash, another election's, into the
+        # core and every ciphertext's associated data (T-12, T-34).
+        pinned = dict(d["profile"]["pins"])
+        pinned[1] = 6
+        v6_hash = vb4.H(vb4.ds(vb4.DEFINITION_TAG, vc.encode(dict(vb4.rv.as_v6(d), profile={"protocol_major": 1, "pins": sorted(pinned.items())}))))
+        assert v6_hash != e["definitionHash"]
+        e6 = dict(e, definitionHash=v6_hash)
+        v6_reading, _ = so3.make_opening("verifier-openings-v3/v6-reading", e6, keys, 2, b3.flat([(3, []), (4, [2]), (2, [0])]), None)
+        assert so3.check_opening(e6, v6_reading, keys)[0] == "ok"
+        c = case(
+            "v6-reading",
+            "Definition version 7 under a fixed electorate, with an opening in segment 5 made honestly for the same election read as version 6 (its version-6 hash, in the core and every ciphertext's associated data): it is opening-stray, so 6.2 fails.",
+            [(0, ["t", rec_a]), (5, [enc(v6_reading)])],
+            "fail",
+        )
+        assert [o.get("code") for o in c["openings"]] == ["opening-stray"], c["openings"]
+
     doc = {
         "format": "abolish-verifier-openings-vectors/1",
-        "title": "The verifier's spoiled-ballot openings under definition version 6 (opening version 3, without an author panel): definitions, clocks, boards and pinned panels, with the rows 2.3 and 6.2 and the report's openings",
+        "title": f"The verifier's spoiled-ballot openings under definition version {'6' if version == 6 else '7 with a fixed electorate'} (opening version 3, without an author panel): definitions, clocks, boards and pinned panels, with the rows 2.3 and 6.2 and the report's openings",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-openings-v3-vectors.py, from verifier-ballots-v4-vectors.py, verifier-ceremony-vectors.py, "
             "spoiled-opening-v3-vectors.py and verifier-openings-vectors.py (independent Python implementations); "
-            "the ballot records are verifier-ballots-v4.json's"
+            f"the ballot records are {source}'s"
         ),
         "panels": {"panel-4": {"threshold": str(panel["k"]), "keys": [k.hex() for k in panel["keys"]]}},
         "cases": cases,
     }
-    path = pathlib.Path(out_dir, "verifier-openings-v3.json")
+    path = pathlib.Path(out_dir, "verifier-openings-v3.json" if version == 6 else "verifier-openings-v3-definition-v7.json")
     path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {path}: {len(cases)} cases")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit("usage: verifier-openings-v3-vectors.py <constants> <out-dir>")
-    main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) not in (3, 4) or sys.argv[3:] not in ([], ["7"]):
+        raise SystemExit("usage: verifier-openings-v3-vectors.py <constants> <out-dir> [7]")
+    main(sys.argv[1], sys.argv[2], 7 if sys.argv[3:] else 6)

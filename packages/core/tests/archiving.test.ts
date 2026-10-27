@@ -3,7 +3,10 @@ import {
   type Checkpoint,
   decodeArchiveLocator,
   decodeArchiveManifest,
+  encodeArchiveLocator,
+  encodeArchiveManifest,
   objectCar,
+  objectCid,
   readArchivedObject,
 } from "@abolishus/crypto";
 import { walkArchive } from "@abolishus/verifier";
@@ -22,6 +25,7 @@ import {
   archiveManifests,
   archiveObjects,
   type ArchiveOptions,
+  ArchiveResumeError,
   type ArchiveRun,
   archiveTransactions,
   type ArweaveClient,
@@ -38,7 +42,9 @@ import { newElection, type TestDb, testDb } from "./db.ts";
 // posted again with the same bytes, and the locator never falls. The judge
 // is the verifier's own walk (`walkArchive`) over what a model of Arweave
 // holds: from the latest locator it must reach every manifest and find
-// every object, with nothing reported.
+// every object, with nothing reported. After a wipe of the archive's tables
+// the run takes up the anchor's chain from Arweave (part 4b-2b-2b-2), and
+// the same walk judges the chain it carries on.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -145,6 +151,21 @@ beforeEach(async () => {
 });
 
 const DEPLOYMENT = { l1ChainId: L1, anchor: ANCHOR };
+
+/** What a wipe of Postgres loses of the archive: its tables, never the board. */
+async function wipe() {
+  await db.admin.begin(async (tx) => {
+    await tx`SET LOCAL session_replication_role = replica`;
+    await tx`DELETE FROM archive_transactions`;
+    await tx`DELETE FROM archive_objects`;
+    await tx`DELETE FROM archive_manifests`;
+  });
+}
+
+const count = async (table: "archive_manifests" | "archive_transactions") => {
+  const [row] = await db.admin<{ n: string }[]>`SELECT count(*)::text AS n FROM ${db.admin(table)}`;
+  return Number(row!.n);
+};
 
 const options = (o: Partial<ArchiveOptions> = {}): ArchiveOptions => ({
   latestLocator: undefined,
@@ -383,16 +404,200 @@ describe("archiveBoards", () => {
     expect(w.findings).toEqual([]);
   });
 
-  test("starts no chain of its own while the anchor names one", async () => {
+  test("after a wipe, takes up the anchor's chain from Arweave and carries on from its sequence", async () => {
+    const arweave = new ModelArweave();
+    const a = await board(0);
+    await drain(arweave);
+    const b = await board(1);
+    await drain(arweave);
+    const held = await archiveLocator(app, DEPLOYMENT);
+    expect(held?.sequence).toBe(1n);
+    const before = arweave.txs.size;
+
+    await wipe();
+    const r = await run(arweave, { latestLocator: held!.locator });
+    // Every manifest and listing is read back, every object registered again
+    // from the board and marked listed, and nothing is posted or written.
+    expect(r).toMatchObject({ resumed: 2, registered: 4, posted: 0, written: [], locator: 1n });
+    expect(arweave.txs.size).toBe(before);
+    expect(await archiveLocator(app, DEPLOYMENT)).toEqual(held);
+    const listed = await app<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM archive_objects WHERE listed_in IS NOT NULL`;
+    expect(listed[0]!.n).toBe("4");
+
+    // A later board goes in manifest 2, which links the resumed chain, and a
+    // walk judging the locator the anchor held finds nothing wrong.
+    const c = await board(2);
+    const final = await drain(arweave, { latestLocator: held!.locator });
+    expect(final.locator).toBe(2n);
+    const w = await walk(
+      arweave,
+      [...cidsOf(a.taken), ...cidsOf(b.taken), ...cidsOf(c.taken)],
+      [held!.locator],
+    );
+    expect(w.findings).toEqual([]);
+    expect(w.manifests.map((m) => m.sequence)).toEqual([0n, 1n, 2n]);
+  });
+
+  test("takes up a chain whose manifests confirmed out of order, through any link that serves", async () => {
     const arweave = new ModelArweave();
     await board(0);
-    const named = new Uint8Array(70);
-    await expect(run(arweave, { latestLocator: named })).rejects.toThrow(/doesn't hold/);
-    expect(arweave.txs.size).toBe(0);
-    // Once its own chain exists, the anchor naming it is what is expected.
+    await run(arweave);
+    arweave.mine();
+    arweave.advance(DEPTH);
+    expect(await run(arweave)).toMatchObject({ written: [0n] });
+    const manifest0 = [...arweave.txs.keys()].at(-1);
+    arweave.drop((id) => id === manifest0);
+    await board(1);
+    await run(arweave);
+    arweave.mine();
+    arweave.advance(DEPTH);
+    expect(await run(arweave)).toMatchObject({ written: [1n] });
+    arweave.mine();
+    arweave.advance(DEPTH);
+    await run(arweave);
+    now += REPOST;
+    await run(arweave);
+    const held = (await drain(arweave)).locator;
+    expect(held).toBe(2n);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    const manifests = await count("archive_manifests");
+
+    await wipe();
+    const r = await run(arweave, { latestLocator: latest!.locator });
+    expect(r).toMatchObject({ resumed: manifests, posted: 0, written: [], locator: held });
+    expect(await archiveLocator(app, DEPLOYMENT)).toEqual(latest);
+  });
+
+  test("refuses a chain it can't read whole, writes nothing, and takes it up once it reads", async () => {
+    const arweave = new ModelArweave();
+    await board(0);
+    await drain(arweave);
+    await board(1);
     await drain(arweave);
     const latest = await archiveLocator(app, DEPLOYMENT);
-    expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({ busy: false });
+    const [manifest0] = await app<{ cid: Uint8Array }[]>`
+      SELECT cid FROM archive_manifests WHERE sequence = 0`;
+    await wipe();
+
+    // Manifest 0's upload is withheld: the chain doesn't read whole.
+    for (const t of arweave.txs.values())
+      if (hex(t.data).includes(hex(manifest0!.cid))) t.withheld = true;
+    const refused = run(arweave, { latestLocator: latest!.locator });
+    await expect(refused).rejects.toThrow(ArchiveResumeError);
+    await expect(refused).rejects.toMatchObject({ code: "unavailable" });
+    expect(await count("archive_manifests")).toBe(0);
+    expect(await count("archive_transactions")).toBe(0);
+
+    for (const t of arweave.txs.values()) t.withheld = false;
+    expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({
+      resumed: 2,
+      posted: 0,
+      locator: 1n,
+    });
+  });
+
+  test("refuses a locator it doesn't write, a manifest not deep enough, and another deployment's chain", async () => {
+    const arweave = new ModelArweave();
+    await board(0);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    await wipe();
+    const code = async (o: Partial<ArchiveOptions>, c: string) => {
+      await expect(run(arweave, o)).rejects.toMatchObject({ name: "ArchiveResumeError", code: c });
+      expect(await count("archive_manifests")).toBe(0);
+    };
+    await code({ latestLocator: new Uint8Array(70) }, "locator");
+    const named = decodeArchiveLocator(latest!.locator, [3]);
+    if (named.kind !== "manifest") throw new Error("not a locator");
+    await code(
+      { latestLocator: encodeArchiveLocator(named.manifest, named.transaction, 2) },
+      "locator",
+    );
+    await code({ latestLocator: latest!.locator, anchor: new Uint8Array(20) }, "foreign");
+    await code({ latestLocator: latest!.locator, l1ChainId: L1 + 1n }, "foreign");
+    await code({ latestLocator: latest!.locator, depth: 1000 }, "unavailable");
+    // Nothing was posted while it refused.
+    const size = arweave.txs.size;
+    await run(arweave, { latestLocator: latest!.locator });
+    expect(arweave.txs.size).toBe(size);
+  });
+
+  test("refuses a chain whose links name two manifests at one sequence, or a manifest at the wrong one", async () => {
+    const arweave = new ModelArweave();
+    // Posted as the worker posts: each manifest's CAR, mined and deep.
+    const put = (m: Uint8Array) => {
+      const id = new Uint8Array(randomBytes(32));
+      arweave.txs.set(hex(id), { data: objectCar(m), minedAt: arweave.height + 1 });
+      return { cid: objectCid(m), transaction: id };
+    };
+    const object = (b: number) => ({
+      cid: Uint8Array.of(0x01, 0x55, 0x12, 0x20, ...new Uint8Array(32).fill(b)),
+      transaction: new Uint8Array(32).fill(b),
+    });
+    const manifest = (sequence: bigint, o: Partial<{ objects: unknown[]; links: unknown[] }>) =>
+      encodeArchiveManifest(
+        {
+          l1_chain_id: L1,
+          anchor: ANCHOR,
+          sequence,
+          objects: [],
+          links: [],
+          evidence: [],
+          runs: [],
+          ...o,
+        } as Parameters<typeof encodeArchiveManifest>[0],
+        3,
+      );
+    const a0 = put(manifest(0n, { objects: [object(1)] }));
+    const b0 = put(manifest(0n, { objects: [object(2)] }));
+    const m1 = put(manifest(1n, { links: [{ sequence: 0n, ...b0 }] }));
+    const m2 = put(
+      manifest(2n, {
+        links: [
+          { sequence: 0n, ...a0 },
+          { sequence: 1n, ...m1 },
+        ],
+      }),
+    );
+    // Manifest 0 posted again under sequence 1's link: the wrong sequence.
+    const m3 = put(manifest(3n, { links: [{ sequence: 1n, ...a0 }] }));
+    arweave.advance(DEPTH + 1);
+    const locator = (m: { cid: Uint8Array; transaction: Uint8Array }) =>
+      encodeArchiveLocator(m.cid, m.transaction, 3);
+    await expect(run(arweave, { latestLocator: locator(m2) })).rejects.toMatchObject({
+      code: "conflict",
+    });
+    await expect(run(arweave, { latestLocator: locator(m3) })).rejects.toMatchObject({
+      code: "foreign",
+    });
+    expect(await count("archive_manifests")).toBe(0);
+  });
+
+  test("takes up the chain over objects a run posted before the anchor's locator was known", async () => {
+    const arweave = new ModelArweave();
+    const { taken } = await board(0);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    await wipe();
+    // A run without the locator registers and posts the objects again.
+    expect(await run(arweave)).toMatchObject({ resumed: 0, registered: 2, posted: 2 });
+    const r = await run(arweave, { latestLocator: latest!.locator });
+    expect(r).toMatchObject({ resumed: 1, registered: 0, posted: 0, written: [], locator: 0n });
+    const settled = await drain(arweave, { latestLocator: latest!.locator });
+    expect(settled.locator).toBe(0n);
+    expect((await walk(arweave, cidsOf(taken), [latest!.locator])).findings).toEqual([]);
+  });
+
+  test("once its own chain exists, the anchor naming it is what is expected", async () => {
+    const arweave = new ModelArweave();
+    await board(0);
+    await drain(arweave);
+    const latest = await archiveLocator(app, DEPLOYMENT);
+    expect(await run(arweave, { latestLocator: latest!.locator })).toMatchObject({
+      busy: false,
+      resumed: 0,
+    });
   });
 
   test("the anchoring run carries the locator the archive names, once it names one", async () => {
@@ -451,6 +656,7 @@ describe("archiveBoards", () => {
     try {
       expect(await run(arweave)).toEqual({
         busy: true,
+        resumed: 0,
         registered: 0,
         confirmed: 0,
         written: [],
@@ -493,7 +699,8 @@ describe("archiveBoards", () => {
       | { kind: "drop"; mask: number }
       | { kind: "withhold"; mask: number }
       | { kind: "reorg" }
-      | { kind: "wait" };
+      | { kind: "wait" }
+      | { kind: "wipe" };
     const step: fc.Arbitrary<Step> = fc.oneof(
       fc.record({
         kind: fc.constant("board" as const),
@@ -506,6 +713,7 @@ describe("archiveBoards", () => {
       fc.record({ kind: fc.constant("withhold" as const), mask: fc.nat() }),
       fc.constant({ kind: "reorg" as const }),
       fc.constant({ kind: "wait" as const }),
+      fc.constant({ kind: "wipe" as const }),
     );
     // A choice of transactions by the bits of `mask`, in posting order.
     const picker = (arweave: ModelArweave, mask: number) => {
@@ -528,8 +736,10 @@ describe("archiveBoards", () => {
           const cids: Uint8Array[] = [];
           const locators: Uint8Array[] = [];
           let named = -1n;
+          // The anchor holds the latest locator a run gave, as the anchoring
+          // job carries it, and a run after a wipe takes up its chain.
           const runOnce = async () => {
-            const r = await run(arweave, { maxLinks });
+            const r = await run(arweave, { maxLinks, latestLocator: locators.at(-1) });
             // The locator never falls (archive-chain.ts, locatorManifest).
             const at = r.locator ?? -1n;
             expect(at).toBeGreaterThanOrEqual(named);
@@ -548,9 +758,10 @@ describe("archiveBoards", () => {
             else if (s.kind === "drop") arweave.drop(picker(arweave, s.mask));
             else if (s.kind === "withhold") arweave.withhold(picker(arweave, s.mask));
             else if (s.kind === "reorg") arweave.reorg();
+            else if (s.kind === "wipe") await wipe();
             else now += REPOST;
           }
-          // Whatever happened, once uploads go through the archive settles:
+          // Whatever happened, wipes included, once uploads go through the archive settles:
           // the latest locator names the latest manifest, and the walk from
           // it, judging every earlier locator, reports nothing and finds
           // every object under a transaction whose data reads as it.

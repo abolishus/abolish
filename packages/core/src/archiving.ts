@@ -18,10 +18,18 @@
 // is posted, so the archive carries no display text and nothing the board's
 // validity checks didn't pass (T-17, T-52). The manifest's evidence and runs
 // are a later part's: until then the manifests list objects and links only.
+//
+// The tables are operational, so a wipe of Postgres loses only the worker's
+// place in the chain. A run that holds no chain while the anchor names one
+// reads the chain back from Arweave first (P4-3 part 4b-2b-2b-2), so it
+// carries on from the anchor's sequence rather than start a new manifest 0,
+// which a reader would take for an overwritten locator (T-69).
 
 import {
   boardEntryHash,
   cidText,
+  type ArchiveManifest,
+  decodeArchiveLocator,
   decodeArchiveManifest,
   decodeCheckpoint,
   encodeArchiveLocator,
@@ -87,13 +95,22 @@ export const ARCHIVE_DEPTH = 25;
  */
 export const ARCHIVE_REPOST_AFTER = 7200n;
 
+/**
+ * The most transactions a resume reads before it gives up: the locator's
+ * chain is the anchor's, which a seized authority sets, so its length and
+ * links are bounded only here (T-52). A deployment writes about one manifest
+ * a run, so this covers more than a year of ten-minute runs.
+ */
+export const ARCHIVE_RESUME_READS = 65_536;
+
 export interface ArchiveOptions {
   /**
    * The locator the board anchor holds now (`latestLocator()`), or `undefined`
-   * if it holds none. A run with no chain of its own refuses to start one
-   * while the anchor names a chain: after a wipe of Postgres a new chain from
+   * if it holds none. A run with no chain of its own never starts one while
+   * the anchor names a chain, since after a wipe of Postgres a new chain from
    * sequence 0 would read as an overwritten locator (`locator-mismatch`,
-   * T-69); resuming from the anchor's chain is part 4b-2's.
+   * T-69): it reads the anchor's chain back from Arweave instead, or throws
+   * `ArchiveResumeError`.
    */
   readonly latestLocator: Uint8Array | undefined;
   /** The L1 the deployment's board anchor is on, which every manifest names. */
@@ -114,6 +131,8 @@ export interface ArchiveOptions {
 export interface ArchiveRun {
   /** Another run held the archive's lock, so this one did nothing. */
   readonly busy: boolean;
+  /** Manifests read back from the anchor's chain into a database that held none. */
+  readonly resumed: number;
   /** Objects first seen in a taken checkpoint. */
   readonly registered: number;
   /** Transactions that reached the depth. */
@@ -132,6 +151,32 @@ export interface ArchiveRun {
 export interface ArchiveLocator {
   readonly sequence: bigint;
   readonly locator: Uint8Array;
+}
+
+/**
+ * Why a database that holds no chain couldn't take up the one the anchor
+ * names (docs/spec/archive.md, Locator): the locator isn't a version-3 one
+ * (`locator`); a manifest it reaches is another deployment's or not at the
+ * sequence its link names (`foreign`), or isn't a version-3 manifest
+ * (`malformed`); two links name different manifests at one sequence
+ * (`conflict`); or no transaction named for a sequence is deep enough with
+ * data that reads as its CID (`unavailable`), which the next run tries
+ * again. Nothing is written or posted until the whole chain reads.
+ */
+export type ArchiveResumeErrorCode =
+  | "locator"
+  | "foreign"
+  | "malformed"
+  | "conflict"
+  | "unavailable";
+
+export class ArchiveResumeError extends Error {
+  override readonly name = "ArchiveResumeError";
+  readonly code: ArchiveResumeErrorCode;
+  constructor(code: ArchiveResumeErrorCode, message: string) {
+    super(`the anchor's archive chain can't be resumed: ${message}`);
+    this.code = code;
+  }
 }
 
 const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
@@ -232,6 +277,124 @@ const carLimit = (bound: number) =>
 interface Chain {
   readonly manifests: ChainManifest[];
   readonly cids: Uint8Array[];
+  /** Each listed object's CID, by hex, with the lowest sequence listing it. */
+  readonly listed: Map<string, bigint>;
+}
+
+/**
+ * Reads back the chain the anchor's locator names, from that manifest down
+ * through its links, and records it: every manifest from 0 to the named one,
+ * the transaction each was read from and the transactions its objects are
+ * listed under, all confirmed, so nothing listed is posted again. A manifest
+ * is read only from a transaction at `depth` whose data reads as its CID, as
+ * `confirm` counts one, and the walk follows the verifier's (docs/spec/
+ * archive.md, The chain from a locator): the first link to a sequence fixes
+ * its CID, and a later link naming it under another transaction is tried
+ * while it is still unread. The locator rule (Who writes them) makes the
+ * named manifest reach every one below it, so an honest chain reads whole;
+ * otherwise nothing is recorded. Manifests the lost database wrote above the
+ * named one are left behind: no locator named them, so no reader is sent to
+ * them, and their sequences are written again. Returns how many it recorded.
+ */
+async function resume(
+  client: Sql,
+  arweave: ArweaveClient,
+  latestLocator: Uint8Array,
+  o: Pick<ArchiveOptions, "l1ChainId" | "anchor" | "now">,
+  depth: number,
+): Promise<number> {
+  const named = decodeArchiveLocator(latestLocator, [3]);
+  if (named.kind !== "manifest")
+    throw new ArchiveResumeError(
+      "locator",
+      `its locator isn't one this worker writes (${named.kind})`,
+    );
+  let reads = 0;
+  const read = async (cid: Uint8Array, transaction: Uint8Array) => {
+    if (++reads > ARCHIVE_RESUME_READS)
+      throw new ArchiveResumeError("unavailable", `over ${ARCHIVE_RESUME_READS} reads`);
+    const n = await arweave.confirmations(transaction);
+    if (n === undefined) return undefined;
+    if (!Number.isSafeInteger(n) || n < 1)
+      throw new Error("the Arweave client gave a depth below 1");
+    if (n < depth) return undefined;
+    const data = await arweave.data(transaction, carLimit(MANIFEST_BOUND));
+    if (data === undefined) return undefined;
+    const r = readArchivedObject(data, cid, MANIFEST_BOUND);
+    return r.ok ? r.bytes : undefined;
+  };
+  const decode = (bytes: Uint8Array, cid: Uint8Array): ArchiveManifest => {
+    try {
+      return decodeArchiveManifest(bytes, 3);
+    } catch {
+      throw new ArchiveResumeError("malformed", `${cidText(cid)} isn't a version-3 manifest`);
+    }
+  };
+  const top = await read(named.manifest, named.transaction);
+  if (top === undefined)
+    throw new ArchiveResumeError(
+      "unavailable",
+      `the locator's manifest ${cidText(named.manifest)}`,
+    );
+  const latest = decode(top, named.manifest);
+
+  const held = new Map<bigint, { cid: Uint8Array; transaction: Uint8Array; bytes: Uint8Array }>();
+  // Each sequence's CID, as its first link names it.
+  const cidAt = new Map<bigint, Uint8Array>();
+  const queue: { sequence: bigint; cid: Uint8Array; transaction: Uint8Array }[] = [];
+  const hold = (
+    sequence: bigint,
+    cid: Uint8Array,
+    transaction: Uint8Array,
+    bytes: Uint8Array,
+    m: ArchiveManifest,
+  ) => {
+    if (m.sequence !== sequence || m.l1_chain_id !== o.l1ChainId || !equal(m.anchor, o.anchor))
+      throw new ArchiveResumeError(
+        "foreign",
+        `${cidText(cid)} isn't this deployment's manifest ${sequence}`,
+      );
+    held.set(sequence, { cid, transaction, bytes });
+    for (const l of m.links) {
+      const fixed = cidAt.get(l.sequence);
+      if (fixed !== undefined && !equal(fixed, l.cid))
+        throw new ArchiveResumeError("conflict", `two manifests are linked at ${l.sequence}`);
+      cidAt.set(l.sequence, l.cid);
+      if (!held.has(l.sequence)) queue.push(l);
+    }
+  };
+  cidAt.set(latest.sequence, named.manifest);
+  hold(latest.sequence, named.manifest, named.transaction, top, latest);
+  const tried = new Set<string>();
+  for (let i = 0; i < queue.length; i++) {
+    const { sequence, cid, transaction } = queue[i] as (typeof queue)[number];
+    if (held.has(sequence) || tried.has(hex(transaction))) continue;
+    tried.add(hex(transaction));
+    const bytes = await read(cid, transaction);
+    if (bytes !== undefined) hold(sequence, cid, transaction, bytes, decode(bytes, cid));
+  }
+  for (let k = 0n; k <= latest.sequence; k++)
+    if (!held.has(k))
+      throw new ArchiveResumeError("unavailable", `no linked transaction serves manifest ${k}`);
+
+  const chain = [...held.entries()].sort(([a], [b]) => (a < b ? -1 : 1));
+  await drizzle({ client }).transaction(async (tx) => {
+    for (const [sequence, h] of chain) {
+      await tx.insert(archiveManifests).values({ sequence, cid: h.cid, manifest: h.bytes });
+      const m = decodeArchiveManifest(h.bytes, 3);
+      // Evidence and runs too, once a later part lists them, so a resumed
+      // database never posts them again.
+      const rows = [h, ...m.objects, ...m.evidence, ...m.runs].map((x) => ({
+        transaction: x.transaction,
+        cid: x.cid,
+      }));
+      await tx
+        .insert(archiveTransactions)
+        .values(rows.map((r) => ({ ...r, postedAt: o.now, confirmed: true })))
+        .onConflictDoNothing();
+    }
+  });
+  return chain.length;
 }
 
 /** The manifest chain as written, each manifest's links read from its own bytes. */
@@ -246,6 +409,7 @@ async function readChain(
     .orderBy(asc(archiveManifests.sequence));
   const manifests: ChainManifest[] = [];
   const cids: Uint8Array[] = [];
+  const listed = new Map<string, bigint>();
   for (const [k, r] of rows.entries()) {
     if (r.sequence !== BigInt(k)) throw new Error(`the manifest chain has no manifest ${k}`);
     const m = decodeArchiveManifest(new Uint8Array(r.manifest), 3);
@@ -258,8 +422,9 @@ async function readChain(
       confirmed: confirmed.has(hex(r.cid)),
     });
     cids.push(new Uint8Array(r.cid));
+    for (const x of m.objects) if (!listed.has(hex(x.cid))) listed.set(hex(x.cid), r.sequence);
   }
-  return { manifests, cids };
+  return { manifests, cids, listed };
 }
 
 /** Each confirmed CID's transaction: the first posted of those that confirmed. */
@@ -343,9 +508,16 @@ async function writeManifests(
     .select({ cid: archiveObjects.cid })
     .from(archiveObjects)
     .where(isNull(archiveObjects.listedIn));
+  // An object a resumed manifest already lists, registered again from the
+  // rebuilt board, is marked as listed there rather than listed twice.
+  for (const r of unlisted) {
+    const at = chain.listed.get(hex(r.cid));
+    if (at !== undefined)
+      await db.update(archiveObjects).set({ listedIn: at }).where(eq(archiveObjects.cid, r.cid));
+  }
   const waiting = unlisted
     .map((r) => new Uint8Array(r.cid))
-    .filter((cid) => confirmed.has(hex(cid)))
+    .filter((cid) => confirmed.has(hex(cid)) && !chain.listed.has(hex(cid)))
     .sort(compareBytes);
   const written: bigint[] = [];
   const txOf = (cid: Uint8Array) => {
@@ -390,6 +562,7 @@ async function writeManifests(
     });
     chain.manifests.push({ links, confirmed: false });
     chain.cids.push(cid);
+    for (const x of objects) chain.listed.set(hex(x), sequence);
     written.push(sequence);
   }
   return written;
@@ -465,7 +638,8 @@ function locatorOf(
 }
 
 /**
- * One archive run: records the objects of new checkpoints, confirms the
+ * One archive run: takes up the anchor's chain if the database holds none
+ * (`resume`), records the objects of new checkpoints, confirms the
  * transactions that reached `depth`, writes the manifests that are due,
  * posts what has no live upload, and reports the sequence the locator names.
  * Throws if Arweave or the database fails; what was done before stays done,
@@ -483,8 +657,10 @@ export async function archiveBoards(
       .select({ sequence: archiveManifests.sequence })
       .from(archiveManifests)
       .limit(1);
-    if (first === undefined && options.latestLocator !== undefined)
-      throw new Error("the anchor names an archive chain this database doesn't hold");
+    const resumed =
+      first === undefined && options.latestLocator !== undefined
+        ? await resume(client, arweave, options.latestLocator, options, depth)
+        : 0;
     const registered = await register(client);
     const bounds = new Map<string, number>();
     for (const o of await db.select().from(archiveObjects)) bounds.set(hex(o.cid), objectBound(o));
@@ -497,6 +673,7 @@ export async function archiveBoards(
     const { posted, refused } = await post(client, arweave, held, mined, options.now, repostAfter);
     return {
       busy: false,
+      resumed,
       registered,
       confirmed,
       written,
@@ -508,6 +685,7 @@ export async function archiveBoards(
   return (
     run ?? {
       busy: true,
+      resumed: 0,
       registered: 0,
       confirmed: 0,
       written: [],

@@ -19,11 +19,14 @@ export {
 export {
   ARCHIVE_DEPTH,
   ARCHIVE_REPOST_AFTER,
+  ARCHIVE_RESUME_READS,
   archiveBoards,
   type ArchiveLocator,
   archiveLocator,
   archiveManifestSequence,
   type ArchiveOptions,
+  ArchiveResumeError,
+  type ArchiveResumeErrorCode,
   type ArchiveRun,
   type ArweaveClient,
 } from "./archiving.ts";

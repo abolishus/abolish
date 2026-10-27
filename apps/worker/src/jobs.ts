@@ -15,6 +15,7 @@ import {
   anchorBoards,
   anchorBusyLimit,
   archiveBoards,
+  ArchiveResumeError,
   type ArchiveRun,
   type ArweaveClient,
   auditBoard,
@@ -219,8 +220,10 @@ const archiveBusySince = new WeakMap<JobContext, bigint>();
 
 /**
  * One archive run under the worker's clock, with the locator the anchor
- * holds now, which keeps a database that lost its chain from starting
- * another (T-69). What the run did is logged in counts; the job fails if an
+ * holds now, from which a database that lost its chain takes it up rather
+ * than start another (T-69); a chain it can't take up is logged with why and
+ * fails the job, and the next run tries again. What the run did is logged in
+ * counts; the job fails if an
  * object was refused (the board no longer gives the bytes its anchored CID
  * names, T-23), or if runs met another's lock without a break for longer
  * than `ARCHIVE_BUSY_LIMIT`, since a worker that froze holding it stops the
@@ -242,7 +245,9 @@ async function archive(ctx: JobContext, _data: JobData<"archive">): Promise<void
     });
   } catch (e) {
     archiveBusySince.delete(ctx);
-    throw e;
+    if (!(e instanceof ArchiveResumeError)) throw e;
+    ctx.log({ queue: "{archive}", finding: "archive-resume", reason: e.code });
+    throw new JobError("archive-findings");
   }
   if (run.busy) {
     ctx.log({ queue: "{archive}", finding: "archive-busy" });
@@ -259,6 +264,7 @@ async function archive(ctx: JobContext, _data: JobData<"archive">): Promise<void
     written: run.written.length,
     posted: run.posted,
     refused: run.refused,
+    ...(run.resumed === 0 ? {} : { resumed: run.resumed }),
     ...(run.locator === undefined ? {} : { locator: Number(run.locator) }),
   });
   if (run.refused > 0) throw new JobError("archive-findings");

@@ -74,6 +74,7 @@ function availability(change: Record<string, unknown> = {}) {
     anchorClock: { epoch: "1760000000", period: "3600", deadline: "43200" },
     registry: "e1".repeat(20),
     registryFromBlock: "200",
+    trusteeRegistryFromBlock: "150",
     board: "b0".repeat(20),
     boardFromBlock: "201",
     portal: "90".repeat(20),
@@ -108,7 +109,11 @@ describe("the availability configuration", () => {
       "b0".repeat(20),
       "90".repeat(20),
     ]);
-    expect([a.registryFromBlock, a.boardFromBlock]).toEqual([200n, 201n]);
+    expect([a.registryFromBlock, a.trusteeRegistryFromBlock, a.boardFromBlock]).toEqual([
+      200n,
+      150n,
+      201n,
+    ]);
     expect([a.l1MaxFeePerGas, a.l2MaxFeePerGas]).toEqual([300000000000n, 10000000000n]);
     expect([a.forceAfter, a.forceLead, a.sendMargin]).toEqual([1800n, 3600n, 1800n]);
     expect(a.maxBoardBytes).toBe(DEFAULT_MAX_BOARD_BYTES);

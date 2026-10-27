@@ -88,7 +88,8 @@ import {
 import { boardSender, SendError } from "./send.ts";
 import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
-import { l1OutputRootAccumulator, l2ElectorateCheck } from "./electorate.ts";
+import { l2ElectorateCheck } from "./electorate.ts";
+import { l1OutputRootAccumulators, type RegistryAccumulators } from "./output-root.ts";
 import { l2RegistrationCheck } from "./registration.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
@@ -128,6 +129,16 @@ const json = (v: unknown) =>
  */
 const NO_ELECTORATE_CHECK: ElectorateCheck = () => Promise.resolve(false);
 
+/** The registries' accumulators under an output root the seat's L1 node shows (T-71). */
+function accumulatorsOf(a: AvailabilityConfig, l2: Rpc): RegistryAccumulators {
+  return l1OutputRootAccumulators({
+    l1: rpcClient(a.l1),
+    l1ChainId: a.l1ChainId,
+    portal: a.portal,
+    l2,
+  });
+}
+
 /** [[verifier]] 2.4 over the seat's L2 node, where the configuration names the group registry. */
 function electorateOf(config: NodeConfig): ElectorateCheck {
   const a = config.availability;
@@ -141,13 +152,7 @@ function electorateOf(config: NodeConfig): ElectorateCheck {
     fromBlock: g.fromBlock,
     registrars: g.registrars,
     threshold: g.threshold,
-    accumulator: l1OutputRootAccumulator({
-      l1: rpcClient(a.l1),
-      l1ChainId: a.l1ChainId,
-      portal: a.portal,
-      l2,
-      registry: g.address,
-    }),
+    accumulators: accumulatorsOf(a, l2),
   });
 }
 
@@ -163,12 +168,15 @@ const NO_REGISTRATION_CHECK: RegistrationCheck = () => Promise.resolve(false);
 function registrationOf(config: NodeConfig): RegistrationCheck {
   const a = config.availability;
   if (a === undefined) return NO_REGISTRATION_CHECK;
+  const l2 = rpcClient(a.l2);
   return l2RegistrationCheck({
-    l2: rpcClient(a.l2),
+    l2,
     chainId: config.l2ChainId,
     electionRegistry: a.registry,
     trusteeRegistry: config.trusteeRegistry,
     fromBlock: a.registryFromBlock,
+    trusteeFromBlock: a.trusteeRegistryFromBlock,
+    accumulators: accumulatorsOf(a, l2),
   });
 }
 

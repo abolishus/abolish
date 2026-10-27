@@ -90,6 +90,7 @@ const AVAILABILITY = z.strictObject({
   }),
   registry: hexOf(20),
   registryFromBlock: decimal(64),
+  trusteeRegistryFromBlock: decimal(64),
   board: hexOf(20),
   boardFromBlock: decimal(64),
   portal: hexOf(20),
@@ -182,6 +183,8 @@ export interface AvailabilityConfig {
   readonly anchorClock: AnchorTiming;
   readonly registry: Uint8Array;
   readonly registryFromBlock: bigint;
+  /** The pinned trustee registry's deployment block, where its log starts. */
+  readonly trusteeRegistryFromBlock: bigint;
   readonly board: Uint8Array;
   readonly boardFromBlock: bigint;
   /** The L2's `OptimismPortal` on L1, for forced inclusion. */
@@ -334,6 +337,7 @@ function availabilityOf(
     anchorClock: a.anchorClock,
     registry: a.registry,
     registryFromBlock: a.registryFromBlock,
+    trusteeRegistryFromBlock: a.trusteeRegistryFromBlock,
     board: a.board,
     boardFromBlock: a.boardFromBlock,
     portal: a.portal,

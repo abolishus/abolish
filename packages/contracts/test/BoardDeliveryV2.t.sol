@@ -766,10 +766,9 @@ contract BoardDeliveryV2Test is TestBase {
     /// figure as their deposit's gas limit. An author seat's key set and
     /// signing key are the election registry's, which every call reads
     /// already, so a default seat's calls, which also read the trustee
-    /// registry, are the dearer. The stubs stand in for the registries:
-    /// rule 9 refuses every definition pinning ballot version 4 until P2-16
-    /// part 5e, so no real registry holds one yet, and `HEADROOM` keeps back
-    /// what real registries cost over them. The board has already accepted a
+    /// registry, are the dearer. The stubs stand in for the registries
+    /// (rule 9 serves no author panel until P2-16 part 5e-5d), and
+    /// `HEADROOM` keeps back what real registries cost over them. The board has already accepted a
     /// record, as any board a forced deposit reaches has, so no measurement
     /// carries the accumulator count's first write (T-25, T-52, T-54).
     function test_ForcedPathCallGas() public {

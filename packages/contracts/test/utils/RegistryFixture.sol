@@ -124,11 +124,9 @@ library RegistryFixture {
     /// `template` under definition version 3, 4, 5 or 6, with each field its
     /// layout adds: Tier 0 split into two regional cells and Tier 2 one cell
     /// (versions 3 to 6); one receipt key (4 to 6); two questions in place of
-    /// the one (5 and 6); and a sealed everyday poll with a 2-of-3 author
-    /// panel (6). The ballot, opening and display-text pins are the versions
-    /// each pairs with, ballot version 3 standing in for version 6's 4, which
-    /// the registry refuses, so a version-6 template is refused there
-    /// (`ProfileNotServed`) unless a test sets its pins.
+    /// the one (5 and 6); and a sealed everyday poll without an author panel
+    /// (6). The ballot, opening and display-text pins are the versions each
+    /// pairs with, so every template is one the registry serves (rule 9).
     function templateV(ElectionRegistry registry, bytes32 electionId, uint8 version)
         internal
         view
@@ -137,8 +135,8 @@ library RegistryFixture {
         d = template(registry, electionId);
         d.version = version;
         d.pinVersions[0] = version;
-        d.pinVersions[1] = version < 5 ? 2 : 3;
-        d.pinVersions[2] = 2;
+        d.pinVersions[1] = version < 5 ? 2 : version == 5 ? 3 : 4;
+        d.pinVersions[2] = version < 6 ? 2 : 3;
         d.pinVersions[8] = version < 5 ? 1 : 2;
         d.electorate = new ElectionDefinitionLib.TierGroup[](0);
         d.tiers = new ElectionDefinitionLib.TierElectorate[](2);
@@ -177,12 +175,6 @@ library RegistryFixture {
         if (version == 6) {
             d.pollClass = 1;
             d.resultsMode = 1;
-            d.authorThreshold = 2;
-            d.authorKeys = new ElectionDefinitionLib.P256Key[](3);
-            for (uint256 i; i < 3; i++) {
-                d.authorKeys[i] = key(i);
-            }
-            d.authorTranscriptHash = sha256(abi.encode("author transcript", electionId));
         }
     }
 

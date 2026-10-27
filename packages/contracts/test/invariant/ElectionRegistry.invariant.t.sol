@@ -61,8 +61,7 @@ contract RegistryHandler is TestBase {
         if (version < 5) d.optionCount = 2 + variant / 5 % 4;
         else d.questions[0].optionCount = uint16(2 + variant / 5 % 4);
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
-        // Version 6 has no profile the deployment serves (rule 9).
-        bool allowed = version != 6 && actor == shadowCreator[id] && shadowHash[id] == bytes32(0);
+        bool allowed = actor == shadowCreator[id] && shadowHash[id] == bytes32(0);
         vm.prank(actor);
         try registry.registerDefinition(enc) {
             if (!allowed) unexpected = true;

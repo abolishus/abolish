@@ -224,7 +224,7 @@ export function PollBoard({
                     {t("boardAnchorPeriod", { segment: anchor.segment })}
                   </h3>
                   {i === 0 ? (
-                    <p className="m-0 text-sm text-recorded">{t("boardAnchorLatest")}</p>
+                    <p className="m-0 text-sm text-muted-foreground">{t("boardAnchorLatest")}</p>
                   ) : null}
                 </div>
                 <div className="grid min-w-0 content-start gap-3 md:col-span-9">

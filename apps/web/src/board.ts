@@ -104,7 +104,7 @@ export interface AnchorRow {
   readonly size: string;
   readonly head: string;
   readonly root: string;
-  /** The checkpoint's hash, computed here: the value the anchor on L1 holds for it. */
+  /** The checkpoint's hash, computed here: the value an anchor on L1 would hold for it. */
   readonly hash: string;
 }
 

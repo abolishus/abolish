@@ -528,16 +528,25 @@ describe("board page", () => {
     for (const from of ["0", "25", "50"]) {
       const page = await text(`/polls/${ID}/board?from=${from}`);
       const periods = [...page.matchAll(/After period (\d+)/g)].map((m) => Number(m[1]));
-      expect(periods).toEqual([4, 3, 2, 1, 0]);
+      expect(periods).toEqual([5, 4, 3, 2, 1, 0]);
       for (const c of CHECKPOINTS) {
         const checkpoint = decodeCheckpoint(fromHex(c));
         expect(page).toContain(toHex(checkpointHash(checkpoint)));
         expect(page).toContain(toHex(checkpoint.root));
       }
-      expect(page).toContain("is for the verifier, which reads every checkpoint from Ethereum");
-      // Fewer than the page asked for: there are no earlier ones to mention.
-      expect(page).not.toContain("Only the latest");
+      expect(page).toContain("that is for the verifier, which reads the anchor itself");
+      // As many as the page asked for: there may be earlier ones.
+      expect(page).toContain("Only the latest 6 checkpoints are shown here.");
     }
+  });
+
+  test("refuses checkpoints that name another poll, showing none of them (T-31)", async () => {
+    // Past the end, so the entries (also the typical poll's) don't refuse the page first.
+    const page = await text(`/polls/${FILLER[3]}/board?from=50`);
+    expect(page).toContain("there is no entry 50 yet");
+    expect(page).toContain("sent checkpoints for this board that");
+    expect(page).not.toContain("After period");
+    expect(page).not.toContain(toHex(checkpointHash(decodeCheckpoint(fromHex(CHECKPOINTS[0]!)))));
   });
 
   test("pages by windows of 25, with links to the earlier ones", async () => {

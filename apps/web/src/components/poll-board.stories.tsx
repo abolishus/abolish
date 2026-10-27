@@ -94,9 +94,9 @@ export const Default: Story = {
       canvas.getByRole("img", { name: "Fingerprint of the checkpoint after period 8" }),
     ).toBeVisible();
     await expect(
-      within(items[5]!).getByRole("figure", { name: "Checkpoint hash, the value anchored" }),
+      within(items[5]!).getByRole("figure", { name: "Checkpoint hash, the value to anchor" }),
     ).toHaveTextContent("65".repeat(32));
-    await expect(canvas.getByText(/reads every checkpoint from Ethereum/)).toBeVisible();
+    await expect(canvas.getByText(/doesn't check that any of them is anchored/)).toBeVisible();
     // As many as the page asked for: there may be earlier ones.
     await expect(canvas.getByText(/Only the latest 6 checkpoints/)).toBeVisible();
   },
@@ -118,7 +118,9 @@ export const NoAnchors: Story = {
   args: { anchors: [] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("status")).toHaveTextContent("No checkpoint yet.");
+    await expect(canvas.getByRole("status")).toHaveTextContent(
+      "No checkpoint has been taken of this board yet.",
+    );
     await expect(canvas.queryByRole("list", { name: "Checkpoints, latest first" })).toBeNull();
   },
 };

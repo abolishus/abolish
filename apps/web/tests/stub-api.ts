@@ -90,8 +90,8 @@ export const BOARD = Array.from({ length: Number(HEAD.treeSize) }, (_, i) => {
 
 /**
  * The typical poll's checkpoints, the latest first, as `apps/api` serves
- * them: one for each of `BOARD`'s segments but the last, still open, with
- * its size, chain head and root. `BOARD` isn't a board the verifier accepts
+ * them: one for each of `BOARD`'s six segments, as many as the page asks
+ * for, with its size, chain head and root. `BOARD` isn't a board the verifier accepts
  * (its payloads break the openings' order), and the page reads no CID, so
  * those are placeholders. Served for every poll, so any other poll's name
  * another election.
@@ -101,7 +101,7 @@ const links = hashes.reduce<Uint8Array[]>(
   (chain, h) => [...chain, chainLink(chain.at(-1) ?? new Uint8Array(32), h)],
   [],
 );
-export const CHECKPOINTS = Array.from({ length: Math.floor((BOARD.length - 1) / 5) }, (_, s) => {
+export const CHECKPOINTS = Array.from({ length: BOARD.length / 5 }, (_, s) => {
   const size = 5 * (s + 1);
   return toHex(
     encodeCheckpoint({

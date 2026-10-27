@@ -317,6 +317,7 @@ const source: ElectionSource = {
           postings: readonly Uint8Array[],
           cutoffs: PostingCutoffs,
           late: boolean,
+          handed: bigint,
         ) {
           const { definitionHash, ballotHash } = postingTopics(postings);
           // Each request bounded, so neither the relay nor the RPCs can hold
@@ -349,6 +350,7 @@ const source: ElectionSource = {
               cutoffs.force,
               STAGING.forcedInclusion,
               late ? { lastOffer: cutoffs.lastOffer } : undefined,
+              handed,
             );
           } finally {
             for (const call of calls) call.fill(0);
@@ -439,7 +441,7 @@ const source: ElectionSource = {
   // One lock per election across this origin's tabs; a browser without Web
   // Locks gets none, and is offered no posting (Client rule 2).
   ...(ELECTION_LOCK === undefined ? {} : { exclusive: ELECTION_LOCK }),
-  markHanded: (electionId, tier, ballot) => recordHanded(electionId, tier, ballot),
+  markHanded: (electionId, tier, ballot, at) => recordHanded(electionId, tier, ballot, at),
   declinePosting: (electionId, tier, ballot) => declinePosting(electionId, tier, ballot),
   declineSeal: (ballot) => withWorker((used) => used.decline(ballot)),
   eraseShares: (electionId, tier) => eraseShares(electionId, tier),

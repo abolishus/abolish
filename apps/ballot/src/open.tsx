@@ -171,8 +171,9 @@ export interface ElectionSource {
    * the contract, with its deadlines read from `cutoffs`, the poll's force
    * cutoff `c_L` and, for a late run, the last-offer cutoff `c_E`, a late
    * run made only where `late` says the voter was told it is best effort
-   * ([[posting-relay]], Outcome, The ballot's own deadline);
-   * absent while the build has no
+   * ([[posting-relay]], Outcome, The ballot's own deadline), and an
+   * earlier run's deposit looked for on L1 from `handed`, the cast's mark
+   * (Outcome, The read); absent while the build has no
    * contract path, and then no posting is offered. The caller zeroes the
    * records once this settles.
    */
@@ -182,6 +183,7 @@ export interface ElectionSource {
     postings: readonly Uint8Array[],
     cutoffs: PostingCutoffs,
     late: boolean,
+    handed: bigint,
   ) => Promise<PostAnswer>;
   /**
    * Posts each of `postings` as `post` does, from the voter's own wallet
@@ -226,14 +228,16 @@ export interface ElectionSource {
   readonly exclusive?: ElectionLock;
   /**
    * Marks the recorded cast whose bytes are `ballot` as one whose postings a
-   * run may hand out (`recordHanded`), under the election's lock before the
-   * run starts, so a reload still waits for them ([[posting-relay]], Sending
-   * after a run).
+   * run may hand out at `at`, in seconds by this device's clock
+   * (`recordHanded`), under the election's lock before the run starts, so a
+   * reload still waits for them ([[posting-relay]], Sending after a run),
+   * answering the cast's mark, the first run's.
    */
   markHanded(
     electionId: Uint8Array,
     tier: number,
     ballot: Uint8Array,
+    at: bigint,
   ): Promise<RecordHandedOutcome>;
   /**
    * Erases the unreceipted seats' `ct_i` and `m_i` of the recorded cast
@@ -1330,7 +1334,7 @@ export function Ballot({
           ...sending,
           undelivered: left,
           // Marked by this tab or another, before a reload or since.
-          ...(cast.handed === true ? { handed: true as const } : {}),
+          ...(cast.handed === undefined ? {} : { handed: true as const }),
         },
         postings,
       };
@@ -1396,8 +1400,8 @@ export function Ballot({
         // The head's time read before the run: one past `c_E` withdraws the offer.
         await readHead();
         if (offerClosed()) return { ...offered };
-        const posted = await postChecked(sending, offered, (postings) =>
-          posting(electionId, sending.ballot, postings, cutoffs(), late).catch(
+        const posted = await postChecked(sending, offered, (postings, marked) =>
+          posting(electionId, sending.ballot, postings, cutoffs(), late, marked).catch(
             (): PostAnswer => "unreachable",
           ),
         );
@@ -1495,15 +1499,16 @@ export function Ballot({
    * seat (Client rule 2; T-15). Before `through` may hand any record out,
    * the cast is marked `handed` under the same lock, so a page that goes
    * away during or after the run still waits for its postings once the poll
-   * is opened again; a mark the store refuses hands nothing out (Sending
-   * after a run; T-25). The records are zeroed once it settles. An offer
+   * is opened again, and `through` is given the mark, the first run's; a
+   * mark the store refuses hands nothing out (Sending after a run; T-25).
+   * The records are zeroed once it settles. An offer
    * withdrawn while the lock was waited for (`offerClosed`) posts nothing
    * and returns to `offered`.
    */
   async function postChecked<A extends PostAnswer | WalletAnswer>(
     sending: Sending,
     offered: Step,
-    through: (postings: readonly Uint8Array[]) => Promise<A>,
+    through: (postings: readonly Uint8Array[], handed: bigint) => Promise<A>,
   ): Promise<{ readonly checked: Sending; readonly answer: A | "recorded" } | Step> {
     return locked(async () => {
       // Another tab's run may hold the lock past `c_E` (T-15).
@@ -1513,11 +1518,14 @@ export function Ballot({
       try {
         if (checked.postings.length === 0) return { checked: checked.sending, answer: "recorded" };
         const marked = await source
-          .markHanded(electionId, sending.tier, sending.ballot)
+          .markHanded(
+            electionId,
+            sending.tier,
+            sending.ballot,
+            BigInt(Math.floor(source.now() / 1000)),
+          )
           .catch((): RecordHandedOutcome => "unwritable");
         switch (marked) {
-          case "recorded":
-            break;
           case "unreadable":
             return stopped("casts-unreadable");
           case "unwritable":
@@ -1526,7 +1534,7 @@ export function Ballot({
           case "missing":
             return stopped("cast-faulty");
         }
-        const answer = await through(checked.postings);
+        const answer = await through(checked.postings, marked.handed);
         return { checked: { ...checked.sending, handed: true }, answer };
       } finally {
         for (const record of checked.postings) record.fill(0);

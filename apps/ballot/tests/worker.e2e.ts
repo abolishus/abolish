@@ -1133,6 +1133,7 @@ describe("the device's records of its casts", () => {
       link: string,
     ): Promise<string>;
     readCasts(electionId: string, tier: number): Promise<string>;
+    recordHanded(electionId: string, tier: number, ballot: string, at: string): Promise<string>;
     eraseShares(electionId: string, tier: number): Promise<string>;
     restampCasts(electionId: string, tier: number, version: number): Promise<void>;
   };
@@ -1283,6 +1284,37 @@ describe("the device's records of its casts", () => {
     await expect(read(0)).resolves.toEqual({
       kind: "read",
       casts: [castOf(naming(10n), "10", { entry, link })],
+    });
+  });
+
+  test("keep the first run's handed mark, answered to every run, across loads", async () => {
+    const handed = (b: string, at: string) =>
+      page.evaluate(
+        ([e, x, y]) =>
+          (globalThis as unknown as { ballotHarness: Harness }).ballotHarness.recordHanded(
+            e,
+            0,
+            x,
+            y,
+          ),
+        [election, b, at] as const,
+      );
+    await expect(handed(naming(10n), "1800000000")).resolves.toBe("missing");
+    await expect(record(0, naming(10n))).resolves.toBe("recorded");
+    await expect(handed(naming(10n), "1800000000")).resolves.toBe("1800000000");
+    // A later run is answered the first run's mark, from which it reads L1.
+    await expect(handed(naming(10n), "1800003600")).resolves.toBe("1800000000");
+    // So is a recast of the same seal.
+    await expect(record(0, naming(11n))).resolves.toBe("recorded");
+    await expect(handed(naming(11n), "1800007200")).resolves.toBe("1800000000");
+    await page.reload();
+    await page.locator("#root[data-ready]").waitFor({ state: "attached" });
+    await expect(read(0)).resolves.toEqual({
+      kind: "read",
+      casts: [
+        { ...castOf(naming(10n), "10"), handed: "1800000000" },
+        { ...castOf(naming(11n), "11"), handed: "1800000000" },
+      ],
     });
   });
 

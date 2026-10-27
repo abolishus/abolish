@@ -37,6 +37,7 @@ import {
   newQuestion,
   type PollForm,
   selectionRange,
+  type TextField,
   tidyPlace,
 } from "../account/poll-form.ts";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
@@ -129,12 +130,35 @@ function zoneName(locale: string, timeZone: string, at: Date): string {
   return name ?? timeZone.replaceAll("_", " ");
 }
 
-/** A problem's words, saying which question, and which of its options, it is in. */
+/** The fields outside any question, by their labels on the page. */
+const FIELD_LABELS: Partial<Record<TextField, keyof Messages>> = {
+  title: "pollFormTitleLabel",
+  description: "pollFormDescriptionLabel",
+  place: "pollFormPlaceLabel",
+};
+
+/**
+ * A problem's words, saying which question, and which of its options, it is
+ * in. Where the problem's own words don't name their field ("This is too
+ * long."), the summary does: otherwise a question's and its explanation's,
+ * or the title's and the description's, read the same (P2-29, creating a
+ * poll's iteration 16).
+ */
 const say = (t: Translate, e: FieldError) => {
   const problem = t(`pollForm_${e.problem}`);
-  if (e.question === undefined) return problem;
-  return e.option === undefined
-    ? t("pollFormInQuestion", { n: e.question, problem })
+  const unnamed = e.problem === "tooLong" || e.problem === "unstorable";
+  if (e.question === undefined) {
+    const label = e.field === undefined ? undefined : FIELD_LABELS[e.field];
+    return unnamed && label !== undefined
+      ? t("pollFormInField", { field: t(label), problem })
+      : problem;
+  }
+  if (e.option === undefined)
+    return unnamed && e.field === "questionDescription"
+      ? t("pollFormInExplanation", { n: e.question, problem })
+      : t("pollFormInQuestion", { n: e.question, problem });
+  return unnamed && e.field === "optionDescription"
+    ? t("pollFormInDetails", { n: e.question, o: e.option, problem })
     : t("pollFormInOption", { n: e.question, o: e.option, problem });
 };
 
@@ -507,19 +531,21 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
   const placeholder = "text-muted-foreground italic";
   return (
     // The everyday register's soft rule, not the civic record's heavy frame
-    // (P2-29, creating a poll's iteration 6).
+    // (P2-29, creating a poll's iteration 6). The author's text breaks a long
+    // word anywhere: with `break-words` a pasted link still set its column's
+    // width, so the page scrolled sideways on a phone (iteration 16).
     <div className="grid gap-6 border border-border p-5 sm:p-6">
       <div className="grid gap-2">
         <p
           className={cn(
-            "m-0 font-heading text-2xl font-semibold break-words",
+            "m-0 font-heading text-2xl font-semibold wrap-anywhere",
             form.title === "" && placeholder,
           )}
         >
           {form.title === "" ? t("pollFormPreviewEmpty") : form.title}
         </p>
         {form.description === "" ? null : (
-          <p className="m-0 text-base whitespace-pre-line break-words">{form.description}</p>
+          <p className="m-0 text-base whitespace-pre-line wrap-anywhere">{form.description}</p>
         )}
         {closesAt === undefined ? null : (
           <p className="m-0 font-mono text-xs tracking-wide" suppressHydrationWarning>
@@ -536,14 +562,14 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
             <li key={q.key} className="grid gap-3 border-t border-border pt-4">
               <p
                 className={cn(
-                  "m-0 text-lg font-semibold break-words",
+                  "m-0 text-lg font-semibold wrap-anywhere",
                   q.question === "" && placeholder,
                 )}
               >
                 {q.question === "" ? t("pollFormPreviewQuestionEmpty") : q.question}
               </p>
               {q.description === "" ? null : (
-                <p className="m-0 text-sm whitespace-pre-line break-words">{q.description}</p>
+                <p className="m-0 text-sm whitespace-pre-line wrap-anywhere">{q.description}</p>
               )}
               <p className="m-0 text-sm text-muted-foreground">
                 {q.rule === "between"
@@ -556,11 +582,11 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
               <ul className="m-0 grid list-none gap-2 p-0">
                 {q.options.map((o) => (
                   <li key={o.key} className="grid gap-1 border border-border px-3 py-2">
-                    <span className={cn("break-words", o.label === "" && placeholder)}>
+                    <span className={cn("wrap-anywhere", o.label === "" && placeholder)}>
                       {o.label === "" ? t("pollFormPreviewOptionEmpty") : o.label}
                     </span>
                     {o.description === "" ? null : (
-                      <span className="text-sm text-muted-foreground break-words">
+                      <span className="text-sm text-muted-foreground wrap-anywhere">
                         {o.description}
                       </span>
                     )}

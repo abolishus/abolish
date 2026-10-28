@@ -804,4 +804,5 @@ export {
   type OpeningRejectionCode,
   type OpeningTarget,
   openingTargets,
+  type PollResults,
 } from "./tally-boarding.ts";

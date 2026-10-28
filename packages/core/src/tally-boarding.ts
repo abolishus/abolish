@@ -30,7 +30,13 @@ import {
   tallyOpeningSigner,
   type WholeOpeningVersion,
 } from "@abolishus/crypto";
-import { countedTally, type L1Header, readElection } from "@abolishus/verifier";
+import {
+  countedResults,
+  type CountedResults,
+  countedTally,
+  type L1Header,
+  readElection,
+} from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import { type AnchorChain, readCheckpoints } from "./anchoring.ts";
 import {
@@ -72,6 +78,10 @@ export type CountedTally =
       readonly state: "fixed";
       readonly election: TallyElection;
       readonly aggregates: readonly CellAggregate[];
+      /** Each cell's number of counted ballots, in partition order. */
+      readonly counted: readonly number[];
+      /** Each cell's tier, in partition order. */
+      readonly tiers: readonly number[];
       readonly pinned: WholeOpeningVersion;
       /** `s_S`, the counted extent's last segment: no opening is labelled at or before it. */
       readonly lastSegment: number;
@@ -232,6 +242,8 @@ export function anchoredCountedTally(
           state: "fixed",
           election: result.election,
           aggregates: result.aggregates,
+          counted: result.counted,
+          tiers: result.tiers,
           pinned: result.pinned,
           lastSegment: sS,
         };
@@ -355,6 +367,18 @@ export interface OpeningBoardingOptions {
   readonly nowMs?: () => number;
 }
 
+/**
+ * A poll's results as its board's openings give them: `unopened` while no
+ * opening is boarded, so nothing has been counted yet, or 7.2's verdict with
+ * each cell's and tier's report over the anchored counted set (`read`), from
+ * as many boarded openings as `openings` says. They are the board's results,
+ * not the verifier's verdict, which also needs every other row over the
+ * sealed board (T-34).
+ */
+export type PollResults =
+  | { readonly state: "unopened" }
+  | { readonly state: "read"; readonly openings: number; readonly results: CountedResults };
+
 type Decided = Exclude<CountedTally, { readonly state: "waiting" }>;
 
 /**
@@ -386,6 +410,7 @@ export class OpeningBoardings {
   readonly #lapsing = new Map<string, { readonly tally: Decided; readonly until: number }>();
   readonly #inFlight = new Map<string, Promise<CountedTally>>();
   readonly #targets = new Map<string, OpeningTarget>();
+  readonly #results = new Map<string, Extract<PollResults, { readonly state: "read" }>>();
 
   constructor({
     tally,
@@ -509,6 +534,45 @@ export class OpeningBoardings {
       if (!again.ok && again.code === "tally-repeat") return entry;
       throw new OpeningError("rejected", "tally-second");
     }
+  }
+
+  /**
+   * The results of `electionId` from the openings boarded so far
+   * (packages/verifier's `countedResults` over the counted tally), or
+   * `unopened` while none is. Throws `OpeningError` `unknown-election`,
+   * `not-open` where this operator boards no opening of the election, and
+   * `not-ready` while the counted tally can't be had yet. Only a boarded
+   * opening, which the Boarding judge passed as a registered seat's, starts
+   * the tally's computation, as on the board path, so asking for an
+   * election's results before any is boarded costs two reads (T-52). Openings
+   * are only ever appended, so results are kept per election until another
+   * is boarded, and a read repeated meanwhile checks no opening again.
+   */
+  async readResults(client: Sql, electionId: Uint8Array): Promise<PollResults> {
+    if (!isBytes(electionId) || electionId.length !== 32)
+      throw new TypeError("electionId must be 32 bytes");
+    const id = new Uint8Array(electionId);
+    const target = await this.#targetOf(client, id);
+    if (target === undefined) throw new OpeningError("not-open");
+    const boarded = await readBoardedOpenings(client, id);
+    if (boarded.length === 0) return { state: "unopened" };
+    const key = Buffer.from(id).toString("hex");
+    const known = this.#results.get(key);
+    if (known !== undefined && known.openings === boarded.length) return known;
+    const tally = await this.#counted(client, id, true);
+    if (tally.state === "waiting") throw new OpeningError("not-ready");
+    if (tally.state === "refused") throw new OpeningError("not-open");
+    const { election, aggregates, counted, tiers, pinned } = tally;
+    const read = {
+      state: "read",
+      openings: boarded.length,
+      results: countedResults(
+        { ok: true, election, aggregates, counted, tiers, pinned },
+        boarded.map((b) => b.payload),
+      ),
+    } as const;
+    remember(this.#results, key, read, this.#cacheSize);
+    return read;
   }
 
   async #targetOf(client: Sql, id: Uint8Array): Promise<OpeningTarget | undefined> {

@@ -63,6 +63,8 @@ const FIXED: CountedTally = {
   state: "fixed",
   election: own,
   aggregates: [empty, empty],
+  counted: [0, 0],
+  tiers: [0, 0],
   pinned: 1,
   lastSegment: 5,
 };

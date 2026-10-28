@@ -22,6 +22,7 @@ import {
 } from "@abolishus/crypto";
 import { countedTally, decodeHeader, type L1Header, splitEntries } from "@abolishus/verifier";
 import { getTableConfig } from "drizzle-orm/pg-core";
+import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { decodeDefinition } from "../../verifier/src/definition.ts";
@@ -71,6 +72,9 @@ interface VectorElection {
   readonly openings: readonly string[];
   readonly result: {
     readonly cells: readonly {
+      readonly ok: boolean;
+      readonly code?: string;
+      readonly counts?: readonly string[];
       readonly passing: readonly Report[];
       readonly failing: readonly (Report & { readonly code: string })[];
     }[];
@@ -128,12 +132,23 @@ function expected(
   throw new Error(`opening ${at} of ${e.id} is in no report`);
 }
 
+/** A fixed tally whose cells hold `counted` ballots each, one tier a cell unless `tiers` says. */
 const fixed = (
   election: TallyElection,
   aggregates: readonly CellAggregate[],
   pinned: WholeOpeningVersion,
   lastSegment = 5,
-): CountedTally => ({ state: "fixed", election, aggregates, pinned, lastSegment });
+  counted: readonly number[] = aggregates.map(() => 0),
+  tiers: readonly number[] = aggregates.map((_, cell) => cell),
+): CountedTally => ({
+  state: "fixed",
+  election,
+  aggregates,
+  counted,
+  tiers,
+  pinned,
+  lastSegment,
+});
 
 const CLOCK = { epoch: 1_000_000n, period: 3_600n };
 const NOW = CLOCK.epoch + 10n * CLOCK.period;
@@ -607,6 +622,226 @@ describe("submitting openings", () => {
   });
 });
 
+// The results read (OpeningBoardings.readResults): packages/verifier's
+// `countedResults` over the counted tally and the openings the board path
+// boarded, so a cell has counts only where a registered seat's opening of it
+// passed the Boarding judge, and those are the counts the vector's
+// independent implementation opened (T-29, T-34).
+describe("reading results", () => {
+  // One connection for the block: the file's clients stay open until it ends.
+  let app: Sql;
+  beforeAll(async () => {
+    app = await db.as("abolish_app");
+  });
+
+  for (const [version, elections] of [
+    [1, vectors.elections],
+    [2, vectors.version2.elections],
+  ] as const)
+    for (const e of elections)
+      test(`version ${version}, ${e.id}: each cell as the vector opens it, once boarded`, async () => {
+        const id = await newElection(app);
+        const counted = e.cells.map((c) => c.length);
+        const tally = fixed(vectorElection, aggregatesOf(e), version, 5, counted);
+        const boarding = boardings(tally);
+        if (tally.state === "fixed") await warm(boarding, app, id, tally);
+        for (const opening of e.openings)
+          await failsWith(boarding.submitOpening(app, id, hex(opening), NOW));
+        const read = await boarding.readResults(app, id);
+        const boarded = (await readBoardedOpenings(app, id)).length;
+        if (boarded === 0) return expect(read).toEqual({ state: "unopened" });
+        if (read.state !== "read") return expect.fail("no results read");
+        expect(read.openings).toBe(boarded);
+        for (const [cell, want] of e.result.cells.entries()) {
+          const got = read.results.cells[cell];
+          const signers = [
+            ...new Set(want.passing.flatMap((p) => (p.signer === null ? [] : [p.signer]))),
+          ].sort((a, b) => a - b);
+          expect(got?.counted, `cell ${cell}`).toBe(counted[cell]);
+          expect(got?.signers, `cell ${cell}`).toEqual(signers);
+          // Only a registered seat's opening is boarded: a cell no seat
+          // opened is missing, whatever the vector's unattributed or failing
+          // openings say of it.
+          if (signers.length === 0) expect(got?.code, `cell ${cell}`).toBe("tally-missing");
+          else if (want.ok) expect(got?.counts, `cell ${cell}`).toEqual(want.counts);
+          else expect(got?.code, `cell ${cell}`).toBe(want.code);
+          // Each cell is its own tier here, with the cell's counts or none.
+          expect(read.results.tiers[cell]?.counts).toEqual(got?.counts);
+        }
+        expect(read.results.ok).toBe(read.results.cells.every((c) => c.counts !== undefined));
+      });
+
+  const counting = (answer: () => CountedTally) => {
+    const calls = { n: 0 };
+    const boarding = new OpeningBoardings({
+      tally: async () => {
+        calls.n++;
+        return answer();
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+    });
+    return { boarding, calls };
+  };
+  const ONE_TIER = fixed(own, [empty, empty], 1, 5, [0, 0], [0, 0]);
+
+  test("says nothing is opened before an opening is boarded, without asking for the tally", async () => {
+    const id = await newElection(app);
+    const { boarding, calls } = counting(() => ONE_TIER);
+    expect(await boarding.readResults(app, id)).toEqual({ state: "unopened" });
+    expect(calls.n).toBe(0);
+  });
+
+  test("gives a tier counts only once every cell of it is opened", async () => {
+    const id = await newElection(app);
+    const { boarding, calls } = counting(() => ONE_TIER);
+    await boarding.submitOpening(app, id, openingOf(0, 1), NOW);
+    const first = await boarding.readResults(app, id);
+    if (first.state !== "read") return expect.fail("no results read");
+    expect(first.results).toMatchObject({
+      ok: false,
+      failure: { cell: 1, code: "tally-missing" },
+      cells: [
+        { cell: 0, tier: 0, counted: 0, counts: ["0", "0", "0"], signers: [1] },
+        { cell: 1, tier: 0, counted: 0, code: "tally-missing", signers: [] },
+      ],
+      tiers: [{ tier: 0, counted: 0 }],
+    });
+    expect(first.results.tiers[0]?.counts).toBeUndefined();
+    await boarding.submitOpening(app, id, openingOf(1, 2), NOW);
+    const second = await boarding.readResults(app, id);
+    if (second.state !== "read") return expect.fail("no results read");
+    expect(second.openings).toBe(2);
+    expect(second.results.ok).toBe(true);
+    expect(second.results.failure).toBeUndefined();
+    expect(second.results.tiers).toEqual([{ tier: 0, counted: 0, counts: ["0", "0", "0"] }]);
+    // Kept until another opening is boarded: a repeat checks none again.
+    expect(await boarding.readResults(app, id)).toBe(second);
+    expect(calls.n).toBe(1);
+  });
+
+  test(
+    "reads, after any run of boarded openings, counts exactly for the cells and tiers they open",
+    { timeout: 300_000 },
+    async () => {
+      // Three cells, the first two one tier and the last another.
+      const tally = fixed(own, [empty, empty, empty], 1, 5, [0, 0, 0], [0, 0, 1]);
+      const seat = fc.record({ cell: fc.integer({ min: 0, max: 2 }), seat: fc.constantFrom(1, 2) });
+      await fc.assert(
+        fc.asyncProperty(fc.array(seat, { minLength: 1, maxLength: 8 }), async (sent) => {
+          const id = await newElection(app);
+          const boarding = boardings(tally);
+          const opened = new Map<number, Set<number>>();
+          for (const o of sent) {
+            await boarding.submitOpening(app, id, openingOf(o.cell, o.seat), NOW);
+            opened.set(o.cell, (opened.get(o.cell) ?? new Set()).add(o.seat));
+            // Read after each, so a kept read is never one opening behind.
+            const read = await boarding.readResults(app, id);
+            if (read.state !== "read") return expect.fail("no results read");
+            expect(read.openings).toBe([...opened.values()].reduce((n, x) => n + x.size, 0));
+            for (const [cell, got] of read.results.cells.entries()) {
+              const seats = [...(opened.get(cell) ?? [])].sort((a, b) => a - b);
+              expect(got.signers).toEqual(seats);
+              expect(got.counts).toEqual(seats.length > 0 ? ["0", "0", "0"] : undefined);
+            }
+            const tiers = read.results.tiers.map((t) => t.counts !== undefined);
+            expect(tiers).toEqual([opened.has(0) && opened.has(1), opened.has(2)]);
+            expect(read.results.ok).toBe(opened.size === 3);
+          }
+        }),
+        { numRuns: Math.min(Number(process.env["FC_NUM_RUNS"] ?? 100), 50) },
+      );
+    },
+  );
+
+  test("sums a tier's cells as the vector opens them", async () => {
+    const e = vectors.elections.find((x) => x.id === "signed");
+    if (e === undefined) return expect.fail("no signed election");
+    const id = await newElection(app);
+    const counted = e.cells.map((c) => c.length);
+    const tally = fixed(vectorElection, aggregatesOf(e), 1, 5, counted, [0, 0]);
+    const boarding = boardings(tally);
+    if (tally.state === "fixed") await warm(boarding, app, id, tally);
+    for (const opening of e.openings) await boarding.submitOpening(app, id, hex(opening), NOW);
+    const read = await boarding.readResults(app, id);
+    if (read.state !== "read") return expect.fail("no results read");
+    // Summed here from the vector's own per-cell counts.
+    const sum = e.result.cells
+      .map((c) => (c.counts ?? []).map(BigInt))
+      .reduce((a, b) => a.map((x, i) => x + (b[i] ?? 0n)))
+      .map(String);
+    expect(read.results.tiers).toEqual([
+      { tier: 0, counted: counted.reduce((a, b) => a + b), counts: sum },
+    ]);
+  });
+
+  test("computes a tally the board path doesn't keep no more than once per readEveryMs", async () => {
+    const ids = [await newElection(app), await newElection(app)];
+    for (const id of ids) await boardings(ONE_TIER).submitOpening(app, id, openingOf(0, 1), NOW);
+    let ms = 0;
+    let calls = 0;
+    const reads = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        return ONE_TIER;
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+      cacheSize: 1,
+      readEveryMs: 1_000,
+      nowMs: () => ms,
+    });
+    const [a, b] = ids as [Uint8Array, Uint8Array];
+    expect(await reads.readResults(app, a)).toMatchObject({ state: "read" });
+    ms = 999;
+    expect(await failsWith(reads.readResults(app, b))).toBe("not-ready");
+    expect(calls).toBe(1);
+    ms = 1_000;
+    expect(await reads.readResults(app, b)).toMatchObject({ state: "read" });
+    // One election kept: reading the other again waits for the budget too.
+    ms = 1_500;
+    expect(await failsWith(reads.readResults(app, a))).toBe("not-ready");
+    expect(calls).toBe(2);
+    // A seat's opening still starts one, whatever reads have spent.
+    expect(await reads.submitOpening(app, a, openingOf(0, 2), NOW)).toMatchObject({ index: 1n });
+    expect(calls).toBe(3);
+  });
+
+  test("checks the same openings once for reads sent at once", async () => {
+    const id = await newElection(app);
+    await boardings(ONE_TIER).submitOpening(app, id, openingOf(0, 1), NOW);
+    const { boarding, calls } = counting(() => ONE_TIER);
+    const reads = await Promise.all([0, 1, 2, 3, 4].map(() => boarding.readResults(app, id)));
+    expect(calls.n).toBe(1);
+    for (const r of reads) expect(r).toBe(reads[0]);
+  });
+
+  test("refuses where the counted tally waits or is refused, and an election it boards nothing of", async () => {
+    const id = await newElection(app);
+    await boardings(OWN).submitOpening(app, id, openingOf(0, 1), NOW);
+    let answer: CountedTally = { state: "waiting" };
+    const { boarding } = counting(() => answer);
+    expect(await failsWith(boarding.readResults(app, id))).toBe("not-ready");
+    const refused = counting(() => (answer = { state: "refused", reason: "a test's" }));
+    expect(await failsWith(refused.boarding.readResults(app, id))).toBe("not-open");
+    const none = new OpeningBoardings({
+      tally: async () => OWN,
+      target: async () => undefined,
+      clock: CLOCK,
+    });
+    expect(await failsWith(none.readResults(app, id))).toBe("not-open");
+    const unknown = new OpeningBoardings({
+      tally: async () => OWN,
+      target: async () => {
+        throw new OpeningError("unknown-election");
+      },
+      clock: CLOCK,
+    });
+    expect(await failsWith(unknown.readResults(app, new Uint8Array(32)))).toBe("unknown-election");
+    await expect(boarding.readResults(app, new Uint8Array(31))).rejects.toThrow(TypeError);
+  });
+});
+
 describe("appendEntry's opening key", () => {
   const opening = (n: number) => Uint8Array.of(0x00, 0x06, n);
 
@@ -824,6 +1059,8 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
       state: "fixed",
       election: want.election,
       aggregates: want.aggregates,
+      counted: want.counted,
+      tiers: want.tiers,
       pinned: want.pinned,
       lastSegment: sS,
     });

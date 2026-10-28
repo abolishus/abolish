@@ -10,12 +10,13 @@ import { LanguageSwitch } from "./language-switch.tsx";
 
 type Key = keyof Messages;
 
-// Only routes this server has. The mockups' Verify, Board and Trustees join
-// as their pages land (docs/status/P2-19.md).
+// Only routes this server has. The mockups' Board and Trustees join as their
+// pages land (docs/status/P2-19.md); a poll's board is under its own page.
 const NAV = [
   { href: "/discover", label: "navDiscover" },
   { href: "/polls", label: "navPolls" },
   { href: "/how-it-works", label: "navHowItWorks" },
+  { href: "/verify", label: "navVerify" },
   { href: "/moderation", label: "navModeration" },
 ] as const satisfies readonly { href: string; label: Key }[];
 

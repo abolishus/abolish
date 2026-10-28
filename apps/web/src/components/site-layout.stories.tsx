@@ -19,16 +19,16 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     "/discover",
   );
-  // A phone's header leaves out the two links that don't fit; the footer
-  // lists all four at every width.
+  // A phone's header leaves out the three links that don't fit; the footer
+  // lists all five at every width.
   const wide = canvasElement.ownerDocument.documentElement.clientWidth >= 768;
-  await expect(within(nav).queryAllByRole("link")).toHaveLength(wide ? 4 : 2);
+  await expect(within(nav).queryAllByRole("link")).toHaveLength(wide ? 5 : 2);
   const footer = canvas.getByRole("navigation", { name: "The record" });
   await expect(within(footer).getByRole("link", { name: "Moderation log" })).toHaveAttribute(
     "href",
     "/moderation",
   );
-  await expect(within(footer).getAllByRole("link")).toHaveLength(4);
+  await expect(within(footer).getAllByRole("link")).toHaveLength(5);
   await expect(canvas.getByRole("main")).toBeVisible();
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
     "There is no page at this address",

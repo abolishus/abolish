@@ -21,6 +21,7 @@ export const PAGES = [
   "/account/polls/:id/setup",
   "/account/verify",
   "/how-it-works",
+  "/verify",
   "other",
 ] as const;
 
@@ -31,6 +32,7 @@ export function pageOf(pathname: string): Page {
   if (pathname === "/" || pathname === "/polls" || pathname === "/moderation") return pathname;
   if (pathname === "/account" || pathname === "/account/verify" || pathname === "/how-it-works")
     return pathname;
+  if (pathname === "/verify") return pathname;
   // Its order and page are in the query, never kept.
   if (pathname === "/discover") return pathname;
   // Any single segment: a malformed ID is still a poll page's 404, and the

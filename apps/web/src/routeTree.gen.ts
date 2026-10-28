@@ -16,6 +16,7 @@ import { Route as HowItWorksRouteImport } from "./routes/how-it-works.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as OfflineRouteImport } from "./routes/offline.tsx";
 import { Route as SwDotjsRouteImport } from "./routes/sw[.]js.ts";
+import { Route as VerifyRouteImport } from "./routes/verify.tsx";
 import { Route as AccountVerifyRouteImport } from "./routes/account_.verify.tsx";
 import { Route as ByHandleRouteImport } from "./routes/by.$handle.tsx";
 import { Route as PCodeRouteImport } from "./routes/p.$code.tsx";
@@ -61,6 +62,11 @@ const OfflineRoute = OfflineRouteImport.update({
 const SwDotjsRoute = SwDotjsRouteImport.update({
   id: "/sw.js",
   path: "/sw.js",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const VerifyRoute = VerifyRouteImport.update({
+  id: "/verify",
+  path: "/verify",
   getParentRoute: () => rootRouteImport,
 } as any);
 const AccountVerifyRoute = AccountVerifyRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/verify": typeof VerifyRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/verify": typeof VerifyRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
@@ -168,6 +176,7 @@ export interface FileRoutesById {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/verify": typeof VerifyRoute;
   "/account_/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
   "/p/$code": typeof PCodeRoute;
@@ -190,6 +199,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/verify"
     | "/account/verify"
     | "/by/$handle"
     | "/p/$code"
@@ -210,6 +220,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/verify"
     | "/account/verify"
     | "/by/$handle"
     | "/p/$code"
@@ -230,6 +241,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/verify"
     | "/account_/verify"
     | "/by/$handle"
     | "/p/$code"
@@ -251,6 +263,7 @@ export interface RootRouteChildren {
   ModerationRoute: typeof ModerationRoute;
   OfflineRoute: typeof OfflineRoute;
   SwDotjsRoute: typeof SwDotjsRoute;
+  VerifyRoute: typeof VerifyRoute;
   AccountVerifyRoute: typeof AccountVerifyRoute;
   ByHandleRoute: typeof ByHandleRoute;
   PCodeRoute: typeof PCodeRoute;
@@ -312,6 +325,13 @@ declare module "@tanstack/react-router" {
       path: "/sw.js";
       fullPath: "/sw.js";
       preLoaderRoute: typeof SwDotjsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/verify": {
+      id: "/verify";
+      path: "/verify";
+      fullPath: "/verify";
+      preLoaderRoute: typeof VerifyRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/account_/verify": {
@@ -414,6 +434,7 @@ const rootRouteChildren: RootRouteChildren = {
   ModerationRoute: ModerationRoute,
   OfflineRoute: OfflineRoute,
   SwDotjsRoute: SwDotjsRoute,
+  VerifyRoute: VerifyRoute,
   AccountVerifyRoute: AccountVerifyRoute,
   ByHandleRoute: ByHandleRoute,
   PCodeRoute: PCodeRoute,

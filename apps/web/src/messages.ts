@@ -207,6 +207,98 @@ const enUS = {
   howWeakTurnoutLimit: "Every result carries its tier and how many could vote.",
   howSource:
     "The protocol, its threat model (with every entry named above) and the source code are published in the open at github.com/abolishus/abolish.",
+  navVerify: "Verify it yourself",
+  recountEyebrow: "Verify it yourself",
+  recountTitle: "Count a poll again without us",
+  recountLede:
+    "The verifier is an open-source program anyone can run. It reads a poll's board, its anchors on Ethereum and its proofs, checks every one, and gives the same answer whoever runs it. It never asks our servers anything.",
+  recountNotYetTitle: "Not yet for the polls on this site",
+  recountNotYetBody:
+    "Our servers don't anchor boards to Ethereum yet, so the verifier finds no poll of ours to check. Until the anchor runs, each poll's board page checks what it can of our server's word, and a test election on a local chain is checked by the verifier on every change to our code.",
+  recountRunMark: "Run it",
+  recountRunTitle: "Four commands, one verdict per poll",
+  recountRunLede:
+    "You need Git, Node.js and Vite+, the toolchain the code is built with. The verifier isn't published as a program to install yet, so it runs from a copy of the source.",
+  recountStep1Title: "Get the source",
+  recountStep1Body: "Copy the code and install what it depends on, at the exact versions it pins.",
+  recountStep2Title: "Copy the boards",
+  recountStep2Body:
+    "The community node reads every checkpoint anchored on Ethereum and copies the board files it names from IPFS, checking each block against its address.",
+  recountStep3Title: "Verify every poll",
+  recountStep3Body:
+    "For each poll the anchors name, the node gathers its inputs from both chains and the copied boards, runs the verifier and writes the inputs and the report side by side.",
+  recountStep4Title: "Check one again on its own",
+  recountStep4Body:
+    "The verifier alone, on the inputs the node gathered, runs the same checks. It prints a report and a summary, and its exit code is the verdict.",
+  recountValueL1: "An Ethereum node you trust to say which block is final. Your own is best.",
+  recountValueL2:
+    "A node of the network polls are registered on, trusted for the records it holds.",
+  recountValueGateway: "Any IPFS gateway, or the node's own. Every block it sends is checked.",
+  recountValueAnchor: "The board anchor's address, as a release of the code pins it.",
+  recountValueRegistry: "The election registry's address, as a release of the code pins it.",
+  recountValuePoll: "The poll's ID, in lower-case hex.",
+  recountExitCaption: "What the exit code means",
+  recountExitCode: "Code",
+  recountExitVerdict: "Verdict",
+  recountExit0: "Verified",
+  recountExit0Means: "Every check passed.",
+  recountExit20: "Failed",
+  recountExit20Means: "A check failed. The report says which, and why.",
+  recountExit21: "Unverifiable",
+  recountExit21Means:
+    "Something couldn't be checked, such as a missing copy or an input nothing proves. Never counted as a pass.",
+  recountExit22: "Rejected",
+  recountExit22Means: "The inputs were malformed, so there is no report.",
+  recountExit64: "Usage",
+  recountExit64Means: "The command wasn't one it takes, or it was asked for its help.",
+  recountExitOther:
+    "Any other code is a failure of the verifier itself and says nothing about the poll.",
+  recountChecksMark: "What it checks",
+  recountChecksTitle: "{count} groups of checks, from the code to the count",
+  recountChecksLede:
+    "Each is set out in the verifier's specification, which is enough to write a verifier of your own in any language. A check it can't make is reported, never passed.",
+  recountCheck1Title: "The ballot app and the contracts",
+  recountCheck1Body:
+    "The ballot app a site serves is a signed release, and every contract the poll uses is the release's build of reviewed code.",
+  recountCheck2Title: "The poll's definition",
+  recountCheck2Body:
+    "Its questions, answers, window, electorate and trustees are the ones registered before it opened, and nothing about them changed since.",
+  recountCheck3Title: "The key ceremony",
+  recountCheck3Body:
+    "The trustees' keys were made in public, every proof in the record of it holds, and enough seats took part.",
+  recountCheck4Title: "The board, its anchors and the archive",
+  recountCheck4Body:
+    "Every entry sits in its place in one unbroken chain, every checkpoint matches its anchor on Ethereum, and the archive holds what the anchors name.",
+  recountCheck5Title: "The ballots",
+  recountCheck5Body:
+    "Each ballot proves its voter is in the electorate without saying who, holds one valid set of answers and arrived inside the poll's window.",
+  recountCheck6Title: "Re-voting and checked ballots",
+  recountCheck6Body:
+    "Only each voter's latest ballot can count, and no ballot opened to check the app is ever counted.",
+  recountCheck7Title: "The count",
+  recountCheck7Body:
+    "The totals are worked out again from the counted ballots alone, and every published opening of a total must match them.",
+  recountCheck8Title: "The report",
+  recountCheck8Body:
+    "Results come per tier, never added across tiers, with small counts flagged and everything it couldn't check listed.",
+  recountTrustMark: "What it trusts",
+  recountTrustTitle: "What it takes on trust, and what it doesn't",
+  recountTrustLede:
+    "A result is only as good as the inputs it was checked against, so the report names every input nothing proved, and the verdict falls short of verified while there is one.",
+  recountTrustServers: "Our servers",
+  recountTrustServersMeans:
+    "Nothing. The verifier never asks our servers or domains for anything, except, when you ask it to check a served ballot app, the app itself, which it then judges byte by byte.",
+  recountTrustL1: "Your Ethereum node",
+  recountTrustL1Means:
+    "Which block is final. The anchors and everything else read from Ethereum are proven against that block.",
+  recountTrustL2: "Your node of the poll's network",
+  recountTrustL2Means:
+    "The records it holds up to its final block, such as the poll's definition. What a proof doesn't cover is named in the report.",
+  recountTrustGateways: "IPFS gateways",
+  recountTrustGatewaysMeans:
+    "Nothing about the board: every block is checked against its address, so a gateway can only fail to answer. It does see which blocks, and so which poll, you read.",
+  recountSource:
+    "The verifier's source is in packages/verifier and its specification in docs/spec/verifier.md, both published at github.com/abolishus/abolish.",
   dgTitle: "{section}: step {step} of {total}",
   dgFake: "To fake one",
   dgFake0: "another passkey",

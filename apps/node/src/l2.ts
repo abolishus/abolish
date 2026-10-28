@@ -17,6 +17,7 @@ import {
   type ContractEvent,
   type ContractEventRecord,
   type ContractEventVersion,
+  type ElectionDefinitionV7Record,
   type EventContracts,
   type L1Origin,
   type Panel,
@@ -211,7 +212,8 @@ async function readLogs(
 export interface Registration {
   /** The definition's canonical encoding, as `DefinitionRegistered` carries it. */
   readonly definition: Uint8Array;
-  readonly decoded: AnyElectionDefinitionRecord;
+  /** Never version 7 under `READ_VERSION` 12, which fails its registration. */
+  readonly decoded: AnyElectionDefinitionRecord | ElectionDefinitionV7Record;
   /** The L1 origin of the creation, which fixes the election's first segment. */
   readonly created: L1Origin;
 }

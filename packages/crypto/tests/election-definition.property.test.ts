@@ -578,13 +578,19 @@ describe("2.3's profile combination", () => {
   // The verifier reads version 9 whole since P2-16 part 5d-3b, versions 10
   // and 11 since P2-17 part 4b-1 and version 12 since P2-16 part 5e-4, so
   // 2.3 judges a profile pinning any of them ([[contracts]], Contract-event
-  // record, Event tables (versions 9 to 12); T-36, T-37).
-  test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
+  // record, Event tables (versions 9 to 12); T-36, T-37). The codec reads
+  // version 13 since P2-17 part 5b, and 2.3 leaves it unverifiable until the
+  // verifier reads it (part 5c).
+  test("the contract-event versions 2.3 knows are the ones its codec reads, but 13", () => {
     const ascending = (a: number, b: number) => a - b;
     expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
-      Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
+      Object.keys(CONTRACT_EVENT.versions)
+        .map(Number)
+        .filter((v) => v !== 13)
+        .sort(ascending),
     );
     expect(profileCombinationRule(pinning(5, 1, 1, 12))).toBeUndefined();
+    expect(profileCombinationRule(pinning(5, 1, 1, 13))).toBe("unsupported-version");
   });
 
   test("a contract-event type pinned twice or not at all is refused, never a fit", () => {

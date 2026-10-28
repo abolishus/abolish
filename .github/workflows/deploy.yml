@@ -357,31 +357,38 @@ jobs:
           subject-digest: ${{ env.DIGEST }}
           push-to-registry: true
 
-  # A newer push to main supersedes this run: skip the staging job (shown as
-  # skipped, not failed) instead of deploying an older commit. The check in
-  # the staging job stays as the fail-safe for a push landing in between.
+  # Runs deploy one at a time in push order (concurrency, above), so a first
+  # attempt deploys its own commit even when main has moved on: the newer
+  # commit's run is queued behind this one and deploys after it. Skipping
+  # instead starved staging whenever merges came faster than a run takes.
+  # A re-run is different: it could point staging back at an older digest
+  # with nobody meaning to roll back, so a re-run deploys only main's head.
   current:
-    name: still main's head
+    name: may deploy
     needs: publish
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
     outputs:
-      is_head: ${{ steps.head.outputs.is_head }}
+      deploy: ${{ steps.head.outputs.deploy }}
     steps:
       - id: head
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          ATTEMPT: ${{ github.run_attempt }}
         run: |
           head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
           if [ "$head" = "$SHA" ]; then
-            echo "is_head=true" >>"$GITHUB_OUTPUT"
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+          elif [ "$ATTEMPT" = 1 ]; then
+            echo "deploy=true" >>"$GITHUB_OUTPUT"
+            echo "::notice::main has moved on to $head; deploying $SHA anyway, and $head's run deploys after it"
           else
-            echo "is_head=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::$SHA was superseded by $head on main; skipping the staging deploy"
+            echo "deploy=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::a re-run of $SHA, which is no longer main's head ($head); not deploying an older commit"
           fi
 
   staging:
@@ -396,7 +403,7 @@ jobs:
         publish,
         current,
       ]
-    if: needs.current.outputs.is_head == 'true'
+    if: needs.current.outputs.deploy == 'true'
     runs-on: ubuntu-24.04
     # Up to thirteen Railway deployments, one after another.
     timeout-minutes: 60
@@ -414,18 +421,20 @@ jobs:
       WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-worker@${{ needs.image-worker-a.outputs.digest }}
       SEAT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-trustee-node@${{ needs.image-trustee-node-a.outputs.digest }}
     steps:
-      # A re-run of an older run would point staging back at an older digest
-      # with nobody meaning to roll back. Only main's head deploys; a rollback
-      # is a redeploy of an earlier deployment in Railway (docs/runbooks/railway.md).
-      - name: This commit is still main's head
+      # The fail-safe for the rule in `current`: a re-run deploys only main's
+      # head, since it could otherwise point staging back at an older digest
+      # with nobody meaning to roll back; a rollback is a redeploy of an earlier
+      # deployment in Railway (docs/runbooks/railway.md).
+      - name: A re-run deploys only main's head
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          ATTEMPT: ${{ github.run_attempt }}
         run: |
           head="$(gh api "repos/$REPO/commits/main" --jq .sha)"
-          if [ "$head" != "$SHA" ]; then
-            echo "::error::$SHA is no longer main's head ($head); not deploying an older commit"
+          if [ "$ATTEMPT" != 1 ] && [ "$head" != "$SHA" ]; then
+            echo "::error::a re-run of $SHA, which is no longer main's head ($head); not deploying an older commit"
             exit 1
           fi
       # Before anything reads the image: the package may still be private.

@@ -50,7 +50,7 @@ const RUN_VALUES = [
   { name: "$POLL_ID", text: "recountValuePoll" },
 ] as const satisfies readonly { name: string; text: Key }[];
 
-/** The verifier's exit codes (docs/spec/verifier.md, Command line); a test ties them to `EXIT_CODES`. */
+/** The verifier's exit codes (docs/spec/verifier.md, Command line); a test ties them to its table. */
 export const EXIT_ROWS = [
   { code: 0, verdict: "recountExit0", meaning: "recountExit0Means" },
   { code: 20, verdict: "recountExit20", meaning: "recountExit20Means" },

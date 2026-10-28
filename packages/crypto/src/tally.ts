@@ -104,7 +104,8 @@ function mul(p: Element, s: bigint): Element {
   return e === 0n ? IDENTITY : p.multiply(e);
 }
 
-function checkRules(rules: TallyRules): void {
+/** Throws unless `rules` are well formed. Not exported from the package: its callers' own checks. */
+export function checkRules(rules: TallyRules): void {
   const { optionCount: m, threshold: k, panelSize: n, questions, panel } = rules;
   if (![m, k, n].every((x) => Number.isSafeInteger(x)))
     throw new TypeError("rules: expected integers");

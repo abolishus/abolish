@@ -18,6 +18,7 @@ import {
   aggregateCell,
   type AnchorClock,
   type CellAggregate,
+  checkCountedTally,
   countedExtent,
   DecodeError,
   decodeBoardEntry,
@@ -30,7 +31,18 @@ import {
 } from "@abolishus/crypto";
 import { type ElectionAdmissionCode, readElection } from "./admission.ts";
 import { ALL_ROWS, ballotChecks, type BallotOutcome, type BallotTally } from "./ballots.ts";
-import { type CountedOutcome, deliverSelected } from "./counted.ts";
+import {
+  type CellReport,
+  cellTiers,
+  type CountedOutcome,
+  countsOf,
+  deliverSelected,
+  type QuestionReport,
+  questionReports,
+  signersOf,
+  type TierReport,
+  tierResults,
+} from "./counted.ts";
 import { isPanelled, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
@@ -123,6 +135,10 @@ export type CountedTallyResult =
       readonly election: TallyElection;
       /** Each cell's aggregate, in partition order. */
       readonly aggregates: readonly CellAggregate[];
+      /** Each cell's number of counted ballots, in partition order. */
+      readonly counted: readonly number[];
+      /** Each cell's tier, in partition order (`cellTiers`). */
+      readonly tiers: readonly number[];
       readonly pinned: WholeOpeningVersion;
     }
   | Exclude<CountedSetResult, { readonly ok: true }>;
@@ -158,7 +174,84 @@ export function countedTally(inputs: CountedExtentInputs): CountedTallyResult {
         cell.map((b) => b.vss),
       ),
     ),
+    counted: counted.cells.map((cell) => cell.length),
+    tiers: cellTiers(counted.record),
     pinned,
+  };
+}
+
+/** A decided counted tally, as `countedTally` gives it. */
+export type FixedCountedTally = Extract<CountedTallyResult, { readonly ok: true }>;
+
+/**
+ * The results a counted tally's openings give (docs/spec/verifier.md,
+ * Results from the counted tally): 7.2's verdict with each cell's and each
+ * tier's report, as the verifier gives them over the sealed board.
+ */
+export interface CountedResults {
+  /** True only if every cell passes 7.2: the election's result is then every cell's counts. */
+  readonly ok: boolean;
+  /** The first failing cell, in cell order, while `ok` is false. */
+  readonly failure?: {
+    readonly cell: number;
+    readonly code: NonNullable<CellReport["code"]>;
+    readonly option?: number;
+    readonly question?: number;
+  };
+  readonly cells: readonly CellReport[];
+  readonly tiers: readonly TierReport[];
+  /** Under definition versions 5 to 7, each question's limits and method. */
+  readonly questions?: readonly QuestionReport[];
+}
+
+/**
+ * The results of a decided counted tally, for a party that holds it summed,
+ * as the board operator does once it judges openings against it: crypto's
+ * opening checks (`checkCountedTally`) over each cell's aggregate and count,
+ * with `payloads` every tally-opening payload on the board in board order,
+ * and the reports 7.2 gives from them. They are the verifier's own
+ * computation over the same counted set, so a result shown from them is the
+ * one a recount of the sealed board gives (T-29, T-16, T-34). A cell no
+ * opening has opened yet is `tally-missing`, as on a sealed board; a tier
+ * has counts only where every one of its cells passes, and no figure ever
+ * joins two tiers or two questions (tally.md, Coarser totals; ADR 0026).
+ */
+export function countedResults(
+  tally: FixedCountedTally,
+  payloads: readonly Uint8Array[],
+): CountedResults {
+  const { election, aggregates, counted, tiers, pinned } = tally;
+  if (counted.length !== aggregates.length || tiers.length !== aggregates.length)
+    throw new RangeError("countedResults: one count and one tier per cell");
+  const checked = checkCountedTally(
+    election,
+    aggregates.map((aggregate, cell) => ({ aggregate, counted: counted[cell] as number })),
+    payloads,
+    pinned,
+  );
+  const { rules } = election;
+  const cells: CellReport[] = checked.cells.map((c, cell) => {
+    const base = {
+      cell,
+      tier: tiers[cell] as number,
+      counted: counted[cell] as number,
+    };
+    const signers = signersOf(c.passing);
+    if (c.ok) return { ...base, ...countsOf(rules, c.counts), signers };
+    return {
+      ...base,
+      code: c.code,
+      ...(c.option !== undefined && { option: c.option }),
+      ...(c.question !== undefined && { question: c.question }),
+      signers,
+    };
+  });
+  return {
+    ok: checked.ok,
+    ...(checked.failure !== undefined && { failure: checked.failure }),
+    cells,
+    tiers: tierResults(tiers, rules, cells),
+    ...questionReports(rules),
   };
 }
 

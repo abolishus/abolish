@@ -35,6 +35,7 @@ import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import {
   aggregateCell,
   type CellAggregate,
+  checkRules,
   firstQuestionOutside,
   type TallyRules,
 } from "./tally.ts";
@@ -373,10 +374,9 @@ export function differ(a: readonly Share[], b: readonly Share[]): boolean {
 
 function checkCell(
   election: TallyElection,
-  ballots: readonly CommittedVote["vss"][],
+  { aggregate, counted }: CountedCell,
   openings: readonly SortedTallyOpening[],
 ): CellCheck {
-  const aggregate = aggregateCell(election.rules, ballots);
   const expected = aggregateHash(aggregate);
   const m = election.rules.optionCount;
   const passing: (OpeningReport & { readonly opening: readonly Share[] })[] = [];
@@ -413,13 +413,13 @@ function checkCell(
   if (passing.some((p) => differ(p.opening, first.opening)))
     return { ok: false, code: "tally-conflict", ...reports };
   // 4. tally-range on the passing opening: no count above the cell's ballots.
-  const bound = BigInt(ballots.length);
+  const bound = BigInt(counted);
   const over = first.opening.findIndex((s) => s.v > bound);
   if (over !== -1) return { ok: false, code: "tally-range", option: over, ...reports };
   // 5. tally-question-range under definition version 5: every question's
   // total within its limits, since each question's result is its slice.
   const counts = first.opening.map((s) => s.v);
-  const question = firstQuestionOutside(election.rules, ballots.length, counts);
+  const question = firstQuestionOutside(election.rules, counted, counts);
   if (question !== null) return { ok: false, code: "tally-question-range", question, ...reports };
   return { ok: true, counts, ...reports };
 }
@@ -491,6 +491,67 @@ export function checkTally(
     throw new RangeError("checkTally: definitionHash must be 32 bytes");
   if (cells.length < 1 || cells.length > MAX_CELLS)
     throw new RangeError("checkTally: from 1 to 256 cells");
+  return checkCells(
+    election,
+    cells.map((ballots) => ({
+      aggregate: aggregateCell(election.rules, ballots),
+      counted: ballots.length,
+    })),
+    payloads,
+    pinned,
+  );
+}
+
+/**
+ * One cell of the counted set, summed: its aggregate over the counted
+ * ballots (`aggregateCell`) and how many ballots it counts, which is all the
+ * opening checks read of them (docs/spec/tally.md, Opening checks).
+ */
+export interface CountedCell {
+  readonly aggregate: CellAggregate;
+  readonly counted: number;
+}
+
+/**
+ * `checkTally` over each cell's aggregate and count rather than its ballots,
+ * for a party that keeps the counted set summed, as the board operator does
+ * once it has judged openings against it (docs/spec/verifier.md, Results
+ * from the counted tally): the same checks in the same order, so it gives
+ * exactly what `checkTally` gives over the ballots summed into `cells`
+ * (T-29). The cells must be summed from the counted set (`aggregateCell`),
+ * never read back from storage: nothing here ties an aggregate or a count to
+ * the ballots, and an overcount loosens `tally-range`. Every aggregate must
+ * have the election's shape, one row of `k`
+ * elements per option, and every count be a whole number of ballots; a cell
+ * that doesn't is the caller's error, never an opening's failure.
+ */
+export function checkCountedTally(
+  election: TallyElection,
+  cells: readonly CountedCell[],
+  payloads: readonly Uint8Array[],
+  pinned: WholeOpeningVersion,
+): TallyCheck {
+  if (!(election.definitionHash instanceof Uint8Array) || election.definitionHash.length !== 32)
+    throw new RangeError("checkCountedTally: definitionHash must be 32 bytes");
+  if (cells.length < 1 || cells.length > MAX_CELLS)
+    throw new RangeError("checkCountedTally: from 1 to 256 cells");
+  checkRules(election.rules);
+  const { optionCount: m, threshold: k } = election.rules;
+  for (const { aggregate, counted } of cells) {
+    if (!Number.isSafeInteger(counted) || counted < 0)
+      throw new RangeError("checkCountedTally: a cell's count must be a whole number");
+    if (aggregate.length !== m || aggregate.some((row) => row.length !== k))
+      throw new RangeError("checkCountedTally: an aggregate doesn't match the election's shape");
+  }
+  return checkCells(election, cells, payloads, pinned);
+}
+
+function checkCells(
+  election: TallyElection,
+  cells: readonly CountedCell[],
+  payloads: readonly Uint8Array[],
+  pinned: WholeOpeningVersion,
+): TallyCheck {
   const byCell = cells.map(() => [] as SortedTallyOpening[]);
   const stray: OpeningReport[] = [];
   const rejected: { at: number; error: DecodeErrorCode }[] = [];
@@ -499,7 +560,7 @@ export function checkTally(
     else if (o.cell === null) stray.push({ at: o.at, signer: o.signer });
     else byCell[o.cell]?.push(o);
   }
-  const checked = cells.map((ballots, c) => checkCell(election, ballots, byCell[c] ?? []));
+  const checked = cells.map((cell, c) => checkCell(election, cell, byCell[c] ?? []));
   const at = checked.findIndex((c) => !c.ok);
   if (at === -1) return { ok: true, cells: checked, stray, rejected };
   const bad = checked[at] as Extract<CellCheck, { ok: false }>;

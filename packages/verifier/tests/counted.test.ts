@@ -54,7 +54,13 @@ import {
   splitEntries,
   verifyBundle,
 } from "../src/index.ts";
-import { type CountedBallot, countedChecks, type CountedInputs } from "../src/counted.ts";
+import {
+  cellTiers,
+  type CountedBallot,
+  countedChecks,
+  type CountedInputs,
+} from "../src/counted.ts";
+import { countedResults } from "../src/counted-set.ts";
 import { decodeDefinition, readDefinition, type VerifiedDefinition } from "../src/definition.ts";
 import { tallyChecks } from "../src/tallies.ts";
 import { run, type TestHeader, toHex } from "./headers.ts";
@@ -315,11 +321,40 @@ function election(
         l2_hash: sha256(text(`l2 ${claim}`)),
       }),
     );
+  /**
+   * `countedResults` over `ballots` summed by cell and every tally opening
+   * on the board, as the board operator reads them (docs/spec/verifier.md,
+   * Results from the counted tally).
+   */
+  const results = (ballots: readonly Cast[]) => {
+    const tiers = cellTiers(definition);
+    const byCell = tiers.map((_, cell) => ballots.filter((b) => b.cell === cell));
+    const payloads = entries
+      .map((x) => decodeBoardEntry(x, version).payload)
+      .filter((p) => p[0] === 0x00 && p[1] === 0x06);
+    return countedResults(
+      {
+        ok: true,
+        election: { definitionHash: hash, rules, registered },
+        aggregates: byCell.map((c) =>
+          aggregateCell(
+            rules,
+            c.map((b) => b.vote.vss),
+          ),
+        ),
+        counted: byCell.map((c) => c.length),
+        tiers,
+        pinned: 1,
+      },
+      payloads,
+    );
+  };
   return {
     hash,
     rules,
     entries,
     board,
+    results,
     cast,
     receipt,
     batch,
@@ -369,6 +404,13 @@ describe("an honest election", () => {
     expect(r.delivery).toEqual({ excluded: [], records: [], rejected: [] });
     // Both openings pass: 7.4 has nothing to add to them.
     expect(r.tallyBreaks).toEqual(new Map());
+  });
+
+  test("the operator's results from the counted tally are 7.2's cells and tiers", () => {
+    const results = e.results([a, b, c]);
+    expect(results.ok).toBe(true);
+    expect(results.cells).toEqual(r.cells);
+    expect(results.tiers).toEqual(r.tiers);
   });
 
   test("a statement after the last cell's first passing opening is destroyed", () => {
@@ -629,6 +671,9 @@ describe("7.2 and 7.4 against the counted set", () => {
       { cell: 0, tier: 0, counted: 0, counts: ["0", "0", "0"], signers: [1] },
       { cell: 1, tier: 2, counted: 0, code: "tally-missing", signers: [] },
     ]);
+    const results = e.results([]);
+    expect(results.failure).toEqual({ cell: 1, code: "tally-missing" });
+    expect([results.cells, results.tiers]).toEqual([r.cells, r.tiers]);
   });
 
   test("under definition version 3 a ballot counts in the cell it names, numbered across the tiers", () => {
@@ -647,6 +692,8 @@ describe("7.2 and 7.4 against the counted set", () => {
       [0, ["0", "0", "0"]],
       [1, ["0", "0", "1"]],
     ]);
+    const results = e.results([a, b]);
+    expect([results.ok, results.cells, results.tiers]).toEqual([true, r.cells, r.tiers]);
   });
 });
 

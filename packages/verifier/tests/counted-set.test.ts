@@ -22,6 +22,7 @@ import {
   verifyBundle,
 } from "../src/index.ts";
 import { readElection } from "../src/admission.ts";
+import { cellTiers } from "../src/counted.ts";
 import { wholeOpeningPin } from "../src/counted-set.ts";
 import { decodeDefinition } from "../src/definition.ts";
 import { run, type TestHeader, toHex } from "./headers.ts";
@@ -263,6 +264,8 @@ describe("the counted tally from the counted extent", { timeout: WHOLE_BOARDS },
     const rules = tallyRules(record);
     // Every ballot is rejected, so each cell sums nothing.
     expect(result.aggregates).toEqual(set.cells.map(() => aggregateCell(rules, [])));
+    expect(result.counted).toEqual(set.cells.map((c) => c.length));
+    expect(result.tiers).toEqual(cellTiers(record));
     expect(result.election.definitionHash).toEqual(set.definitionHash);
     expect(result.election.rules).toEqual(rules);
     const read = readElection(inputs.definition, inputs.panel, inputs.entries);

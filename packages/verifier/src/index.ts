@@ -73,10 +73,13 @@ export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {
   type CountedExtentInputs,
+  countedResults,
+  type CountedResults,
   countedSet,
   type CountedSetResult,
   countedTally,
   type CountedTallyResult,
+  type FixedCountedTally,
 } from "./counted-set.ts";
 export { type OpeningBreak, type OpeningReport } from "./openings.ts";
 export {

@@ -97,7 +97,7 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
  * step's 4 bytes and the root's word (and, for the relayed one, its four call
  * fields' 128 bytes); version 12's `PanelPinned` is 32 bytes more than
  * version 1's, its kind's word; version 13's `DefinitionRegistered` with a
- * version-7 definition, about 115 KB at its lists' maxima. An event that
+ * version-7 definition, at most about 113 KB as framed. An event that
  * needs more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
@@ -523,7 +523,7 @@ const DEFINITION_REGISTERED_V2 = definitionRegistered(
 
 // Versions 1 and 3 to 7, each with its self-pin, as a registry that
 // registers version 7 decodes them (rule 2): version 13's row. Its bound is
-// version 2's, since a version-7 definition runs to about 115 KB.
+// version 2's, since a version-7 registration runs to about 113 KB as framed.
 const DEFINITION_REGISTERED_V13 = definitionRegistered(
   MAX_EVENT_DATA,
   decodeRegistrableElectionDefinitionV13,

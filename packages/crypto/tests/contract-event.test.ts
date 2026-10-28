@@ -19,6 +19,7 @@ import {
   type ContractRole,
   DecodeError,
   decodeContractEvent,
+  decodeElectionDefinitionV7,
   encodeContractEvent,
   EncodeError,
   type EventContracts,
@@ -112,6 +113,7 @@ const FILES: Readonly<Record<ContractEventVersion, Vectors>> = {
   10: load("contract-event-v10.json"),
   11: load("contract-event-v11.json"),
   12: load("contract-event-v12.json"),
+  13: load("contract-event-v13.json"),
 };
 const vectors = FILES[1];
 
@@ -474,6 +476,7 @@ describe.each([
   [10, "contract-event-v10.json"],
   [11, "contract-event-v11.json"],
   [12, "contract-event-v12.json"],
+  [13, "contract-event-v13.json"],
 ] as const)("contract-event version %i vectors (docs/spec/vectors/%s)", (version, file) => {
   const vectors = FILES[version];
   const contracts = contractsOf(vectors);
@@ -1569,6 +1572,99 @@ describe("contract-event version 12 against version 11", () => {
           ? expect.objectContaining({ event: "PanelPinned", kind: Number(kind) })
           : { ok: false, error: "event-data" },
       );
+    }
+  });
+});
+
+// docs/spec/vectors/contract-event-v13.json (version 13, the election
+// registry's `DefinitionRegistered` reading a version-7 definition) from
+// scripts/contract-event-v13-vectors.py, an independent generator over
+// version 12's check, each definition's decoding its own election-definition
+// file's verdict. Its records, failures, decode rejections and accumulator
+// run above; these are its relation to version 12 and to the versions before.
+const V13 = FILES[13] as Vectors & {
+  readonly underVersion12: Readonly<Record<string, string>>;
+};
+const DEFINITION_REGISTERED = "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)";
+
+// The definition's version byte, after its record type (record.md, Envelope).
+const definitionVersion = (v: VectorRecord) =>
+  hex((v.event as { definition: string }).definition)[2];
+
+describe("contract-event version 13 against version 12", () => {
+  // The event's signature is version 2's: only what its definition may be
+  // changes, so every table is version 12's (Event tables (version 13)).
+  test("its tables are version 12's, the election registry's DefinitionRegistered among them", () => {
+    expect(CONTRACT_EVENT_SIGNATURES[13]).toEqual(CONTRACT_EVENT_SIGNATURES[12]);
+    expect(CONTRACT_EVENT_SIGNATURES[13]["election-registry"]).toContain(DEFINITION_REGISTERED);
+  });
+
+  // Version 13 reads every record version 12 does alike. Version 12's file
+  // has no election-registry record, so version 2's (the registry's layouts
+  // since) are checked too: every one keeps its verdict but the version-7
+  // registration, which version 13 reads (T-53).
+  test("every version-12 vector and version-2 election-registry vector keeps its verdict, but a version-7 registration", () => {
+    const all: [VectorRecord, ContractEventVersion][] = [
+      ...[...FILES[12].records, ...FILES[12].eventFailures].map(
+        (v) => [v, 12] as [VectorRecord, ContractEventVersion],
+      ),
+      ...[...FILES[2].records, ...FILES[2].eventFailures]
+        .filter((v) => v.fields.contract === FILES[2].contracts["election-registry"])
+        .map((v) => [v, 2] as [VectorRecord, ContractEventVersion]),
+    ];
+    expect(all.length).toBeGreaterThan(50);
+    let sevens = 0;
+    for (const [v, from] of all) {
+      if (from === 2 && v.id === "event-data-definition-v7") {
+        sevens++;
+        const record = { ...recordOf(v.fields), contract: mapAddress(v.fields.contract, 2, 13) };
+        const result = checkContractEvent(record, contractsOf(V13), 13);
+        if (!result.ok) throw new Error(`${v.id}: ${result.error}`);
+        expect(result.role).toBe("election-registry");
+        expect(result.event.event === "DefinitionRegistered" && result.event.decoded.version).toBe(
+          7,
+        );
+        continue;
+      }
+      expect(verdictUnder(v, from, 13), v.id).toEqual(expected(v));
+    }
+    expect(sevens).toBe(1);
+  });
+
+  // Under version 12 a version-7 definition is no definition the event
+  // carries, so a registry that registers version 7 pins version 13 and
+  // refuses 1 to 12 (Registration, rule 2; T-53).
+  test("underVersion12 gives each version-7 registration's verdict under version 12, and the rest pass it alike", () => {
+    let sevens = 0;
+    for (const v of V13.records) {
+      const seven =
+        (v.event as { event?: string }).event === "DefinitionRegistered" &&
+        definitionVersion(v) === 7;
+      if (seven) sevens++;
+      expect(V13.underVersion12[v.id]).toBe(seven ? "event-data" : undefined);
+      expect(verdictUnder(v, 13, 12), v.id).toEqual(
+        seven ? { ok: false, error: "event-data" } : expected(v),
+      );
+    }
+    expect(sevens).toBeGreaterThanOrEqual(8);
+    expect(Object.keys(V13.underVersion12)).toHaveLength(sevens);
+  });
+
+  // The decoded copy is the definition's own decoding under its version, a
+  // fixed or rolling version 7 included, so 4.4 and the rolling checks read
+  // the bytes the registry registered (T-53).
+  test("each registration's decoded definition is its definition's, under the version it is labelled", () => {
+    const contracts = contractsOf(V13);
+    for (const v of V13.records.filter(
+      (r) => (r.event as { event?: string }).event === "DefinitionRegistered",
+    )) {
+      const result = checkContractEvent(recordOf(v.fields), contracts, 13);
+      if (!result.ok || result.event.event !== "DefinitionRegistered") throw new Error(v.id);
+      expect(result.event.decoded.version, v.id).toBe(definitionVersion(v));
+      if (result.event.decoded.version === 7)
+        expect(result.event.decoded.value).toEqual(
+          decodeElectionDefinitionV7(result.event.definition),
+        );
     }
   });
 });

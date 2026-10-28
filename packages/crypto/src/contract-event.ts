@@ -1,4 +1,4 @@
-// The contract-event record, record type 0x0008 versions 1 to 12
+// The contract-event record, record type 0x0008 versions 1 to 13
 // (docs/spec/contracts.md, Contract-event record): one log of one of our L2
 // contracts exactly as the event accumulator hashes it, and the event check
 // that ties it to the contract a definition names and to the event tables of
@@ -20,7 +20,10 @@
 // and root as well (T-50, T-71, P2-17), and version 12 replaces the trustee
 // registry's `PanelPinned` with one that logs each panel's kind, which the
 // election registry reads to refuse a civic-record poll under a panel that
-// isn't independent (T-14, T-53, P2-16).
+// isn't independent (T-14, T-53, P2-16), and version 13 reads the election
+// registry's `DefinitionRegistered` carrying a version-7 definition, which
+// every earlier version fails, so a rolling poll's own registration is
+// archived (T-53, P2-17).
 // The accumulator's storage proofs are the only
 // evidence archived with it: no transaction, receipt or header, so the
 // archive holds no bytes our contracts didn't define (T-17;
@@ -77,6 +80,8 @@ import {
   type AnyElectionDefinitionRecord,
   decodeElectionDefinitionRecord,
   decodeRegistrableElectionDefinition,
+  decodeRegistrableElectionDefinitionV13,
+  type ElectionDefinitionV7Record,
 } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { MAX_TRUSTEES, p256Key } from "./trustee.ts";
@@ -91,8 +96,9 @@ import { decodeTier1Addition, VOUCH_K, VOUCH_LENGTH } from "./vouch.ts";
  * 10's and 11's a rolling event carrying ballot version 5, that with the
  * step's 4 bytes and the root's word (and, for the relayed one, its four call
  * fields' 128 bytes); version 12's `PanelPinned` is 32 bytes more than
- * version 1's, its kind's word. An event that needs more is a new record
- * version.
+ * version 1's, its kind's word; version 13's `DefinitionRegistered` with a
+ * version-7 definition, at most about 113 KB as framed. An event that
+ * needs more is a new record version.
  */
 export const MAX_EVENT_DATA = 1 << 20;
 
@@ -109,7 +115,7 @@ const contractEventV1 = struct([
 ] as const);
 
 /**
- * Record type 0x0008, versions 1 to 12 (docs/spec/contracts.md,
+ * Record type 0x0008, versions 1 to 13 (docs/spec/contracts.md,
  * Contract-event record): one layout, with each version's own event tables.
  */
 export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
@@ -125,6 +131,7 @@ export const CONTRACT_EVENT = recordType(RECORD_TYPES.contractEvent, {
   10: contractEventV1,
   11: contractEventV1,
   12: contractEventV1,
+  13: contractEventV1,
 });
 
 const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
@@ -132,7 +139,7 @@ const SCHEMA = new RecordSchema([CONTRACT_EVENT]);
 export type ContractEventRecord = CodecValue<typeof contractEventV1>;
 
 /** The record's versions; the profile pins one for every contract's events. */
-export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+export type ContractEventVersion = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
 
 export function encodeContractEvent(
   record: ContractEventRecord,
@@ -205,8 +212,11 @@ export type ContractEvent =
       readonly l1Origin: L1Origin;
       /** The definition's canonical encoding, as the event carries it. */
       readonly definition: Uint8Array;
-      /** Version 1 only under record version 1; 1 and 3 to 6 under version 2. */
-      readonly decoded: AnyElectionDefinitionRecord;
+      /**
+       * Version 1 only under record version 1; 1 and 3 to 6 under versions 2
+       * to 12; 1 and 3 to 7 under version 13.
+       */
+      readonly decoded: AnyElectionDefinitionRecord | ElectionDefinitionV7Record;
     }
   | {
       readonly event: "PanelPinned";
@@ -467,7 +477,7 @@ const MAX_DEFINITION_V1 = 4096;
 
 function definitionRegistered(
   max: number,
-  decodeDefinition: (bytes: Uint8Array) => AnyElectionDefinitionRecord,
+  decodeDefinition: (bytes: Uint8Array) => AnyElectionDefinitionRecord | ElectionDefinitionV7Record,
 ): EventSpec {
   return {
     signature: "DefinitionRegistered(bytes32,bytes32,uint64,uint64,bytes32,bytes)",
@@ -479,7 +489,7 @@ function definitionRegistered(
       const origin = abi && l1Origin(abi.words, 0);
       const definition = abi?.tails[0];
       if (origin === undefined || definition === undefined) return "event-data";
-      let decoded: AnyElectionDefinitionRecord;
+      let decoded: AnyElectionDefinitionRecord | ElectionDefinitionV7Record;
       try {
         decoded = decodeDefinition(definition);
       } catch (e) {
@@ -509,6 +519,14 @@ const DEFINITION_REGISTERED = definitionRegistered(MAX_DEFINITION_V1, (b) => {
 const DEFINITION_REGISTERED_V2 = definitionRegistered(
   MAX_EVENT_DATA,
   decodeRegistrableElectionDefinition,
+);
+
+// Versions 1 and 3 to 7, each with its self-pin, as a registry that
+// registers version 7 decodes them (rule 2): version 13's row. Its bound is
+// version 2's, since a version-7 registration runs to about 113 KB as framed.
+const DEFINITION_REGISTERED_V13 = definitionRegistered(
+  MAX_EVENT_DATA,
+  decodeRegistrableElectionDefinitionV13,
 );
 
 /** A panel's kind as the trustee registry logs it: 1 `independent`, 2 `transitional`. */
@@ -1410,10 +1428,24 @@ const TABLES: Readonly<
     ],
     board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED, RELAYED_ROLLING_BALLOT_SUBMITTED],
   },
+  // Version 12's rows, every one unchanged but the election registry's
+  // `DefinitionRegistered`, replaced in place by the one that reads a
+  // version-7 definition as well.
+  13: {
+    "election-registry": [ELECTION_CREATED, DEFINITION_REGISTERED_V13, AUTHOR_PANEL_REGISTERED],
+    "trustee-registry": [PANEL_PINNED_V12, CEREMONY_REGISTERED_V2],
+    "group-registry": [
+      ...GROUP_EVENTS,
+      TIER1_MEMBER_ADDED,
+      SELF_PAID_GROUP_CREATED,
+      SELF_PAID_MEMBER_ADDED,
+    ],
+    board: [...BOARD_EVENTS_V9, ROLLING_BALLOT_SUBMITTED, RELAYED_ROLLING_BALLOT_SUBMITTED],
+  },
 };
 
 const ROLES = ["election-registry", "trustee-registry", "group-registry", "board"] as const;
-const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] as const;
+const VERSIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const;
 
 const hexOf = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
@@ -1452,6 +1484,7 @@ export const CONTRACT_EVENT_SIGNATURES: Readonly<
   10: signaturesOf(10),
   11: signaturesOf(11),
   12: signaturesOf(12),
+  13: signaturesOf(13),
 });
 
 function signaturesOf(v: ContractEventVersion): Readonly<Record<ContractRole, readonly string[]>> {

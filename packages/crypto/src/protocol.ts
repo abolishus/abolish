@@ -165,6 +165,26 @@ export function decodeRegistrableElectionDefinition(
   return record;
 }
 
+// The versions an election registry that registers version 7 decodes
+// (docs/spec/contracts.md, Election registry, Registration, rule 2), which
+// contract-event version 13's `DefinitionRegistered` reads.
+const REGISTRABLE_VERSIONS_V13: ReadonlySet<number> = new Set([1, 3, 4, 5, 6, 7]);
+
+/**
+ * `decodeAnyElectionDefinition` restricted to the versions an election
+ * registry that registers version 7 decodes, 1 and 3 to 7, for
+ * contract-event version 13: any other is `unknown-version`, even once this
+ * package reads it, so version 13's check of `DefinitionRegistered` never
+ * changes with a later definition version.
+ */
+export function decodeRegistrableElectionDefinitionV13(
+  bytes: Uint8Array,
+): AnyElectionDefinitionRecord | ElectionDefinitionV7Record {
+  const record = decodeAnyElectionDefinition(bytes);
+  if (!REGISTRABLE_VERSIONS_V13.has(record.version)) throw new DecodeError("unknown-version", 2);
+  return record;
+}
+
 /**
  * `decodeAnyElectionDefinition` for callers that read only version 5
  * (questions): a definition of any other version is `unknown-version` to
@@ -462,7 +482,12 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4,
 // that logs each panel's kind: a trustee registry logs one or the other,
 // never both, so it fits wherever version 11 does, and is the only one that
 // fits beside a registry that logs the kind ([[contracts]], Event tables
-// (version 12); [[P2-16]] part 5e-4).
+// (version 12); [[P2-16]] part 5e-4). Version 13, whose
+// `DefinitionRegistered` reads a version-7 definition too, isn't listed: the
+// event check reads it, but 2.3 leaves a profile pinning it unverifiable
+// until the verifier reads it, and fails a version-7 profile pinning 8 to 12
+// only from that release ([[contracts]], Event tables (version 13);
+// [[P2-17]] part 5c; T-36).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
 ]);

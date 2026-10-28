@@ -754,6 +754,68 @@ describe("reading results", () => {
     },
   );
 
+  test("sums a tier's cells as the vector opens them", async () => {
+    const e = vectors.elections.find((x) => x.id === "signed");
+    if (e === undefined) return expect.fail("no signed election");
+    const id = await newElection(app);
+    const counted = e.cells.map((c) => c.length);
+    const tally = fixed(vectorElection, aggregatesOf(e), 1, 5, counted, [0, 0]);
+    const boarding = boardings(tally);
+    if (tally.state === "fixed") await warm(boarding, app, id, tally);
+    for (const opening of e.openings) await boarding.submitOpening(app, id, hex(opening), NOW);
+    const read = await boarding.readResults(app, id);
+    if (read.state !== "read") return expect.fail("no results read");
+    // Summed here from the vector's own per-cell counts.
+    const sum = e.result.cells
+      .map((c) => (c.counts ?? []).map(BigInt))
+      .reduce((a, b) => a.map((x, i) => x + (b[i] ?? 0n)))
+      .map(String);
+    expect(read.results.tiers).toEqual([
+      { tier: 0, counted: counted.reduce((a, b) => a + b), counts: sum },
+    ]);
+  });
+
+  test("computes a tally the board path doesn't keep no more than once per readEveryMs", async () => {
+    const ids = [await newElection(app), await newElection(app)];
+    for (const id of ids) await boardings(ONE_TIER).submitOpening(app, id, openingOf(0, 1), NOW);
+    let ms = 0;
+    let calls = 0;
+    const reads = new OpeningBoardings({
+      tally: async () => {
+        calls++;
+        return ONE_TIER;
+      },
+      target: targetOf(OWN),
+      clock: CLOCK,
+      cacheSize: 1,
+      readEveryMs: 1_000,
+      nowMs: () => ms,
+    });
+    const [a, b] = ids as [Uint8Array, Uint8Array];
+    expect(await reads.readResults(app, a)).toMatchObject({ state: "read" });
+    ms = 999;
+    expect(await failsWith(reads.readResults(app, b))).toBe("not-ready");
+    expect(calls).toBe(1);
+    ms = 1_000;
+    expect(await reads.readResults(app, b)).toMatchObject({ state: "read" });
+    // One election kept: reading the other again waits for the budget too.
+    ms = 1_500;
+    expect(await failsWith(reads.readResults(app, a))).toBe("not-ready");
+    expect(calls).toBe(2);
+    // A seat's opening still starts one, whatever reads have spent.
+    expect(await reads.submitOpening(app, a, openingOf(0, 2), NOW)).toMatchObject({ index: 1n });
+    expect(calls).toBe(3);
+  });
+
+  test("checks the same openings once for reads sent at once", async () => {
+    const id = await newElection(app);
+    await boardings(ONE_TIER).submitOpening(app, id, openingOf(0, 1), NOW);
+    const { boarding, calls } = counting(() => ONE_TIER);
+    const reads = await Promise.all([0, 1, 2, 3, 4].map(() => boarding.readResults(app, id)));
+    expect(calls.n).toBe(1);
+    for (const r of reads) expect(r).toBe(reads[0]);
+  });
+
   test("refuses where the counted tally waits or is refused, and an election it boards nothing of", async () => {
     const id = await newElection(app);
     await boardings(OWN).submitOpening(app, id, openingOf(0, 1), NOW);

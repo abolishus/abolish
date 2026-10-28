@@ -363,7 +363,13 @@ export interface OpeningBoardingOptions {
   readonly waitMs?: number;
   /** How long a refusal that `lapses` is kept before the tally is asked again (default 10 min). */
   readonly lapseMs?: number;
-  /** Milliseconds, for `waitMs` and `lapseMs`; `Date.now` unless a test moves it. */
+  /**
+   * The least time between two counted-tally computations a results read
+   * starts (default 60 s): a read needs no seat, so this is all that bounds
+   * what readers cycling through elections cost (T-52).
+   */
+  readonly readEveryMs?: number;
+  /** Milliseconds, for `waitMs`, `lapseMs` and `readEveryMs`; `Date.now` unless a test moves it. */
   readonly nowMs?: () => number;
 }
 
@@ -382,7 +388,8 @@ export type PollResults =
 type Decided = Exclude<CountedTally, { readonly state: "waiting" }>;
 
 /**
- * Judges and boards tally openings. One per process: each election's counted
+ * Judges and boards tally openings, and reads the results they give
+ * (`readResults`). One per process: each election's counted
  * tally, once decided, is kept, so an opening costs its own checks, never a
  * read of the board through `C_S` and the admission of its ballots. That is
  * sound because the anchored counted extent never changes once `t_S` has
@@ -390,7 +397,8 @@ type Decided = Exclude<CountedTally, { readonly state: "waiting" }>;
  * definition, and one already on the board in the same bytes is answered
  * from it, before the tally is asked for; only an opening a registered seat
  * signed starts a computation, so no one else's bytes, nor a replay of what
- * the board shows, ever do; one election's tally is computed at a time, and
+ * the board shows, ever do (a results read starts one only within its own
+ * budget, `readEveryMs`); one election's tally is computed at a time, and
  * an opening of another meanwhile is answered `not-ready`; and a `waiting`
  * answer, or a computation that threw, is kept for `waitMs`, so openings
  * sent before the set is fixed cost one admission per election per interval
@@ -404,6 +412,8 @@ export class OpeningBoardings {
   readonly #cacheSize: number;
   readonly #waitMs: number;
   readonly #lapseMs: number;
+  readonly #readEveryMs: number;
+  #nextRead = 0;
   readonly #nowMs: () => number;
   readonly #decided = new Map<string, Decided>();
   readonly #waiting = new Map<string, number>();
@@ -419,6 +429,7 @@ export class OpeningBoardings {
     cacheSize = 256,
     waitMs = 60_000,
     lapseMs = 600_000,
+    readEveryMs = 60_000,
     nowMs = Date.now,
   }: OpeningBoardingOptions) {
     if (typeof clock.epoch !== "bigint" || clock.epoch < 0n)
@@ -429,12 +440,15 @@ export class OpeningBoardings {
       throw new RangeError("cacheSize must be at least 1");
     if (!Number.isSafeInteger(waitMs) || waitMs < 0) throw new RangeError("waitMs must be ≥ 0");
     if (!Number.isSafeInteger(lapseMs) || lapseMs < 0) throw new RangeError("lapseMs must be ≥ 0");
+    if (!Number.isSafeInteger(readEveryMs) || readEveryMs < 0)
+      throw new RangeError("readEveryMs must be ≥ 0");
     this.#tally = tally;
     this.#target = target;
     this.#clock = { epoch: clock.epoch, period: clock.period };
     this.#cacheSize = cacheSize;
     this.#waitMs = waitMs;
     this.#lapseMs = lapseMs;
+    this.#readEveryMs = readEveryMs;
     this.#nowMs = nowMs;
   }
 
@@ -480,7 +494,7 @@ export class OpeningBoardings {
       return entry;
     }
     const signed = tallyOpeningSigner(target.registered, own, target.pinned) !== null;
-    const tally = await this.#counted(client, id, signed);
+    const tally = await this.#counted(client, id, () => signed);
     if (tally.state === "waiting") throw new OpeningError("not-ready");
     if (tally.state === "refused") throw new OpeningError("not-open");
     if (now < this.#clock.epoch) throw new OpeningError("not-ready");
@@ -541,12 +555,16 @@ export class OpeningBoardings {
    * (packages/verifier's `countedResults` over the counted tally), or
    * `unopened` while none is. Throws `OpeningError` `unknown-election`,
    * `not-open` where this operator boards no opening of the election, and
-   * `not-ready` while the counted tally can't be had yet. Only a boarded
-   * opening, which the Boarding judge passed as a registered seat's, starts
-   * the tally's computation, as on the board path, so asking for an
-   * election's results before any is boarded costs two reads (T-52). Openings
-   * are only ever appended, so results are kept per election until another
-   * is boarded, and a read repeated meanwhile checks no opening again.
+   * `not-ready` while the counted tally can't be had yet. Before any opening
+   * is boarded a read costs the target (read and checked once per election)
+   * and one indexed read, and starts no computation. After, it uses the
+   * tally the board path keeps; one it doesn't keep (after a restart, or
+   * evicted) a read computes, but no more often than once per
+   * `readEveryMs`, whichever election is asked for, and never beside
+   * another computation, so readers can't keep the worker busy nor hold off
+   * the seats' openings for long (T-52). Openings are only ever appended, so
+   * results are kept per election until another is boarded, and reads of
+   * the same openings, at once or later, check them once.
    */
   async readResults(client: Sql, electionId: Uint8Array): Promise<PollResults> {
     if (!isBytes(electionId) || electionId.length !== 32)
@@ -557,11 +575,26 @@ export class OpeningBoardings {
     const boarded = await readBoardedOpenings(client, id);
     if (boarded.length === 0) return { state: "unopened" };
     const key = Buffer.from(id).toString("hex");
-    const known = this.#results.get(key);
-    if (known !== undefined && known.openings === boarded.length) return known;
-    const tally = await this.#counted(client, id, true);
+    const kept = () => {
+      const known = this.#results.get(key);
+      if (known === undefined || known.openings !== boarded.length) return undefined;
+      remember(this.#results, key, known, this.#cacheSize);
+      return known;
+    };
+    const known = kept();
+    if (known !== undefined) return known;
+    const tally = await this.#counted(client, id, () => {
+      const now = this.#nowMs();
+      if (now < this.#nextRead) return false;
+      this.#nextRead = now + this.#readEveryMs;
+      return true;
+    });
     if (tally.state === "waiting") throw new OpeningError("not-ready");
     if (tally.state === "refused") throw new OpeningError("not-open");
+    // Reads that waited on the same tally: the first to get here checked
+    // these openings, synchronously, for all of them.
+    const again = kept();
+    if (again !== undefined) return again;
     const { election, aggregates, counted, tiers, pinned } = tally;
     const read = {
       state: "read",
@@ -588,9 +621,11 @@ export class OpeningBoardings {
 
   /**
    * The election's counted tally, computed only for an opening a registered
-   * seat `signed`: any other is answered `waiting` until one has.
+   * seat signed, or for a results read within its budget: `start` says
+   * whether this one may, and is asked only when nothing else would answer.
+   * Any other is answered `waiting` until one has.
    */
-  async #counted(client: Sql, id: Uint8Array, signed: boolean): Promise<CountedTally> {
+  async #counted(client: Sql, id: Uint8Array, start: () => boolean): Promise<CountedTally> {
     const key = Buffer.from(id).toString("hex");
     const known = this.#decided.get(key);
     if (known !== undefined) {
@@ -607,7 +642,7 @@ export class OpeningBoardings {
     // another election's waits for it to end (T-52).
     const running = this.#inFlight.get(key);
     if (running !== undefined) return running;
-    if (!signed || this.#inFlight.size > 0) return { state: "waiting" };
+    if (this.#inFlight.size > 0 || !start()) return { state: "waiting" };
     const pending = this.#tally(client, id);
     this.#inFlight.set(key, pending);
     let tally;

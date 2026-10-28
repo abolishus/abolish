@@ -572,8 +572,11 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
               >
                 {q.question === "" ? t("pollFormPreviewQuestionEmpty") : q.question}
               </p>
+              {/* The ballot client sets the explanation at its options' size, so
+                  here too it is never the smallest words on the question
+                  (P2-29, creating a poll's iteration 19). */}
               {q.description === "" ? null : (
-                <p className="m-0 text-sm whitespace-pre-line wrap-anywhere">{q.description}</p>
+                <p className="m-0 text-base whitespace-pre-line wrap-anywhere">{q.description}</p>
               )}
               <p className="m-0 text-sm text-muted-foreground">
                 {q.rule === "between"
@@ -585,15 +588,31 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
               </p>
               <ul className="m-0 grid list-none gap-2 p-0">
                 {q.options.map((o) => (
-                  <li key={o.key} className="grid gap-1 border border-border px-3 py-2">
-                    <span className={cn("wrap-anywhere", o.label === "" && placeholder)}>
-                      {o.label === "" ? t("pollFormPreviewOptionEmpty") : o.label}
-                    </span>
-                    {o.description === "" ? null : (
-                      <span className="text-sm text-muted-foreground wrap-anywhere">
-                        {o.description}
+                  <li
+                    key={o.key}
+                    className="flex items-center gap-3 border border-border px-3 py-2"
+                  >
+                    {/* The ballot client's empty mark: round where an answer
+                        picks one, square where it may pick more, so the
+                        preview shows which kind of choice this is (iteration 19). */}
+                    <span
+                      aria-hidden="true"
+                      data-mark={max === 1 ? "one" : "many"}
+                      className={cn(
+                        "size-5 shrink-0 border-2 border-foreground",
+                        max === 1 && "rounded-full",
+                      )}
+                    />
+                    <span className="grid min-w-0 flex-1 gap-1">
+                      <span className={cn("wrap-anywhere", o.label === "" && placeholder)}>
+                        {o.label === "" ? t("pollFormPreviewOptionEmpty") : o.label}
                       </span>
-                    )}
+                      {o.description === "" ? null : (
+                        <span className="text-sm text-muted-foreground wrap-anywhere">
+                          {o.description}
+                        </span>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>

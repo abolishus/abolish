@@ -607,6 +607,51 @@ export const EmptiedQuestionInReview: Story = {
 };
 
 /**
+ * The preview drew a question's explanation at 14px, the smallest words on
+ * the question and smaller than its options, where the ballot client sets it
+ * at its options' size (P2-29, creating a poll's iteration 19).
+ */
+export const PreviewExplanationAtOptionsSizePhone: Story = {
+  args: { client: savedDraft(), id: ID },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const preview = within(
+      await canvas.findByRole("complementary", { name: "What people will see" }),
+    );
+    const explanation = getComputedStyle(preview.getByText("Until 9 PM."));
+    const option = getComputedStyle(preview.getByText("Monday"));
+    await expect(explanation.fontSize).toBe(option.fontSize);
+  },
+};
+
+/**
+ * The preview's options were plain boxes, so it never showed whether an
+ * answer picks one or several; it now draws the ballot client's empty mark,
+ * round for one and square for more, and follows the rule as it changes
+ * (P2-29, creating a poll's iteration 19).
+ */
+export const PreviewMarksTheChoice: Story = {
+  args: { client: savedDraft(), id: ID },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const preview = await canvas.findByRole("complementary", { name: "What people will see" });
+    const marks = (n: number) =>
+      [...preview.querySelectorAll("ol > li")][n]?.querySelectorAll("[data-mark]") ?? [];
+    const kinds = (n: number) => [...marks(n)].map((m) => m.getAttribute("data-mark"));
+    await expect(kinds(0)).toEqual(["one", "one"]);
+    await expect(kinds(1)).toEqual(["many", "many", "many"]);
+    for (const mark of [...marks(0), ...marks(1)])
+      await expect(mark).toHaveAttribute("aria-hidden", "true");
+    await expect(getComputedStyle(marks(0)[0]!).borderRadius).not.toBe("0px");
+    await expect(getComputedStyle(marks(1)[0]!).borderRadius).toBe("0px");
+    const first = within(canvas.getByRole("region", { name: "Question 1" }));
+    await userEvent.click(first.getByRole("radio", { name: "Any number" }));
+    await waitFor(() => expect(kinds(0)).toEqual(["many", "many"]));
+  },
+};
+
+/**
  * The review's `text-pretty` ended the who row's first line at "e-", with
  * "mail address" under it, wherever the row was 212px to 270px wide: on the
  * site, any screen under 303px, a folded phone's 280 or a 360px phone zoomed

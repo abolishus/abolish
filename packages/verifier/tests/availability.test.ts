@@ -858,7 +858,7 @@ describe("evidence that isn't held is unverifiable, never a failure", () => {
       status: "unverifiable",
       code: "not-reached",
     });
-    expect(availabilityChecks(inputs([], { eventVersion: 13 })).row).toEqual({
+    expect(availabilityChecks(inputs([], { eventVersion: 14 })).row).toEqual({
       status: "unverifiable",
       code: "unsupported-version",
       at: {},

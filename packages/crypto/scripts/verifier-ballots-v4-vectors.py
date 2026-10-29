@@ -115,8 +115,10 @@ def det(label):
     return hashlib.sha256(b"abolish verifier ballots v4 vectors " + label.encode()).digest()
 
 
-def pins_for(ballot=4, opening=3, definition=6, events=9):
-    """A version-6 (or version-7) profile: board-entry version 5, contract-event version 9, the first that frames ballot version 4 (close.md, Version; contracts.md, Event tables (version 9)), display-text version 2, tally-opening version 1, and the given ballot, spoiled-opening and contract-event pins."""
+def pins_for(ballot=4, opening=3, definition=6, events=None):
+    """A version-6 (or version-7) profile: board-entry version 5, contract-event version 9, the first that frames ballot version 4 (close.md, Version; contracts.md, Event tables (version 9)), or under version 7 contract-event version 13, the only one that reads its registration (contracts.md, Event tables (version 13)), display-text version 2, tally-opening version 1, and the given ballot, spoiled-opening and contract-event pins."""
+    if events is None:
+        events = 13 if definition == 7 else 9
     own = {1: definition, BALLOT_TYPE: ballot, SPOILED_OPENING_TYPE: opening, BOARD_ENTRY_TYPE: vb.BOARD_VERSION, vb.CONTRACT_EVENT_TYPE: events, DISPLAY_TEXT_TYPE: 2}
     return {"protocol_major": 1, "pins": [(t, own.get(t, 1)) for t in range(1, 10)]}
 
@@ -129,21 +131,23 @@ def v6_reading(d):
 
 
 def combination(d):
-    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll fits with display-text 2, ballot 4, spoiled-ballot opening 3, contract-event 9, and tally-opening 1 and board-entry 5 without an author panel, or tally-opening 3 and board-entry 7 with one (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll fails whatever it pins, here as with an author panel; a ballot version this verifier doesn't read is unsupported once no other pin fails (version 5, a rolling electorate's, is read, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot."""
+    """2.3 under definition version 6, or 7 with a fixed electorate (docs/spec/verifier.md, 2.3), from the spec's text, for the pins these cases use: a sealed poll fits with display-text 2, ballot 4, spoiled-ballot opening 3, contract-event 9 to 13 (13 under version 7), and tally-opening 1 and board-entry 5 without an author panel, or tally-opening 3 and board-entry 7 with one (and, fitting, 2.3 is unverifiable with `not-implemented`, as under every version); a live poll fails whatever it pins, here as with an author panel; a ballot version this verifier doesn't read is unsupported once no other pin fails (version 5, a rolling electorate's, is read, so a fixed one pinning it fails); any other pin fails, contract-event version 8 among them, which frames no version-4 ballot, and under version 7 contract-event versions 9 to 12, which read no version-7 registration; a contract-event version this verifier doesn't read is unsupported once no other pin fails."""
     pins = dict(d["profile"]["pins"])
     if d["results_mode"] != d6.SEALED:
         return COMBINATION_FAILS
     author = bool(d["author_keys"])
     wanted = {DISPLAY_TEXT_TYPE: 2, SPOILED_OPENING_TYPE: 3, TALLY_OPENING_TYPE: 3 if author else 1, BOARD_ENTRY_TYPE: 7 if author else 5}
-    # Contract-event versions 9 to 12 frame ballot version 4; 1 to 8 don't.
+    # Contract-event versions 9 to 13 frame ballot version 4; 1 to 8 don't.
+    # Under definition version 7 only 13 reads the election's own
+    # registration, which 4.4 requires boarded.
     events = pins[vb.CONTRACT_EVENT_TYPE]
-    if any(pins[t] != v for t, v in wanted.items()) or events <= 8:
+    if any(pins[t] != v for t, v in wanted.items()) or events <= 8 or (pins[1] == 7 and events <= 12):
         return COMBINATION_FAILS
     if pins[BALLOT_TYPE] not in (1, 2, 3, 4, 5):
         return UNSUPPORTED
     if pins[BALLOT_TYPE] != 4:
         return COMBINATION_FAILS
-    if events > 12:
+    if events > 13:
         return UNSUPPORTED
     return NOT_IMPLEMENTED
 
@@ -455,6 +459,20 @@ def build(constants, version=6):
         [t_e8, ok_e8["cell-0"]],
         "ballots",
     )
+    if version == 7:
+        # Contract-event version 12 frames ballot version 4 but reads no
+        # version-7 registration, so this election's own
+        # `DefinitionRegistered` would fail 4.4 (T-53): 2.3 fails it, and
+        # admission still judges the board's ballots.
+        d_e12, t_e12, e_e12 = election_for("v7-events-12", [1, 2, 3], profile=pins(events=12))
+        ok_e12 = honest(e_e12)
+        bundle(
+            "events-12",
+            "Definition version 7 under a fixed electorate pinning contract-event version 12, which reads no version-7 registration: 2.3 fails profile-combination, and admission still judges every ballot.",
+            d_e12, t_e12, e_e12, [1, 2, 3],
+            [t_e12, ok_e12["cell-0"]],
+            "ballots",
+        )
 
     # An author panel: 3.2 holds per panel, and this board carries no
     # transcript that hashes to `author_transcript_hash`, so the author run
@@ -655,7 +673,7 @@ def assemble(constants, proofs_path, out_dir, version=6):
                 assert sig is not None or verdict is None, (bnd["id"], i)
                 # Every ballot here is a board-path one in segment 0, and no
                 # contract-event record carries one.
-                assert pins[vb.CONTRACT_EVENT_TYPE] in (8, 9)
+                assert pins[vb.CONTRACT_EVENT_TYPE] in (8, 9, 12, 13)
                 late = vb.window(d, {"kind": "board", "segment": 0}) if code == "ok" else None
                 if late is not None:
                     rejected.append({"entry": i, "code": late})
@@ -719,6 +737,8 @@ def assemble(constants, proofs_path, out_dir, version=6):
     assert by["ballot-v3"]["expected"]["2.3"] == COMBINATION_FAILS
     assert by["ballot-v5"]["expected"]["2.3"] == COMBINATION_FAILS and by["ballot-unread"]["expected"]["2.3"] == UNSUPPORTED
     if version == 7:
+        assert by["events-12"]["expected"]["2.3"] == COMBINATION_FAILS and by["events-12"]["ballots"]["admitted"] == 1
+        assert by["admitted"]["expected"]["2.3"] == NOT_IMPLEMENTED
         assert by["v6-reading"]["ballots"] == {"admitted": 1, "rejected": [{"entry": 2, "code": "ballot-stray"}], "repeats": []}
         assert by["v6-stub"]["expected"]["3.1"] == outcome("fail", "ceremony-signature", {"entry": 0}) and by["v6-stub"]["expected"]["5.1"] == NOT_REACHED
     assert by["quorum"]["expected"]["6.2"] == NOT_REACHED and by["ballot-v1"]["expected"]["6.2"] == NOT_REACHED

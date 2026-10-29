@@ -105,7 +105,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 // The contract-event versions crypto's group-registry read takes, as 4.4's
 // event check reads them (src/events.ts).
 const isReadable = (v: number | undefined): v is ContractEventVersion =>
-  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 12;
+  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 13;
 
 /**
  * A fixed tier as the recount reads it, and the definition's statement of

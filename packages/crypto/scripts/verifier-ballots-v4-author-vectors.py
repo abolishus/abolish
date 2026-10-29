@@ -84,7 +84,7 @@ def det(label):
 
 
 def pins(version=6):
-    """verifier-ballots-v4.json's version-6 (or version-7) profile, contract-event version 9 among its pins, under board-entry version 7, which carries the approvals; it keeps tally-opening version 1, which can't count an author panel's half, so 2.3 fails it (verifier-tally-v3-author-vectors.py's profile, with version 3, fits)."""
+    """verifier-ballots-v4.json's version-6 (or version-7) profile, contract-event version 9 (13 under definition version 7) among its pins, under board-entry version 7, which carries the approvals; it keeps tally-opening version 1, which can't count an author panel's half, so 2.3 fails it (verifier-tally-v3-author-vectors.py's profile, with version 3, fits)."""
     p = vb4.pins_for(definition=version)
     return dict(p, pins=[(t, BOARD_VERSION if t == vb4.BOARD_ENTRY_TYPE else v) for t, v in p["pins"]])
 

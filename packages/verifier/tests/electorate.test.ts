@@ -300,7 +300,7 @@ describe("electorateCheck", () => {
   test("leaves an unread contract-event version unverifiable", () => {
     const t = tierOf("one-group");
     const d = v5([t.electorate]);
-    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 13 } : p));
+    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 14 } : p));
     expect(
       electorateCheck(
         { ...d, value: { ...d.value, profile: { protocol_major: 1, pins } } },
@@ -588,7 +588,7 @@ describe("electorateCheck under a rolling electorate", () => {
         code: "group-registry",
         at: {},
       });
-    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 13 } : p));
+    const pins = d.value.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version: 14 } : p));
     expect(
       electorateCheck(
         { ...d, value: { ...d.value, profile: { protocol_major: 1, pins } } },

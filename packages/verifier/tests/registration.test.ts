@@ -5,8 +5,8 @@ import { decodeDefinition } from "../src/definition.ts";
 import { registrationCheck } from "../src/index.ts";
 import { hex, numRuns, read } from "./registry-logs.ts";
 import {
+  type AnyDefinition,
   ceremonyRegistered,
-  type Definition,
   definitionRegistered,
   encodingOf,
   KEY_SET,
@@ -14,6 +14,7 @@ import {
   releaseOf,
   v1Definition,
   v5Definition,
+  v7Definition,
 } from "./registration-logs.ts";
 
 // The registration from L2 state (docs/spec/verifier.md, Registration) over
@@ -21,11 +22,11 @@ import {
 // key set and its hash are key-set.json's (T-34, T-37, T-71).
 
 const v5 = v5Definition();
-const honest = (d: Definition = v5, version?: number): ContractEventRecord[] => [
+const honest = (d: AnyDefinition = v5, version?: number): ContractEventRecord[] => [
   ceremonyRegistered(d, version === undefined ? {} : { version }),
   definitionRegistered(d),
 ];
-const check = (records: readonly ContractEventRecord[], d: Definition = v5, keySet = KEY_SET) =>
+const check = (records: readonly ContractEventRecord[], d: AnyDefinition = v5, keySet = KEY_SET) =>
   registrationCheck(d, keySet, records, releaseOf(d));
 const fail = (code: string) => ({ status: "fail", code });
 const flip = (b: Uint8Array, at = 0) => {
@@ -43,6 +44,22 @@ describe("registrationCheck", () => {
         check(honest(v5Definition(version), version), v5Definition(version)),
         `${version}`,
       ).toEqual({ status: "pass" });
+  });
+
+  test("reads a version-7 definition's registration only under contract-event version 13", () => {
+    const v7 = v7Definition();
+    expect(check(honest(v7, 13), v7)).toEqual({ status: "pass" });
+    const later = { ...v7, value: { ...v7.value, closes_at: v7.value.closes_at + 1n } };
+    expect(
+      check(
+        [ceremonyRegistered(v7, { version: 13 }), definitionRegistered(v7, encodingOf(later))],
+        v7,
+      ),
+    ).toEqual(fail("definition-registered"));
+    // Version 12's `DefinitionRegistered` decodes no version-7 definition
+    // (T-53).
+    const v12 = v7Definition(12);
+    expect(check(honest(v12, 12), v12)).toEqual(fail("registry-records"));
   });
 
   test("passes version 1's record, which logs no key set, on its transcript alone", () => {
@@ -151,7 +168,7 @@ describe("registrationCheck", () => {
   });
 
   test("leaves an unread contract-event pin unverifiable", () => {
-    for (const version of [0, 13])
+    for (const version of [0, 14])
       expect(check(honest(), v5Definition(version))).toEqual({
         status: "unverifiable",
         code: "unsupported-version",

@@ -5,14 +5,19 @@ import {
   type ContractEventRecord,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  electionDefinitionV7Hash,
   electionStubHash,
   electionStubV5Hash,
+  electionStubV7Hash,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   type ElectionDefinition,
   type ElectionDefinitionV5,
+  type ElectionDefinitionV7,
 } from "@abolishus/crypto";
 import type { RegistrationRelease } from "../src/index.ts";
 import { definitionOf, hex, read, word } from "./registry-logs.ts";
@@ -83,8 +88,14 @@ const typicalV1 = decodeElectionDefinition(
 const typicalV5 = decodeElectionDefinitionV5(
   definitionOf("election-definition-v5.json", "definition-v5-typical"),
 );
+const typicalV7 = decodeElectionDefinitionV7(
+  definitionOf("election-definition-v7.json", "definition-v7-rolling-typical"),
+);
 /** The vectors' typical definition with the contract-event pin at `version`. */
-const pinned = <D extends ElectionDefinition | ElectionDefinitionV5>(d: D, version: number): D => ({
+const pinned = <D extends ElectionDefinition | ElectionDefinitionV5 | ElectionDefinitionV7>(
+  d: D,
+  version: number,
+): D => ({
   ...d,
   profile: {
     ...d.profile,
@@ -99,20 +110,40 @@ export const v5Definition = (version = 8) => ({
   version: 5 as const,
   value: pinned(typicalV5, version),
 });
+// Version 7's own registration reads only under contract-event version 13
+// (docs/spec/contracts.md, Event tables (version 13)).
+export const v7Definition = (version = 13) => ({
+  version: 7 as const,
+  value: pinned(typicalV7, version),
+});
 export type Definition = ReturnType<typeof v1Definition> | ReturnType<typeof v5Definition>;
+/** `Definition`, or a version 7, which only this package's registration check reads. */
+export type AnyDefinition = Definition | ReturnType<typeof v7Definition>;
 
-export const releaseOf = (d: Definition): RegistrationRelease => ({
+export const releaseOf = (d: AnyDefinition): RegistrationRelease => ({
   chainId: d.value.l2_chain_id,
   electionRegistry: d.value.election_registry,
   trusteeRegistry: d.value.trustee_registry,
 });
 
-export const encodingOf = (d: Definition) =>
-  d.version === 1 ? encodeElectionDefinition(d.value) : encodeElectionDefinitionV5(d.value);
-export const hashOf = (d: Definition) =>
-  d.version === 1 ? electionDefinitionHash(d.value) : electionDefinitionV5Hash(d.value);
-export const stubOf = (d: Definition) =>
-  d.version === 1 ? electionStubHash(d.value) : electionStubV5Hash(d.value);
+export const encodingOf = (d: AnyDefinition) =>
+  d.version === 1
+    ? encodeElectionDefinition(d.value)
+    : d.version === 5
+      ? encodeElectionDefinitionV5(d.value)
+      : encodeElectionDefinitionV7(d.value);
+export const hashOf = (d: AnyDefinition) =>
+  d.version === 1
+    ? electionDefinitionHash(d.value)
+    : d.version === 5
+      ? electionDefinitionV5Hash(d.value)
+      : electionDefinitionV7Hash(d.value);
+export const stubOf = (d: AnyDefinition) =>
+  d.version === 1
+    ? electionStubHash(d.value)
+    : d.version === 5
+      ? electionStubV5Hash(d.value)
+      : electionStubV7Hash(d.value);
 
 const abiBytes = (b: Uint8Array) => {
   const padded = new Uint8Array(Math.ceil(b.length / 32) * 32);
@@ -129,7 +160,7 @@ const base = (contract: Uint8Array, block: bigint) => ({
 
 /** `DefinitionRegistered` for `d`'s election, logging `encoding` (by default `d`'s own) under `hash`. */
 export function definitionRegistered(
-  d: Definition,
+  d: AnyDefinition,
   encoding = encodingOf(d),
   hash = hashOf(d),
   block = 20n,
@@ -162,7 +193,7 @@ export interface CeremonyFields {
  * key set), with `changes` to the topics or the record.
  */
 export function ceremonyRegistered(
-  d: Definition,
+  d: AnyDefinition,
   changes: Partial<CeremonyFields> & { readonly header?: Partial<CeremonyFields> } = {},
   block = 15n,
 ): ContractEventRecord {

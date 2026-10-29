@@ -14,7 +14,7 @@
 import { checkElectionRecordToShow } from "@abolishus/crypto";
 
 import type { PollTags, PollView } from "../poll.ts";
-import { type CardText, pickTranslation, type StreamCard } from "../stream.ts";
+import { type CardText, pickTranslation, type PollWords, type StreamCard } from "../stream.ts";
 import { fromHex } from "../values.ts";
 import { definitionView } from "./definition.ts";
 
@@ -55,6 +55,32 @@ export function checkedText(
   displayTextHex: string | undefined,
   locale: string,
 ): CardText | undefined {
+  const words = checkedWords(poll, definitionHex, displayTextHex, locale);
+  return words === undefined ? undefined : cardText(words);
+}
+
+/** A card's words from the poll's: its heading and its first question's. */
+export function cardText(words: PollWords): CardText {
+  // A checked text has exactly the definition's questions, and a well-formed definition one at least.
+  const first = words.questions[0]!;
+  return {
+    language: words.language,
+    heading: words.title === "" ? first.question : words.title,
+    question: words.title === "" ? undefined : first.question,
+    options: first.options,
+  };
+}
+
+/**
+ * Every question's words, as `checkedText` checks and picks them: version 1
+ * has no title (`""`) and one question.
+ */
+export function checkedWords(
+  poll: PollView,
+  definitionHex: string,
+  displayTextHex: string | undefined,
+  locale: string,
+): PollWords | undefined {
   if (displayTextHex === undefined) return undefined;
   let display;
   try {
@@ -75,24 +101,23 @@ export function checkedText(
       translations.map((t) => ({ ...t, language: utf8.decode(t.language) })),
       locale,
     );
+  const labels = (options: readonly { readonly label: Uint8Array }[]) =>
+    options.map((o) => utf8.decode(o.label));
   if (checked.version === 1) {
     const t = tagged(checked.displayText.translations);
     return {
       language: t.language,
-      heading: utf8.decode(t.question),
-      question: undefined,
-      options: t.options.map((o) => utf8.decode(o.label)),
+      title: "",
+      questions: [{ question: utf8.decode(t.question), options: labels(t.options) }],
     };
   }
   const t = tagged(checked.displayText.translations);
-  const title = utf8.decode(t.title);
-  // A checked text has exactly the definition's questions, and a well-formed definition one at least.
-  const first = t.questions[0]!;
-  const question = utf8.decode(first.question);
   return {
     language: t.language,
-    heading: title === "" ? question : title,
-    question: title === "" ? undefined : question,
-    options: first.options.map((o) => utf8.decode(o.label)),
+    title: utf8.decode(t.title),
+    questions: t.questions.map((q) => ({
+      question: utf8.decode(q.question),
+      options: labels(q.options),
+    })),
   };
 }

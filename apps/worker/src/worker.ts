@@ -31,6 +31,7 @@ import {
   BallotBatches,
   DestructionSubmissions,
   OpeningSubmissions,
+  ResultsReads,
   ReceiptSubmissions,
 } from "./ballots.ts";
 import { HANDLERS, JobError, TIER0_QUEUES, TIER1_QUEUES } from "./jobs.ts";
@@ -111,7 +112,8 @@ export interface WorkerOptions {
    * anchored counted set it reads from the anchor and finalized L1 (T-29,
    * T-52); only beside ballot admission, whose clock labels each entry.
    * Without it, nothing takes that queue's jobs and the API answers each
-   * opening unavailable once it times out.
+   * opening unavailable once it times out. The same boardings answer the
+   * `{results-read}` queue from the openings they boarded.
    */
   readonly openings?: { readonly boardings: OpeningBoardings };
   /**
@@ -206,6 +208,14 @@ export const OPENING_CONCURRENCY = 4;
  * T-52).
  */
 export const DESTRUCTION_CONCURRENCY = 4;
+
+/**
+ * Results reads handled at once. A read the boardings keep costs two
+ * indexed reads; one they don't starts at most one computation per
+ * `readEveryMs` across elections, and the others meanwhile answer
+ * `not-ready` at once (core's OpeningBoardings.readResults; T-52).
+ */
+export const RESULTS_CONCURRENCY = 4;
 
 /** Expiry is counted in whole UTC months, so once a day is plenty. */
 export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
@@ -381,6 +391,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
             boardings: options.openings.boardings,
             now: unixNow,
           }),
+          results: new ResultsReads({ sql, boardings: options.openings.boardings }),
         }),
     ...(options.destructions === undefined
       ? {}
@@ -399,7 +410,7 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
         ? false
         : key === "ballotSubmit" || key === "receiptSubmit"
           ? options.ballots !== undefined
-          : key === "openingSubmit"
+          : key === "openingSubmit" || key === "resultsRead"
             ? options.openings !== undefined
             : key === "destructionSubmit"
               ? options.destructions !== undefined
@@ -432,7 +443,8 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
           (key === "ballotSubmit" ||
             key === "receiptSubmit" ||
             key === "openingSubmit" ||
-            key === "destructionSubmit") &&
+            key === "destructionSubmit" ||
+            key === "resultsRead") &&
           Date.now() - job.timestamp > BALLOT_MAX_AGE_MS
         )
           throw new JobError("stale-job");
@@ -468,7 +480,9 @@ export async function startWorker(options: WorkerOptions): Promise<RunningWorker
                 ? OPENING_CONCURRENCY
                 : key === "destructionSubmit"
                   ? DESTRUCTION_CONCURRENCY
-                  : 1,
+                  : key === "resultsRead"
+                    ? RESULTS_CONCURRENCY
+                    : 1,
         removeOnComplete: { count: 0 },
         removeOnFail: { count: 0 },
       },

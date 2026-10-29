@@ -63,6 +63,12 @@ export {
   type ReceiptOutcome,
   ReceiptQueue,
   type ReceiptUnavailable,
+  RESULTS_EVENTS_MAX_LEN,
+  RESULTS_OUTCOME,
+  RESULTS_TIMEOUT_MS,
+  type ResultsOutcome,
+  ResultsQueue,
+  type ResultsUnavailable,
 } from "./ballot-queue.ts";
 export {
   BALLOT_BATCH,
@@ -72,6 +78,7 @@ export {
   DestructionSubmissions,
   OpeningSubmissions,
   ReceiptSubmissions,
+  ResultsReads,
 } from "./ballots.ts";
 export {
   checkCreationAnchorsDeployment,
@@ -236,6 +243,7 @@ export {
   PRUNE_EVERY_MS,
   RECEIPT_CONCURRENCY,
   REGISTRY_SYNC_EVERY_MS,
+  RESULTS_CONCURRENCY,
   type RunningWorker,
   startWorker,
   TIER0_BOUNDARY_EVERY_MS,

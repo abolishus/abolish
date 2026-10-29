@@ -11,8 +11,9 @@ import * as z from "zod";
 //   `tests/no-join.test.ts` checks every schema here.
 // - Job data is a strict object, parsed before it is queued and again before
 //   it is handled, so no field the schema doesn't name reaches Redis or a
-//   handler. Job IDs are BullMQ's counters, or random for `{ballot-submit}`,
-//   `{receipt-submit}` and `{opening-submit}`, never derived from the data.
+//   handler. Job IDs are BullMQ's counters, or random for the queues the
+//   API waits on (`{ballot-submit}`, `{receipt-submit}`, `{opening-submit}`,
+//   `{destruction-submit}` and `{results-read}`), never derived from the data.
 //
 // Every key a queue uses is `abolish:{<queue>}:…`, so the braces are a hash
 // tag: Dragonfly (and Redis Cluster) keep each queue's keys in one slot,
@@ -246,6 +247,20 @@ export const QUEUES = {
         .max(2 * MAX_DESTRUCTION_STATEMENT)
         .regex(/^(?:[0-9a-f]{2})*$/),
     }),
+  },
+  /**
+   * A poll's results from the openings boarded so far (core's
+   * OpeningBoardings.readResults over the counted tally the openings are
+   * judged against; docs/spec/verifier.md, Results from the counted tally;
+   * T-29, T-52). Queued by the API's `elections.getResults` through
+   * `ResultsQueue` and run only beside `{opening-submit}`, whose boardings
+   * keep that tally. A job carries the election alone, never who asked
+   * (T-10, T-11), and returns the results (`RESULTS_OUTCOME`).
+   */
+  resultsRead: {
+    name: "{results-read}",
+    side: "board",
+    data: z.strictObject({ electionId: z.string().regex(/^[0-9a-f]{64}$/) }),
   },
 } as const satisfies Record<string, QueueSpec>;
 

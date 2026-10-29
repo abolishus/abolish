@@ -18,6 +18,10 @@ import {
   MAX_PAGE,
   MAX_PAGE_BYTES,
   MAX_PROOF_PATH,
+  MAX_RESULT_CELLS,
+  MAX_RESULT_OPTIONS,
+  MAX_RESULT_QUESTIONS,
+  MAX_RESULT_SEATS,
   MAX_SHARE_RECEIPT,
   MAX_SHARE_RECEIPT_ENTRY,
   MAX_TALLY_OPENING,
@@ -93,6 +97,85 @@ const getDisplayText = oc
   })
   .input(ElectionQuery)
   .output(z.strictObject({ displayText: hexBytes(MAX_DISPLAY_TEXT) }));
+
+const Small = z.number().check(z.int(), z.minimum(0));
+const Counts = z.array(U64).check(z.maxLength(MAX_RESULT_OPTIONS));
+const ByQuestion = z.array(Counts).check(z.maxLength(MAX_RESULT_QUESTIONS));
+
+const getResults = oc
+  .route({
+    method: "GET",
+    path: "/elections/results",
+    summary: "A poll's results from the tally openings this board holds",
+    description:
+      "The results the tally openings this server boarded give, as packages/verifier's `countedResults` computes them over the counted set the openings were judged against (docs/spec/verifier.md, Results from the counted tally): `unopened` while no opening is boarded, else `read` with the number of openings read, `passed` (7.2's pass: every cell opened), the first failing cell and its code while it hasn't, each cell's report in partition order (its tier, its counted ballots and, once a registered seat's opening of it passes, its count per option, each question's slice under definition versions 5 to 7, and the seats its passing openings are attributed to; else its code, `tally-missing` while none is boarded, with the option or question it names left to the verifier's report), each tier's (its counts only once every one of its cells has them) and, under versions 5 to 7, each question's option count (`size`), its selection limits (`atLeast`, `atMost`) and the method they give. Counts are decimal strings. No figure joins two tiers or two questions (ADR 0026). These are the board's results, not the verifier's verdict: an opening sent only by another path is missing from them, and only the verifier's run over the sealed board says the election passes, so whoever shows them says so and links to checking them (T-29, T-34). Moderation never withholds them (docs/moderation-policy.md). The results are computed in the worker, which keeps them until the next opening is boarded; one it doesn't keep is computed at most once a minute across every election, and meanwhile is `RESULTS_NOT_READY`, as it is before the counted set is fixed. An election this server boards no opening of is `RESULTS_NOT_COUNTED`.",
+    tags: ["elections"],
+  })
+  .errors({
+    ...electionNotFound,
+    RESULTS_NOT_COUNTED: {
+      status: 409,
+      message: "This server boards no tally opening of this election, so counts no results.",
+    },
+    RESULTS_NOT_READY: { status: 503, message: "The results can't be read yet; ask again later." },
+    RESULTS_UNAVAILABLE: {
+      status: 503,
+      message: "The results couldn't be read in time; ask again.",
+    },
+  })
+  .input(ElectionQuery)
+  .output(
+    z.union([
+      z.strictObject({ state: z.literal("unopened") }),
+      z.strictObject({
+        state: z.literal("read"),
+        openings: Small,
+        passed: z.boolean(),
+        failure: z.optional(
+          z.strictObject({
+            cell: Small,
+            code: ErrorCode,
+          }),
+        ),
+        cells: z
+          .array(
+            z.strictObject({
+              cell: Small,
+              tier: Small,
+              counted: Small,
+              counts: z.optional(Counts),
+              byQuestion: z.optional(ByQuestion),
+              code: z.optional(ErrorCode),
+              signers: z.array(Small).check(z.maxLength(MAX_RESULT_SEATS)),
+            }),
+          )
+          .check(z.maxLength(MAX_RESULT_CELLS)),
+        tiers: z
+          .array(
+            z.strictObject({
+              tier: Small,
+              counted: Small,
+              counts: z.optional(Counts),
+              byQuestion: z.optional(ByQuestion),
+            }),
+          )
+          .check(z.maxLength(MAX_RESULT_CELLS)),
+        questions: z.optional(
+          z
+            .array(
+              z.strictObject({
+                question: Small,
+                size: Small,
+                atLeast: Small,
+                atMost: Small,
+                method: z.string().check(z.maxLength(64)),
+              }),
+            )
+            .check(z.maxLength(MAX_RESULT_QUESTIONS)),
+        ),
+      }),
+    ]),
+  );
 
 /** The longest search query and its most terms; a test ties these copies to `@abolishus/core`. */
 export const MAX_SEARCH_QUERY = 200;
@@ -755,6 +838,7 @@ export const contract = {
     getDefinition,
     getDisplayText,
     getTags,
+    getResults,
     resolveCode,
     getCode,
   },

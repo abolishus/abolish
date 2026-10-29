@@ -45,6 +45,7 @@ import type {
   DestructionQueue,
   OpeningQueue,
   ReceiptQueue,
+  ResultsQueue,
 } from "@abolishus/worker/ballot-queue";
 import type { Sql } from "postgres";
 
@@ -53,9 +54,9 @@ import type { Sql } from "postgres";
 // no protocol logic lives here (AGENTS.md, Architecture). Every answer is a
 // claim the caller checks with @abolishus/crypto (T-23, T-24, T-34).
 //
-// The context holds the database, the worker's ballot, receipt, opening and destruction queues, Tier 0
-// registration, the Tier 1 relay, the posting relay, the clock and the boards'
-// anchoring clock, and nothing of the request: no handler can see a request's
+// The context holds the database, the worker's ballot, receipt, opening,
+// destruction and results queues, Tier 0 registration, the Tier 1 relay, the
+// posting relay, the clock and the boards' anchoring clock, and nothing of the request: no handler can see a request's
 // headers, cookies or address, so no procedure can tie what it serves or
 // receives to a person or session (T-10, T-11).
 
@@ -71,6 +72,9 @@ export type OpeningSubmitter = Pick<OpeningQueue, "submit">;
 /** What `destructions.submit` needs of the worker's queue. */
 export type DestructionSubmitter = Pick<DestructionQueue, "submit">;
 
+/** What `elections.getResults` needs of the worker's queue. */
+export type ResultsReader = Pick<ResultsQueue, "read">;
+
 export interface Context {
   readonly sql: Sql;
   /** Absent when this server has no ballot queue: it then boards no ballot. */
@@ -81,6 +85,8 @@ export interface Context {
   readonly openings?: OpeningSubmitter | undefined;
   /** Absent when this server has no destruction queue: it then boards no destruction statement. */
   readonly destructions?: DestructionSubmitter | undefined;
+  /** Absent when this server has no results queue: it then counts no results. */
+  readonly results?: ResultsReader | undefined;
   /** UNIX time in seconds. */
   readonly now: () => bigint;
   /** Absent when this server isn't configured for Tier 0 registration: it then queues nothing. */
@@ -174,6 +180,30 @@ export const router = os.router({
       if (view === undefined) throw errors.ELECTION_NOT_FOUND();
       if (view.tags === undefined) throw errors.TAGS_WITHHELD();
       return view.tags;
+    }),
+    // The results the boarded openings give, read in the worker by core's
+    // OpeningBoardings over the counted tally it judges them against, which
+    // the verifier's `countedResults` computes, never here (T-29, T-52).
+    // Moderation never withholds a result (docs/moderation-policy.md). A
+    // server without the queue boards no opening, so counts none.
+    getResults: os.elections.getResults.handler(async ({ input, context, errors }) => {
+      const id = await knownElection(context.sql, input.electionId, errors.ELECTION_NOT_FOUND);
+      if (context.results === undefined) throw errors.RESULTS_NOT_COUNTED();
+      const outcome = await context.results.read(id);
+      if (outcome.ok) {
+        const { ok: _, ...results } = outcome;
+        return results;
+      }
+      switch (outcome.code) {
+        case "unknown-election":
+          throw errors.ELECTION_NOT_FOUND();
+        case "not-open":
+          throw errors.RESULTS_NOT_COUNTED();
+        case "not-ready":
+          throw errors.RESULTS_NOT_READY();
+        case "unavailable":
+          throw errors.RESULTS_UNAVAILABLE();
+      }
     }),
     // Short links (docs/design/sharing.md). A refusal never quotes the input,
     // and the request log records only the route (T-11, T-67).

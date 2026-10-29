@@ -469,7 +469,7 @@ export const SPOILED_OPENING_VERSIONS: ReadonlySet<number> = new Set<number>([1,
 export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4, 5]);
 // The contract-event versions this package reads (contract-event.ts's
 // CONTRACT_EVENT), written out for the same reason; a test ties the two.
-// Only versions 8 to 12 name every board event (the close rule's, the
+// Only versions 8 to 13 name every board event (the close rule's, the
 // batches', the obligation root's and the availability records') and every
 // group-registry event (the Tier 1 addition and the self-paid group and
 // addition), which land in the sequence every election shares, so 2.3 fails

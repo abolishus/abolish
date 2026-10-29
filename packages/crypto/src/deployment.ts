@@ -1,11 +1,12 @@
 // The deployment record (docs/spec/deployment.md, record type 0x0020): what a
 // ballot-client release is built for, as one record, its strict decoding,
-// its deployment hash, the well-formedness rules of versions 1 and 2, and
-// version 2's rules for the Tier 0 token keys across releases. A release
-// binds the record by hash, so whoever reads the release reads the pins its
-// client runs with (T-34, T-37, T-71, T-43), and from version 2 the issuer's
-// key for each period, which a client takes from its release and nowhere
-// else (T-74, T-10). The rules check only what the record says about itself:
+// its deployment hash, the well-formedness rules of versions 1 to 3, and
+// the rules for the Tier 0 token keys across releases. A release binds the
+// record by hash, so whoever reads the release reads the pins its client
+// runs with (T-34, T-37, T-71, T-43), from version 2 the issuer's key for
+// each period, which a client takes from its release and nowhere else
+// (T-74, T-10), and from version 3 the relays that reach each seat's node,
+// which a client learns of from nowhere else either (T-43, T-25). The rules check only what the record says about itself:
 // that the contracts and keys behind it are the ones it names is the
 // verifier's and the release Safe's signers' (T-64).
 
@@ -30,16 +31,18 @@ import { type DecodedRecord, RECORD_TYPES, RecordSchema, recordType, UNPINNED } 
 // The origin and host grammar is release.md's (Well-formedness).
 import {
   ascending,
+  ascii,
   distinct,
   isHost,
   isOrigin,
+  isPath,
   isZero,
   ORIGIN_PREFIX,
   sameBytes,
 } from "./release.ts";
 import { PanelError, panelId } from "./trustee.ts";
 
-/** The record's bounds (docs/spec/deployment.md, Record and Record (version 2)). */
+/** The record's bounds (docs/spec/deployment.md, Record and Record (versions 2 and 3)). */
 export const DEPLOYMENT_LIMITS = Object.freeze({
   gameTypes: 8,
   registrars: 16,
@@ -50,6 +53,9 @@ export const DEPLOYMENT_LIMITS = Object.freeze({
   origin: 267,
   rpId: 253,
   tokenKeys: 16,
+  seatRelays: 128,
+  relays: 4,
+  relayPath: 128,
 } as const);
 
 /** `panel`'s `kind`. */
@@ -126,37 +132,83 @@ const deploymentV2 = struct([
   ["tier0_token_keys", list(tokenKey, DEPLOYMENT_LIMITS.tokenKeys)],
 ] as const);
 
+const relay = struct([
+  ["origin", bytesVar(DEPLOYMENT_LIMITS.origin)],
+  ["path", bytesVar(DEPLOYMENT_LIMITS.relayPath)],
+] as const);
+
+const seatRelay = struct([
+  // bytes[33], as a seat's key, so a bad key decodes and fails `relay-seat`.
+  ["key", bytesFixed(33)],
+  ["relays", list(relay, DEPLOYMENT_LIMITS.relays)],
+] as const);
+
+// Version 2 with one field appended; every version-2 field keeps its place.
+const deploymentV3 = struct([
+  ...V1_FIELDS,
+  ["tier0_token_keys", list(tokenKey, DEPLOYMENT_LIMITS.tokenKeys)],
+  ["seat_relays", list(seatRelay, DEPLOYMENT_LIMITS.seatRelays)],
+] as const);
+
 export type DeploymentRecord = CodecValue<typeof deploymentV1>;
 export type DeploymentRecordV2 = CodecValue<typeof deploymentV2>;
+export type DeploymentRecordV3 = CodecValue<typeof deploymentV3>;
 export type DeploymentPanel = CodecValue<typeof panel>;
 export type DeploymentGroup = CodecValue<typeof group>;
 export type DeploymentTokenKey = CodecValue<typeof tokenKey>;
+export type DeploymentSeatRelay = CodecValue<typeof seatRelay>;
+export type DeploymentRelay = CodecValue<typeof relay>;
 
-/** Record type `0x0020`, versions 1 and 2. Never on the board, and no profile pins it. */
+/** Record type `0x0020`, versions 1 to 3. Never on the board, and no profile pins it. */
 export const DEPLOYMENT_RECORD = recordType(RECORD_TYPES.deploymentRecord, {
   1: deploymentV1,
   2: deploymentV2,
+  3: deploymentV3,
 });
 
 export type DecodedDeploymentRecord = DecodedRecord<(typeof DEPLOYMENT_RECORD)["versions"]>;
+export type DeploymentRecordVersion = DecodedDeploymentRecord["version"];
 
-// 0x0020 is the only type this decoder knows, so any other is
+// 0x0020 is the only type these decoders know, so any other is
 // `unknown-record-type`, a release record's included (Decoding).
 const SCHEMA = new RecordSchema([DEPLOYMENT_RECORD]);
 
+// A decoder per highest version read, for a reader that has to keep refusing
+// a later version as `unknown-version` until it is taught to judge it (T-36).
+const EARLIER_READERS = [
+  recordType(RECORD_TYPES.deploymentRecord, { 1: deploymentV1 }),
+  recordType(RECORD_TYPES.deploymentRecord, { 1: deploymentV1, 2: deploymentV2 }),
+].map((t) => ({ type: t, schema: new RecordSchema([t]) }));
+
 export function encodeDeploymentRecord(record: DecodedDeploymentRecord): Uint8Array {
-  return record.version === 1
-    ? SCHEMA.encode(DEPLOYMENT_RECORD, 1, record.value)
-    : SCHEMA.encode(DEPLOYMENT_RECORD, 2, record.value);
+  switch (record.version) {
+    case 1:
+      return SCHEMA.encode(DEPLOYMENT_RECORD, 1, record.value);
+    case 2:
+      return SCHEMA.encode(DEPLOYMENT_RECORD, 2, record.value);
+    case 3:
+      return SCHEMA.encode(DEPLOYMENT_RECORD, 3, record.value);
+  }
 }
 
 /**
- * Strictly decodes a deployment record of either version. A deployment
- * belongs to no election, so no profile pins its version (Decoding): the
- * caller reads `version`, and a version-1 record lists no token key.
+ * Strictly decodes a deployment record of any version up to `upTo` (every
+ * version by default). A deployment belongs to no election, so no profile
+ * pins its version (Decoding): the caller reads `version`, a version-1
+ * record lists no token key and a version-1 or version-2 record no relay. A
+ * version above `upTo` is `unknown-version`, as for a version no decoder
+ * knows, so a reader that judges only the earlier versions can say it
+ * doesn't read the later one rather than skip what it adds.
  */
-export function decodeDeploymentRecord(bytes: Uint8Array): DecodedDeploymentRecord {
-  return SCHEMA.decode(DEPLOYMENT_RECORD, bytes, UNPINNED);
+export function decodeDeploymentRecord(
+  bytes: Uint8Array,
+  upTo: DeploymentRecordVersion = 3,
+): DecodedDeploymentRecord {
+  if (upTo === 3) return SCHEMA.decode(DEPLOYMENT_RECORD, bytes, UNPINNED);
+  const reader = EARLIER_READERS[upTo - 1];
+  if (reader === undefined) throw new RangeError(`decodeDeploymentRecord: no version ${upTo}`);
+  // Each earlier reader's versions are DEPLOYMENT_RECORD's, layouts and all.
+  return reader.schema.decode(reader.type, bytes, UNPINNED) as DecodedDeploymentRecord;
 }
 
 /**
@@ -215,14 +267,31 @@ export const DEPLOYMENT_V2_RULES = Object.freeze([
   "token-key-order",
 ] as const);
 
+/** Version 3's codes after version 2's, in checking order. */
+export const DEPLOYMENT_V3_RULES = Object.freeze([
+  "seat-relays-empty",
+  "relay-seat",
+  "relays-empty",
+  "relay-origin",
+  "relay-path",
+  "relay-order",
+  "seat-relay-order",
+  "relay-endpoint",
+  "relay-rp",
+] as const);
+
 export type DeploymentRule =
   | (typeof DEPLOYMENT_RULES)[number]
-  | (typeof DEPLOYMENT_V2_RULES)[number];
+  | (typeof DEPLOYMENT_V2_RULES)[number]
+  | (typeof DEPLOYMENT_V3_RULES)[number];
+
+type SeatRelayRule = "relay-seat" | "relays-empty" | "relay-origin" | "relay-path" | "relay-order";
 
 /**
  * The first rule a record breaks, with where, as the spec names it: a panel
  * or group by its index, an origin rule by its list, an `rp-id` by its field,
- * a token key by its index in `tier0_token_keys`.
+ * a token key by its index in `tier0_token_keys`, a rule checked entry by
+ * entry by the entry's index in `seat_relays`.
  */
 export type DeploymentFailure =
   | {
@@ -236,6 +305,7 @@ export type DeploymentFailure =
     }
   | { readonly rule: "rp-id"; readonly field: "backup_rp_id" | "account_rp_id" }
   | { readonly rule: "token-key" | "token-key-repeated"; readonly key: number }
+  | { readonly rule: SeatRelayRule; readonly seat_relay: number }
   | {
       readonly rule: Exclude<
         DeploymentRule,
@@ -250,20 +320,28 @@ export type DeploymentFailure =
         | "rp-id"
         | "token-key"
         | "token-key-repeated"
+        | SeatRelayRule
       >;
     };
 
 /**
  * The first well-formedness rule a decoded record breaks (docs/spec/
- * deployment.md, Well-formedness, and for version 2, Well-formedness
- * (version 2)), or `undefined` if it is well formed. A reader rejects an
- * ill-formed record with this rule; a deployment with no well-formed record
- * has no release.
+ * deployment.md, Well-formedness, and from version 2 each later version's
+ * Well-formedness section), or `undefined` if it is well formed. A reader
+ * rejects an ill-formed record with this rule; a deployment with no
+ * well-formed record has no release.
  */
 export function deploymentRecordRule(
   record: DecodedDeploymentRecord,
 ): DeploymentFailure | undefined {
-  return record.version === 1 ? v1Rule(record.value) : v2Rule(record.value);
+  switch (record.version) {
+    case 1:
+      return v1Rule(record.value);
+    case 2:
+      return v2Rule(record.value);
+    case 3:
+      return v3Rule(record.value);
+  }
 }
 
 function v1Rule(d: DeploymentRecord): DeploymentFailure | undefined {
@@ -403,6 +481,45 @@ function v2Rule(d: DeploymentRecordV2): DeploymentFailure | undefined {
   return undefined;
 }
 
+function v3Rule(d: DeploymentRecordV3): DeploymentFailure | undefined {
+  const earlier = v2Rule(d);
+  if (earlier !== undefined) return earlier;
+  const entries = d.seat_relays;
+  // T-31: a release whose client has no relay names a version-2 record, so
+  // one set of pins has one record.
+  if (entries.length === 0) return { rule: "seat-relays-empty" };
+  const seats = d.panels.flatMap((p) => p.seats.map((s) => s.key));
+  for (const [i, e] of entries.entries()) {
+    // The client finds a seat's relays by the key its pinned panel lists.
+    if (!seats.some((k) => sameBytes(k, e.key))) return { rule: "relay-seat", seat_relay: i };
+    if (e.relays.length === 0) return { rule: "relays-empty", seat_relay: i };
+    for (const r of e.relays) {
+      if (!isOrigin(r.origin)) return { rule: "relay-origin", seat_relay: i };
+      if (!isRelayPath(r.path)) return { rule: "relay-path", seat_relay: i };
+    }
+    // Each origin once per seat: a second resource there is no second route.
+    if (!ascending(e.relays.map((r) => r.origin))) return { rule: "relay-order", seat_relay: i };
+  }
+  if (!ascending(entries.map((e) => e.key))) return { rule: "seat-relay-order" };
+  const relays = entries.flatMap((e) => e.relays.map((r) => r.origin));
+  const endpoints = DEPLOYMENT_ORIGIN_LISTS.flatMap((name) => d[name]);
+  // T-25: a relay at an endpoint would put the operator on the route that
+  // exists to bypass it. Only exact origins are compared (the signers check
+  // another port or host of one operator).
+  if (relays.some((o) => endpoints.some((x) => sameBytes(x, o)))) return { rule: "relay-endpoint" };
+  // T-20: as `endpoint-rp`, a page there could open a voter's backup.
+  if (relays.some((o) => isUnder(hostOf(o), d.backup_rp_id))) return { rule: "relay-rp" };
+  return undefined;
+}
+
+// Empty for the origin's root, or a path by release.md's grammar; the
+// codec bounds it at 128 bytes.
+function isRelayPath(p: Uint8Array): boolean {
+  if (p.length === 0) return true;
+  const s = ascii(p);
+  return s !== undefined && isPath(s);
+}
+
 /** Version 2's rules across releases, in checking order. */
 export const DEPLOYMENT_ACROSS_RULES = Object.freeze([
   "token-key-changed",
@@ -417,12 +534,13 @@ export interface DeploymentAcrossFailure {
 }
 
 /**
- * The first rule of Across releases two well-formed version-2 records break,
- * `earlier` being the one named by the release published first on L1, or
- * `undefined`. A period's key is fixed once a release lists it and belongs
- * to that period alone, and a retirement stands (T-74, T-10). A version-1
- * record lists no key, so has nothing to compare: pass only version 2, and
- * only records `deploymentRecordRule` accepted.
+ * The first rule of Across releases two well-formed records of version 2 or
+ * 3 break, `earlier` being the one named by the release published first on
+ * L1, or `undefined`. A period's key is fixed once a release lists it and
+ * belongs to that period alone, and a retirement stands (T-74, T-10). Only
+ * the token keys are compared: version 3's relays meet no rule across
+ * releases. A version-1 record lists no key, so has nothing to compare: pass
+ * only versions 2 and 3, and only records `deploymentRecordRule` accepted.
  */
 export function deploymentAcrossRule(
   earlier: DeploymentRecordV2,

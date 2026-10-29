@@ -229,7 +229,10 @@ function findDeployment(
   if (denc === undefined) return stop("deployment-record-missing", S, false);
   let deployment: DecodedDeploymentRecord;
   try {
-    deployment = decodeDeploymentRecord(denc);
+    // This release judges versions 1 and 2 only: a version-3 record is
+    // `unsupported-version` until the keys run is taught it, rather than
+    // resolved and then left out of every pair (T-36, T-74).
+    deployment = decodeDeploymentRecord(denc, 2);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     if (e.code === "unknown-version")

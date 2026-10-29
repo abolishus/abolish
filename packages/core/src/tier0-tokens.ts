@@ -222,7 +222,9 @@ export function tier0Issuer({
 /**
  * Refuses an issuer that disagrees with the deployment record its release
  * names (`encoding`, record `0x0020`; [[deployment]], Record (version 2)):
- * a record that isn't a well-formed version 2, another L2 or group registry,
+ * a record that isn't a well-formed version 2 or 3 (version 3 lists the
+ * same keys, beside relays the issuer has no part in), another L2 or group
+ * registry,
  * a region whose group isn't the record's signed Tier 0 group there, or a
  * held key the record doesn't list for its period, lists under another
  * `pkS`, or lists retired. A client finalises only under the keys its
@@ -242,7 +244,7 @@ export function checkTier0IssuerDeployment(issuer: Tier0Issuer, encoding: Uint8A
       throw new RangeError(`the deployment record doesn't decode: ${e.code}`);
     throw e;
   }
-  if (record.version !== 2)
+  if (record.version === 1)
     throw new RangeError("the deployment record is version 1, which lists no token key");
   const fault = deploymentRecordRule(record);
   if (fault !== undefined)

@@ -8,6 +8,7 @@ import {
   DEPLOYMENT_ACROSS_RULES,
   DEPLOYMENT_RULES,
   DEPLOYMENT_V2_RULES,
+  DEPLOYMENT_V3_RULES,
   deploymentAcrossRule,
   deploymentHash,
   type DeploymentRecordV2,
@@ -17,14 +18,15 @@ import {
 } from "../src/index.ts";
 import { buildSchema, hex, SPEC_VECTORS, type Vector, type VectorFile } from "./spec-vectors.ts";
 
-// This package's deployment record (src/deployment.ts, P2-30 part 3c-2a)
-// against both vector files, docs/spec/vectors/deployment-record.json and
-// deployment-record-v2.json, printed by their Python generators: each
-// vector decodes to the value the file's own type descriptors read, re-encodes
-// to its bytes under its deployment hash and breaks exactly the rule it
-// names, where it names it; each rejected one is rejected with its code; and
-// each succession breaks its rule across releases at its period (T-31, T-36,
-// T-37, T-74).
+// This package's deployment record (src/deployment.ts, P2-30 part 3c-2a and
+// P2-8 part 3c-1b-2b-2b-2d-2b-2e-3a) against the three vector files,
+// docs/spec/vectors/deployment-record.json, deployment-record-v2.json and
+// deployment-record-v3.json, printed by their Python generators: each vector
+// decodes to the value the file's own type descriptors read, re-encodes to
+// its bytes under its deployment hash and breaks exactly the rule it names,
+// where it names it; each rejected one is rejected with its code by a reader
+// of the file's versions; and each succession breaks its rule across
+// releases at its period (T-31, T-36, T-37, T-43, T-74).
 const NUM_RUNS = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const toHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
@@ -52,6 +54,7 @@ const read = (name: string) =>
   JSON.parse(readFileSync(new URL(name, SPEC_VECTORS), "utf8")) as DeploymentFile;
 const v1File = read("deployment-record.json");
 const v2File = read("deployment-record-v2.json");
+const v3File = read("deployment-record-v3.json");
 
 function decodeError(f: () => unknown): string | undefined {
   try {
@@ -78,12 +81,17 @@ describe("deployment record codec and rules (docs/spec/deployment.md)", () => {
   test("has the files' rules, in their order", () => {
     expect([...DEPLOYMENT_RULES]).toEqual(v1File.rules);
     expect([...DEPLOYMENT_RULES, ...DEPLOYMENT_V2_RULES]).toEqual(v2File.rules);
+    expect([...DEPLOYMENT_RULES, ...DEPLOYMENT_V2_RULES, ...DEPLOYMENT_V3_RULES]).toEqual(
+      v3File.rules,
+    );
     expect([...DEPLOYMENT_ACROSS_RULES]).toEqual(v2File.acrossRules);
+    expect([...DEPLOYMENT_ACROSS_RULES]).toEqual(v3File.acrossRules);
   });
 
-  for (const [name, file] of [
-    ["version 1", v1File],
-    ["version 2", v2File],
+  for (const [name, file, version] of [
+    ["version 1", v1File, 1],
+    ["version 2", v2File, 2],
+    ["version 3", v3File, 3],
   ] as const) {
     describe(name, () => {
       const { schema, type } = buildSchema(file as unknown as VectorFile);
@@ -98,6 +106,8 @@ describe("deployment record codec and rules (docs/spec/deployment.md)", () => {
           const d = decodeDeploymentRecord(bytes);
           // The file's own descriptors are an independent reading of the bytes.
           expect(d).toEqual(schema.decode(t.recordType, bytes, UNPINNED));
+          // A reader of the file's versions alone reads it the same.
+          expect(decodeDeploymentRecord(bytes, version)).toEqual(d);
           expect(toHex(encodeDeploymentRecord(d))).toBe(v.encoding);
           expect(toHex(deploymentHash(bytes))).toBe(v.deploymentHash);
         },
@@ -109,26 +119,33 @@ describe("deployment record codec and rules (docs/spec/deployment.md)", () => {
         expect(got.at).toEqual(v.illFormedAt);
       });
 
-      // The version-1 file was printed for a reader of version 1 alone, to
-      // which version 2 is unknown. A reader of both reads that vector's
-      // version-1 body under version 2's layout, which is `truncated`
-      // (Record (version 2), Decoding).
+      // Each file was printed for a reader of its versions alone, to which a
+      // later version is unknown. A reader of every version reads such a
+      // vector's earlier body under the later layout, which is `truncated`
+      // (Record (version 2) and Record (version 3), Decoding).
+      const later = new Set(["v1:unknown-version", "v2:version-three"]);
       const asRead = (v: DeploymentVector) =>
-        file === v1File && v.id === "unknown-version" ? "truncated" : v.error;
+        later.has(`v${version}:${v.id}`) ? "truncated" : v.error;
 
       test.each(rejected)("%s is rejected with its code", (_id, v) => {
+        expect(decodeError(() => decodeDeploymentRecord(hex(v.encoding), version))).toBe(v.error);
         expect(decodeError(() => decodeDeploymentRecord(hex(v.encoding)))).toBe(asRead(v));
       });
     });
   }
 
+  // A version-3 record is a version-2 record to the rules across releases.
   const v2 = (encoding: string): DeploymentRecordV2 => {
     const d = decodeDeploymentRecord(hex(encoding));
-    if (d.version !== 2) throw new Error("expected a version-2 record");
+    if (d.version === 1) throw new Error("expected a version-2 or version-3 record");
     return d.value;
   };
 
-  test.each((v2File.successions ?? []).map((s) => [s.id, s] as const))(
+  test.each(
+    [v2File, v3File].flatMap((f) =>
+      (f.successions ?? []).map((s) => [`${f === v2File ? "v2" : "v3"} ${s.id}`, s] as const),
+    ),
+  )(
     "%s: across releases, the first rule broken and the lowest period it is broken at",
     (_id, s) => {
       const got = deploymentAcrossRule(v2(s.earlier), v2(s.later));
@@ -206,7 +223,7 @@ describe("deployment record codec and rules (docs/spec/deployment.md)", () => {
 
   // Canonicity: every byte string the decoder accepts re-encodes to itself,
   // and none of a valid record's proper prefixes or extensions decodes.
-  const encodings = [...v1File.vectors, ...v2File.vectors]
+  const encodings = [...v1File.vectors, ...v2File.vectors, ...v3File.vectors]
     .filter((v) => "value" in v)
     .map((v) => hex(v.encoding));
   const someEncoding = fc.constantFrom(...encodings);

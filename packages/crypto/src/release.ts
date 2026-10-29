@@ -233,7 +233,8 @@ function isHeaderValue(v: Uint8Array): boolean {
   );
 }
 
-function isPath(p: string): boolean {
+/** Whether `p` is a path by release.md's grammar (Well-formedness, `path`). */
+export function isPath(p: string): boolean {
   const segments = p.split("/");
   return (
     segments.length <= RELEASE_LIMITS.pathSegments &&

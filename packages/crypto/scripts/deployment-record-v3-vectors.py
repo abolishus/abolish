@@ -414,6 +414,30 @@ def pair_cases(site_vectors, d):
     ]
 
 
+def succession_cases(v2_base):
+    """Pairs for Across releases with a version-3 record on either side or both.
+
+    Each of version 2's successions with the typical relays on both records,
+    then version 2's earlier against a version-3 later and the reverse for a
+    case of each rule, and relays that differ between releases, which meet no
+    rule (Across releases).
+    """
+    out = []
+    for vid, description, earlier, later, code in v2.across_cases(v2_base):
+        out.append((f"v3-{vid}", f"{description}, both version 3", 3, typical(earlier), 3, typical(later), code))
+    mixed = {c[0]: c for c in v2.across_cases(v2_base)}
+    for vid in ["same", "changed", "reused", "unretired"]:
+        _, description, earlier, later, code = mixed[vid]
+        out.append((f"v2-v3-{vid}", f"{description}, version 2 then version 3", 2, earlier, 3, typical(later), code))
+        out.append((f"v3-v2-{vid}", f"{description}, version 3 then version 2", 3, typical(earlier), 2, later, code))
+    t = typical(v2_base)
+    fewer = with_relays(t, [dict(e, relays=e["relays"][:1]) for e in t["seat_relays"][1:]])
+    moved = with_relays(t, [dict(e, relays=[relay(b"https://relay.example.com")]) for e in t["seat_relays"]])
+    out.append(("relays-dropped", "The later release drops a seat's entry and a relay of every other seat's", 3, t, 3, fewer, None))
+    out.append(("relays-moved", "The later release lists every seat at a relay the earlier doesn't", 3, t, 3, moved, None))
+    return out
+
+
 def main():
     vectors_dir = pathlib.Path(sys.argv[1])
     site_vectors = json.loads((vectors_dir / "site-directory.json").read_text())["vectors"]
@@ -502,6 +526,22 @@ def main():
     assert len({v["id"] for v in out_vectors}) == len(out_vectors)
     assert len({p["id"] for p in pairs}) == len(pairs)
 
+    successions = []
+    for vid, description, ev, earlier, lv, later, code in succession_cases(v2_base):
+        for version, d in [(ev, earlier), (lv, later)]:
+            assert (ill_formed(d) if version == VERSION else v2.ill_formed(d)) is None, vid
+        # Across releases reads only the token keys, so version 2's judge of
+        # the same keys is this version's.
+        got = v2.across(earlier, later)
+        assert (got[0] if got else None) == code, (vid, got, code)
+        s = {"id": vid, "description": description, "earlier": h(encode(earlier, ev)), "later": h(encode(later, lv))}
+        if code is not None:
+            s["across"] = code
+            s["acrossAt"] = {"period": str(got[1]["period"])}
+        successions.append(s)
+    assert {s["across"] for s in successions if "across" in s} == set(v2.ACROSS_RULES)
+    assert len({s["id"] for s in successions}) == len(successions)
+
     largest = max(len(bytes.fromhex(v["encoding"])) for v in out_vectors if "value" in v)
     assert largest == MAX_ENCODING, largest
     out = {
@@ -520,6 +560,8 @@ def main():
         "types": types(),
         "vectors": out_vectors,
         "pairs": pairs,
+        "acrossRules": v2.ACROSS_RULES,
+        "successions": successions,
     }
     (vectors_dir / "deployment-record-v3.json").write_text(json.dumps(out, indent=2) + "\n")
 

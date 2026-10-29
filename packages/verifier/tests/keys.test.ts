@@ -360,7 +360,7 @@ describe("findings", () => {
     expect(r.result).toEqual({ status: "fail", ...r.findings?.[0] });
   });
 
-  test("a well-formed version-3 deployment is unsupported, never resolved and left out of the pairs", () => {
+  test("well-formed version-3 deployments are resolved and their pairs judged", () => {
     const v3 = decodeDeploymentRecord(
       hexToBytes(
         (
@@ -371,16 +371,19 @@ describe("findings", () => {
       ),
     );
     if (v3.version !== 3) throw new Error("fixture");
-    // Two releases whose keys differ for one period: token-key-changed, were
-    // the pair judged.
+    // Two releases whose keys differ for one period: a run that left them out
+    // of the pairs would pass.
     const { json, now } = many(2, v3.value.seat_relays);
     const r = runKeys(parseKeysEvidence(json), PIN, now);
+    expect(r.releases?.map((x) => [x.version, x.outcome])).toEqual([
+      ["3", "resolved"],
+      ["3", "resolved"],
+    ]);
     expect(r.result).toEqual({
-      status: "unverifiable",
-      code: "unsupported-version",
-      at: { sequence: "0", record: "deployment" },
+      status: "fail",
+      code: "token-key-changed",
+      at: { earlier: "0", later: "1", period: r.periods?.[0]?.period },
     });
-    expect(r.findings ?? []).toEqual([]);
   });
 
   test("below the cap every finding is listed and the flag is absent", () => {

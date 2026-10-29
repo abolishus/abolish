@@ -1,10 +1,10 @@
 // The keys run (docs/spec/verifier.md, Token keys across releases): every
 // release the pinned registry holds, revoked or not, read from L1 state; its
 // release record and deployment record found by hash; every pair of
-// version-2 deployments judged by the rules across releases; and each
-// period's key first listed before its period began. A Tier 0 key that
-// changes, moves or comes back from retirement, or that no release published
-// before its period, lets the issuer tell one account's tokens from
+// version-2 or version-3 deployments judged by the rules across releases;
+// and each period's key first listed before its period began. A Tier 0 key
+// that changes, moves or comes back from retirement, or that no release
+// published before its period, lets the issuer tell one account's tokens from
 // another's (T-74, T-10). The rules are packages/crypto's; this file reads
 // and orders them. It contacts no host.
 
@@ -165,7 +165,7 @@ function deploymentAt(f: DeploymentFailure): KeysAt {
 
 interface Resolved {
   readonly resolved: true;
-  readonly deployment: DecodedDeploymentRecordUpTo<2>;
+  readonly deployment: DecodedDeploymentRecordUpTo<3>;
   readonly hash: Uint8Array;
 }
 
@@ -227,12 +227,12 @@ function findDeployment(
   row.deploymentHash = bytesToHex(v.deployment_hash);
   const denc = byHash.deployments.get(bytesToHex(v.deployment_hash));
   if (denc === undefined) return stop("deployment-record-missing", S, false);
-  let deployment: DecodedDeploymentRecordUpTo<2>;
+  let deployment: DecodedDeploymentRecordUpTo<3>;
   try {
-    // This release judges versions 1 and 2 only: a version-3 record is
+    // This release judges versions 1 to 3: a later record is
     // `unsupported-version` until the keys run is taught it, rather than
     // resolved and then left out of every pair (T-36, T-74).
-    deployment = decodeDeploymentRecord(denc, 2);
+    deployment = decodeDeploymentRecord(denc, 3);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     if (e.code === "unknown-version")
@@ -349,7 +349,9 @@ export function runKeys(
   }
   const listing: [number, DeploymentRecordV2, Uint8Array][] = [];
   for (const [s, x] of step4.entries())
-    if (x.resolved && x.deployment.version === 2) listing.push([s, x.deployment.value, x.hash]);
+    // Across releases compares token keys only, which versions 2 and 3 both
+    // list; a version-3 record's seat relays meet no rule there.
+    if (x.resolved && x.deployment.version !== 1) listing.push([s, x.deployment.value, x.hash]);
 
   // Step 5: by the later release, then the earlier; within one registry the
   // lower sequence was published first.
@@ -376,8 +378,8 @@ export function runKeys(
       if (k.retired && !retiredFrom.has(k.period)) retiredFrom.set(k.period, s);
     }
   const firstUnresolved = step4.findIndex((x) => !x.resolved);
-  // The first version-2 release lists its own period and the one before,
-  // which no earlier release could list.
+  // The first version-2 or version-3 release lists its own period and the
+  // one before, which no earlier release could list.
   const s0 = listing[0];
   const floor0 = s0 === undefined ? 0n : (published[s0[0]] as PublishedRelease).publishedAt / P;
   const periods: KeysPeriodRow[] = [];

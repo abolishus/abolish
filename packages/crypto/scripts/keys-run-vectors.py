@@ -11,10 +11,10 @@ It reuses only this folder's other independent generators:
 release-registry-vectors.py's namespace, slots and times words (and its
 Keccak-256, contract-event-vectors.py's), release-record-vectors.py's release
 record (encoding, strict decoder, well-formedness, release hash) and
-deployment-record-vectors.py's and deployment-record-v2-vectors.py's
-deployment record (encoding, strict decoder of both versions,
-well-formedness, deployment hash, the rules across releases and the test
-token keys).
+deployment-record-vectors.py's, deployment-record-v2-vectors.py's and
+deployment-record-v3-vectors.py's deployment record (encoding, strict decoder
+of all three versions, well-formedness, deployment hash, the rules across
+releases, the test token keys and the typical seat relays).
 
 Reading the registry's account and words from an L1 header and trie nodes is
 Anchors from L1's walk, which l1-anchor.json covers; these vectors give the
@@ -43,7 +43,8 @@ def _load(name, file):
 
 reg = _load("release_registry_vectors", "release-registry-vectors.py")
 rr = reg.rr
-v2 = _load("deployment_record_v2_vectors", "deployment-record-v2-vectors.py")
+v3 = _load("deployment_record_v3_vectors", "deployment-record-v3-vectors.py")
+v2 = v3.v2
 v1 = v2.v1
 h, word = rr.h, reg.word
 
@@ -69,13 +70,13 @@ def decode_release(enc):
 
 def decode_deployment(enc):
     try:
-        return v2.decode(enc), None
-    except v2.DecodeError as e:
+        return v3.decode(enc), None
+    except v3.DecodeError as e:
         return None, e.args[0]
 
 
 def deployment_rule(version, d):
-    return v1.ill_formed(d) if version == 1 else v2.ill_formed(d)
+    return {1: v1.ill_formed, 2: v2.ill_formed, 3: v3.ill_formed}[version](d)
 
 
 def judge(v, records, deployments):
@@ -170,7 +171,9 @@ def judge(v, records, deployments):
         deps[s] = (version, d, dh)
 
     unresolved = [s for s in range(c) if s not in deps]
-    listing = sorted(s for s, (version, _, _) in deps.items() if version == 2)
+    # Across releases compares token keys only, which versions 2 and 3 both
+    # list; a version-3 record's relays meet no rule there.
+    listing = sorted(s for s, (version, _, _) in deps.items() if version >= 2)
 
     # Step 5.
     findings = []
@@ -249,7 +252,10 @@ def main():
         return d
 
     def enc_dep(version, d):
-        return v2.encode(d, version=version)
+        return v3.encode(d, version=version)
+
+    def dv3(ks, label=None):
+        return v3.typical(dv2(ks, label))
 
     # Releases' deployments, by name: (version, record) or raw bytes.
     D = {
@@ -270,14 +276,33 @@ def main():
         "ill-formed-key": enc_dep(2, dv2([dict(k, key=bytes(32)) if k["period"] == Q + 2 else k for k in keys(Q - 1, Q + 6)])),
         "ill-formed-v1": None,
         "truncated": enc_dep(2, dv2(keys(Q, Q + 7)))[:-1],
-        "version-3": None,
+        "version-4": None,
+        "v2-labelled-v3": None,
+        "first-v3": enc_dep(3, dv3(keys(Q - 1, Q + 6))),
+        "second-v3": enc_dep(3, dv3(keys(Q, Q + 7))),
+        "second-changed-v3": enc_dep(3, dv3(keys(Q, Q + 7, q3="replacement"))),
+        "first-retired-v3": enc_dep(3, dv3(keys(Q - 1, Q + 6, q2="retired"))),
+        "second-v3-moved": None,
+        "late-v3": enc_dep(3, dv3(keys(Q + 8, Q + 15))),
+        "far-back-v3": enc_dep(3, dv3(keys(Q - 4, Q + 3))),
+        "ill-formed-v3": None,
     }
     bad_panel = copy.deepcopy(v1_base)
     case = next(c for c in v1.ill_formed_cases(v1_base) if c[3] is not None and "panel" in c[4])
     case[2](bad_panel)
     assert v1.ill_formed(bad_panel)[1].get("panel") is not None
     D["ill-formed-v1"] = enc_dep(1, bad_panel)
-    D["version-3"] = D["second"][:2] + b"\x03" + D["second"][3:]
+    # A version no reader has: still unsupported, never a failure.
+    D["version-4"] = D["second"][:2] + b"\x04" + D["second"][3:]
+    # Version 2's layout labelled version 3, which this release reads: it
+    # ends before its seat relays.
+    D["v2-labelled-v3"] = D["second"][:2] + b"\x03" + D["second"][3:]
+    moved = dv3(keys(Q, Q + 7))
+    moved = v3.with_relays(moved, [dict(e, relays=[v3.relay(b"https://relay.example.com")]) for e in moved["seat_relays"]])
+    D["second-v3-moved"] = enc_dep(3, moved)
+    no_relays = v3.with_relays(dv3(keys(Q - 1, Q + 6)), [])
+    assert v3.ill_formed(no_relays)[0] == "seat-relays-empty"
+    D["ill-formed-v3"] = enc_dep(3, no_relays)
     for name, enc in D.items():
         assert isinstance(enc, bytes), name
 
@@ -404,9 +429,9 @@ def main():
     expect(scenario("record-missing", "The first version-2 release's record isn't given", honest, omit_records=(1,)), "unverifiable", "release-record-missing")
     expect(scenario("deployment-missing", "The second version-2 release's deployment record isn't given", honest, omit_deployments=(2,)), "unverifiable", "deployment-record-missing")
     expect(scenario("release-unsupported", "A release record of version 2, which this release doesn't read", [honest[0], ("first", T1, 0, "raw-version-2")]), "unverifiable", "unsupported-version")
-    expect(scenario("deployment-unsupported", "A deployment record of version 3, which this release doesn't read", [honest[0], ("version-3", T1, 0, None)]), "unverifiable", "unsupported-version")
+    expect(scenario("deployment-unsupported", "A deployment record of version 4, which this release doesn't read", [honest[0], ("version-4", T1, 0, None)]), "unverifiable", "unsupported-version")
     expect(
-        scenario("unsupported-then-fail", "An unsupported deployment, then a changed key: the failure decides", [("first", T1, 0, None), ("version-3", T2, 0, None), ("second-changed", T2 + 10, 0, None)]),
+        scenario("unsupported-then-fail", "An unsupported deployment, then a changed key: the failure decides", [("first", T1, 0, None), ("version-4", T2, 0, None), ("second-changed", T2 + 10, 0, None)]),
         "fail",
         "token-key-changed",
     )
@@ -445,6 +470,23 @@ def main():
         "fail",
         "deployment-record",
     )
+
+    # Version 3: its token keys judged as version 2's, its relays by no rule
+    # across releases.
+    honest_v3 = [honest[0], ("first-v3", T1, 0, None), ("second-v3", T2, 0, None)]
+    expect(scenario("v3-honest", "The honest history with both later deployments version 3", honest_v3), "pass")
+    expect(scenario("v2-then-v3", "A version-2 release, then a version-3 one listing the periods ahead", [honest[0], honest[1], ("second-v3", T2, 0, None)]), "pass")
+    expect(scenario("v3-then-v2", "A version-3 release, then a version-2 one listing the periods ahead", [honest[0], ("first-v3", T1, 0, None), honest[2]]), "pass")
+    expect(scenario("v3-relays-moved", "Two version-3 releases whose seats' relays all differ: relays meet no rule across releases", [honest[0], ("first-v3", T1, 0, None), ("second-v3-moved", T2, 0, None)]), "pass")
+    expect(scenario("v3-first-floor", "The first release listing keys is version 3 and lists four periods before its own: none is late", [("far-back-v3", T1, 0, None)]), "pass")
+    expect(scenario("v2-then-v3-changed", "A version-2 release, then a version-3 one listing another key for Q + 3", [honest[0], honest[1], ("second-changed-v3", T2, 0, None)]), "fail", "token-key-changed")
+    expect(scenario("v3-then-v2-changed", "A version-3 release, then a version-2 one listing another key for Q + 3", [honest[0], ("first-v3", T1, 0, None), ("second-changed", T2, 0, None)]), "fail", "token-key-changed")
+    expect(scenario("v3-reused", "A version-3 release, then a version-2 one listing its key of Q - 1 for Q + 7", [honest[0], ("first-v3", T1, 0, None), ("second-reused", T2, 0, None)]), "fail", "token-key-reused")
+    expect(scenario("v3-unretired", "A version-3 release retires Q + 2 and a later version-3 one lists it live", [honest[0], ("first-retired-v3", T1, 0, None), ("second-v3", T2, 0, None)]), "fail", "token-key-unretired")
+    expect(scenario("v3-late", "A version-3 release published in Q + 8 is the first to list Q + 8", honest_v3 + [("late-v3", T3, 0, None)]), "fail", "token-key-late")
+    expect(scenario("v3-late-behind-v4", "A late version-3 listing above a version-4 deployment: no finding while it might list the period first", honest + [("version-4", T2 + 10, 0, None), ("late-v3", T3, 0, None)]), "unverifiable", "unsupported-version")
+    expect(scenario("deployment-v3-rule", "A version-3 deployment record listing no seat relays", [honest[0], ("ill-formed-v3", T1, 0, None)]), "fail", "deployment-record")
+    expect(scenario("deployment-v2-labelled-v3", "Version 2's layout labelled version 3: it ends before its seat relays", [honest[0], ("v2-labelled-v3", T1, 0, None)]), "fail", "deployment-record")
 
     # Steps 1 to 3.
     expect(scenario("stale", "A header more than an hour before the run's clock", honest, run_at=NOW + reg.MAX_STALENESS + 1), "unverifiable", "l1-stale")
@@ -486,7 +528,7 @@ def main():
         "spec": "docs/spec/verifier.md (Token keys across releases)",
         "generator": (
             "packages/crypto/scripts/keys-run-vectors.py: standard library only; reuses release-registry-vectors.py's slots, "
-            "release-record-vectors.py's release record and deployment-record-v2-vectors.py's deployment record"
+            "release-record-vectors.py's release record and deployment-record-v3-vectors.py's deployment record"
         ),
         "pins": {"l1ChainId": str(rr.SEPOLIA), "registry": h(rr.REGISTRY)},
         "tokenKeyPeriod": str(P),

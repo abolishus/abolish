@@ -13,7 +13,8 @@ import {
   type TreeClaim,
 } from "../board.ts";
 import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
-import type { CardText, StreamCard, StreamSort } from "../stream.ts";
+import { type PollResults, resultsView, type ServedResults } from "../results.ts";
+import type { CardText, PollWords, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
   type AskedBy,
@@ -27,7 +28,7 @@ import {
 import type { RemovalGround } from "../components/moderation-log.tsx";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
-import { checkedText, streamCard } from "./stream-card.ts";
+import { cardText, checkedWords, streamCard } from "./stream-card.ts";
 
 export interface BoardHead {
   /** Entries on the board, as a canonical decimal `u64`. */
@@ -54,6 +55,10 @@ export type PollPage =
       readonly askedBy: AskedBy | undefined;
       /** Its words in the page's locale, as `wordsOf` reads them; `undefined` if none can be shown. */
       readonly text: CardText | undefined;
+      /** Every question's words, as `text` is checked; `undefined` with it. */
+      readonly words: PollWords | undefined;
+      /** Its results so far, as `resultsOf` reads them. */
+      readonly results: PollResults;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -82,14 +87,21 @@ export async function loadPoll(
       tagsOf(api, electionId),
       askedByOf(readAskedBy, electionId),
       wordsOf(api, electionId),
+      resultsOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation, claimed, tags, askedBy, displayText] = answers;
+  const [{ definition }, board, moderation, claimed, tags, askedBy, displayText, served] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
+  // The API withholds a hidden poll's text; dropped here too, should its
+  // answers to the two reads straddle the hiding (T-68).
+  const words =
+    moderation.state === "hidden"
+      ? undefined
+      : checkedWords(view.poll, definition, displayText, locale);
   // A claim, checked as `/p/<code>` checks it: the code must be a prefix of
   // the hash this page checked, or the page would print another poll's code
   // (T-34). Which of several polls sharing a prefix owns the shorter one is
@@ -112,13 +124,41 @@ export async function loadPoll(
     // Core names no one for a hidden poll; dropped here too, since the page's
     // data reaches the browser whether or not it is shown (T-68).
     askedBy: moderation.state === "hidden" ? undefined : askedBy,
-    // The API withholds a hidden poll's text; dropped here too, should its
-    // answers to the two reads straddle the hiding (T-68).
-    text:
-      moderation.state === "hidden"
-        ? undefined
-        : checkedText(view.poll, definition, displayText, locale),
+    text: words === undefined ? undefined : cardText(words),
+    words,
+    // Moderation never withholds a result: a hidden poll's is shown by
+    // option number (docs/moderation-policy.md).
+    results: "state" in served ? resultsView(view.poll, served) : served,
   };
+}
+
+/** How long the poll page waits for its results before showing it without them. */
+export const RESULTS_WAIT_MS = 2_000;
+
+/**
+ * The results the API reads for `electionId` (`GET /elections/results`):
+ * as served, `not-counted` or `not-ready` by the API's codes, and
+ * `unavailable` for any other failure or an answer slower than
+ * `RESULTS_WAIT_MS`. The results are optional on the page, as its words
+ * are, and the worker can take the API's whole 10 s to read them, so a slow
+ * read shows the poll without them rather than holding the page (T-52).
+ */
+async function resultsOf(
+  api: Api,
+  electionId: string,
+): Promise<ServedResults | Exclude<PollResults, { kind: "read" }>> {
+  try {
+    return await api.elections.getResults(
+      { electionId },
+      { signal: AbortSignal.timeout(RESULTS_WAIT_MS) },
+    );
+  } catch (error) {
+    if (error instanceof ORPCError && error.defined) {
+      if (error.code === "RESULTS_NOT_COUNTED") return { kind: "not-counted" };
+      if (error.code === "RESULTS_NOT_READY") return { kind: "not-ready" };
+    }
+    return { kind: "unavailable" };
+  }
 }
 
 /**

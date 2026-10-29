@@ -120,6 +120,19 @@ export interface CardText {
   readonly options: readonly string[];
 }
 
+/** One language's words for every question of a poll, as its page shows its results. */
+export interface PollWords {
+  /** The translation's tag, lowercase BCP 47, as the record holds it. */
+  readonly language: string;
+  /** The poll's title, `""` when it has none (version 1 never has one). */
+  readonly title: string;
+  /** Each question's text and its option labels, in ballot and option order. */
+  readonly questions: readonly {
+    readonly question: string;
+    readonly options: readonly string[];
+  }[];
+}
+
 /**
  * Why a listed poll's card has no words: its definition (as on the poll
  * page), or `text` when the display text is missing, withheld or fails its

@@ -459,6 +459,28 @@ export const esUS: Messages = {
     "Las respuestas se emiten solo en la app de votación, nunca en este sitio web, y cada una se sella en el propio dispositivo de quien vota antes de enviar nada. La app de votación todavía no puede abrir una encuesta desde esta página.",
   pollAnswerClosed:
     "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",
+  resultsTitle: "Resultados",
+  resultsSealed:
+    "Las respuestas siguen selladas mientras la encuesta está abierta. Los resultados aparecen aquí una vez que se cuentan.",
+  resultsCounting:
+    "Esta encuesta ya cerró. Los resultados aparecen aquí una vez que se cuentan sus respuestas.",
+  resultsNotCounted:
+    "Este servidor no publica los resultados de esta encuesta. Cualquiera puede contarlos igual desde su tablero público.",
+  resultsUnavailable:
+    "No se pudieron cargar los resultados en este momento. Vuelve a intentarlo en un rato.",
+  resultsAnswered: { one: "Respondió {count} persona", other: "Respondieron {count} personas" },
+  resultsNoneAnswered: "Nadie respondió.",
+  resultsTierPending:
+    "Parte del conteo de este grupo todavía no se publica. Sus resultados aparecen aquí cuando se publique completo.",
+  resultsLeader: "La más elegida: {option}, por el {share} de quienes respondieron.",
+  resultsTied:
+    "Empate como las más elegidas: {option}, cada una por el {share} de quienes respondieron.",
+  resultsNothingPicked: "No se eligió ninguna respuesta.",
+  resultsOption: "Respuesta {number}",
+  resultsPeople: { one: "{count} persona", other: "{count} personas" },
+  resultsClaim:
+    "Estos son los resultados que nuestro servidor lee del conteo publicado en el tablero público de la encuesta. Nada en esta página los comprueba por ti: cualquiera puede volver a contar el tablero y comparar.",
+  resultsCheck: "Comprobar el conteo en el tablero",
   reactionsTitle: "Reacciones",
   reactionsLede:
     "Reacciona a la encuesta en sí, la respondas o no. Una reacción no es una respuesta y no dice nada sobre si respondiste.",

@@ -13,10 +13,13 @@ import {
   type PollTags,
   type PollView,
 } from "../poll.ts";
+import type { PollResults as Results } from "../results.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
+import type { PollWords } from "../stream.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
+import { PollResults } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./when.tsx";
@@ -39,6 +42,10 @@ export interface PollSummaryProps {
   phoneVerification: boolean;
   /** Who asked it, if its author chose to say; never shown while it's hidden. */
   askedBy?: Asker | undefined;
+  /** Its results so far; without them, none are shown. */
+  results?: Results | undefined;
+  /** Every question's words, which name the results' questions and options. */
+  words?: PollWords | undefined;
 }
 
 const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
@@ -112,6 +119,8 @@ export function PollSummary({
   reactions,
   phoneVerification,
   askedBy,
+  results,
+  words,
 }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
@@ -213,6 +222,18 @@ export function PollSummary({
           </div>
         )}
       </header>
+
+      {/* Shown on a hidden poll too, by number: moderation never withholds a
+          result (docs/moderation-policy.md). Nothing is counted before it opens. */}
+      {results === undefined || status === "scheduled" ? null : (
+        <PollResults
+          poll={poll}
+          results={results}
+          status={status}
+          words={moderation.state === "hidden" ? undefined : words}
+          phoneVerification={phoneVerification}
+        />
+      )}
 
       <section
         aria-labelledby="answer-title"

@@ -53,6 +53,9 @@ import {
   PROFILE_HANDLE,
   QUESTIONS_ID,
   questionsDefinition,
+  RESULTS_FAILS_ID,
+  RESULTS_MISFIT_ID,
+  RESULTS_NOT_READY_ID,
   seen,
   streamed,
   STREAM_BAD_TEXT,
@@ -368,8 +371,8 @@ describe("poll page", () => {
       "x-forwarded-for": "203.0.113.9",
       "user-agent": "visitor-agent",
     });
-    // The definition, head, moderation, code, tags and display text.
-    expect(seen.length).toBe(6);
+    // The definition, head, moderation, code, tags, display text and results.
+    expect(seen.length).toBe(7);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(headers.authorization).toBeUndefined();
@@ -436,6 +439,80 @@ describe("poll page", () => {
     const response = await get(`/polls/${id}`);
     expect(response.status).toBe(404);
     expect(await response.text()).toContain("There is no page at this address");
+  });
+});
+
+describe("results", () => {
+  const text = async (path: string) => (await (await get(path)).text()).replace(/<[^>]+>/g, "");
+  const section = async (path: string) =>
+    /<section aria-labelledby="results-title"[^>]*>([\s\S]*?)<\/section>\s*<section aria-labelledby="answer-title"/.exec(
+      await (await get(path)).text(),
+    )?.[1];
+
+  test("a counted poll's results, in a sentence first, then each answer's share and count, by tier", async () => {
+    const page = await text(`/polls/${STREAM_V1}`);
+    expect(page).toContain("Tier 0 (verified e-mail)");
+    expect(page).toContain("12 people answered");
+    expect(page).toContain("Should the park stay open late?");
+    // The author's words isolated inside our sentence (T-75).
+    expect(page).toContain("Most picked: \u2068Yes\u2069, by 50% of those who answered.");
+    expect(page).toContain("25%");
+    expect(page).toContain("8.3%");
+    expect(page).toContain("6 people");
+    expect(page).toContain("1 person");
+    // A tier with a cell still unopened shows no counts (ADR 0026: never a partial tier).
+    expect(page).toContain("2 people answered");
+    expect(page).toContain("Part of this group&#x27;s count isn&#x27;t published yet");
+    // The board's results, not the verifier's verdict, with the way to check them (T-34).
+    expect(page).toContain("Nothing on this page checks them for you");
+    expect(await section(`/polls/${STREAM_V1}`)).toContain(`href="/polls/${STREAM_V1}/board"`);
+  });
+
+  test("a version-5 poll's results question by question, with a tie said as one", async () => {
+    const page = await text(`/polls/${STREAM_V5}`);
+    expect(page).toContain("8 people answered");
+    expect(page).toContain("Should the library open on Sundays?");
+    expect(page).toContain(
+      "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
+    );
+    expect(page).toContain("Most picked: \u2068Yes\u2069, by 62.5% of those who answered.");
+  });
+
+  test("a hidden poll's results go by answer number, since its text is withheld", async () => {
+    const page = await text(`/polls/${HIDDEN_ID}`);
+    // Moderation never withholds a result (docs/moderation-policy.md).
+    expect(page).toContain("3 people answered");
+    expect(page).toContain("Most picked: \u2068Answer 1\u2069, by 100% of those who answered.");
+    expect(page).toContain("Answer 5");
+  });
+
+  test.each([
+    ["unopened and closed", ID, "The results appear here once its answers are counted."],
+    ["unopened and open", OPEN_ONE, "Answers stay sealed while the poll is open."],
+    ["not counted here", FILLER[1]!, "This server doesn&#x27;t publish this poll&#x27;s results."],
+    ["not ready", RESULTS_NOT_READY_ID, "The results couldn&#x27;t be loaded just now."],
+    ["a failed read", RESULTS_FAILS_ID, "The results couldn&#x27;t be loaded just now."],
+    // T-34: counts that don't fit the definition aren't printed under its options.
+    [
+      "counts that don't fit the poll",
+      RESULTS_MISFIT_ID,
+      "The results couldn&#x27;t be loaded just now.",
+    ],
+  ])("%s says so in place of the results, and still serves the page", async (_, id, says) => {
+    const response = await get(`/polls/${id}`);
+    expect(response.status).toBe(200);
+    const html = (await section(`/polls/${id}`)) ?? "";
+    expect(html).toContain(says);
+    expect(html).not.toContain("answered</p>");
+  });
+
+  test("the API is asked for the results by the poll's ID alone", async () => {
+    seen.length = 0;
+    await get(`/polls/${STREAM_V1}`, { cookie: "__Secure-abolish-account.session_token=secret" });
+    const asks = seen.filter((r) => r.path === "/elections/results");
+    expect(asks).toHaveLength(1);
+    expect([...asks[0]!.query.keys()]).toEqual(["electionId"]);
+    expect(asks[0]!.headers["cookie"]).toBeUndefined();
   });
 });
 

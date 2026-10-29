@@ -317,6 +317,52 @@ export const codes = new Map([
   [MISCODED_ID, MISCODED_CODE],
 ]);
 
+/**
+ * Each poll's results, as `GET /elections/results` answers them: the
+ * version-1 stream poll counted in Tier 0 with Tier 2 still partly unopened,
+ * the version-5 one question by question, the hidden poll counted, and the
+ * typical poll and the open one unopened. One poll answers counts that don't
+ * fit its definition, one isn't ready and one fails; the rest are polls this
+ * server counts no results of.
+ */
+export const RESULTS_MISFIT_ID = FILLER[4]!;
+export const RESULTS_NOT_READY_ID = FILLER[5]!;
+export const RESULTS_FAILS_ID = FILLER[6]!;
+const counted = (tiers: unknown[]) => ({
+  state: "read",
+  openings: 3,
+  passed: false,
+  cells: [],
+  tiers,
+});
+const RESULTS = new Map<string, unknown>([
+  [ID, { state: "unopened" }],
+  [OPEN_ONE, { state: "unopened" }],
+  [
+    STREAM_V1,
+    counted([
+      { tier: 0, counted: 12, counts: ["6", "3", "1"] },
+      { tier: 2, counted: 2 },
+    ]),
+  ],
+  [
+    STREAM_V5,
+    counted([
+      {
+        tier: 0,
+        counted: 8,
+        counts: ["4", "4", "0", "5", "1"],
+        byQuestion: [
+          ["4", "4", "0"],
+          ["5", "1"],
+        ],
+      },
+    ]),
+  ],
+  [HIDDEN_ID, counted([{ tier: 0, counted: 3, counts: ["3", "1", "0", "0", "2"] }])],
+  [RESULTS_MISFIT_ID, counted([{ tier: 0, counted: 3, counts: ["1", "1"] }])],
+]);
+
 /** The stub's state: while `down`, it drops every connection unanswered, as a dead API would. */
 export const stub = { down: false };
 
@@ -513,6 +559,26 @@ export function stubApi(): Server {
               "This poll's tags are withheld under the moderation policy; see GET /moderation/status.",
           });
         return json(200, TAGS.get(electionId) ?? {});
+      case "/elections/results": {
+        if (electionId === RESULTS_FAILS_ID) return json(500, {});
+        if (electionId === RESULTS_NOT_READY_ID)
+          return json(503, {
+            defined: true,
+            code: "RESULTS_NOT_READY",
+            status: 503,
+            message: "The results can't be read yet; ask again later.",
+          });
+        const results = RESULTS.get(electionId);
+        return results === undefined
+          ? json(409, {
+              defined: true,
+              code: "RESULTS_NOT_COUNTED",
+              status: 409,
+              message:
+                "This server boards no tally opening of this election, so counts no results.",
+            })
+          : json(200, results);
+      }
       case "/elections/code": {
         if (electionId === CODE_FAILS_ID) return json(500, {});
         const code = codes.get(electionId);

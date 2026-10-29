@@ -450,6 +450,25 @@ const enUS = {
   pollAnswer:
     "Answers are cast only in the ballot app, never on this website, and each is sealed on the voter's own device before anything is sent. The ballot app can't open a poll from this page yet.",
   pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
+  resultsTitle: "Results",
+  resultsSealed:
+    "Answers stay sealed while the poll is open. The results appear here once they're counted.",
+  resultsCounting: "This poll has closed. The results appear here once its answers are counted.",
+  resultsNotCounted:
+    "This server doesn't publish this poll's results. Anyone can still count them from its public board.",
+  resultsUnavailable: "The results couldn't be loaded just now. Try again in a little while.",
+  resultsAnswered: { one: "{count} person answered", other: "{count} people answered" },
+  resultsNoneAnswered: "No one answered.",
+  resultsTierPending:
+    "Part of this group's count isn't published yet. Its results appear here once it all is.",
+  resultsLeader: "Most picked: {option}, by {share} of those who answered.",
+  resultsTied: "Tied for most picked: {option}, each by {share} of those who answered.",
+  resultsNothingPicked: "No answer was picked.",
+  resultsOption: "Answer {number}",
+  resultsPeople: { one: "{count} person", other: "{count} people" },
+  resultsClaim:
+    "These are the results our server reads from the count published on the poll's public board. Nothing on this page checks them for you: anyone can count the board again and compare.",
+  resultsCheck: "Check the count on the board",
   reactionsTitle: "Reactions",
   reactionsLede:
     "React to the poll itself, whether or not you answer it. A reaction isn't an answer and says nothing about whether you answered.",

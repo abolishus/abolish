@@ -27,6 +27,7 @@ import { Route as EmbedPCodeRouteImport } from "./routes/embed.p.$code.tsx";
 import { Route as PCodeFlyerRouteImport } from "./routes/p.$code_.flyer.tsx";
 import { Route as PollsElectionIdPreviewDotpngRouteImport } from "./routes/polls.$electionId.preview[.]png.ts";
 import { Route as PollsElectionIdBoardRouteImport } from "./routes/polls.$electionId_.board.tsx";
+import { Route as PollsElectionIdResultsRouteImport } from "./routes/polls.$electionId_.results.tsx";
 import { Route as AccountPollsIdSetupRouteImport } from "./routes/account_.polls.$id_.setup.tsx";
 
 const IndexRoute = IndexRouteImport.update({
@@ -119,6 +120,11 @@ const PollsElectionIdBoardRoute = PollsElectionIdBoardRouteImport.update({
   path: "/polls/$electionId/board",
   getParentRoute: () => rootRouteImport,
 } as any);
+const PollsElectionIdResultsRoute = PollsElectionIdResultsRouteImport.update({
+  id: "/polls/$electionId_/results",
+  path: "/polls/$electionId/results",
+  getParentRoute: () => rootRouteImport,
+} as any);
 const AccountPollsIdSetupRoute = AccountPollsIdSetupRouteImport.update({
   id: "/account_/polls/$id_/setup",
   path: "/account/polls/$id/setup",
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   "/p/$code/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId/board": typeof PollsElectionIdBoardRoute;
+  "/polls/$electionId/results": typeof PollsElectionIdResultsRoute;
   "/account/polls/$id/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRoutesByTo {
@@ -165,6 +172,7 @@ export interface FileRoutesByTo {
   "/p/$code/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId/board": typeof PollsElectionIdBoardRoute;
+  "/polls/$electionId/results": typeof PollsElectionIdResultsRoute;
   "/account/polls/$id/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRoutesById {
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   "/p/$code_/flyer": typeof PCodeFlyerRoute;
   "/polls/$electionId/preview.png": typeof PollsElectionIdPreviewDotpngRoute;
   "/polls/$electionId_/board": typeof PollsElectionIdBoardRoute;
+  "/polls/$electionId_/results": typeof PollsElectionIdResultsRoute;
   "/account_/polls/$id_/setup": typeof AccountPollsIdSetupRoute;
 }
 export interface FileRouteTypes {
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | "/p/$code/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId/board"
+    | "/polls/$electionId/results"
     | "/account/polls/$id/setup";
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | "/p/$code/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId/board"
+    | "/polls/$electionId/results"
     | "/account/polls/$id/setup";
   id:
     | "__root__"
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | "/p/$code_/flyer"
     | "/polls/$electionId/preview.png"
     | "/polls/$electionId_/board"
+    | "/polls/$electionId_/results"
     | "/account_/polls/$id_/setup";
   fileRoutesById: FileRoutesById;
 }
@@ -273,6 +285,7 @@ export interface RootRouteChildren {
   EmbedPCodeRoute: typeof EmbedPCodeRoute;
   PCodeFlyerRoute: typeof PCodeFlyerRoute;
   PollsElectionIdBoardRoute: typeof PollsElectionIdBoardRoute;
+  PollsElectionIdResultsRoute: typeof PollsElectionIdResultsRoute;
   AccountPollsIdSetupRoute: typeof AccountPollsIdSetupRoute;
 }
 
@@ -404,6 +417,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof PollsElectionIdBoardRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/polls/$electionId_/results": {
+      id: "/polls/$electionId_/results";
+      path: "/polls/$electionId/results";
+      fullPath: "/polls/$electionId/results";
+      preLoaderRoute: typeof PollsElectionIdResultsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
     "/account_/polls/$id_/setup": {
       id: "/account_/polls/$id_/setup";
       path: "/account/polls/$id/setup";
@@ -444,6 +464,7 @@ const rootRouteChildren: RootRouteChildren = {
   EmbedPCodeRoute: EmbedPCodeRoute,
   PCodeFlyerRoute: PCodeFlyerRoute,
   PollsElectionIdBoardRoute: PollsElectionIdBoardRoute,
+  PollsElectionIdResultsRoute: PollsElectionIdResultsRoute,
   AccountPollsIdSetupRoute: AccountPollsIdSetupRoute,
 };
 export const routeTree = rootRouteImport

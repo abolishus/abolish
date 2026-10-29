@@ -66,6 +66,21 @@ export interface PollView {
 }
 
 /**
+ * One cell of a poll's tally partition, in partition order: the tier it lies
+ * in, its member count as the definition states it (its anonymity set,
+ * reported with its results; T-16) and, under version 5, the regions it
+ * holds by index, as the fold derives them from the tier's region counts
+ * (docs/spec/election-definition.md, Regional cells). Version 1 has one cell
+ * per tier, of its one group.
+ */
+export interface PartitionCell {
+  readonly tier: Tier;
+  readonly members: string;
+  /** `undefined` under version 1, or where the stated cells aren't the fold's. */
+  readonly regions: readonly number[] | undefined;
+}
+
+/**
  * Where a poll is listed: the topic and place our server files it under, its
  * author's or moderation's once it refiled the poll
  * ([[0041-poll-topics-and-places]]). They sit beside the poll, which doesn't

@@ -12,6 +12,7 @@ import {
   loadPoll,
   loadPollList,
   loadProfile,
+  loadResultsPage,
   loadStream,
   resolveShortLink,
   STREAM_PAGE,
@@ -54,6 +55,13 @@ export const fetchPoll = createServerFn({ method: "GET" })
   .handler(({ data, context }) =>
     opaque(() => loadPoll(api(), data, context.locale, context.readAskedBy)),
   );
+
+export const fetchResultsPage = createServerFn({ method: "GET" })
+  .inputValidator((electionId: unknown) => {
+    if (!isElectionId(electionId)) throw new TypeError("expected an election ID");
+    return electionId;
+  })
+  .handler(({ data, context }) => opaque(() => loadResultsPage(api(), data, context.locale)));
 
 export const fetchBoardPage = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {

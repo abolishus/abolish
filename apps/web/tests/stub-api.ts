@@ -339,36 +339,69 @@ export const codes = new Map([
 export const RESULTS_MISFIT_ID = FILLER[4]!;
 export const RESULTS_NOT_READY_ID = FILLER[5]!;
 export const RESULTS_FAILS_ID = FILLER[6]!;
-const counted = (tiers: unknown[]) => ({
+/** A poll whose cells don't add up to its tiers' results, which the results page refuses to show (T-34). */
+export const CELLS_MISFIT_ID = FILLER[7]!;
+const counted = (tiers: unknown[], cells: unknown[] = []) => ({
   state: "read",
   openings: 3,
   passed: false,
-  cells: [],
+  cells,
   tiers,
 });
+const missing = (cell: number, tier: number, n: number) => ({
+  cell,
+  tier,
+  counted: n,
+  code: "tally-missing",
+  signers: [],
+});
+// The version-5 stream poll's Tier 0 is three cells (the typical vector's
+// regions 5,000, 1,200 and 40 + 980, folded), counted apart and summed here.
+const STREAM_V5_CELLS = [
+  [5, ["2", "3", "0"], ["4", "1"]],
+  [2, ["1", "1", "0"], ["1", "0"]],
+  [1, ["1", "0", "0"], ["0", "0"]],
+] as const;
 const RESULTS = new Map<string, unknown>([
   [ID, { state: "unopened" }],
   [OPEN_ONE, { state: "unopened" }],
   [
     STREAM_V1,
-    counted([
-      { tier: 0, counted: 12, counts: ["6", "3", "1"] },
-      { tier: 2, counted: 2 },
-    ]),
+    counted(
+      [
+        { tier: 0, counted: 12, counts: ["6", "3", "1"] },
+        { tier: 2, counted: 2 },
+      ],
+      [{ cell: 0, tier: 0, counted: 12, counts: ["6", "3", "1"], signers: [0] }, missing(1, 2, 2)],
+    ),
   ],
   [
     STREAM_V5,
-    counted([
-      {
-        tier: 0,
-        counted: 8,
-        counts: ["4", "4", "0", "5", "1"],
-        byQuestion: [
-          ["4", "4", "0"],
-          ["5", "1"],
-        ],
-      },
-    ]),
+    counted(
+      [
+        {
+          tier: 0,
+          counted: 8,
+          counts: ["4", "4", "0", "5", "1"],
+          byQuestion: [
+            ["4", "4", "0"],
+            ["5", "1"],
+          ],
+        },
+        { tier: 2, counted: 1 },
+      ],
+      [
+        ...STREAM_V5_CELLS.map(([n, first, second], cell) => ({
+          cell,
+          tier: 0,
+          counted: n,
+          counts: [...first, ...second],
+          byQuestion: [first, second],
+          signers: [0],
+        })),
+        missing(3, 2, 1),
+      ],
+    ),
   ],
   [HIDDEN_ID, counted([{ tier: 0, counted: 3, counts: ["3", "1", "0", "0", "2"] }])],
   [
@@ -386,6 +419,16 @@ const RESULTS = new Map<string, unknown>([
     ]),
   ],
   [RESULTS_MISFIT_ID, counted([{ tier: 0, counted: 3, counts: ["1", "1"] }])],
+  [
+    CELLS_MISFIT_ID,
+    counted(
+      [
+        { tier: 0, counted: 4, counts: ["2", "1", "1"] },
+        { tier: 2, counted: 0 },
+      ],
+      [{ cell: 0, tier: 0, counted: 4, counts: ["1", "2", "1"], signers: [0] }, missing(1, 2, 0)],
+    ),
+  ],
 ]);
 
 /** The stub's state: while `down`, it drops every connection unanswered, as a dead API would. */

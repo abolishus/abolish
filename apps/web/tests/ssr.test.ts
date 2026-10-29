@@ -31,6 +31,7 @@ import {
   BALLOT,
   BOARD,
   brokenProofs,
+  CELLS_MISFIT_ID,
   CHECKPOINTS,
   CODE,
   CODE_FAILS_ID,
@@ -197,6 +198,7 @@ describe("every page", () => {
     "/",
     `/polls/${ID}`,
     `/polls/${ID}/board`,
+    `/polls/${STREAM_V5}/results`,
     "/moderation",
     "/polls",
     "/account",
@@ -515,6 +517,122 @@ describe("results", () => {
     expect(asks).toHaveLength(1);
     expect([...asks[0]!.query.keys()]).toEqual(["electionId"]);
     expect(asks[0]!.headers["cookie"]).toBeUndefined();
+  });
+});
+
+describe("results page", () => {
+  const text = async (path: string) => (await (await get(path)).text()).replace(/<[^>]+>/g, "");
+
+  test("a poll's results tier by tier, question by question, under its own words", async () => {
+    const response = await get(`/polls/${STREAM_V5}/results`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    // Its heading in the author's words, isolated from ours (T-75).
+    expect(html).toMatch(/<h1[^>]*><bdi[^>]*>Park and library<\/bdi><\/h1>/);
+    expect(html).toContain("<title>Results · Poll c1c1c1c1c1c1c1c1…");
+    const page = html.replace(/<[^>]+>/g, "");
+    // A tab per tier, each with how many answered; never a figure across them (T-16).
+    expect(page).toContain("Tier 0 (verified e-mail)");
+    expect(page).toContain("8 people answered");
+    expect(page).toContain("Tier 2 (document-verified)");
+    expect(page).toContain(
+      "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
+    );
+    expect(page).toContain("Most picked: \u2068Yes\u2069, by 62.5% of those who answered.");
+    expect(page).toContain("There is no total row: the groups are never added together.");
+    expect(page).toContain("Not all published yet");
+    expect(page).not.toContain("9 people");
+  });
+
+  test("a tier counted in several cells shows each cell's own results, with its regions and members", async () => {
+    const page = await text(`/polls/${STREAM_V5}/results`);
+    expect(page).toContain("Part by part");
+    expect(page).toContain("This group is counted in 3 parts, each published on its own.");
+    expect(page).toContain("Part 1");
+    expect(page).toContain("region 1 · 5,000 members");
+    expect(page).toContain("region 3 and region 4 · 1,020 members");
+    // Cell 1's first question: 2 and 3 of its 5.
+    expect(page).toContain("40%");
+    expect(page).toContain("60%");
+  });
+
+  test("a tier of one cell has no part-by-part table", async () => {
+    const page = await text(`/polls/${STREAM_V1}/results`);
+    expect(page).toContain("12 people answered");
+    expect(page).toContain("Most picked: \u2068Yes\u2069, by 50% of those who answered.");
+    expect(page).not.toContain("Part by part");
+  });
+
+  test("cells that don't add up to their tier aren't shown, and the tier's results still are (T-34)", async () => {
+    const page = await text(`/polls/${CELLS_MISFIT_ID}/results`);
+    expect(page).toContain("4 people answered");
+    expect(page).toContain("This group&#x27;s parts couldn&#x27;t be shown just now.");
+  });
+
+  test("a hidden poll's results go by answer number, out of search engines", async () => {
+    const html = await (await get(`/polls/${HIDDEN_ID}/results`)).text();
+    expect(html).toContain('<meta name="robots" content="noindex"');
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("Most picked: \u2068Answer 1\u2069, by 100% of those who answered.");
+    expect(page).toContain("Poll efefefefefefefef…");
+  });
+
+  test.each([
+    ["unopened and closed", ID, "The results appear here once its answers are counted."],
+    ["unopened and open", OPEN_ONE, "Answers stay sealed while the poll is open."],
+    ["not counted here", FILLER[1]!, "This server doesn&#x27;t publish this poll&#x27;s results."],
+    ["a failed read", RESULTS_FAILS_ID, "The results couldn&#x27;t be loaded just now."],
+    [
+      "counts that don't fit the poll",
+      RESULTS_MISFIT_ID,
+      "The results couldn&#x27;t be loaded just now.",
+    ],
+  ])("%s says so, and still serves the page", async (_, id, says) => {
+    const response = await get(`/polls/${id}/results`);
+    expect(response.status).toBe(200);
+    const page = (await response.text()).replace(/<[^>]+>/g, "");
+    expect(page).toContain(says);
+    expect(page).not.toContain("Results by group");
+  });
+
+  test("links back to the poll, to its board and to counting it yourself (T-34)", async () => {
+    const html = await (await get(`/polls/${STREAM_V1}/results`)).text();
+    expect(html).toContain(`href="/polls/${STREAM_V1}"`);
+    expect(html).toContain(`href="/polls/${STREAM_V1}/board"`);
+    expect(html).toContain('href="/verify"');
+    expect(html).toContain("Nothing on this page checks them for you");
+  });
+
+  test("the poll page links to its results page once results are read", async () => {
+    expect(await (await get(`/polls/${STREAM_V1}`)).text()).toContain(
+      `href="/polls/${STREAM_V1}/results"`,
+    );
+    expect(await (await get(`/polls/${ID}`)).text()).not.toContain(`/polls/${ID}/results`);
+  });
+
+  test("refuses a definition that names another election (T-34)", async () => {
+    const page = await text(`/polls/${SWAPPED_ID}/results`);
+    expect(page).toContain("the definition of another poll");
+  });
+
+  test.each([
+    ["an unknown poll", UNKNOWN_ID],
+    ["a non-canonical ID", STREAM_V1.toUpperCase()],
+  ])("%s is not found", async (_, id) => {
+    expect((await get(`/polls/${id}/results`)).status).toBe(404);
+  });
+
+  test("the API is asked by the poll's ID alone, with no cookie (T-10)", async () => {
+    seen.length = 0;
+    await get(`/polls/${STREAM_V5}/results`, {
+      cookie: "__Secure-abolish-account.session_token=secret",
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const r of seen) {
+      expect([...r.query.keys()]).toEqual(["electionId"]);
+      expect(r.headers["cookie"]).toBeUndefined();
+    }
+    expect(seen.filter((r) => r.path === "/elections/results")).toHaveLength(1);
   });
 });
 
@@ -1760,7 +1878,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(9);
+    expect(ids.length).toBe(10);
     return ids;
   }
 
@@ -2049,13 +2167,14 @@ const KB = 1024;
  * throttling) every 100 KiB is about half a second. Every page shares about
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet and
- * reactions, the poll form the draft rules and the codecs they check with,
+ * reactions, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
  * home the stream's cards beside its trust scene.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 175, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 206, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 209, css: 40, fonts: 58 },
+  [`/polls/${STREAM_V5}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 167, css: 40, fonts: 58 },

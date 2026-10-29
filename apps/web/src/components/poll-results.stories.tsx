@@ -72,6 +72,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     `/polls/${electionId}/board`,
   );
+  await expect(canvas.getByRole("link", { name: "See the full results" })).toHaveAttribute(
+    "href",
+    `/polls/${electionId}/results`,
+  );
 };
 
 export const Default: Story = { play };

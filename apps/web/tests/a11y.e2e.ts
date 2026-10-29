@@ -75,6 +75,7 @@ const PAGES = [
   `/polls/${STREAM_V5}`,
   `/polls/${HIDDEN_ID}`,
   `/polls/${ID}/board`,
+  `/polls/${STREAM_V5}/results`,
   `/p/${CODE}/flyer`,
   `/embed/p/${OPEN_ONE_CODE}`,
   `/embed/p/${OPEN_MANY_CODE}`,

@@ -31117,6 +31117,247 @@
       "illFormed": "relay-endpoint"
     },
     {
+      "id": "relay-is-l2-rpc",
+      "description": "A relay at an L2 endpoint's origin",
+      "type": {
+        "kind": "ref",
+        "name": "deployment_v3"
+      },
+      "encoding": "0020030000000000aa36a70000000000014a34f6bb1d969853549e9354fb8b11f06440bf25b09f6851c105ea2a7f14eaa550fa0b4f96bbec7cddd01bdcc49f95da402b01e01184410085518e83feabb13b195397a540f22cd5272d7efd838b0764c95300000000017d78400000000000000708a808deb348496d023417d5ccddd222951a55445c9e213498fa4a5ed9866319dc9a21f129376c6f11fdfe7a5cae65cecc898d4ebc681087b8d712161b000000020000000000000001000000006955b9000000000000000e10000000000000a8c0851c26b22ed073014403921c8186edc8e26b1a71e9b03f8973b475a71a21c87f125637dea1883d5002000000030286b092500906830ec0a8271d0813010fe2abd8426c1d1ccc640380d9a88d0b0b8703553b6272e9e10ab2a5657dc9ac15702d9d8efb1406bc6e821832a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff2400000001020400000007033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d0102cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e368140103dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b00102302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f940102b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1010260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e3670103ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e8160100000003000000000000000000000000000000000000000000010001000000000000000000000002010000000000000000010000001668747470733a2f2f6170692e61626f6c6973682e7573000000020000002768747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001868747470733a2f2f7365706f6c69612e626173652e6f7267000000010000002b68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001d62616c6c6f742d73746167696e672e75702e7261696c7761792e617070010000000a61626f6c6973682e757354d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b200000008000002b2b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c00000002b3a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef661000000002b41a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f00000002b56ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd1900000002b6a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f84500000002b73cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae24000000002b8943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed3200000002b9aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f000000000702302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d300000001c68747470733a2f2f73302e72656c61792e6578616d706c652e6f7267000000000260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d310000001c68747470733a2f2f73312e72656c61792e6578616d706c652e6f72670000000002b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d320000001c68747470733a2f2f73322e72656c61792e6578616d706c652e6f72670000000002cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814000000020000002768747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000000e61626f6c6973682f736561742d330000001c68747470733a2f2f73332e72656c61792e6578616d706c652e6f726700000000033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d340000001c68747470733a2f2f73342e72656c61792e6578616d706c652e6f72670000000003dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d350000001c68747470733a2f2f73352e72656c61792e6578616d706c652e6f72670000000003ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d360000001c68747470733a2f2f73362e72656c61792e6578616d706c652e6f726700000000",
+      "value": {
+        "l1_chain_id": "11155111",
+        "l2_chain_id": "84532",
+        "election_registry": "f6bb1d969853549e9354fb8b11f06440bf25b09f",
+        "board": "6851c105ea2a7f14eaa550fa0b4f96bbec7cddd0",
+        "trustee_registry": "1bdcc49f95da402b01e01184410085518e83feab",
+        "group_registry": "b13b195397a540f22cd5272d7efd838b0764c953",
+        "l2_from_block": "25000000",
+        "l2_max_sequencer_drift": "1800",
+        "l1_anchor": "a808deb348496d023417d5ccddd222951a55445c",
+        "l1_relay": "9e213498fa4a5ed9866319dc9a21f129376c6f11",
+        "l1_portal": "fdfe7a5cae65cecc898d4ebc681087b8d712161b",
+        "dispute_game_types": ["0", "1"],
+        "anchor_epoch": "1767225600",
+        "anchor_period": "3600",
+        "anchor_deadline": "43200",
+        "anchor_authority": "851c26b22ed073014403921c8186edc8e26b1a71",
+        "contracts_commit": "e9b03f8973b475a71a21c87f125637dea1883d50",
+        "registrar_threshold": "2",
+        "registrars": [
+          "0286b092500906830ec0a8271d0813010fe2abd8",
+          "426c1d1ccc640380d9a88d0b0b8703553b6272e9",
+          "e10ab2a5657dc9ac15702d9d8efb1406bc6e8218"
+        ],
+        "initial_panel": "32a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff24",
+        "panels": [
+          {
+            "kind": "2",
+            "threshold": "4",
+            "seats": [
+              {
+                "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+                "ours": true
+              },
+              {
+                "key": "02cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814",
+                "ours": true
+              },
+              {
+                "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+                "ours": true
+              },
+              {
+                "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+                "ours": true
+              },
+              {
+                "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+                "ours": true
+              },
+              {
+                "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+                "ours": true
+              },
+              {
+                "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+                "ours": true
+              }
+            ]
+          }
+        ],
+        "groups": [
+          {
+            "group_id": "0",
+            "tier": "0",
+            "self_paid": false,
+            "region": "0"
+          },
+          {
+            "group_id": "1",
+            "tier": "0",
+            "self_paid": true,
+            "region": "0"
+          },
+          {
+            "group_id": "2",
+            "tier": "1",
+            "self_paid": false,
+            "region": "0"
+          }
+        ],
+        "api": ["68747470733a2f2f6170692e61626f6c6973682e7573"],
+        "l2_rpc": [
+          "68747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d",
+          "68747470733a2f2f7365706f6c69612e626173652e6f7267"
+        ],
+        "l1_rpc": [
+          "68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d"
+        ],
+        "backup_rp_id": "62616c6c6f742d73746167696e672e75702e7261696c7761792e617070",
+        "backups": true,
+        "account_rp_id": "61626f6c6973682e7573",
+        "membership_zkey_sha256": "54d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265",
+        "membership_wasm_sha256": "e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b2",
+        "tier0_token_keys": [
+          {
+            "period": "690",
+            "key": "b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c",
+            "retired": false
+          },
+          {
+            "period": "691",
+            "key": "a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef6610",
+            "retired": false
+          },
+          {
+            "period": "692",
+            "key": "1a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f",
+            "retired": false
+          },
+          {
+            "period": "693",
+            "key": "6ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd19",
+            "retired": false
+          },
+          {
+            "period": "694",
+            "key": "a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f845",
+            "retired": false
+          },
+          {
+            "period": "695",
+            "key": "3cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae240",
+            "retired": false
+          },
+          {
+            "period": "696",
+            "key": "943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed32",
+            "retired": false
+          },
+          {
+            "period": "697",
+            "key": "aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f",
+            "retired": false
+          }
+        ],
+        "seat_relays": [
+          {
+            "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d30"
+              },
+              {
+                "origin": "68747470733a2f2f73302e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d31"
+              },
+              {
+                "origin": "68747470733a2f2f73312e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d32"
+              },
+              {
+                "origin": "68747470733a2f2f73322e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d",
+                "path": "61626f6c6973682f736561742d33"
+              },
+              {
+                "origin": "68747470733a2f2f73332e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d34"
+              },
+              {
+                "origin": "68747470733a2f2f73342e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d35"
+              },
+              {
+                "origin": "68747470733a2f2f73352e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d36"
+              },
+              {
+                "origin": "68747470733a2f2f73362e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          }
+        ]
+      },
+      "deploymentHash": "6d8e94a202596201dd51630094725d57acab68b9a1ca77250814d6c3d0cec57a",
+      "illFormed": "relay-endpoint"
+    },
+    {
       "id": "relay-is-l1-rpc",
       "description": "A relay at an L1 endpoint's origin",
       "type": {
@@ -33796,6 +34037,482 @@
       "illFormedAt": {
         "seat_relay": "4"
       }
+    },
+    {
+      "id": "rule-order-entry",
+      "description": "A stranger's key with no relay: relay-seat comes before relays-empty",
+      "type": {
+        "kind": "ref",
+        "name": "deployment_v3"
+      },
+      "encoding": "0020030000000000aa36a70000000000014a34f6bb1d969853549e9354fb8b11f06440bf25b09f6851c105ea2a7f14eaa550fa0b4f96bbec7cddd01bdcc49f95da402b01e01184410085518e83feabb13b195397a540f22cd5272d7efd838b0764c95300000000017d78400000000000000708a808deb348496d023417d5ccddd222951a55445c9e213498fa4a5ed9866319dc9a21f129376c6f11fdfe7a5cae65cecc898d4ebc681087b8d712161b000000020000000000000001000000006955b9000000000000000e10000000000000a8c0851c26b22ed073014403921c8186edc8e26b1a71e9b03f8973b475a71a21c87f125637dea1883d5002000000030286b092500906830ec0a8271d0813010fe2abd8426c1d1ccc640380d9a88d0b0b8703553b6272e9e10ab2a5657dc9ac15702d9d8efb1406bc6e821832a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff2400000001020400000007033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d0102cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e368140103dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b00102302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f940102b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1010260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e3670103ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e8160100000003000000000000000000000000000000000000000000010001000000000000000000000002010000000000000000010000001668747470733a2f2f6170692e61626f6c6973682e7573000000020000002768747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001868747470733a2f2f7365706f6c69612e626173652e6f7267000000010000002b68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001d62616c6c6f742d73746167696e672e75702e7261696c7761792e617070010000000a61626f6c6973682e757354d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b200000008000002b2b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c00000002b3a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef661000000002b41a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f00000002b56ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd1900000002b6a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f84500000002b73cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae24000000002b8943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed3200000002b9aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f000000000702302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d300000001c68747470733a2f2f73302e72656c61792e6578616d706c652e6f7267000000000260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d310000001c68747470733a2f2f73312e72656c61792e6578616d706c652e6f72670000000002b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d320000001c68747470733a2f2f73322e72656c61792e6578616d706c652e6f726700000000027302fb39c8f91d39a30b41c61270426972cab7ad4b62d90ec364b16df9a06ee600000000033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d340000001c68747470733a2f2f73342e72656c61792e6578616d706c652e6f72670000000003dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d350000001c68747470733a2f2f73352e72656c61792e6578616d706c652e6f72670000000003ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d360000001c68747470733a2f2f73362e72656c61792e6578616d706c652e6f726700000000",
+      "value": {
+        "l1_chain_id": "11155111",
+        "l2_chain_id": "84532",
+        "election_registry": "f6bb1d969853549e9354fb8b11f06440bf25b09f",
+        "board": "6851c105ea2a7f14eaa550fa0b4f96bbec7cddd0",
+        "trustee_registry": "1bdcc49f95da402b01e01184410085518e83feab",
+        "group_registry": "b13b195397a540f22cd5272d7efd838b0764c953",
+        "l2_from_block": "25000000",
+        "l2_max_sequencer_drift": "1800",
+        "l1_anchor": "a808deb348496d023417d5ccddd222951a55445c",
+        "l1_relay": "9e213498fa4a5ed9866319dc9a21f129376c6f11",
+        "l1_portal": "fdfe7a5cae65cecc898d4ebc681087b8d712161b",
+        "dispute_game_types": ["0", "1"],
+        "anchor_epoch": "1767225600",
+        "anchor_period": "3600",
+        "anchor_deadline": "43200",
+        "anchor_authority": "851c26b22ed073014403921c8186edc8e26b1a71",
+        "contracts_commit": "e9b03f8973b475a71a21c87f125637dea1883d50",
+        "registrar_threshold": "2",
+        "registrars": [
+          "0286b092500906830ec0a8271d0813010fe2abd8",
+          "426c1d1ccc640380d9a88d0b0b8703553b6272e9",
+          "e10ab2a5657dc9ac15702d9d8efb1406bc6e8218"
+        ],
+        "initial_panel": "32a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff24",
+        "panels": [
+          {
+            "kind": "2",
+            "threshold": "4",
+            "seats": [
+              {
+                "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+                "ours": true
+              },
+              {
+                "key": "02cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814",
+                "ours": true
+              },
+              {
+                "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+                "ours": true
+              },
+              {
+                "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+                "ours": true
+              },
+              {
+                "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+                "ours": true
+              },
+              {
+                "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+                "ours": true
+              },
+              {
+                "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+                "ours": true
+              }
+            ]
+          }
+        ],
+        "groups": [
+          {
+            "group_id": "0",
+            "tier": "0",
+            "self_paid": false,
+            "region": "0"
+          },
+          {
+            "group_id": "1",
+            "tier": "0",
+            "self_paid": true,
+            "region": "0"
+          },
+          {
+            "group_id": "2",
+            "tier": "1",
+            "self_paid": false,
+            "region": "0"
+          }
+        ],
+        "api": ["68747470733a2f2f6170692e61626f6c6973682e7573"],
+        "l2_rpc": [
+          "68747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d",
+          "68747470733a2f2f7365706f6c69612e626173652e6f7267"
+        ],
+        "l1_rpc": [
+          "68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d"
+        ],
+        "backup_rp_id": "62616c6c6f742d73746167696e672e75702e7261696c7761792e617070",
+        "backups": true,
+        "account_rp_id": "61626f6c6973682e7573",
+        "membership_zkey_sha256": "54d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265",
+        "membership_wasm_sha256": "e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b2",
+        "tier0_token_keys": [
+          {
+            "period": "690",
+            "key": "b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c",
+            "retired": false
+          },
+          {
+            "period": "691",
+            "key": "a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef6610",
+            "retired": false
+          },
+          {
+            "period": "692",
+            "key": "1a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f",
+            "retired": false
+          },
+          {
+            "period": "693",
+            "key": "6ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd19",
+            "retired": false
+          },
+          {
+            "period": "694",
+            "key": "a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f845",
+            "retired": false
+          },
+          {
+            "period": "695",
+            "key": "3cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae240",
+            "retired": false
+          },
+          {
+            "period": "696",
+            "key": "943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed32",
+            "retired": false
+          },
+          {
+            "period": "697",
+            "key": "aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f",
+            "retired": false
+          }
+        ],
+        "seat_relays": [
+          {
+            "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d30"
+              },
+              {
+                "origin": "68747470733a2f2f73302e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d31"
+              },
+              {
+                "origin": "68747470733a2f2f73312e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d32"
+              },
+              {
+                "origin": "68747470733a2f2f73322e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "027302fb39c8f91d39a30b41c61270426972cab7ad4b62d90ec364b16df9a06ee6",
+            "relays": []
+          },
+          {
+            "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d34"
+              },
+              {
+                "origin": "68747470733a2f2f73342e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d35"
+              },
+              {
+                "origin": "68747470733a2f2f73352e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d36"
+              },
+              {
+                "origin": "68747470733a2f2f73362e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          }
+        ]
+      },
+      "deploymentHash": "85bfd0118bce441fcb866fff7035b0f0f37551cc7b06136b82e6a7f8750702eb",
+      "illFormed": "relay-seat",
+      "illFormedAt": {
+        "seat_relay": "3"
+      }
+    },
+    {
+      "id": "rule-order-seat-order",
+      "description": "Seats out of order, and a relay at the API: seat-relay-order comes first",
+      "type": {
+        "kind": "ref",
+        "name": "deployment_v3"
+      },
+      "encoding": "0020030000000000aa36a70000000000014a34f6bb1d969853549e9354fb8b11f06440bf25b09f6851c105ea2a7f14eaa550fa0b4f96bbec7cddd01bdcc49f95da402b01e01184410085518e83feabb13b195397a540f22cd5272d7efd838b0764c95300000000017d78400000000000000708a808deb348496d023417d5ccddd222951a55445c9e213498fa4a5ed9866319dc9a21f129376c6f11fdfe7a5cae65cecc898d4ebc681087b8d712161b000000020000000000000001000000006955b9000000000000000e10000000000000a8c0851c26b22ed073014403921c8186edc8e26b1a71e9b03f8973b475a71a21c87f125637dea1883d5002000000030286b092500906830ec0a8271d0813010fe2abd8426c1d1ccc640380d9a88d0b0b8703553b6272e9e10ab2a5657dc9ac15702d9d8efb1406bc6e821832a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff2400000001020400000007033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d0102cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e368140103dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b00102302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f940102b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1010260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e3670103ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e8160100000003000000000000000000000000000000000000000000010001000000000000000000000002010000000000000000010000001668747470733a2f2f6170692e61626f6c6973682e7573000000020000002768747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001868747470733a2f2f7365706f6c69612e626173652e6f7267000000010000002b68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d0000001d62616c6c6f742d73746167696e672e75702e7261696c7761792e617070010000000a61626f6c6973682e757354d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b200000008000002b2b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c00000002b3a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef661000000002b41a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f00000002b56ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd1900000002b6a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f84500000002b73cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae24000000002b8943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed3200000002b9aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f00000000070260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d310000001c68747470733a2f2f73312e72656c61792e6578616d706c652e6f72670000000002302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d300000001c68747470733a2f2f73302e72656c61792e6578616d706c652e6f72670000000002b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d320000001c68747470733a2f2f73322e72656c61792e6578616d706c652e6f72670000000002cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d330000001c68747470733a2f2f73332e72656c61792e6578616d706c652e6f726700000000033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d340000001c68747470733a2f2f73342e72656c61792e6578616d706c652e6f72670000000003dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0000000020000001668747470733a2f2f6170692e61626f6c6973682e75730000000e61626f6c6973682f736561742d350000001c68747470733a2f2f73352e72656c61792e6578616d706c652e6f72670000000003ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816000000020000001f68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e65740000000e61626f6c6973682f736561742d360000001c68747470733a2f2f73362e72656c61792e6578616d706c652e6f726700000000",
+      "value": {
+        "l1_chain_id": "11155111",
+        "l2_chain_id": "84532",
+        "election_registry": "f6bb1d969853549e9354fb8b11f06440bf25b09f",
+        "board": "6851c105ea2a7f14eaa550fa0b4f96bbec7cddd0",
+        "trustee_registry": "1bdcc49f95da402b01e01184410085518e83feab",
+        "group_registry": "b13b195397a540f22cd5272d7efd838b0764c953",
+        "l2_from_block": "25000000",
+        "l2_max_sequencer_drift": "1800",
+        "l1_anchor": "a808deb348496d023417d5ccddd222951a55445c",
+        "l1_relay": "9e213498fa4a5ed9866319dc9a21f129376c6f11",
+        "l1_portal": "fdfe7a5cae65cecc898d4ebc681087b8d712161b",
+        "dispute_game_types": ["0", "1"],
+        "anchor_epoch": "1767225600",
+        "anchor_period": "3600",
+        "anchor_deadline": "43200",
+        "anchor_authority": "851c26b22ed073014403921c8186edc8e26b1a71",
+        "contracts_commit": "e9b03f8973b475a71a21c87f125637dea1883d50",
+        "registrar_threshold": "2",
+        "registrars": [
+          "0286b092500906830ec0a8271d0813010fe2abd8",
+          "426c1d1ccc640380d9a88d0b0b8703553b6272e9",
+          "e10ab2a5657dc9ac15702d9d8efb1406bc6e8218"
+        ],
+        "initial_panel": "32a39128f280ecf5528bf963edf453d1070183687d16f54b653da2cc45c0ff24",
+        "panels": [
+          {
+            "kind": "2",
+            "threshold": "4",
+            "seats": [
+              {
+                "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+                "ours": true
+              },
+              {
+                "key": "02cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814",
+                "ours": true
+              },
+              {
+                "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+                "ours": true
+              },
+              {
+                "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+                "ours": true
+              },
+              {
+                "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+                "ours": true
+              },
+              {
+                "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+                "ours": true
+              },
+              {
+                "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+                "ours": true
+              }
+            ]
+          }
+        ],
+        "groups": [
+          {
+            "group_id": "0",
+            "tier": "0",
+            "self_paid": false,
+            "region": "0"
+          },
+          {
+            "group_id": "1",
+            "tier": "0",
+            "self_paid": true,
+            "region": "0"
+          },
+          {
+            "group_id": "2",
+            "tier": "1",
+            "self_paid": false,
+            "region": "0"
+          }
+        ],
+        "api": ["68747470733a2f2f6170692e61626f6c6973682e7573"],
+        "l2_rpc": [
+          "68747470733a2f2f626173652d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d",
+          "68747470733a2f2f7365706f6c69612e626173652e6f7267"
+        ],
+        "l1_rpc": [
+          "68747470733a2f2f657468657265756d2d7365706f6c69612d7270632e7075626c69636e6f64652e636f6d"
+        ],
+        "backup_rp_id": "62616c6c6f742d73746167696e672e75702e7261696c7761792e617070",
+        "backups": true,
+        "account_rp_id": "61626f6c6973682e7573",
+        "membership_zkey_sha256": "54d36172b57e9536882af32afe5d7dd2473c5b0608b154766c4db0c180cc1265",
+        "membership_wasm_sha256": "e57d339cafe3cc03580365c0d2e7aa941b866689782fd2d8d00876acc58af8b2",
+        "tier0_token_keys": [
+          {
+            "period": "690",
+            "key": "b20fdcd3c3a0e5cd8b6871a86c7df3411a7129e4bc382fbce64781c71efe497c",
+            "retired": false
+          },
+          {
+            "period": "691",
+            "key": "a64533a7bcb6d0553e08e4fc6d81a61595337bdd3d7666bc3aa88a467cef6610",
+            "retired": false
+          },
+          {
+            "period": "692",
+            "key": "1a8e7e007c49c5d2f940f9df68fb16b79029d736f8fd222efc171b1c11965a6f",
+            "retired": false
+          },
+          {
+            "period": "693",
+            "key": "6ee7bc78cc3910f900919c81570c746f2c2782b95fdd43dc4e9a8ab2cac6cd19",
+            "retired": false
+          },
+          {
+            "period": "694",
+            "key": "a4bb5387104ccb10c0802a65c97801a804cadc489e96362f918319d314b0f845",
+            "retired": false
+          },
+          {
+            "period": "695",
+            "key": "3cdbd0c63138611be175efabf2e2deb308219b25fa22e3ee3c9d1cb7a0cae240",
+            "retired": false
+          },
+          {
+            "period": "696",
+            "key": "943aa4351c2f3c03dabb64f1966ee9567a076be16b0987e4be166d045505ed32",
+            "retired": false
+          },
+          {
+            "period": "697",
+            "key": "aa6370c5e348a1903ef50757f4ae7434fde5d761bbe171f6c3f628557624a24f",
+            "retired": false
+          }
+        ],
+        "seat_relays": [
+          {
+            "key": "0260f61ba473e325078ae44a748ded54be1172b5b66a2f1d30840fb42f78e7e367",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d31"
+              },
+              {
+                "origin": "68747470733a2f2f73312e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02302e7dce7befd9f74171868d1d2a50c7eb0b3c445af3161f380cd7d3c7db6f94",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d30"
+              },
+              {
+                "origin": "68747470733a2f2f73302e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02b7dd5141039c54e6e2f2e08136fc25f8c0e6d677df2da0e3cc3807f3e94784b1",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d32"
+              },
+              {
+                "origin": "68747470733a2f2f73322e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "02cab9538880b983af008e46388dd538338dae63cad730e6e3f5b362a9b1e36814",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d33"
+              },
+              {
+                "origin": "68747470733a2f2f73332e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "033cd7597b02d477b74eaf229b0c60056fd4f1b87c0d36a7ae3c68031b8957f27d",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d34"
+              },
+              {
+                "origin": "68747470733a2f2f73342e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03dbab6765bb5c18376bf93f2bd97057c97e33ab532cfa6095f80c6e4082b6e6b0",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6170692e61626f6c6973682e7573",
+                "path": "61626f6c6973682f736561742d35"
+              },
+              {
+                "origin": "68747470733a2f2f73352e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          },
+          {
+            "key": "03ffb83768e894c0ce1807588fe60b742b46de9f32b424ef9582417609c476e816",
+            "relays": [
+              {
+                "origin": "68747470733a2f2f6f687474702e6578616d706c652d72656c61792e6e6574",
+                "path": "61626f6c6973682f736561742d36"
+              },
+              {
+                "origin": "68747470733a2f2f73362e72656c61792e6578616d706c652e6f7267",
+                "path": ""
+              }
+            ]
+          }
+        ]
+      },
+      "deploymentHash": "1a359da1bf93e09f59f865d21ee49573a51a86771d3a437b92d5bc4e656fa346",
+      "illFormed": "seat-relay-order"
     },
     {
       "id": "rule-order-endpoint",

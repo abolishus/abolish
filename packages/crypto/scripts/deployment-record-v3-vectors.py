@@ -292,6 +292,7 @@ def ill_formed_cases(base):
         ("seat-relays-unsorted", "Seats out of key order", entries(lambda es: [es[1], es[0]] + es[2:]), "seat-relay-order", {}),
         ("seat-relays-repeated", "One seat listed twice", entries(lambda es: es[:2] + [v1.clone(es[1])] + es[2:]), "seat-relay-order", {}),
         ("relay-is-api", "A relay at the API's origin", origin_at(0, 0, b"https://api.abolish.us"), "relay-endpoint", {}),
+        ("relay-is-l2-rpc", "A relay at an L2 endpoint's origin", origin_at(3, 0, b"https://base-sepolia-rpc.publicnode.com"), "relay-endpoint", {}),
         ("relay-is-l1-rpc", "A relay at an L1 endpoint's origin", origin_at(6, 0, b"https://ethereum-sepolia-rpc.publicnode.com"), "relay-endpoint", {}),
         ("relay-at-rp-id", "A relay at the backup RP ID's host", origin_at(1, 0, b"https://ballot-staging.up.railway.app"), "relay-rp", {}),
         ("relay-under-rp-id", "A relay under the backup RP ID, with a port", origin_at(6, 1, b"https://relay.ballot-staging.up.railway.app:8443"), "relay-rp", {}),
@@ -327,6 +328,20 @@ def ill_formed_cases(base):
             lambda d: (relays_of(4, lambda xs: list(reversed(xs)))(d), d.__setitem__("seat_relays", [d["seat_relays"][1], d["seat_relays"][0]] + d["seat_relays"][2:])),
             "relay-order",
             S(4),
+        ),
+        (
+            "rule-order-entry",
+            "A stranger's key with no relay: relay-seat comes before relays-empty",
+            lambda d: d["seat_relays"][3].update(key=stranger, relays=[]),
+            "relay-seat",
+            S(3),
+        ),
+        (
+            "rule-order-seat-order",
+            "Seats out of order, and a relay at the API: seat-relay-order comes first",
+            lambda d: (origin_at(5, 0, b"https://api.abolish.us")(d), d.__setitem__("seat_relays", [d["seat_relays"][1], d["seat_relays"][0]] + d["seat_relays"][2:])),
+            "seat-relay-order",
+            {},
         ),
         (
             "rule-order-endpoint",

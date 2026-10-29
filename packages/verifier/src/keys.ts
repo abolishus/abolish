@@ -1,10 +1,10 @@
 // The keys run (docs/spec/verifier.md, Token keys across releases): every
 // release the pinned registry holds, revoked or not, read from L1 state; its
 // release record and deployment record found by hash; every pair of
-// version-2 or version-3 deployments judged by the rules across releases; and each
-// period's key first listed before its period began. A Tier 0 key that
-// changes, moves or comes back from retirement, or that no release published
-// before its period, lets the issuer tell one account's tokens from
+// version-2 or version-3 deployments judged by the rules across releases;
+// and each period's key first listed before its period began. A Tier 0 key
+// that changes, moves or comes back from retirement, or that no release
+// published before its period, lets the issuer tell one account's tokens from
 // another's (T-74, T-10). The rules are packages/crypto's; this file reads
 // and orders them. It contacts no host.
 
@@ -378,8 +378,8 @@ export function runKeys(
       if (k.retired && !retiredFrom.has(k.period)) retiredFrom.set(k.period, s);
     }
   const firstUnresolved = step4.findIndex((x) => !x.resolved);
-  // The first version-2 or version-3 release lists its own period and the one before,
-  // which no earlier release could list.
+  // The first version-2 or version-3 release lists its own period and the
+  // one before, which no earlier release could list.
   const s0 = listing[0];
   const floor0 = s0 === undefined ? 0n : (published[s0[0]] as PublishedRelease).publishedAt / P;
   const periods: KeysPeriodRow[] = [];

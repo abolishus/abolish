@@ -588,6 +588,8 @@ export const esUS: Messages = {
   ogFinalCount: "Conteo final · {answers}",
   ogUpdated: "{answers} · actualizado el {day}",
   ogQuestionOne: "Pregunta 1 de {count}",
+  ogMostPicked: "La más elegida",
+  ogTiedPicked: "Empate como las más elegidas",
   ogQuestions: { one: "{count} pregunta", other: "{count} preguntas" },
   ogCivic: "Registro cívico · {kind}",
   ogTiers: "Cada nivel se cuenta por separado.",

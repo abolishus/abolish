@@ -18,12 +18,14 @@ import { drawable } from "./glyphs.ts";
 import {
   answersCounted,
   answersSoFar,
+  byTierLines,
   closing,
   countingLines,
   countOf,
   dayOf,
   longDayOf,
   openLines,
+  percentOf,
   sealedLines,
   unworded,
 } from "./text.ts";
@@ -196,6 +198,8 @@ function unreleased(model: PollPreview, t: (typeof TYPE)[PreviewFormat]): ReactE
       return <StateBlock lines={openLines(model)} lock={false} t={t} />;
     case "counting":
       return <StateBlock lines={countingLines(model)} lock={false} t={t} />;
+    case "by-tier":
+      return <StateBlock lines={byTierLines(model)} lock={false} t={t} />;
     default:
       return undefined;
   }
@@ -211,6 +215,7 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
     case "sealed":
     case "open":
     case "counting":
+    case "by-tier":
       block = unreleased(model, t)!;
       break;
     case "live":
@@ -224,15 +229,27 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
                 answers: answersSoFar(model, model.answers),
                 day: dayOf(model.locale, results.releasedAt),
               });
+      const { leaders, tied, share } = results.lead;
+      // Which question, and what the line below says of it: the share
+      // stands apart from the answers' words, so a long label never cuts it.
+      const kicker = [
+        ...(many ? [text("ogQuestionOne", { count: model.questionCount })] : []),
+        ...(leaders === undefined ? [] : [text(tied ? "ogTiedPicked" : "ogMostPicked")]),
+      ].join(" · ");
       block = (
         <div style={column({ gap: 12 })}>
-          {many ? (
-            <div style={row({ fontSize: t.small, color: PALETTE.mutedForeground })}>
-              {text("ogQuestionOne", { count: model.questionCount })}
+          {kicker === "" ? null : (
+            <div style={row({ fontSize: t.small, color: PALETTE.mutedForeground })}>{kicker}</div>
+          )}
+          <div style={row({ alignItems: "flex-end", gap: 24, fontSize: t.lead, fontWeight: 600 })}>
+            <div style={{ display: "block", flex: 1, lineClamp: format === "square" ? 2 : 1 }}>
+              {leaders ?? text("resultsNothingPicked")}
             </div>
-          ) : null}
-          <div style={row({ fontSize: t.lead, fontWeight: 600 })}>{results.lead.sentence}</div>
-          <Bar share={results.lead.share} height={t.bar} color={PALETTE.primary} />
+            {leaders === undefined ? null : (
+              <div style={row({ flexShrink: 0 })}>{percentOf(model.locale, share)}</div>
+            )}
+          </div>
+          <Bar share={share} height={t.bar} color={PALETTE.primary} />
           {tally === undefined ? null : (
             <div style={row({ fontSize: t.small, color: PALETTE.mutedForeground })}>{tally}</div>
           )}
@@ -282,7 +299,8 @@ function EverydayCard({ model, format }: { model: EverydayPreview; format: Previ
           fontWeight: 600,
           lineHeight: format === "square" ? 1.06 : 1.08,
           letterSpacing: -0.01 * t.question,
-          lineClamp: t.lines,
+          // Two lines on the wide card beside a lead, so the two fit.
+          lineClamp: format === "landscape" && "lead" in results ? 2 : t.lines,
         }}
       >
         {drawnHeadline(model)}

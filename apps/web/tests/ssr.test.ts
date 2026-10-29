@@ -2125,6 +2125,36 @@ describe("link preview", () => {
     expect(new Set(bodies).size).toBe(1);
   });
 
+  // P2-24 part 4: a closed poll's final lead, from the results its page reads.
+  test("gives a closed poll's final lead where one tier's count is published", async () => {
+    const meta = async (id: string) => {
+      const html = (await (await get(`/polls/${id}`)).text()).replaceAll("&#x27;", "'");
+      return {
+        description: /<meta property="og:description" content="([^"]*)"/.exec(html)?.[1],
+        image: /<meta property="og:image" content="([^"]+)"/.exec(html)?.[1],
+      };
+    };
+    // The first question's lead, never one across questions (T-16).
+    const v5 = await meta(STREAM_V5);
+    expect(v5.description).toMatch(
+      /^Closed on \d+ \w+\. Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered\. Anyone can check the count\.$/,
+    );
+    // A hidden poll's result by answer number: its text is withheld, its result never is.
+    expect((await meta(HIDDEN_ID)).description).toContain(
+      "Most picked: Answer 1, by 100% of those who answered.",
+    );
+    // Counted in two tiers: no lead across them (ADR 0026).
+    expect((await meta(STREAM_V1)).description).toContain("Each tier is counted on its own.");
+    expect((await meta(STREAM_V1)).description).not.toContain("%");
+    // Not yet counted: no lead.
+    expect((await meta(ID)).description).not.toContain("%");
+    if (v5.image === undefined) throw new Error("no og:image");
+    const image = new URL(v5.image.replaceAll("&amp;", "&"));
+    const response = await get(image.pathname + image.search);
+    expect(response.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(await pngSize(response)).toEqual([1200, 630]);
+  });
+
   // P2-24 part 6: the question in the preview, from the display text checked
   // against the definition, in the page's translation.
   test("names a poll by its question where its display text checks, in the page's language", async () => {

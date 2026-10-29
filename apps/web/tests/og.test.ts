@@ -21,12 +21,13 @@ import {
   PREVIEW_SIZE,
   shortLink,
 } from "../src/og/model.ts";
-import { pollPreview, previewLocale, previewPath, previewVersion } from "../src/og/poll.ts";
+import { leadOf, pollPreview, previewLocale, previewPath, previewVersion } from "../src/og/poll.ts";
 import { DRAWABLE, drawable } from "../src/og/glyphs.ts";
 import { isolated } from "../src/titles.ts";
 import { FONTS, renderPreview } from "../src/og/render.ts";
 import { previewText } from "../src/og/text.ts";
 import type { PollView } from "../src/poll.ts";
+import type { PollResults } from "../src/results.ts";
 import { fromHex } from "../src/values.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -50,7 +51,12 @@ const base = {
   closesAt: "2026-11-15T20:00:00.000Z",
 } as const;
 
-const LEAD = { sentence: "Better lighting on the river path leads, with 41%.", share: 0.41 };
+const LEAD = {
+  leaders: "Better lighting on the river path",
+  tied: false,
+  text: "Most picked: \u2068Better lighting on the river path\u2069, by 41% of those who answered.",
+  share: 0.41,
+};
 const TIERS = [
   { name: "Verified residents", ballots: 40_112, share: 0.624, result: "62.4% yes" },
   { name: "Accounts", ballots: 52_118, share: 0.581, result: "58.1% yes" },
@@ -74,6 +80,7 @@ const VARIANTS: Record<string, PollPreview> = {
     results: { state: "open" },
   },
   counting: { ...base, civic: false, results: { state: "counting" } },
+  "by tier": { ...base, answers: undefined, civic: false, results: { state: "by-tier" } },
   civic: { ...base, civic: true, kind: "Referendum", results: { state: "closed", tiers: TIERS } },
   "civic sealed": { ...base, civic: true, kind: "Referendum", results: { state: "sealed" } },
 };
@@ -263,12 +270,15 @@ describe("a poll without released results", () => {
         { state: "sealed" } as const,
         { state: "open" } as const,
         { state: "counting" } as const,
+        // Everyday only: a civic card has a row per tier.
+        { state: "by-tier" } as const,
       ),
       // A code of the seal, of any length a poll can get, or none.
       codeLength: fc.option(fc.integer({ min: 7, max: 52 }), { nil: undefined }),
     })
     .map(({ codeLength, ...model }) => ({
       ...model,
+      civic: model.civic && model.results.state !== "by-tier",
       code: codeLength === undefined ? undefined : shortCode(fromHex(model.seal), codeLength),
     })) as fc.Arbitrary<PollPreview>;
 
@@ -319,6 +329,7 @@ describe("a poll without released results", () => {
     ["tiers", { state: "sealed", tiers: TIERS }],
     ["a share", { state: "open", share: 0.4 }],
     ["an ordering", { state: "counting", order: ["a", "b"] }],
+    ["a lead by tier", { state: "by-tier", lead: LEAD }],
   ])("can't carry %s past the runtime check either", async (_, results) => {
     const model = { ...base, civic: false, results } as unknown as PollPreview;
     expect(() => checkPreview(model)).toThrow(TypeError);
@@ -464,6 +475,208 @@ describe("a poll page's preview today", () => {
     expect(pollPreview(poll, CODE, "abolish.us", closes, "en-US").results).toEqual({
       state: "counting",
     });
+  });
+
+  // P2-24 part 4: the result card.
+  const read = (
+    ...tiers: { tier: 0 | 1 | 2; counted: number; questions?: string[][] | undefined }[]
+  ) =>
+    ({
+      kind: "read",
+      tiers: tiers.map((t) => ({ questions: undefined, ...t })),
+    }) as PollResults;
+  const COUNTED = read({ tier: 0, counted: 12, questions: [["6", "3", "1"]] });
+  const LABELS = { question: "Should the park stay open late?", place: undefined };
+  const OPTIONS = { ...LABELS, options: ["Yes", "No", "Only in summer"] };
+  const results = fc.oneof(
+    fc.constantFrom<PollResults>(
+      { kind: "unopened" },
+      { kind: "not-counted" },
+      { kind: "not-ready" },
+      { kind: "unavailable" },
+    ),
+    fc
+      .array(
+        fc.record({
+          tier: fc.constantFrom(0 as const, 1 as const, 2 as const),
+          counted: fc.nat({ max: 1000 }),
+          questions: fc.option(
+            fc.array(fc.array(fc.nat({ max: 1000 }).map(String), { minLength: 1, maxLength: 5 }), {
+              minLength: 1,
+              maxLength: 3,
+            }),
+            { nil: undefined },
+          ),
+        }),
+        { maxLength: 3 },
+      )
+      .map((tiers) => read(...tiers)),
+  );
+
+  test("shows nothing of any result before it closes, whatever the API answers", () => {
+    fc.assert(
+      fc.property(results, fc.integer({ min: 0, max: closes - 1 }), (served, now) => {
+        const model = pollPreview(poll, CODE, "abolish.us", now, "en-US", OPTIONS, served);
+        expect(model.results).toEqual({ state: "open" });
+        expect(model.answers).toBeUndefined();
+      }),
+      { numRuns },
+    );
+  });
+
+  test("once closed, gives the first question's final lead from its one tier's count", () => {
+    const model = pollPreview(poll, CODE, "abolish.us", closes, "en-US", OPTIONS, COUNTED);
+    expect(model.answers).toBe(12);
+    expect(model.results).toEqual({
+      state: "closed",
+      lead: {
+        leaders: "Yes",
+        tied: false,
+        text: "Most picked: \u2068Yes\u2069, by 50% of those who answered.",
+        share: 0.5,
+      },
+    });
+    const card = cardText(model, "landscape");
+    expect(card).toMatch(/Most picked\s+Yes\s+50%/);
+    expect(card).toContain("Final count · 12 answers counted");
+    expect(card).toContain("Closed 15 Nov");
+    expect(previewText(model).description).toBe(
+      "Closed on 15 Nov. Most picked: \u2068Yes\u2069, by 50% of those who answered. " +
+        "Anyone can check the count.",
+    );
+    // A version-5 poll's lead is its first question's, never a sum of its questions (T-16).
+    const several = pollPreview(
+      { ...poll, version: 5, questions: [poll.questions[0]!, poll.questions[0]!] },
+      CODE,
+      "abolish.us",
+      closes,
+      "en-US",
+      OPTIONS,
+      read({
+        tier: 0,
+        counted: 8,
+        questions: [
+          ["1", "7", "0"],
+          ["8", "0", "0"],
+        ],
+      }),
+    );
+    expect(several.results).toMatchObject({ lead: { leaders: "No", share: 0.875 } });
+    expect(cardText(several, "landscape")).toMatch(/Question 1 of 2 · Most picked\s+No\s+87\.5%/);
+  });
+
+  test("says the lead in the page's language", () => {
+    const model = pollPreview(poll, CODE, "abolish.us", closes, "es-US", OPTIONS, COUNTED);
+    expect(model.results).toMatchObject({
+      lead: { text: "La más elegida: \u2068Yes\u2069, por el 50% de quienes respondieron." },
+    });
+    const card = cardText(model, "landscape");
+    expect(card).toMatch(/La más elegida\s+Yes\s+50\s?%/);
+    expect(card).toContain("Conteo final");
+  });
+
+  test("names an option by number where it has no words, or the image can't draw them", () => {
+    // A hidden poll's text is withheld; its result never is (docs/moderation-policy.md).
+    expect(leadOf(["1", "3", "0"], 4, "en-US", undefined)).toEqual({
+      leaders: "Answer 2",
+      tied: false,
+      text: "Most picked: Answer 2, by 75% of those who answered.",
+      share: 0.75,
+    });
+    expect(leadOf(["3", "1"], 4, "en-US", ["Ναι", "Όχι"])).toEqual({
+      leaders: "Answer 1",
+      tied: false,
+      text: "Most picked: \u2068Ναι\u2069, by 75% of those who answered.",
+      share: 0.75,
+    });
+  });
+
+  test("says a tie as one, and a count where nothing was picked", () => {
+    const tie = leadOf(["2", "2", "1"], 5, "en-US", ["Yes", "No", "Maybe"]);
+    expect(tie).toMatchObject({ leaders: "Yes and No", tied: true, share: 0.4 });
+    expect(tie.text).toBe(
+      "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 40% of those who answered.",
+    );
+    const none = leadOf(["0", "0"], 3, "en-US", ["Yes", "No"]);
+    expect(none).toEqual({
+      leaders: undefined,
+      tied: false,
+      text: "No answer was picked.",
+      share: 0,
+    });
+    const card = cardText(
+      { ...base, civic: false, results: { state: "closed", lead: none } },
+      "square",
+    );
+    expect(card).toContain("No answer was picked.");
+    expect(card).not.toMatch(/%|Most picked/);
+    expect(leadOf(["0", "0"], 0, "en-US", ["Yes", "No"]).share).toBe(0);
+  });
+
+  test("leads with the leader's share of those who answered, as the page does", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.nat({ max: 10_000 }), { minLength: 1, maxLength: 8 }),
+        fc.nat({ max: 10_000 }),
+        (picks, extra) => {
+          const counted = Math.max(...picks) + extra;
+          const lead = leadOf(picks.map(String), counted, "en-US", undefined);
+          const top = Math.max(...picks);
+          expect(lead.share).toBeCloseTo(top === 0 ? 0 : top / counted, 5);
+          expect(lead.tied).toBe(top > 0 && picks.filter((p) => p === top).length > 1);
+          expect(lead.leaders === undefined).toBe(top === 0);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("shows no lead across tiers, and none until a count is published", () => {
+    const at = (served: PollResults) =>
+      pollPreview(poll, CODE, "abolish.us", closes, "en-US", OPTIONS, served);
+    const tiers = read(
+      { tier: 0, counted: 12, questions: [["6", "3", "1"]] },
+      { tier: 2, counted: 2 },
+    );
+    expect(at(tiers).results).toEqual({ state: "by-tier" });
+    expect(at(tiers).answers).toBeUndefined();
+    expect(previewText(at(tiers)).description).toBe(
+      "Closed on 15 Nov. Each tier is counted on its own. Anyone can check the count.",
+    );
+    expect(at(read({ tier: 0, counted: 1 }, { tier: 2, counted: 2 })).results).toEqual({
+      state: "counting",
+    });
+    for (const served of [
+      { kind: "unopened" },
+      { kind: "not-counted" },
+      { kind: "not-ready" },
+      { kind: "unavailable" },
+      read(),
+      read({ tier: 0, counted: 12 }),
+    ] as PollResults[]) {
+      expect(at(served).results).toEqual({ state: "counting" });
+      expect(at(served).answers).toBeUndefined();
+    }
+    expect(pollPreview(poll, CODE, "abolish.us", closes, "en-US").results).toEqual({
+      state: "counting",
+    });
+  });
+
+  test("draws a closed poll's lead as a PNG, a long one too", async () => {
+    const long = { ...OPTIONS, options: ["A".repeat(200), "No", "Maybe"] };
+    for (const words of [OPTIONS, long])
+      for (const format of FORMATS) {
+        const model = pollPreview(poll, CODE, "abolish.us", closes, "en-US", words, COUNTED);
+        expect(pngSize(await renderPreview(model, format))).toEqual(PREVIEW_SIZE[format]);
+      }
+  });
+
+  test("gets a new version once its count is published", async () => {
+    const counting = pollPreview(poll, CODE, "abolish.us", closes, "en-US", OPTIONS);
+    const counted = pollPreview(poll, CODE, "abolish.us", closes, "en-US", OPTIONS, COUNTED);
+    expect(await previewVersion(counted, "landscape")).not.toBe(
+      await previewVersion(counting, "landscape"),
+    );
   });
 
   test("counts a version-5 poll's questions, and draws one for a poll with none", () => {

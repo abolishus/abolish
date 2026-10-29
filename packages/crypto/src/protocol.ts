@@ -482,17 +482,23 @@ export const BALLOT_VERSIONS: ReadonlySet<number> = new Set<number>([1, 2, 3, 4,
 // that logs each panel's kind: a trustee registry logs one or the other,
 // never both, so it fits wherever version 11 does, and is the only one that
 // fits beside a registry that logs the kind ([[contracts]], Event tables
-// (version 12); [[P2-16]] part 5e-4). Version 13, whose
-// `DefinitionRegistered` reads a version-7 definition too, isn't listed: the
-// event check reads it, but 2.3 leaves a profile pinning it unverifiable
-// until the verifier reads it, and fails a version-7 profile pinning 8 to 12
-// only from that release ([[contracts]], Event tables (version 13);
-// [[P2-17]] part 5c; T-36).
+// (version 12); [[P2-16]] part 5e-4). Version 13 reads every record version
+// 12 passes as it does, and a `DefinitionRegistered` carrying a version-7
+// definition besides, so it fits wherever version 12 does ([[contracts]],
+// Event tables (version 13); [[P2-17]] part 5c).
 export const CONTRACT_EVENT_VERSIONS: ReadonlySet<number> = new Set<number>([
-  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13,
 ]);
 // The versions 2.3 passes: those whose tables name every event.
-const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9, 10, 11, 12]);
+const WHOLE_EVENTS: ReadonlySet<number> = new Set([8, 9, 10, 11, 12, 13]);
+// The contract-event versions whose election registry's `DefinitionRegistered`
+// reads no version-7 definition: a version-7 election's own registration is
+// one of the events 4.4 requires boarded, so beside definition version 7
+// each would fail 4.4 at that record, and 2.3 fails such a profile, as the
+// registry that registers version 7 refuses it (rule 9). As above, a later
+// version this package doesn't know isn't listed ([[contracts]], Event
+// tables (version 13); T-36, T-53).
+const NO_DEFINITION_V7: ReadonlySet<number> = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
 // The contract-event versions whose tables name no relayed rolling ballot:
 // beside ballot version 5 they leave a rolling poll's voters no direct
 // submission the board's events archive (8 and 9) or none forced through L1
@@ -535,10 +541,13 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version 5 under 2 (rolling), and each of those ballot versions pairs with
  * those definitions only (a rolling profile that fits is
  * `unsupported-version` until the verifier reads its step roots: P2-17 part
- * 4d-2); ballot version 5 also needs contract-event version 11 or 12, the only ones whose tables name the
- * relayed rolling ballot, and fails beside version 8, 9 or 10 (T-25, T-50, T-53),
- * and ballot version 4 needs version 9 to 12, which frame it, and fails
- * beside version 8 (T-25, T-53); what follows of version 6
+ * 4d-2); ballot version 5 also needs contract-event version 11 to 13, the
+ * only ones whose tables name the relayed rolling ballot, and fails beside
+ * version 8, 9 or 10 (T-25, T-50, T-53), ballot version 4 needs version 9
+ * to 13, which frame it, and fails beside version 8 (T-25, T-53), and
+ * definition version 7 needs version 13, the only one whose
+ * `DefinitionRegistered` reads its own registration, and fails beside 8 to
+ * 12 (T-53); what follows of version 6
  * holds for version 7 under either mode (docs/spec/verifier.md, 2.3);
  * a version-6 definition with an author panel must pin board-entry version
  * 7, which carries its approvals, and tally-opening version 3, which sums
@@ -558,7 +567,7 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * election's creator can't leave delivery, challenge or destruction off the
  * board (T-34, T-42). Every profile also needs a board-entry version that
  * carries close statements (5, 6 for a live poll, or 7 with an author panel) and contract-event
- * version 8 to 12, which archive
+ * version 8 to 13, which archive
  * every board event (the close rule's, the batches', the obligation root's
  * and the availability records') and the group registry's Tier 1 and
  * self-paid additions, so a seat can always state the close, force what it
@@ -677,7 +686,7 @@ export function profileCombinationRule(
     allowed.includes(RECORD_TYPES.shareReceipt) && allowed.includes(RECORD_TYPES.shareComplaint);
   const carriesDestruction = allowed.includes(RECORD_TYPES.destructionStatement);
   // Every profile needs the close statement on the board (board-entry
-  // version 5) and every event archived (contract-event versions 8 to 12),
+  // version 5) and every event archived (contract-event versions 8 to 13),
   // whatever its definition version, or its seats have no way
   // to state the close and 5.5 and 6.3 can't be checked ([[close]],
   // Version; T-35, T-50). A contract-event version this package doesn't
@@ -692,7 +701,8 @@ export function profileCombinationRule(
     carriesClose &&
     (!knownEvents || WHOLE_EVENTS.has(events)) &&
     (unknownBallot || ballot !== 5 || !NO_RELAYED_ROLLING.has(events)) &&
-    (unknownBallot || ballot !== 4 || !NO_BALLOT_V4.has(events));
+    (unknownBallot || ballot !== 4 || !NO_BALLOT_V4.has(events)) &&
+    (definition !== 7 || !NO_DEFINITION_V7.has(events));
   if (!fits) return "profile-combination";
   if (unknownBallot && wanted !== 1) return "unsupported-version";
   if (coreOpening !== undefined && spoiled !== undefined && spoiled !== coreOpening)

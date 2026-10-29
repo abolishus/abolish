@@ -77,7 +77,7 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 // The contract-event versions crypto's event check reads, as 4.4 and the
 // recount read them (src/events.ts, src/electorate.ts).
 const isReadable = (v: number | undefined): v is ContractEventVersion =>
-  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 12;
+  v !== undefined && Number.isInteger(v) && v >= 1 && v <= 13;
 
 /**
  * The registration of `definition`, the definition the caller checked, from

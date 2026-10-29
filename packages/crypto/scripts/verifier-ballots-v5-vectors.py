@@ -14,7 +14,7 @@ every ballot proves membership of its step's tree under that definition's
 hash and its tier's rolling scope, so a verifier checks them with nothing
 but the bundle and the events. Ballots come by every path a rolling poll
 has: the board path, and the board's `RollingBallotSubmitted` and
-`RelayedRollingBallotSubmitted` under contract-event version 11, each with
+`RelayedRollingBallotSubmitted` under contract-event version 13, each with
 the root its submitter supplied, which `root-step-mismatch` holds to the
 step's own (docs/spec/ballot-validity.md, Admission (version 5)).
 
@@ -27,7 +27,8 @@ and the ceremony rows; its encoders and rules are given
 rolling-electorate-vectors.py's version 7 here) and
 verifier-ballots-vectors.py (the anchoring clock, the close rule's window and
 the board's rolling events, framed by contract-event-v10-vectors.py and
-contract-event-v11-vectors.py).
+contract-event-v11-vectors.py and read under contract-event-v13-vectors.py's
+version 13).
 
 Membership proofs need a Groth16 prover, so generation has three steps, as
 for verifier-ballots-v4.json:
@@ -76,12 +77,13 @@ vc.RULE[7] = rv.definition_rule
 H, ds = cv.H, cv.ds
 BALLOT_TYPE = 0x0002
 MEMBERSHIP_VK_HASH = bytes.fromhex(json.loads((VECTORS / "membership-proof.json").read_text())["verificationKey"]["hash"])
-EVENTS_VERSION = 11
+EVENTS_VERSION = 13
 # Definition version 7 under mode 2: ballot version 5, spoiled-ballot opening
 # version 3, tally-opening version 1 and display-text version 2, as a sealed
 # rolling poll without an author panel pins them, with board-entry version 5
-# (the close statement) and contract-event version 11, the first whose tables
-# name the relayed rolling ballot (docs/spec/verifier.md, 2.3).
+# (the close statement) and contract-event version 13, the only one whose
+# tables name the relayed rolling ballot and read the definition's own
+# registration (docs/spec/verifier.md, 2.3).
 PINS = [(1, 7), (BALLOT_TYPE, 5), (3, 3), (4, 1), (5, 1), (6, 1), (vc.BOARD_ENTRY_TYPE, vb.BOARD_VERSION), (vb.CONTRACT_EVENT_TYPE, EVENTS_VERSION), (9, 2)]
 
 outcome, NOT_IMPLEMENTED = vc.outcome, vc.NOT_IMPLEMENTED
@@ -340,7 +342,7 @@ def build(constants):
     )
     bundle(
         "rolling-path",
-        "The same poll's ballots by the board's RollingBallotSubmitted (contract-event version 11), each with the root its submitter supplied: step N0's ballot with step N0's root (admitted), step N0 − 1's with step N0's root (root-step-mismatch), the re-vote at N0 + 1 with step N0 + 2's root, the same tree's (admitted: the supplied root is compared with the step's root, not its number), a board-path copy of the first (a repeat), tier 2's ballot boarded after close (window-after-close), a step before registration (root-step-range, before the supplied root is read), a relabelled step with that step's own root (membership-proof), the close step's ballot at closes_at (admitted) and a second event of the first ballot (a repeat).",
+        "The same poll's ballots by the board's RollingBallotSubmitted (contract-event version 13), each with the root its submitter supplied: step N0's ballot with step N0's root (admitted), step N0 − 1's with step N0's root (root-step-mismatch), the re-vote at N0 + 1 with step N0 + 2's root, the same tree's (admitted: the supplied root is compared with the step's root, not its number), a board-path copy of the first (a repeat), tier 2's ballot boarded after close (window-after-close), a step before registration (root-step-range, before the supplied root is read), a relabelled step with that step's own root (membership-proof), the close step's ballot at closes_at (admitted) and a second event of the first ballot (a repeat).",
         [
             t,
             item(b_dan, p_dan, "rolling", root=root_of(0, N0), time=T0 + 40),

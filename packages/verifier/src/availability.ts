@@ -193,17 +193,18 @@ export interface AvailabilityResult {
 export function availabilityChecks(inputs: AvailabilityInputs): AvailabilityResult {
   const { clock, eventVersion } = inputs;
   // Version 8 is the first whose tables name the availability events, and
-  // 2.3 fails every profile pinning an earlier one; versions 9 to 12 name
+  // 2.3 fails every profile pinning an earlier one; versions 9 to 13 name
   // them as version 8 does, and a later version is a later release's to
   // read (T-36).
-  if (eventVersion === undefined || eventVersion > 12)
+  if (eventVersion === undefined || eventVersion > 13)
     return { row: { status: "unverifiable", code: "unsupported-version", at: {} } };
   if (
     eventVersion !== 8 &&
     eventVersion !== 9 &&
     eventVersion !== 10 &&
     eventVersion !== 11 &&
-    eventVersion !== 12
+    eventVersion !== 12 &&
+    eventVersion !== 13
   )
     return { row: { status: "unverifiable", code: "not-reached" } };
   const pinned = eventVersion;

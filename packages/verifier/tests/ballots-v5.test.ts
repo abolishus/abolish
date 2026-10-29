@@ -117,7 +117,7 @@ const plain = (rows: ReadonlyMap<string, { status: string; code?: string; at?: o
 function rootOfStepN0(): bigint {
   const { definition, entries } = election(byId("rolling-path"));
   const d = definition.value;
-  const record = decodeContractEvent((entries[1] as Uint8Array).subarray(51), 11);
+  const record = decodeContractEvent((entries[1] as Uint8Array).subarray(51), 13);
   const checked = checkContractEvent(
     record,
     {
@@ -126,7 +126,7 @@ function rootOfStepN0(): bigint {
       groupRegistry: d.group_registry,
       board: d.board,
     },
-    11,
+    13,
   );
   if (!checked.ok || checked.event.event !== "RollingBallotSubmitted")
     throw new Error("entry 1 isn't a rolling ballot");

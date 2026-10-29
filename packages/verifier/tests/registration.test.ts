@@ -151,7 +151,7 @@ describe("registrationCheck", () => {
   });
 
   test("leaves an unread contract-event pin unverifiable", () => {
-    for (const version of [0, 13])
+    for (const version of [0, 14])
       expect(check(honest(), v5Definition(version))).toEqual({
         status: "unverifiable",
         code: "unsupported-version",

@@ -528,14 +528,14 @@ describe("2.3's profile combination", () => {
       events !== 6 &&
       events !== 7;
     if (!fits) return "profile-combination";
-    return events >= 8 && events <= 12 ? undefined : "unsupported-version";
+    return events >= 8 && events <= 13 ? undefined : "unsupported-version";
   };
 
   test("board-entry versions 1 to 8 against ballot, tally-opening and contract-event versions", () => {
     for (let board = 1; board <= 8; board++)
       for (let ballot = 1; ballot <= 3; ballot++)
         for (let opening = 1; opening <= 3; opening++)
-          for (const events of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 255])
+          for (const events of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 255])
             expect(profileCombinationRule(pinning(board, ballot, opening, events))).toBe(
               expected(board, ballot, opening, events),
             );
@@ -562,35 +562,34 @@ describe("2.3's profile combination", () => {
     // A contract-event version this package doesn't read may be a later
     // release's that names those events: unsupported, never a failure, unless
     // the profile fails on another ground (T-36).
-    expect(profileCombinationRule(pinning(5, 1, 1, 13))).toBe("unsupported-version");
-    expect(profileCombinationRule(pinning(4, 1, 1, 13))).toBe("profile-combination");
-    expect(profileCombinationRule(pinning(5, 2, 1, 13))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 1, 1, 14))).toBe("unsupported-version");
+    expect(profileCombinationRule(pinning(4, 1, 1, 14))).toBe("profile-combination");
+    expect(profileCombinationRule(pinning(5, 2, 1, 14))).toBe("profile-combination");
     // Each of versions 9 to 11 reads every record the one before passes as it
-    // does, and version 12 every one version 11 passes but the `PanelPinned`
-    // it replaces, so each fits wherever version 8 does ([[contracts]], Event
-    // tables (versions 9 to 12)).
-    for (const events of [9, 10, 11, 12]) {
+    // does, version 12 every one version 11 passes but the `PanelPinned` it
+    // replaces, and version 13 every one version 12 passes, so each fits
+    // wherever version 8 does ([[contracts]], Event tables (versions 9 to
+    // 13)).
+    for (const events of [9, 10, 11, 12, 13]) {
       expect(profileCombinationRule(pinning(5, 1, 1, events))).toBeUndefined();
       expect(profileCombinationRule(pinning(4, 1, 1, events))).toBe("profile-combination");
     }
   });
 
   // The verifier reads version 9 whole since P2-16 part 5d-3b, versions 10
-  // and 11 since P2-17 part 4b-1 and version 12 since P2-16 part 5e-4, so
-  // 2.3 judges a profile pinning any of them ([[contracts]], Contract-event
-  // record, Event tables (versions 9 to 12); T-36, T-37). The codec reads
-  // version 13 since P2-17 part 5b, and 2.3 leaves it unverifiable until the
-  // verifier reads it (part 5c).
-  test("the contract-event versions 2.3 knows are the ones its codec reads, but 13", () => {
+  // and 11 since P2-17 part 4b-1, version 12 since P2-16 part 5e-4 and
+  // version 13 since P2-17 part 5c, so 2.3 judges a profile pinning any of
+  // them ([[contracts]], Contract-event record, Event tables (versions 9 to
+  // 13); T-36, T-37).
+  test("the contract-event versions 2.3 knows are the ones its codec reads", () => {
     const ascending = (a: number, b: number) => a - b;
     expect([...CONTRACT_EVENT_VERSIONS].sort(ascending)).toEqual(
-      Object.keys(CONTRACT_EVENT.versions)
-        .map(Number)
-        .filter((v) => v !== 13)
-        .sort(ascending),
+      Object.keys(CONTRACT_EVENT.versions).map(Number).sort(ascending),
     );
     expect(profileCombinationRule(pinning(5, 1, 1, 12))).toBeUndefined();
-    expect(profileCombinationRule(pinning(5, 1, 1, 13))).toBe("unsupported-version");
+    // Version 13 fits wherever version 12 does.
+    expect(profileCombinationRule(pinning(5, 1, 1, 13))).toBeUndefined();
+    expect(profileCombinationRule(pinning(5, 1, 1, 14))).toBe("unsupported-version");
   });
 
   test("a contract-event type pinned twice or not at all is refused, never a fit", () => {

@@ -14,9 +14,11 @@ import {
 // again under version 7, so every ballot names the version-7 hash and proves
 // membership under its scope, every transcript is made for its stub, and
 // 1.3, 2.3, 3.2, 5.1 to 5.5, 5.7, 6.2 and 7.4 are judged as under version
-// 6. Two cases are version 7's own: a ballot made for the same election read
-// as version 6 (`v6-reading`), and a transcript made for that reading's stub
-// (`v6-stub`). Fixtures: docs/spec/vectors/verifier-ballots-v4-definition-v7.json
+// 6, beside contract-event version 13, the only one that reads a version-7
+// registration. Three cases are version 7's own: a ballot made for the same
+// election read as version 6 (`v6-reading`), a transcript made for that
+// reading's stub (`v6-stub`), and an election pinning contract-event version
+// 12 (`events-12`), which 2.3 fails (T-53). Fixtures: docs/spec/vectors/verifier-ballots-v4-definition-v7.json
 // (packages/crypto/scripts/verifier-ballots-v4-vectors.py with `7`, with
 // snarkjs's verdict on every membership proof) beside verifier-ballots-v4.json,
 // and l1-anchor.json's L1 evidence, which matters only to 4.1 and 4.2.
@@ -90,7 +92,7 @@ const rows = (r: Report, ids: readonly string[]) =>
   );
 const ADMISSION = ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7"];
 // The cases only the version-7 file has: the same election read as version 6.
-const OWN = new Set(["v6-reading", "v6-stub"]);
+const OWN = new Set(["v6-reading", "v6-stub", "events-12"]);
 
 test("every definition is version 7 under a fixed electorate", () => {
   for (const c of v7.cases) {
@@ -99,7 +101,7 @@ test("every definition is version 7 under a fixed electorate", () => {
   }
 });
 
-test("the version-6 file's cases, and version 7's own two, are all here", () => {
+test("the version-6 file's cases, and version 7's own three, are all here", () => {
   expect(v7.cases.map((c) => c.id).filter((id) => !OWN.has(id))).toEqual(v6.cases.map((c) => c.id));
   expect(v7.cases.filter((c) => OWN.has(c.id)).length).toBe(OWN.size);
 });

@@ -4,6 +4,7 @@ export {
   type DestructionSubmitter,
   type OpeningSubmitter,
   type ReceiptSubmitter,
+  type ResultsReader,
   router,
 } from "./router.ts";
 export {

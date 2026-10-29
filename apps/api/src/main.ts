@@ -10,6 +10,7 @@ import {
   DestructionQueue,
   OpeningQueue,
   ReceiptQueue,
+  ResultsQueue,
 } from "@abolishus/worker/ballot-queue";
 import { Redis } from "ioredis";
 import postgres from "postgres";
@@ -92,6 +93,7 @@ let ballots: BallotQueue | undefined;
 let receipts: ReceiptQueue | undefined;
 let openings: OpeningQueue | undefined;
 let destructions: DestructionQueue | undefined;
+let results: ResultsQueue | undefined;
 if (env.REDIS_URL !== undefined) {
   // Fail fast while Redis is down or stalled, so a request answers
   // unavailable within a second rather than hold one of the server's slots
@@ -108,6 +110,7 @@ if (env.REDIS_URL !== undefined) {
   receipts = await ReceiptQueue.open({ connection: redis });
   openings = await OpeningQueue.open({ connection: redis });
   destructions = await DestructionQueue.open({ connection: redis });
+  results = await ResultsQueue.open({ connection: redis });
 }
 
 const tier0Env = [env.API_TIER0_GROUP, env.TURNSTILE_SECRET_KEY, env.API_CHALLENGE_HOST];
@@ -216,6 +219,7 @@ const server = createApiServer({
   ...(receipts !== undefined && { receipts }),
   ...(openings !== undefined && { openings }),
   ...(destructions !== undefined && { destructions }),
+  ...(results !== undefined && { results }),
   ...(tier0 !== undefined && { tier0 }),
   ...(tier1 !== undefined && { tier1 }),
   ...(postings !== undefined && { postings }),
@@ -238,6 +242,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
             receipts?.close(),
             openings?.close(),
             destructions?.close(),
+            results?.close(),
           ]).then(() => redis?.quit()),
           postingRedis?.quit(),
         ]),

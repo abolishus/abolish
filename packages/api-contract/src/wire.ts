@@ -175,3 +175,15 @@ export const TurnstileResponse = z
     z.maxLength(2048, { abort: true }),
     z.regex(/^[\x21-\x7e]+$/, "expected 1 to 2048 printable ASCII characters"),
   );
+
+/**
+ * Bounds on a poll's results as `GET /elections/results` carries them:
+ * `MAX_OPTIONS` counts per cell or tier, `MAX_QUESTIONS` questions and
+ * `MAX_TRUSTEES` seats (docs/spec/parameters.md), and 256 cells, the most a
+ * definition has (docs/spec/election-definition.md, Rules, `cells`). Tests
+ * tie each to the spec.
+ */
+export const MAX_RESULT_OPTIONS = 64;
+export const MAX_RESULT_QUESTIONS = 32;
+export const MAX_RESULT_SEATS = 16;
+export const MAX_RESULT_CELLS = 256;

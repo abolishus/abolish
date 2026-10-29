@@ -4,7 +4,16 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 
 import { generateOpenApi, renderOpenApi } from "../scripts/openapi.ts";
-import { contract, MAX_BOARD_PAYLOAD, MAX_DISPLAY_TEXT, POSTING_MAX_DATA } from "../src/index.ts";
+import {
+  contract,
+  MAX_BOARD_PAYLOAD,
+  MAX_DISPLAY_TEXT,
+  MAX_RESULT_CELLS,
+  MAX_RESULT_OPTIONS,
+  MAX_RESULT_QUESTIONS,
+  MAX_RESULT_SEATS,
+  POSTING_MAX_DATA,
+} from "../src/index.ts";
 
 const root = join(import.meta.dirname, "..");
 const repo = join(root, "../..");
@@ -241,6 +250,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/code",
       "GET /elections/definition",
       "GET /elections/display-text",
+      "GET /elections/results",
       "GET /elections/tags",
       "GET /moderation/log",
       "GET /moderation/status",
@@ -270,6 +280,19 @@ describe("spec ties", () => {
     const table = readFileSync(join(repo, "docs/spec/parameters.md"), "utf8");
     const row = /^\|\s*`MAX_DISPLAY_TEXT`\s*\|\s*([\d,]+)\s*\|/m.exec(table);
     expect(row?.[1]?.replaceAll(",", "")).toBe(String(MAX_DISPLAY_TEXT));
+  });
+
+  test("the results' bounds match docs/spec/parameters.md and the definition's cell limit", () => {
+    const table = readFileSync(join(repo, "docs/spec/parameters.md"), "utf8");
+    const param = (name: string) =>
+      new RegExp(`^\\|\\s*\`${name}\`\\s*\\|\\s*([\\d,]+)\\s*\\|`, "m")
+        .exec(table)?.[1]
+        ?.replaceAll(",", "");
+    expect(param("MAX_OPTIONS")).toBe(String(MAX_RESULT_OPTIONS));
+    expect(param("MAX_QUESTIONS")).toBe(String(MAX_RESULT_QUESTIONS));
+    expect(param("MAX_TRUSTEES")).toBe(String(MAX_RESULT_SEATS));
+    const definition = readFileSync(join(repo, "docs/spec/election-definition.md"), "utf8");
+    expect(definition).toContain(`${MAX_RESULT_CELLS} cells in the whole definition`);
   });
 
   test("source imports zod only as zod/mini", () => {

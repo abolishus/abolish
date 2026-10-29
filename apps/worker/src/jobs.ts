@@ -48,12 +48,14 @@ import type {
   DestructionOutcome,
   OpeningOutcome,
   ReceiptOutcome,
+  ResultsOutcome,
 } from "./ballot-queue.ts";
 import type {
   BallotBatches,
   DestructionSubmissions,
   OpeningSubmissions,
   ReceiptSubmissions,
+  ResultsReads,
 } from "./ballots.ts";
 import type { ErrorKind, Log } from "./log.ts";
 import { GameBlockError } from "./output-roots.ts";
@@ -100,6 +102,8 @@ export interface JobContext {
   readonly receipts?: ReceiptSubmissions;
   /** Tally-opening boarding, when the worker reads the anchor and finalized L1; its queue runs only then. */
   readonly openings?: OpeningSubmissions;
+  /** Results reads, beside the openings' boarding whose counted tally they use; its queue runs only then. */
+  readonly results?: ResultsReads;
   /** Destruction-statement boarding, beside ballot admission and by its clock; its queue runs only then. */
   readonly destructions?: DestructionSubmissions;
   /** The registry sync, when the worker is configured for it; its queue runs only then. */
@@ -607,7 +611,16 @@ async function destructionSubmit(
   return ctx.destructions.submit(data.electionId, data.statement);
 }
 
-/** What a job returns: nothing, but the submitting queues' outcomes. */
+/**
+ * Reads one poll's results from the openings boarded so far and returns
+ * them, or a refusal's code.
+ */
+async function resultsRead(ctx: JobContext, data: JobData<"resultsRead">): Promise<ResultsOutcome> {
+  if (ctx.results === undefined) throw new JobError("internal");
+  return ctx.results.read(data.electionId);
+}
+
+/** What a job returns: nothing, but the submitting queues' outcomes and the results read. */
 export type JobResult<K extends QueueKey> = K extends "ballotSubmit"
   ? BallotOutcome
   : K extends "receiptSubmit"
@@ -616,7 +629,9 @@ export type JobResult<K extends QueueKey> = K extends "ballotSubmit"
       ? OpeningOutcome
       : K extends "destructionSubmit"
         ? DestructionOutcome
-        : void;
+        : K extends "resultsRead"
+          ? ResultsOutcome
+          : void;
 
 export const HANDLERS: {
   readonly [K in QueueKey]: (ctx: JobContext, data: JobData<K>) => Promise<JobResult<K>>;
@@ -639,4 +654,5 @@ export const HANDLERS: {
   receiptSubmit,
   openingSubmit,
   destructionSubmit,
+  resultsRead,
 };

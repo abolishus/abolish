@@ -17,6 +17,11 @@
 // own by core's `DestructionBoardings.submitDestruction` (docs/spec/tally.md,
 // Destruction, Boarding): one signature check against the seats' statements
 // already boarded, at most one each.
+//
+// Its `{results-read}` side reads a poll's results by core's
+// `OpeningBoardings.readResults` (docs/spec/verifier.md, Results from the
+// counted tally), with the boardings `{opening-submit}` judges openings by,
+// so a read reuses the counted tally they keep.
 
 import {
   type BallotAdmissions,
@@ -24,6 +29,7 @@ import {
   DestructionError,
   type OpeningBoardings,
   OpeningError,
+  type PollResults,
   ReceiptError,
   type SubmitOutcome,
 } from "@abolishus/core";
@@ -33,6 +39,7 @@ import type {
   DestructionOutcome,
   OpeningOutcome,
   ReceiptOutcome,
+  ResultsOutcome,
 } from "./ballot-queue.ts";
 import type { Log } from "./log.ts";
 
@@ -296,6 +303,76 @@ export class DestructionSubmissions {
         code: e.code,
         ...(e.rejection === undefined ? {} : { rejection: e.rejection }),
       };
+    }
+  }
+}
+
+/** `results` as the queue carries it: each report's fields named, so nothing else rides along. */
+function resultsOutcomeOf(results: PollResults): ResultsOutcome {
+  if (results.state === "unopened") return { ok: true, state: "unopened" };
+  const { ok, failure, cells, tiers, questions } = results.results;
+  const slices = (r: {
+    readonly counts?: readonly string[];
+    readonly byQuestion?: readonly (readonly string[])[];
+  }) => ({
+    ...(r.counts !== undefined && { counts: [...r.counts] }),
+    ...(r.byQuestion !== undefined && { byQuestion: r.byQuestion.map((q) => [...q]) }),
+  });
+  return {
+    ok: true,
+    state: "read",
+    openings: results.openings,
+    passed: ok,
+    ...(failure !== undefined && {
+      failure: { cell: failure.cell, code: failure.code },
+    }),
+    cells: cells.map((c) => ({
+      cell: c.cell,
+      tier: c.tier,
+      counted: c.counted,
+      ...slices(c),
+      ...(c.code !== undefined && { code: c.code }),
+      signers: [...c.signers],
+    })),
+    tiers: tiers.map((t) => ({ tier: t.tier, counted: t.counted, ...slices(t) })),
+    ...(questions !== undefined && {
+      questions: questions.map((q) => ({
+        question: q.question,
+        size: q.options,
+        atLeast: q.minSelections,
+        atMost: q.maxSelections,
+        method: q.method,
+      })),
+    }),
+  };
+}
+
+/**
+ * Reads a poll's results from the openings boarded so far, with the
+ * boardings that judge them, so a read uses the counted tally they keep. A
+ * refusal is an outcome; a database, anchor or L1 node error throws, and the
+ * reader asks again.
+ */
+export class ResultsReads {
+  readonly #sql: Sql;
+  readonly #boardings: OpeningBoardings;
+
+  constructor({
+    sql,
+    boardings,
+  }: Pick<BallotBatchOptions, "sql"> & { readonly boardings: OpeningBoardings }) {
+    this.#sql = sql;
+    this.#boardings = boardings;
+  }
+
+  /** The outcome for `electionId` (hex). */
+  async read(electionId: string): Promise<ResultsOutcome> {
+    try {
+      return resultsOutcomeOf(await this.#boardings.readResults(this.#sql, bytes(electionId)));
+    } catch (e) {
+      // `rejected` is a submitted opening's; a read never gets it.
+      if (!(e instanceof OpeningError) || e.code === "rejected") throw e;
+      return { ok: false, code: e.code };
     }
   }
 }

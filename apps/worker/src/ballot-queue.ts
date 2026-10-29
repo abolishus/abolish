@@ -17,10 +17,17 @@
 // board's ballots the API never runs (T-52), and the `{destruction-submit}`
 // queue for destruction statements (`DestructionQueue`), judged by the
 // Boarding rule (docs/spec/tally.md, Destruction, Boarding).
+//
+// The `{results-read}` queue (`ResultsQueue`) carries a poll's results the
+// other way: its job is the election alone, and the worker answers what the
+// openings boarded so far give, by core's `OpeningBoardings.readResults`
+// over the counted tally it judges them against (docs/spec/verifier.md,
+// Results from the counted tally), which the API never computes (T-29, T-52).
 
 import { Queue, QueueEvents } from "bullmq";
 import { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
+import { PARAMETERS } from "@abolishus/crypto";
 import * as z from "zod";
 import { JOB_OPTIONS, KEY_PREFIX, QUEUES } from "./queues.ts";
 
@@ -106,6 +113,82 @@ export const DESTRUCTION_OUTCOME = z.union([
 ]);
 export type DestructionOutcome = z.output<typeof DESTRUCTION_OUTCOME>;
 
+const COUNT = z.string().regex(/^(0|[1-9][0-9]{0,19})$/);
+const SMALL = z.number().int().nonnegative();
+const CODE = z
+  .string()
+  .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/)
+  .max(64);
+// `MAX_OPTIONS` counts, `MAX_QUESTIONS` questions and `MAX_TRUSTEES` seats
+// at most (docs/spec/parameters.md), and 256 cells, the most a definition
+// has (docs/spec/election-definition.md, Rules, `cells`).
+const COUNTS = z.array(COUNT).max(PARAMETERS.MAX_OPTIONS);
+const BY_QUESTION = z.array(COUNTS).max(PARAMETERS.MAX_QUESTIONS);
+const MAX_CELLS = 256;
+
+/**
+ * What the worker returns for a results read: `unopened` while no opening
+ * is boarded, else 7.2's verdict with each cell's and tier's report as
+ * packages/verifier's `countedResults` gives them, and the number of
+ * openings read; or the refusal's code (core's OpeningError). Nothing in it
+ * names a ballot, and it is the same for every reader (T-10, T-11).
+ */
+export const RESULTS_OUTCOME = z.union([
+  z.strictObject({ ok: z.literal(true), state: z.literal("unopened") }),
+  z.strictObject({
+    ok: z.literal(true),
+    state: z.literal("read"),
+    openings: SMALL,
+    passed: z.boolean(),
+    failure: z
+      .strictObject({
+        cell: SMALL,
+        code: CODE,
+      })
+      .optional(),
+    cells: z
+      .array(
+        z.strictObject({
+          cell: SMALL,
+          tier: SMALL,
+          counted: SMALL,
+          counts: COUNTS.optional(),
+          byQuestion: BY_QUESTION.optional(),
+          code: CODE.optional(),
+          signers: z.array(SMALL).max(PARAMETERS.MAX_TRUSTEES),
+        }),
+      )
+      .max(MAX_CELLS),
+    tiers: z
+      .array(
+        z.strictObject({
+          tier: SMALL,
+          counted: SMALL,
+          counts: COUNTS.optional(),
+          byQuestion: BY_QUESTION.optional(),
+        }),
+      )
+      .max(MAX_CELLS),
+    questions: z
+      .array(
+        z.strictObject({
+          question: SMALL,
+          size: SMALL,
+          atLeast: SMALL,
+          atMost: SMALL,
+          method: z.string().max(64),
+        }),
+      )
+      .max(PARAMETERS.MAX_QUESTIONS)
+      .optional(),
+  }),
+  z.strictObject({
+    ok: z.literal(false),
+    code: z.enum(["unknown-election", "not-ready", "not-open"]),
+  }),
+]);
+export type ResultsOutcome = z.output<typeof RESULTS_OUTCOME>;
+
 /** The worker gave no outcome in time, or the queue couldn't take the ballot. */
 export interface BallotUnavailable {
   readonly ok: false;
@@ -122,6 +205,9 @@ export type OpeningUnavailable = BallotUnavailable;
 
 /** A destruction statement's `BallotUnavailable`. */
 export type DestructionUnavailable = BallotUnavailable;
+
+/** A results read's `BallotUnavailable`. */
+export type ResultsUnavailable = BallotUnavailable;
 
 /** About four events per job (added, waiting, active, completed). */
 export const BALLOT_EVENTS_MAX_LEN = 1024;
@@ -152,8 +238,19 @@ export interface BallotQueueOptions {
   readonly maxWaiting?: number;
 }
 
+/** A queue's own options beside the connection's. */
+interface SubmitQueueOptions extends BallotQueueOptions {
+  /** Its events stream's length; `BALLOT_EVENTS_MAX_LEN` unless its outcomes are larger. */
+  readonly eventsMaxLen?: number;
+}
+
 /** The queues the API submits to and hears an outcome from. */
-type SubmitKey = "ballotSubmit" | "receiptSubmit" | "openingSubmit" | "destructionSubmit";
+type SubmitKey =
+  | "ballotSubmit"
+  | "receiptSubmit"
+  | "openingSubmit"
+  | "destructionSubmit"
+  | "resultsRead";
 
 /**
  * One submitting queue: queues a job of `key`'s data and waits for the
@@ -194,9 +291,15 @@ class SubmitQueue<Outcome> {
   static async open<Outcome>(
     key: SubmitKey,
     outcome: z.ZodType<Outcome>,
-    options: BallotQueueOptions,
+    options: SubmitQueueOptions,
   ): Promise<SubmitQueue<Outcome>> {
-    const { connection, prefix = KEY_PREFIX, timeoutMs = 20_000, maxWaiting = 4096 } = options;
+    const {
+      connection,
+      prefix = KEY_PREFIX,
+      timeoutMs = 20_000,
+      maxWaiting = 4096,
+      eventsMaxLen = BALLOT_EVENTS_MAX_LEN,
+    } = options;
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs >= BALLOT_MAX_AGE_MS)
       throw new RangeError("timeoutMs must be at least 1 and below BALLOT_MAX_AGE_MS");
     if (!Number.isSafeInteger(maxWaiting) || maxWaiting < 1)
@@ -208,7 +311,7 @@ class SubmitQueue<Outcome> {
     const queue = new Queue(name, {
       connection,
       prefix,
-      streams: { events: { maxLen: BALLOT_EVENTS_MAX_LEN } },
+      streams: { events: { maxLen: eventsMaxLen } },
     });
     // Its reads block for seconds and must wait out a reconnect rather than
     // fail, whatever fail-fast options the queue's connection has.
@@ -413,6 +516,53 @@ export class DestructionQueue {
   }
 
   /** Answers every waiting statement `unavailable` and disconnects. */
+  close(): Promise<void> {
+    return this.#queue.close();
+  }
+}
+
+/**
+ * About four events per read: a results outcome can be far larger than a
+ * ballot's (each cell's counts, up to 256 cells), so its stream keeps fewer.
+ */
+export const RESULTS_EVENTS_MAX_LEN = 256;
+
+/**
+ * How long a results read waits for its outcome by default: below the API's
+ * idle timeout, since nothing crosses the socket meanwhile. A read the
+ * worker answers late still leaves its results kept there for the next.
+ */
+export const RESULTS_TIMEOUT_MS = 10_000;
+
+export class ResultsQueue {
+  readonly #queue: SubmitQueue<ResultsOutcome>;
+
+  private constructor(queue: SubmitQueue<ResultsOutcome>) {
+    this.#queue = queue;
+  }
+
+  /** Connects, and resolves once outcomes can be heard. */
+  static async open(options: BallotQueueOptions): Promise<ResultsQueue> {
+    return new ResultsQueue(
+      await SubmitQueue.open("resultsRead", RESULTS_OUTCOME, {
+        timeoutMs: RESULTS_TIMEOUT_MS,
+        ...options,
+        eventsMaxLen: RESULTS_EVENTS_MAX_LEN,
+      }),
+    );
+  }
+
+  /**
+   * Asks for `electionId`'s results and answers the worker's outcome, or
+   * `unavailable`. Never throws for Redis's state: the reader asks again.
+   */
+  read(electionId: Uint8Array): Promise<ResultsOutcome | ResultsUnavailable> {
+    return this.#queue.submit(
+      QUEUES.resultsRead.data.parse({ electionId: Buffer.from(electionId).toString("hex") }),
+    );
+  }
+
+  /** Answers every waiting read `unavailable` and disconnects. */
   close(): Promise<void> {
     return this.#queue.close();
   }

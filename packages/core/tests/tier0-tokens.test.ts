@@ -2,6 +2,7 @@ import {
   decodeDeploymentRecord,
   type DeploymentGroup,
   type DeploymentRecordV2,
+  deploymentRecordRule,
   encodeDeploymentRecord,
   generateTier0TokenKeyPair,
   GROUP_ORDER,
@@ -432,6 +433,33 @@ describe("checkTier0IssuerDeployment", () => {
 
   test("passes the record listing every held key, and keys it doesn't hold", () => {
     expect(refusal(record())).toBeUndefined();
+  });
+
+  test("passes a version-3 record of the same fields, its relays beside them", () => {
+    const v3 = decodeDeploymentRecord(Buffer.from(vector("deployment-record-v3.json"), "hex"));
+    if (v3.version !== 3) throw new Error("the typical vector isn't version 3");
+    const fields = decodeDeploymentRecord(record());
+    if (fields.version !== 2) throw new Error("expected version 2");
+    const encoding = encodeDeploymentRecord({
+      version: 3,
+      value: { ...fields.value, seat_relays: v3.value.seat_relays },
+    });
+    expect(deploymentRecordRule(decodeDeploymentRecord(encoding))).toBeUndefined();
+    expect(refusal(encoding)).toBeUndefined();
+    // Version 3's own rules apply: a relay at the API's origin.
+    const [first, ...rest] = v3.value.seat_relays;
+    if (first === undefined) throw new Error("no seat relay");
+    const atApi = encodeDeploymentRecord({
+      version: 3,
+      value: {
+        ...fields.value,
+        seat_relays: [
+          { ...first, relays: [{ origin: fields.value.api[0]!, path: new Uint8Array() }] },
+          ...rest,
+        ],
+      },
+    });
+    expect(refusal(atApi)).toBe("the deployment record is ill formed: relay-endpoint");
   });
 
   test("refuses a record that doesn't decode, is version 1 or is ill formed", () => {

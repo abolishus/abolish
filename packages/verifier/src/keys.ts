@@ -10,7 +10,7 @@
 
 import {
   DecodeError,
-  type DecodedDeploymentRecord,
+  type DecodedDeploymentRecordUpTo,
   decodeDeploymentRecord,
   decodeReleaseRecord,
   deploymentAcrossRule,
@@ -165,7 +165,7 @@ function deploymentAt(f: DeploymentFailure): KeysAt {
 
 interface Resolved {
   readonly resolved: true;
-  readonly deployment: DecodedDeploymentRecord;
+  readonly deployment: DecodedDeploymentRecordUpTo<2>;
   readonly hash: Uint8Array;
 }
 
@@ -227,9 +227,12 @@ function findDeployment(
   row.deploymentHash = bytesToHex(v.deployment_hash);
   const denc = byHash.deployments.get(bytesToHex(v.deployment_hash));
   if (denc === undefined) return stop("deployment-record-missing", S, false);
-  let deployment: DecodedDeploymentRecord;
+  let deployment: DecodedDeploymentRecordUpTo<2>;
   try {
-    deployment = decodeDeploymentRecord(denc);
+    // This release judges versions 1 and 2 only: a version-3 record is
+    // `unsupported-version` until the keys run is taught it, rather than
+    // resolved and then left out of every pair (T-36, T-74).
+    deployment = decodeDeploymentRecord(denc, 2);
   } catch (e) {
     if (!(e instanceof DecodeError)) throw e;
     if (e.code === "unknown-version")

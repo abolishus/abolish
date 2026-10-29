@@ -922,6 +922,7 @@ export {
 } from "./identity-chain.ts";
 export {
   type DecodedDeploymentRecord,
+  type DecodedDeploymentRecordUpTo,
   decodeDeploymentRecord,
   DEPLOYMENT_ACROSS_RULES,
   DEPLOYMENT_LIMITS,
@@ -929,6 +930,7 @@ export {
   DEPLOYMENT_RECORD,
   DEPLOYMENT_RULES,
   DEPLOYMENT_V2_RULES,
+  DEPLOYMENT_V3_RULES,
   type DeploymentAcrossFailure,
   deploymentAcrossRule,
   type DeploymentFailure,
@@ -939,7 +941,11 @@ export {
   type DeploymentRecord,
   deploymentRecordRule,
   type DeploymentRecordV2,
+  type DeploymentRecordV3,
+  type DeploymentRecordVersion,
+  type DeploymentRelay,
   type DeploymentRule,
+  type DeploymentSeatRelay,
   type DeploymentTokenKey,
   encodeDeploymentRecord,
   PANEL_KINDS,

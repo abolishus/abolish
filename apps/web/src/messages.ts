@@ -574,6 +574,8 @@ const enUS = {
   ogFinalCount: "Final count · {answers}",
   ogUpdated: "{answers} · updated {day}",
   ogQuestionOne: "Question 1 of {count}",
+  ogMostPicked: "Most picked",
+  ogTiedPicked: "Tied for most picked",
   ogQuestions: { one: "{count} question", other: "{count} questions" },
   ogCivic: "Civic record · {kind}",
   ogTiers: "Each tier is counted on its own.",

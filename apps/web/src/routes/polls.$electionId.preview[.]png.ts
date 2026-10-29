@@ -42,10 +42,15 @@ export const Route = createFileRoute("/polls/$electionId/preview.png")({
         if (page.kind !== "poll") return plain(404);
         const shape = format === "square" ? "square" : "landscape";
         await loadCatalog(locale);
-        const model = pollPreview(page.poll, page.code, url.host, Date.now(), locale, {
-          question: page.text?.heading,
-          place: page.tags.place,
-        });
+        const model = pollPreview(
+          page.poll,
+          page.code,
+          url.host,
+          Date.now(),
+          locale,
+          { question: page.text?.heading, place: page.tags.place, options: page.text?.options },
+          page.results,
+        );
         const current = await previewVersion(model, shape);
         const etag = `"${current}"`;
         const headers = {

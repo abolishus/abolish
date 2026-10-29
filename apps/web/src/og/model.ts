@@ -8,9 +8,18 @@ import { shortCode } from "@abolishus/core/short-codes";
 import { isLocale, type Locale } from "../locales.ts";
 import { fromHex } from "../values.ts";
 
-/** The latest released lead of the first question, as a sentence and its share (0–1). */
+/** The latest released lead of the first question, and its share (0–1). */
 export interface Lead {
-  readonly sentence: string;
+  /**
+   * The answers picked most, as the image names them: an author's words
+   * only where its fonts draw them (src/og/glyphs.ts), else by number.
+   * `undefined` when nothing was picked.
+   */
+  readonly leaders: string | undefined;
+  /** Whether more than one answer is picked most, each by `share`. */
+  readonly tied: boolean;
+  /** The lead as a sentence for the text beside the image, the author's words isolated (T-75). */
+  readonly text: string;
   readonly share: number;
 }
 
@@ -39,10 +48,19 @@ export interface Counting {
   readonly state: "counting";
 }
 
+/**
+ * Closed and counted in several tiers: the everyday card has room for one
+ * lead, and none may join two tiers (ADR 0026; T-16), so it shows none.
+ */
+export interface ByTier {
+  readonly state: "by-tier";
+}
+
 export type EverydayResults =
   | Sealed
   | Open
   | Counting
+  | ByTier
   | { readonly state: "live"; readonly lead: Lead; readonly releasedAt: string }
   | { readonly state: "closed"; readonly lead: Lead };
 
@@ -102,6 +120,7 @@ const KEYS: Readonly<Record<string, readonly string[]>> = {
   sealed: ["state"],
   open: ["state"],
   counting: ["state"],
+  "by-tier": ["state"],
 };
 
 /**

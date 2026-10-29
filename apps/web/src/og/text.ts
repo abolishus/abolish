@@ -30,6 +30,9 @@ export const dayOf = (locale: Locale, iso: string) => day(locale).format(new Dat
 /** "7 November 2026". */
 export const longDayOf = (locale: Locale, iso: string) => longDay(locale).format(new Date(iso));
 export const countOf = (locale: Locale, n: number) => new Intl.NumberFormat(locale).format(n);
+/** "62.5%", as the poll page's results print a share. */
+export const percentOf = (locale: Locale, share: number) =>
+  new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(share);
 
 const words = (model: Pick<PollPreview, "locale">) => titles(model.locale).text;
 
@@ -48,7 +51,9 @@ export const unworded = (model: PollPreview) =>
 export const headline = (model: PollPreview) => model.question ?? unworded(model);
 
 const isClosed = (model: PollPreview) =>
-  model.results.state === "closed" || model.results.state === "counting";
+  model.results.state === "closed" ||
+  model.results.state === "counting" ||
+  model.results.state === "by-tier";
 
 /** "Closes 15 Nov" or "Closed 15 Nov", if the close fits a date. */
 export function closing(model: PollPreview): string | undefined {
@@ -102,6 +107,11 @@ export function countingLines(model: PollPreview): [string, string] {
   return [onDay(model, "ogCountingHead"), words(model)("ogCountingNote")];
 }
 
+/** Closed and counted tier by tier, with no lead across them. */
+export function byTierLines(model: PollPreview): [string, string] {
+  return [onDay(model, "ogCountingHead"), words(model)("ogTiers")];
+}
+
 /**
  * og:title and og:description: the question, then who asked, the count and
  * the lead or the state. A sealed poll's description says when results
@@ -133,13 +143,16 @@ export function previewText(model: PollPreview): { title: string; description: s
     case "counting":
       status = [onDay(model, "ogCountingText")];
       break;
+    case "by-tier":
+      status = [onDay(model, "ogClosedText"), text("ogTiers")];
+      break;
     case "live":
-      status = [...so, "lead" in results ? results.lead.sentence : text("ogTiers")];
+      status = [...so, "lead" in results ? results.lead.text : text("ogTiers")];
       break;
     case "closed":
       status = [
         onDay(model, "ogClosedText"),
-        "lead" in results ? results.lead.sentence : text("ogTiers"),
+        "lead" in results ? results.lead.text : text("ogTiers"),
       ];
   }
   return {

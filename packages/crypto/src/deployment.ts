@@ -6,9 +6,10 @@
 // runs with (T-34, T-37, T-71, T-43), from version 2 the issuer's key for
 // each period, which a client takes from its release and nowhere else
 // (T-74, T-10), and from version 3 the relays that reach each seat's node,
-// which a client learns of from nowhere else either (T-43, T-25). The rules check only what the record says about itself:
-// that the contracts and keys behind it are the ones it names is the
-// verifier's and the release Safe's signers' (T-64).
+// which a client learns of from nowhere else either (T-43, T-25). The
+// rules check only what the record says about itself: that the contracts,
+// keys and relays behind it are the ones it names is the verifier's and the
+// release Safe's signers' (T-64).
 
 import {
   bool,
@@ -168,6 +169,14 @@ export const DEPLOYMENT_RECORD = recordType(RECORD_TYPES.deploymentRecord, {
 
 export type DecodedDeploymentRecord = DecodedRecord<(typeof DEPLOYMENT_RECORD)["versions"]>;
 export type DeploymentRecordVersion = DecodedDeploymentRecord["version"];
+/**
+ * What a reader of versions up to `N` decodes, so a caller bounded at an
+ * earlier version can't judge a later one by mistake.
+ */
+export type DecodedDeploymentRecordUpTo<N extends DeploymentRecordVersion> = Extract<
+  DecodedDeploymentRecord,
+  { readonly version: 1 | (N extends 1 ? never : 2) | (N extends 3 ? 3 : never) }
+>;
 
 // 0x0020 is the only type these decoders know, so any other is
 // `unknown-record-type`, a release record's included (Decoding).
@@ -200,6 +209,12 @@ export function encodeDeploymentRecord(record: DecodedDeploymentRecord): Uint8Ar
  * knows, so a reader that judges only the earlier versions can say it
  * doesn't read the later one rather than skip what it adds.
  */
+export function decodeDeploymentRecord(bytes: Uint8Array, upTo: 1): DecodedDeploymentRecordUpTo<1>;
+export function decodeDeploymentRecord(bytes: Uint8Array, upTo: 2): DecodedDeploymentRecordUpTo<2>;
+export function decodeDeploymentRecord(
+  bytes: Uint8Array,
+  upTo?: DeploymentRecordVersion,
+): DecodedDeploymentRecord;
 export function decodeDeploymentRecord(
   bytes: Uint8Array,
   upTo: DeploymentRecordVersion = 3,

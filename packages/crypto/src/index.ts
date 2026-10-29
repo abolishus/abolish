@@ -922,6 +922,7 @@ export {
 } from "./identity-chain.ts";
 export {
   type DecodedDeploymentRecord,
+  type DecodedDeploymentRecordUpTo,
   decodeDeploymentRecord,
   DEPLOYMENT_ACROSS_RULES,
   DEPLOYMENT_LIMITS,

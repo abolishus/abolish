@@ -446,6 +446,20 @@ describe("checkTier0IssuerDeployment", () => {
     });
     expect(deploymentRecordRule(decodeDeploymentRecord(encoding))).toBeUndefined();
     expect(refusal(encoding)).toBeUndefined();
+    // Version 3's own rules apply: a relay at the API's origin.
+    const [first, ...rest] = v3.value.seat_relays;
+    if (first === undefined) throw new Error("no seat relay");
+    const atApi = encodeDeploymentRecord({
+      version: 3,
+      value: {
+        ...fields.value,
+        seat_relays: [
+          { ...first, relays: [{ origin: fields.value.api[0]!, path: new Uint8Array() }] },
+          ...rest,
+        ],
+      },
+    });
+    expect(refusal(atApi)).toBe("the deployment record is ill formed: relay-endpoint");
   });
 
   test("refuses a record that doesn't decode, is version 1 or is ill formed", () => {

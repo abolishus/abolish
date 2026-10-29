@@ -5,6 +5,7 @@ import {
   decodeDeploymentRecord,
   decodeReleaseRecord,
   deploymentHash,
+  type DeploymentSeatRelay,
   encodeDeploymentRecord,
   encodeReleaseRecord,
   releaseHash,
@@ -287,7 +288,9 @@ describe("the registry's account", () => {
 describe("findings", () => {
   // 47 version-2 releases, each listing one period under its own key: every
   // pair breaks token-key-changed, 1,081 findings in all.
-  function many(n: number) {
+  // With `relays`, each deployment is version 3, the seat relays of
+  // deployment-record-v3.json's typical record beside the same fields.
+  function many(n: number, relays?: readonly DeploymentSeatRelay[]) {
     const honest = vector("honest");
     const base = decodeDeploymentRecord(
       hexToBytes(vectors.deployments[honest.deployments[1] as string] as string),
@@ -307,13 +310,14 @@ describe("findings", () => {
     for (let s = 0; s < n; s++) {
       const secret = new Uint8Array(32);
       secret[0] = s + 1;
-      const d = encodeDeploymentRecord({
-        version: 2,
-        value: {
-          ...base.value,
-          tier0_token_keys: [{ period, key: tier0TokenPublicKey(secret), retired: false }],
-        },
-      });
+      const value = {
+        ...base.value,
+        tier0_token_keys: [{ period, key: tier0TokenPublicKey(secret), retired: false }],
+      };
+      const d =
+        relays === undefined
+          ? encodeDeploymentRecord({ version: 2, value })
+          : encodeDeploymentRecord({ version: 3, value: { ...value, seat_relays: relays } });
       const r = encodeReleaseRecord({
         version: 1,
         value: {
@@ -354,6 +358,29 @@ describe("findings", () => {
       ["3", "0"],
     ]);
     expect(r.result).toEqual({ status: "fail", ...r.findings?.[0] });
+  });
+
+  test("a well-formed version-3 deployment is unsupported, never resolved and left out of the pairs", () => {
+    const v3 = decodeDeploymentRecord(
+      hexToBytes(
+        (
+          JSON.parse(read("deployment-record-v3.json")) as {
+            vectors: { id: string; encoding: string }[];
+          }
+        ).vectors.find((v) => v.id === "typical")?.encoding ?? "",
+      ),
+    );
+    if (v3.version !== 3) throw new Error("fixture");
+    // Two releases whose keys differ for one period: token-key-changed, were
+    // the pair judged.
+    const { json, now } = many(2, v3.value.seat_relays);
+    const r = runKeys(parseKeysEvidence(json), PIN, now);
+    expect(r.result).toEqual({
+      status: "unverifiable",
+      code: "unsupported-version",
+      at: { sequence: "0", record: "deployment" },
+    });
+    expect(r.findings ?? []).toEqual([]);
   });
 
   test("below the cap every finding is listed and the flag is absent", () => {

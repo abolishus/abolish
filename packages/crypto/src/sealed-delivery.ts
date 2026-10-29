@@ -256,6 +256,14 @@ export interface DeliveryKey {
   readonly requestHash: Uint8Array;
 }
 
+// `answer_key` hashes `K ‖ request_hash ‖ answer_nonce` unframed, which is
+// unambiguous only while each is 32 bytes.
+function checkDeliveryKey(k: DeliveryKey): void {
+  for (const b of [k.key, k.requestHash])
+    if (!(b instanceof Uint8Array) || b.length !== 32)
+      throw new RangeError("sealed answer: K and request_hash must be 32 bytes each");
+}
+
 /** A sealed delivery ready to send, and what its answer is opened with. */
 export interface SealedDeliveryRequest {
   readonly request: Uint8Array;
@@ -308,10 +316,13 @@ export function sealDelivery(
   kemKey: KemPublicKey,
   envelope: DeliveryEnvelope,
 ): SealedDeliveryRequest {
-  return sealDeliveryWith(kemKey, envelope, {
-    mu: randomBytes(MLKEM_MSG_LEN),
-    e: nonZeroRandom(),
-  });
+  const mu = randomBytes(MLKEM_MSG_LEN);
+  try {
+    return sealDeliveryWith(kemKey, envelope, { mu, e: nonZeroRandom() });
+  } finally {
+    // Retention: the client erases `μ` once it has `K`; best effort (T-39).
+    mu.fill(0);
+  }
 }
 
 /** One election's KEM secret a node holds, beside its key's `kem_key_hash`. */
@@ -357,6 +368,9 @@ export function openSealedDelivery(
   holders: readonly DeliveryHolder[],
   bytes: Uint8Array,
 ): SealedDeliveryResult {
+  // T-52: a body past the longest request is refused before it is copied.
+  if (!(bytes instanceof Uint8Array) || bytes.length > MAX_SEALED_REQUEST)
+    return { ok: false, code: "sealed-malformed" };
   let request: SealedDelivery;
   try {
     request = decodeSealedDelivery(bytes, 1);
@@ -416,9 +430,12 @@ function answerBody(answer: DeliveryAnswer): Uint8Array {
       return body;
     }
     case "refused": {
-      const body = Uint8Array.from(answer.code, (c) => c.charCodeAt(0));
-      if (!isRefusalCode(body)) throw new RangeError("sealed answer: not a refusal code");
-      return body;
+      // Judged as a string first: a character above U+007F would otherwise
+      // lose its high bits in the byte it maps to.
+      const code: unknown = answer.code;
+      if (typeof code !== "string" || code.length > MAX_REFUSAL_CODE || !REFUSAL_CODE.test(code))
+        throw new RangeError("sealed answer: not a refusal code");
+      return Uint8Array.from(code, (c) => c.charCodeAt(0));
     }
     case "busy":
       return new Uint8Array(0);
@@ -463,6 +480,7 @@ export function sealAnswerWith(
   answer: DeliveryAnswer,
   answerNonce: Uint8Array,
 ): Uint8Array {
+  checkDeliveryKey(opened);
   if (!(answerNonce instanceof Uint8Array) || answerNonce.length !== 32)
     throw new RangeError("sealed answer: the answer nonce must be 32 bytes");
   const nonce = Uint8Array.from(answerNonce);
@@ -496,6 +514,7 @@ export type SealedAnswerResult =
  * sent it; it counts once it passes Client rule 1's `share-receipt` check.
  */
 export function openSealedAnswer(sent: DeliveryKey, bytes: Uint8Array): SealedAnswerResult {
+  checkDeliveryKey(sent);
   let answer: SealedAnswer;
   try {
     answer = decodeSealedAnswer(bytes, 1);

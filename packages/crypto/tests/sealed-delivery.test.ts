@@ -5,6 +5,8 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   ANSWER_PLAINTEXT,
   decodeSealedAnswer,
+  GROUP_ORDER,
+  IDENTITY,
   decodeSealedDelivery,
   DELIVERY_ENVELOPE,
   type DeliveryAnswer,
@@ -363,6 +365,35 @@ describe("sealed delivery: the production entry points", () => {
     for (const receipt of [new Uint8Array(0), new Uint8Array(MAX_ANSWER_BODY + 1)])
       expect(() => sealAnswer(k, { outcome: "receipt", receipt })).toThrow(RangeError);
     expect(() => sealAnswerWith(k, { outcome: "busy" }, new Uint8Array(31))).toThrow(RangeError);
+  });
+
+  test("refuses an ephemeral, a key or a secret out of range, and a refusal code past ASCII", () => {
+    const k = opened(sealDelivery(seat.publicKey, envelope).request);
+    const mu = new Uint8Array(32);
+    for (const e of [GROUP_ORDER, GROUP_ORDER + 1n])
+      expect(() => sealDeliveryWith(seat.publicKey, envelope, { mu, e })).toThrow(RangeError);
+    expect(() => sealDelivery({ ...seat.publicKey, dh: IDENTITY }, envelope)).toThrow();
+    expect(() =>
+      sealDelivery({ ...seat.publicKey, ek: new Uint8Array(1184).fill(0xff) }, envelope),
+    ).toThrow();
+    expect(() => deliveryHolder({ ...seat.secretKey, x: 0n })).toThrow();
+    expect(() => deliveryHolder({ ...seat.secretKey, seed: new Uint8Array(63) })).toThrow();
+    // "ţĵ"'s low bytes spell "c5", a valid code: judged as a string, it is refused.
+    expect(() => sealAnswer(k, { outcome: "refused", code: "ţĵ" })).toThrow(RangeError);
+    for (const bad of [
+      { ...k, key: k.key.subarray(1) },
+      { ...k, requestHash: new Uint8Array(33) },
+    ]) {
+      expect(() => sealAnswer(bad, { outcome: "busy" })).toThrow(RangeError);
+      expect(() => openSealedAnswer(bad, new Uint8Array(SEALED_ANSWER_LENGTH))).toThrow(RangeError);
+    }
+  });
+
+  test("refuses a request longer than the longest before decoding it", () => {
+    expect(openSealedDelivery([holder], new Uint8Array(MAX_SEALED_REQUEST + 1))).toEqual({
+      ok: false,
+      code: "sealed-malformed",
+    });
   });
 
   test("every answer round-trips, and every one is the same length", () => {

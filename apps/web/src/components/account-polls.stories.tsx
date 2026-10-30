@@ -194,6 +194,14 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   // A registered poll stays: nothing to retry or discard.
   await expect(registered!.getByText(/It will never take answers/)).toBeVisible();
   await expect(registered!.queryByRole("button")).toBeNull();
+  // A time is in the state's face and size, never the evidence's monospace.
+  for (const item of items) {
+    const style = (e: Element) => getComputedStyle(e);
+    const state = style(within(item).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/));
+    const time = style(within(item).getByText(/^(Last edited|Submitted|Closes|Closed) .* UTC$/));
+    await expect(time.fontFamily).toBe(state.fontFamily);
+    await expect(time.fontSize).toBe(state.fontSize);
+  }
 };
 
 export const EveryState: Story = {
@@ -227,6 +235,16 @@ export const EveryStateDesktop: Story = {
     await expect(
       lefts((i) => within(i).getByText(/^(Last edited|Submitted|Closes|Closed) .* UTC$/)).size,
     ).toBe(1);
+    // The state's line is one height in every row, with or without an action.
+    const below = new Set(
+      items.map((i) =>
+        Math.round(
+          box(within(i).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/)).top -
+            box(within(i).getByRole("heading")).bottom,
+        ),
+      ),
+    );
+    await expect(below.size).toBe(1);
     // A row's links and buttons are one height, so its actions sit on one line.
     for (const item of items) {
       const targets = [

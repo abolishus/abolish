@@ -322,10 +322,12 @@ export function AccountPolls({
                     <Icon aria-hidden="true" className={`size-4 shrink-0 ${tone}`} />
                     {t(`pollsState_${shown}`)}
                   </p>
-                  <p className="m-0 font-mono text-xs tracking-wide" suppressHydrationWarning>
+                  {/* A time is a fact in the body's face, as on the poll's page; the mono mark is for evidence. */}
+                  <p className="m-0 text-sm text-muted-foreground" suppressHydrationWarning>
                     {when(p, shown)}
                   </p>
-                  <div className="text-sm md:text-end">{actions(p, shown)}</div>
+                  {/* An action's 48px even where there is none, so every row's line is one height. */}
+                  <div className="text-sm md:min-h-12 md:text-end">{actions(p, shown)}</div>
                   {help === undefined ? null : (
                     <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground md:col-span-full">
                       {t(help)}

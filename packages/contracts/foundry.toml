@@ -23,8 +23,14 @@ cbor_metadata = false
 # Forge still writes out/build-info, whose id hashes absolute paths, so the
 # package build script deletes it.
 cache = false
-# Tests read the cross-language vectors (docs/spec/vectors) and nothing else.
-fs_permissions = [{ access = "read", path = "../../docs/spec/vectors" }]
+# Tests read the cross-language vectors (docs/spec/vectors) and nothing else;
+# the deploy script (script/Deploy.s.sol) reads the built artifacts in out/,
+# and writes its records to deployments/ and reads the L1 one back.
+fs_permissions = [
+  { access = "read", path = "../../docs/spec/vectors" },
+  { access = "read", path = "./out" },
+  { access = "read-write", path = "./deployments" },
+]
 
 [profile.default.fuzz]
 runs = 256

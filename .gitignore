@@ -24,6 +24,10 @@ packages/contracts/out/
 packages/contracts/out-precompile/
 packages/contracts/cache/
 packages/contracts/broadcast/*/31337/
+packages/contracts/broadcast/*/31338/
+# The deploy script's records from the local Anvil pair (test/deploy.test.ts).
+packages/contracts/deployments/31337.json
+packages/contracts/deployments/31338.json
 
 # Noir
 packages/circuits/**/target/

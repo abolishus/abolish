@@ -7,7 +7,7 @@
 
 ## Context
 
-The owner's top priority (2026-10-29, [[P2-32]]) is the contracts on Base Sepolia (84532) and Sepolia (11155111), so that staging can create, open and count a real poll. The spec gives many conditions as "before any registry is deployed" or "before any deployment". Most are met on `main` (the list is in [[P2-32]], Part 1a). Seven are open and the agent can decide on them:
+The owner's top priority (2026-10-29, [[P2-32]]) is the contracts on Base Sepolia (84532) and Sepolia (11155111), so that staging can create, open and count a real poll. The spec gives many conditions as "before any registry is deployed" or "before any deployment". Most are met on `main` (the list is in [[P2-32]], Part 1a). Nine are open and the agent can decide on them:
 
 1. **Definition versions 1 and 3 are still admitted** ([[contracts]], Election registry, Known-weak). Neither lists receipt keys, so receipts under them are judged by the keys the client's release pinned ([[receipts]]).
 2. **The registry's decoder isn't budgeted to the record's limits** under an L2 transaction gas cap (same section, Large definitions). A definition near its list limits could never be registered.
@@ -16,6 +16,8 @@ The owner's top priority (2026-10-29, [[P2-32]]) is the contracts on Base Sepoli
 5. **Tally openings have no contract path** ([[tally]], Residuals). An operator that boards no opening fails the election, and nothing attributes the failure to it.
 6. **Verifier 1.2's binding of a deployment to the release creation code isn't specified** ([[verifier]] 1.2; T-64). Until it is, 1.2 is `not-implemented` for every deployment, and a deployer's initcode could write storage or logs that forge failures blamed on others.
 7. **Groups carry no region** ([[0019-regional-cells]], Consequences): `createGroup` takes a tier only, and `GroupCreated` logs none, so until it does the registration service serves region 0 only, with one published group ([[registration]]).
+8. **An obligation root holds an election's counted set open** ([[P1-12f]] part 3; [[STATUS]], Known-weak). The board has the root call, but the verifier doesn't read a root's leaves yet, so one registered seat, or anyone holding its per-election key, can send a root that leaves an election's 5.9 and tally unverifiable, never failed (T-25).
+9. **`tally-late` isn't built** ([[verifier]] 5.6, 7.1; [[STATUS]], Known-weak). The contract-event window is fixed in the registry's bytecode ([[P1-18b]]), so what is left is the verifier's, but the gate is written as "no election registry is deployed before it". Until it is built, a board with a contract-path delivery record or an ordinary ballot leaves 7.1 unverifiable.
 
 Three more are [[delivery]]'s residuals, which "MUST be closed, or accepted by the owner, before any election registry is deployed": a newest ballot that never reached the board, approved stubs holding a seat's capacity, and withheld board data keeping a ballot out of a node's complaint scope. The spec reserves accepting them to the owner, so this ADR doesn't decide them.
 
@@ -27,13 +29,13 @@ What is one-way here is the deployment itself: a deployed registry and board are
 
 ### A. Every condition first, testnets included
 
-Close all seven (and the three residuals) before any deployment. Pros: one rule everywhere, and the first deployment has production's shape. Cons: [[P3-4]] is a large item the owner has deferred, and so is [[P4-3]]'s data availability, which closes two of the residuals. Retiring versions 1 and 3 also means moving the reference election's single-question elections and much of the Foundry suite onto version 4. Staging waits on all of it, against the owner's stated priority.
+Close all nine (and the three residuals) before any deployment. Pros: one rule everywhere, and the first deployment has production's shape. Cons: [[P3-4]] is a large item the owner has deferred, and so is [[P4-3]]'s data availability, which closes two of the residuals. Retiring versions 1 and 3 also means moving the reference election's single-question elections and much of the Foundry suite onto version 4. Staging waits on all of it, against the owner's stated priority.
 
-### B. A testnet waiver for the seven, named and enforced, with the residuals put to the owner
+### B. A testnet waiver for the nine, named and enforced, with the residuals put to the owner
 
-The seven stay binding on any deployment beyond a testnet. A deployment to Base Sepolia, Sepolia or a local Anvil may go ahead with them open, on these terms:
+The nine stay binding on any deployment beyond a testnet. A deployment to Base Sepolia, Sepolia or a local Anvil may go ahead with them open, on these terms:
 
-- **The deploy script refuses any other chain** while any of the seven is open.
+- **The deploy script refuses any other chain** while any of the nine is open.
 - **No release offered for real polls pins a testnet deployment.** This is a release-procedure rule ([[release]]), since anyone can deploy the same bytecode on any chain without the script.
 - **Staging's own path never depends on what is open.**
   - Poll creation registers definition version 5 only ([[poll-creation]]), which binds receipt keys.
@@ -41,6 +43,7 @@ The seven stay binding on any deployment beyond a testnet. A deployment to Base 
   - Staging uses Tier 0 groups only, and its registration serves region 0 only, with one published group, so no result depends on a group's region.
   - The launch panel's seats are ours, and they never record a nullifier key.
   - Staging's operator is the only board path for openings, and also the party whose failure the missing contract path would leave unattributed.
+  - Staging's seats are ours and send no roots ([[P1-12f]] part 3c builds them). A leaked seat key could hold a staging poll unverifiable, which costs a test.
   - Staging's verifier runs report 1.2 `not-implemented`, as any run does today.
 - **The runbook names the waiver** ([[staging-testnet]]).
 - **The owner decides the three residuals.** No testnet deployment is made until the owner has accepted them for testnets or they are closed. The deploy itself is the owner's in any case: part 3's workflow is a `ci:` PR the owner reviews and runs.
@@ -57,15 +60,17 @@ B. The conditions protect elections that can't be redone. A testnet holds none o
 
 ## Consequences
 
-- [[contracts]] gains a Testnet deployments section that lists the seven and the owner's three. Each condition's own statement names that section.
+- [[contracts]] gains a Testnet deployments section that lists the nine and the owner's three. Each condition's own statement names that section.
 - [[P2-32]] part 1b's deploy script checks the chain ID against 84532, 11155111 and 31337 and stops otherwise.
 - The owner is asked to accept, for testnets only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
-- Closing the seven is still owed before production:
+- Closing the nine is still owed before production:
   - versions 1 and 3 and the decoder budget, with [[P1-18]]'s remaining deployment needs;
   - Tier 2 and the nullifier-key events, with [[P3-4]];
   - the openings' path, with [[P1-18]];
   - the 1.2 binding, with [[P4-1]];
-  - regions at group creation, with [[P3-2]]'s group registry ([[0019-regional-cells]]).
+  - regions at group creation, with [[P3-2]]'s group registry ([[0019-regional-cells]]);
+  - the obligation roots' leaves, with [[P1-12f]] part 3;
+  - `tally-late`, with [[P1-19]].
 
   So are the two conditions [[contracts]] already gives as before any registry is deployed beyond a testnet: the operator's boarding throughput against self-paid floods ([[P4-3]]) and the review of `SELF_PAID_FEE` (Group registry, Known-weak, Paid floods of self-paid additions). The chain check covers them too.
 
@@ -76,6 +81,8 @@ B. The conditions protect elections that can't be redone. A testnet holds none o
   - A quorum of our own launch seats could record a nullifier key and stop sealing on the testnet. Only procedure prevents it.
   - Staging's operator could withhold openings unattributed.
   - A testnet group's region is only the release's word, so staging can't show regional results.
+  - A root sent for a staging poll leaves it unverifiable.
+- Nothing but release procedure checks the rule that no release for real polls binds a testnet deployment. A verifier or release-builder check that reports or refuses a definition or deployment record on chain 84532, 11155111 or 31337 is owed before the first release that binds a deployment record ([[P4-4]]'s release checks, or [[P1-19]] 2.3).
 
 ## Decision
 

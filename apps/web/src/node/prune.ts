@@ -5,7 +5,7 @@
 // expired phone codes, sends and recipients and ended holds, the dead
 // mark on Tier 0 token records whose key stopped redeeming, so a record
 // keeps no period past its key's window ([[tier0-token]], Issuance, step 3),
-// and the reaction counts of hours gone by.
+// and the reaction and follow counts of hours gone by.
 // Where each service is configured, it also rewrites what is stored under its
 // keyrings' current keys: every phone-hash chain extended, every e-mail
 // address re-hashed and re-sealed, so a rotation is done within one tick of
@@ -24,6 +24,7 @@ import {
   type Keyring,
   MAX_NOTICE_BATCH,
   markDeadTier0Tokens,
+  pruneFollowHours,
   type PushSender,
   pruneAccountEmails,
   pruneAccountPhones,
@@ -92,6 +93,7 @@ export function startAccountPrune({
         await pruneAccountEmails(sql, at).catch(() => log({ error: "AccountEmailPruneFailed" }));
         await pruneAccountPhones(sql, at).catch(() => log({ error: "AccountPhonePruneFailed" }));
         await pruneReactionHours(sql, at).catch(() => log({ error: "ReactionHourPruneFailed" }));
+        await pruneFollowHours(sql, at).catch(() => log({ error: "FollowHourPruneFailed" }));
         if (phoneKeys !== undefined)
           await rotatePhoneHashes(sql, phoneKeys).then(
             // What the operator must settle (the account-keys runbook): a

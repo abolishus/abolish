@@ -183,6 +183,9 @@ describe("schema", () => {
       // Never updated; pruned past the daily window (account-emails.test.ts).
       ["account_email_sends", "DELETE,INSERT,SELECT"],
       ["account_emails", "DELETE,INSERT,SELECT,UPDATE"],
+      ["account_follow_hours", "DELETE,INSERT,SELECT,UPDATE"],
+      // Set or stopped, never changed in place (follows.test.ts).
+      ["account_follows", "DELETE,INSERT,SELECT"],
       ["account_moderators", "INSERT,SELECT"],
       // Plus UPDATE of the tries and the due time (account-notices.test.ts).
       ["account_notices", "DELETE,INSERT,SELECT"],

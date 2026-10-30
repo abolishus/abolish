@@ -13,7 +13,7 @@ const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
 
 const ACCOUNT = "a".repeat(32);
 const EXPORT = {
-  version: 2,
+  version: 3,
   exportedAt: "2026-10-23T09:15:00.000Z",
   account: { id: ACCOUNT, createdAt: "2026-10-01T09:00:00.000Z" },
   email: { address: "ana@example.org", verifiedOn: "2026-10-02T00:00:00.000Z", locale: "en-US" },
@@ -94,7 +94,8 @@ describe("export client", () => {
       null,
       "text",
       { ...EXPORT, version: 1 },
-      { ...EXPORT, version: "2" },
+      { ...EXPORT, version: 2 },
+      { ...EXPORT, version: "3" },
       { ...EXPORT, exportedAt: "2026-10-23" },
       { ...EXPORT, exportedAt: undefined },
       { ...EXPORT, account: { id: ACCOUNT.toUpperCase() } },

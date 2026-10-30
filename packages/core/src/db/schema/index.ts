@@ -73,6 +73,7 @@ import {
   postingSent,
   postingSpend,
 } from "./postings.ts";
+import { accountFollowHours, accountFollows } from "./follows.ts";
 import { accountNotices } from "./notices.ts";
 import { accountPushSubscriptions } from "./push.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
@@ -87,6 +88,8 @@ export {
   accountEmailRecipients,
   accountEmails,
   accountEmailSends,
+  accountFollowHours,
+  accountFollows,
   accountModerators,
   accountNotices,
   accountPhoneCodes,
@@ -154,7 +157,7 @@ export {
  * data and are rebuilt from chain + IPFS. Account tables hold accounts
  * (better-auth), the polls each account wrote (ADR 0032), the Tier 0 token
  * each account took ([[tier0-token]]), the reactions it set on polls
- * ([[P2-25]]), its creator profile with the handles ever issued
+ * and the polls it follows ([[P2-25]]), its creator profile with the handles ever issued
  * ([[0040-creator-profiles]]), the notices waiting to be e-mailed to it and
  * the browsers it asked to be told by web push ([[P2-27]]): who someone is
  * to the app, never how they voted. Operational tables (moderation, caches)
@@ -192,6 +195,8 @@ export const TABLE_CLASSES = {
     "account_email_recipients",
     "account_email_sends",
     "account_emails",
+    "account_follow_hours",
+    "account_follows",
     "account_moderators",
     "account_notices",
     "account_passkeys",

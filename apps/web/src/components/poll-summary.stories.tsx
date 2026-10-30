@@ -481,3 +481,151 @@ export const ReportFailed: Story = {
     await expect(section.getByRole("button", { name: "Send report" })).toBeEnabled();
   },
 };
+
+/** The ballot client's address, as `BALLOT_URL` gives it. */
+const BALLOT = "https://ballot.abolish.us/";
+
+/** A poll with no title: its one question heads the page. */
+const WORDED = {
+  text: {
+    language: "en",
+    heading: "Should the park stay open late?",
+    question: undefined,
+    options: ["Yes", "No", "Abstain"],
+  },
+  words: {
+    language: "en",
+    title: "",
+    questions: [{ question: "Should the park stay open late?", options: ["Yes", "No", "Abstain"] }],
+  },
+};
+
+const wordedPlay: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  const heading = canvas.getByRole("heading", { level: 1 });
+  await expect(heading).toHaveTextContent("Should the park stay open late?");
+  await expect(heading).toHaveAttribute("lang", "en");
+  await expect(canvas.getByText("Poll 1011121314151617… · One choice")).toBeVisible();
+  const asks = canvas.getByRole("region", { name: "What it asks" });
+  // The question heading the page isn't said again: its answers, numbered by question.
+  await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();
+  await expect(within(asks).getByText("Pick one from 3 options")).toBeVisible();
+  await expect(
+    within(asks)
+      .getAllByRole("listitem")
+      .slice(1)
+      .map((li) => li.textContent),
+  ).toEqual(["Yes", "No", "Abstain"]);
+  // One way into the ballot client, with the poll in the fragment alone (T-10, T-11).
+  await expect(canvas.getByRole("link", { name: "Answer the question" })).toHaveAttribute(
+    "href",
+    `${BALLOT}#election=${poll.electionId}`,
+  );
+  await expect(canvas.getByText(/Nothing is sent until you cast your answers there/)).toBeVisible();
+};
+
+/** In its own words, answerable in the ballot client. */
+export const Worded: Story = { args: { ...WORDED, ballot: BALLOT }, play: wordedPlay };
+
+export const WordedDark: Story = {
+  args: { ...WORDED, ballot: BALLOT },
+  parameters: { theme: "dark" },
+  play: wordedPlay,
+};
+
+/** A titled poll of several questions: each question in its words, with its answers. */
+export const WordedQuestions: Story = {
+  args: {
+    poll: { ...questions, questions: questions.questions.slice(0, 2) },
+    text: {
+      language: "en",
+      heading: "Park and library",
+      question: "Should the park stay open late?",
+      options: ["Yes", "No", "Abstain"],
+    },
+    words: {
+      language: "en",
+      title: "Park and library",
+      questions: [
+        { question: "Should the park stay open late?", options: ["Yes", "No", "Abstain"] },
+        {
+          question: "Which days should the library open on Sundays and holidays?",
+          options: ["Sundays", "Public holidays", "School holidays", "Every evening", "None"],
+        },
+      ],
+    },
+    ballot: BALLOT,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Park and library");
+    await expect(
+      canvas.getByRole("heading", { name: "Question 1: Should the park stay open late?" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", {
+        name: "Question 2: Which days should the library open on Sundays and holidays?",
+      }),
+    ).toBeVisible();
+    await expect(canvas.getByText("Pick any from 5 options")).toBeVisible();
+    await expect(canvas.getByText("Public holidays")).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Answer 2 questions" })).toBeVisible();
+  },
+};
+
+/** A question in a right-to-left script keeps its own direction beside our words. */
+export const WordedRightToLeft: Story = {
+  args: {
+    text: {
+      language: "he",
+      heading: "האם הפארק יישאר פתוח?",
+      question: undefined,
+      options: ["כן", "לא", "נמנע"],
+    },
+    words: {
+      language: "he",
+      title: "",
+      questions: [
+        {
+          question: "האם הפארק יישאר פתוח?",
+          options: ["כן", "לא", "נמנע"],
+        },
+      ],
+    },
+    ballot: BALLOT,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const heading = canvas.getByRole("heading", { level: 1 });
+    await expect(heading).toHaveAttribute("lang", "he");
+    await expect(heading).toHaveAttribute("dir", "auto");
+    await expect(canvas.getByText("נמנע")).toHaveAttribute("dir", "auto");
+  },
+};
+
+/** Not open yet: its words, and no way in until it opens. */
+export const WordedScheduled: Story = {
+  args: {
+    ...WORDED,
+    ballot: BALLOT,
+    asOf: { seconds: "1767225599", iso: "2025-12-31T23:59:59.000Z" },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("region", { name: "What it asks" })).toBeVisible();
+    await expect(canvas.getByText("You can answer here once the poll opens.")).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+  },
+};
+
+/** A deployment that names no ballot client says so and links nowhere. */
+export const WordedNoBallot: Story = {
+  args: { ...WORDED, ballot: null },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Answering from this page isn't set up on this site yet."),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+  },
+};

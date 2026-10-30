@@ -346,6 +346,84 @@ describe("poll page", () => {
     expect(html).toContain(">Follow this poll<");
   });
 
+  // P2-19 part 13: the page in the poll's own words, answerable from it.
+  test("an open poll's page is headed and titled in its own words, its answers listed", async () => {
+    const html = await (await get(`/polls/${OPEN_ONE}`)).text();
+    // A poll with no title is headed by its question, in its language and
+    // direction, and the title isolates it from the site's words (T-75).
+    expect(html).toMatch(/<h1 lang="en" dir="auto"[^>]*>Should the park stay open late\?<\/h1>/);
+    expect(html).toContain("<title>\u2068Should the park stay open late?\u2069 · Abolish</title>");
+    expect(html).toContain(`Poll ${OPEN_ONE.slice(0, 16)}…`);
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("What it asks");
+    expect(page).toContain("Pick one from 3 options");
+    // Its one question heads the page, so it isn't said a second time, only numbered.
+    expect(html).not.toMatch(/<h3[^>]*>(?:<[^>]+>)*[^<]*Should the park/);
+    expect(html).toContain('<h3 class="sr-only">Question 1</h3>');
+    for (const label of ["Yes", "No", "Abstain"])
+      expect(html).toMatch(new RegExp(`<li lang="en" dir="auto"[^>]*>${label}</li>`));
+    // One way in, carrying the poll in the fragment alone, which no server sees (T-10, T-11).
+    expect(html).toContain(`href="${BALLOT}#election=${OPEN_ONE}"`);
+    expect(html).not.toContain("pick=");
+    expect(page).toContain("Answer the question");
+    expect(page).toContain("Nothing is sent until you cast your answers there.");
+  });
+
+  test("a poll of several questions is headed by its title, each question with its answers", async () => {
+    const html = await (await get(`/polls/${OPEN_MANY}`)).text();
+    expect(html).toMatch(/<h1 lang="en" dir="auto"[^>]*>Park and library<\/h1>/);
+    expect(html).toContain("<title>\u2068Park and library\u2069 · Abolish</title>");
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("Question 1: Should the park stay open late?");
+    expect(page).toContain("Question 2: Should the library open on Sundays?");
+    expect(page).toMatch(/Pick [a-z ]+ from 3 options/);
+    expect(page).toMatch(/Pick [a-z ]+ from 2 options/);
+    expect(page).toContain("Answer 2 questions");
+    expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}"`);
+  });
+
+  test("the page's words follow its language, as its heading's", async () => {
+    const html = await (await get(`/polls/${OPEN_ONE}`, { "accept-language": "es-MX" })).text();
+    expect(html).toMatch(
+      /<h1 lang="es-419" dir="auto"[^>]*>¿Debe el parque abrir hasta tarde\?<\/h1>/,
+    );
+    expect(html).toContain("Lo que pregunta");
+    expect(html).toContain("Responder la pregunta");
+  });
+
+  test.each([
+    ["a closed poll", STREAM_V1],
+    ["a poll whose text fails its check", STREAM_BAD_TEXT],
+    ["a poll with no text", STREAM_NO_TEXT],
+    ["a hidden poll", HIDDEN_ID],
+  ])("%s offers no way in to answer it", async (_, id) => {
+    const html = await (await get(`/polls/${id}`)).text();
+    expect(html).not.toContain(`href="${BALLOT}`);
+    expect(html).not.toMatch(/>Answer (?:the question|\d+ questions)</);
+  });
+
+  test("a deployment that names no ballot client says answering isn't set up, linking nowhere", async () => {
+    delete process.env["BALLOT_URL"];
+    try {
+      const html = await (await get(`/polls/${OPEN_ONE}`)).text();
+      expect(html).not.toContain(BALLOT);
+      expect(html).toContain("Answering from this page isn&#x27;t set up on this site yet.");
+      // Its words are still shown.
+      expect(html).toContain("What it asks");
+    } finally {
+      process.env["BALLOT_URL"] = BALLOT;
+    }
+  });
+
+  test("a poll whose words can't be shown is headed and titled by its ID, with no questions", async () => {
+    for (const id of [STREAM_BAD_TEXT, HIDDEN_ID]) {
+      const html = await (await get(`/polls/${id}`)).text();
+      expect(html).toContain(`Poll ${id.slice(0, 16)}…</h1>`);
+      expect(html).toContain(`<title>Poll ${id.slice(0, 16)}… · Abolish</title>`);
+      expect(html).not.toContain("What it asks");
+    }
+  });
+
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
     const response = await get(`/polls/${QUESTIONS_ID}`);
     expect(response.status).toBe(200);
@@ -1903,7 +1981,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(12);
+    expect(ids.length).toBe(13);
     return ids;
   }
 
@@ -1945,10 +2023,11 @@ describe("server functions", () => {
       }
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
-        // The site key's and the phone setting's take no input, and answer
-        // the key and the setting: off here, which seroval writes `{"t":2,"s":3}`.
+        // The site key's, the ballot client's and the phone setting's take no
+        // input, and answer the key, the address and the setting: off here,
+        // which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected 1 to 10 distinct election IDs|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
+          `expected an election ID|expected 1 to 10 distinct election IDs|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|${BALLOT.replaceAll(".", "\\.")}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }
@@ -2224,7 +2303,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/how-it-works": { html: 12, js: 171, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
   "/account": { html: 6, js: 199, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 255, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 172, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

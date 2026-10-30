@@ -187,6 +187,14 @@ export const fetchChallengeKey = createServerFn({ method: "GET" }).handler((): s
 });
 
 /**
+ * The ballot client's address (`BALLOT_URL`) a poll's page links to for
+ * answering it, or `null` if none is set, where the page offers no link.
+ */
+export const fetchBallot = createServerFn({ method: "GET" }).handler(
+  (): string | null => ballotBase(process.env["BALLOT_URL"]) ?? null,
+);
+
+/**
  * Whether this deployment verifies a phone before an account votes
  * (`PHONE_VERIFICATION`; [[0038-verified-accounts]], Owner decision
  * (2026-10-22)): off unless set to `on`, which the deployable refuses at

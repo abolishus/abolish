@@ -5,7 +5,7 @@ import { followsClient } from "../account/follows.ts";
 import { reactionsClient } from "../account/reactions.ts";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
-import { fetchPhoneVerification, fetchPoll } from "../data.ts";
+import { fetchBallot, fetchPhoneVerification, fetchPoll } from "../data.ts";
 import { embedHeight } from "../embed.ts";
 import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
@@ -53,7 +53,11 @@ export const Route = createFileRoute("/polls/$electionId")({
             embed: { page: `${origin}/embed/p/${page.code}`, height: embedHeight(page.poll) },
           }
         : undefined;
-    return { page, preview, share, phoneVerification: await fetchPhoneVerification() };
+    const [phoneVerification, ballot] = await Promise.all([
+      fetchPhoneVerification(),
+      fetchBallot(),
+    ]);
+    return { page, preview, share, phoneVerification, ballot };
   },
   head: ({ match, loaderData }) => {
     const { pageTitle, text } = titles(match.context.locale);
@@ -61,15 +65,19 @@ export const Route = createFileRoute("/polls/$electionId")({
     const preview = loaderData?.preview;
     return {
       meta: [
-        // A poll's page is named as its heading names it; one that isn't
-        // there has the root's not-found title.
+        // A poll's page is named as its heading names it, in its own words
+        // where they can be shown; one that isn't there has the root's
+        // not-found title.
         ...(page === undefined
           ? []
           : [
               pageTitle(
-                page.kind === "poll"
-                  ? text("pollHeading", { prefix: page.poll.electionId.slice(0, 16) })
-                  : text("unavailableTitle"),
+                page.kind !== "poll"
+                  ? text("unavailableTitle")
+                  : page.text === undefined
+                    ? text("pollHeading", { prefix: page.poll.electionId.slice(0, 16) })
+                    : // Isolated: an author's words mustn't reorder ours (T-75).
+                      isolated(page.text.heading),
               ),
             ]),
         // A delisted or hidden poll stays reachable by link, but out of search
@@ -102,7 +110,7 @@ export const Route = createFileRoute("/polls/$electionId")({
   },
   component: function Poll() {
     const t = useTranslate(catalogs);
-    const { page, share, phoneVerification } = Route.useLoaderData();
+    const { page, share, phoneVerification, ballot } = Route.useLoaderData();
     if (page.kind === "poll")
       return (
         <PollSummary
@@ -112,6 +120,7 @@ export const Route = createFileRoute("/polls/$electionId")({
           report={reportPoll}
           follows={followsClient}
           phoneVerification={phoneVerification}
+          ballot={ballot}
         />
       );
     return (

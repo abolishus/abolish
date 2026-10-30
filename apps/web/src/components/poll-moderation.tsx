@@ -196,7 +196,10 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           {t("moderationLogLink")}
         </a>
       </p>
-      <div role="status">{notice}</div>
+      {/* Empty, it is out of the grid, so it takes no gap and the block's rule ends with its last line; it stays in the tree, so its words are announced when they come. */}
+      <div role="status" className="empty:absolute">
+        {notice}
+      </div>
       {alert === null ? null : (
         <p role="alert" className="m-0 text-destructive">
           {alert}

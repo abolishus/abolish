@@ -334,8 +334,8 @@ export function AccountPolls({
             ) : null}
           </div>
         )}
-        {/* Empty, it takes no room, so the list stays right under the button; it stays in the tree, so its words are announced when they come. */}
-        <div role="status" className="text-base empty:-mt-4">
+        {/* Empty, it is out of the grid, so it takes no gap and the list stays right under the button; it stays in the tree, so its words are announced when they come. */}
+        <div role="status" className="text-base empty:absolute">
           {done === undefined ? null : t(done)}
         </div>
         {/* What a profile's box does, and which profile, is said once, not under every poll, where seven rows repeated both seven times; each box is described by it. */}

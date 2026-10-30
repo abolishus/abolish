@@ -4,7 +4,7 @@ How a ballot client delivers a ballot to a trustee node's own intake without the
 
 What this page doesn't cover yet ([[P2-8]] part 3c-1b-2b-2b-2d-2b-2e):
 
-- **Building it.** A relay for staging (2e-5) and the client's route (2e-6). Sealing and opening are built in `packages/crypto` (2e-3: `sealDelivery`, `openSealedDelivery`, `sealAnswer` and `openSealedAnswer`), and the node's route in `apps/trustee-node` (2e-4a: `POST /v1/sealed-intake` and `seatKeys`, its README's Sealed route), with a replay answered from the stored receipt (2e-4b, its README's Intake).
+- **Building it.** Staging's relay deployed, with its origin in the client's `connect-src` (2e-5b), and the client's route (2e-6). The relay is built in `apps/intake-relay` (2e-5a, its README). Sealing and opening are built in `packages/crypto` (2e-3: `sealDelivery`, `openSealedDelivery`, `sealAnswer` and `openSealedAnswer`), and the node's route in `apps/trustee-node` (2e-4a: `POST /v1/sealed-intake` and `seatKeys`, its README's Sealed route), with a replay answered from the stored receipt (2e-4b, its README's Intake).
 - **Author seats.** An author panel's seats publish no endpoint a release lists, so they get no sealed delivery until [[P2-16]] part 7 says where an author panel publishes its relays.
 
 ## Sources

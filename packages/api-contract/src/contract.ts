@@ -263,6 +263,33 @@ const getTags = oc
   .input(ElectionQuery)
   .output(z.strictObject({ topic: z.optional(z.enum(POLL_TOPICS)), place: z.optional(Place) }));
 
+/** The tiers a definition can name (docs/spec/election-definition.md). */
+const MAX_TIERS = 3;
+
+const getAnswered = oc
+  .route({
+    method: "GET",
+    path: "/elections/answered",
+    summary: "How many have answered a poll so far",
+    description:
+      "For each tier with a voter, in ascending order, how many distinct voters (`answered`) (each tier and nullifier once, so a re-vote never counts twice) have ballots on this server's board for the election. Tiers are never added together (T-01). Counts are decimal strings. Only ballots this server boarded are counted (direct-submitted ballots aren't yet), and anyone can recount them from the public board, which already shows every ballot as it is boarded, so the count says nothing the board doesn't (T-10, T-11). It counts ballots, never answers: what anyone chose is only ever in the tally's totals. Moderation never withholds it, as it never withholds the board (docs/moderation-policy.md; T-68).",
+    tags: ["elections"],
+  })
+  .errors(electionNotFound)
+  .input(ElectionQuery)
+  .output(
+    z.strictObject({
+      tiers: z
+        .array(
+          z.strictObject({
+            tier: z.number().check(z.int(), z.minimum(0), z.maximum(MAX_TIERS - 1)),
+            answered: U64,
+          }),
+        )
+        .check(z.maxLength(MAX_TIERS)),
+    }),
+  );
+
 /** The longest short code (docs/design/sharing.md); a test ties this copy to `@abolishus/core`. */
 export const MAX_SHORT_CODE_LENGTH = 52;
 
@@ -838,6 +865,7 @@ export const contract = {
     getDefinition,
     getDisplayText,
     getTags,
+    getAnswered,
     getResults,
     resolveCode,
     getCode,

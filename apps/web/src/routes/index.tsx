@@ -13,8 +13,8 @@ export const Route = createFileRoute("/")({
     fetchStream({
       data: { sort: "new", after: "", q: "", topic: "", place: "", limit: HOME_STREAM, locale },
     }).then(
-      ({ stream, ballot }) =>
-        stream.kind === "stream" ? { cards: stream.cards, ballot } : undefined,
+      ({ stream, ballot, phoneVerification }) =>
+        stream.kind === "stream" ? { cards: stream.cards, ballot, phoneVerification } : undefined,
       () => undefined,
     ),
   component: function Home() {

@@ -22,7 +22,7 @@ import {
   resultsView,
   type ServedResults,
 } from "../results.ts";
-import type { CardText, PollWords, StreamCard, StreamSort } from "../stream.ts";
+import type { CardAnswered, CardText, PollWords, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
   type AskedBy,
@@ -309,6 +309,38 @@ async function tagsOf(api: Api, electionId: string): Promise<PollTags> {
   }
   const { topic, place } = served;
   return { topic, place: place !== undefined && placeIsWellFormed(place) ? place : undefined };
+}
+
+/** What `GET /elections/answered` serves, before `cardAnswered` places it on the poll's tiers. */
+type ServedAnswered = Awaited<ReturnType<Api["elections"]["getAnswered"]>>["tiers"];
+
+/**
+ * How many the API says have answered `electionId` so far, or `undefined`
+ * when the read fails: the count is optional on a card, as its tags are, so
+ * an API without the route or a slow answer shows none rather than taking
+ * the stream down.
+ */
+async function answeredOf(api: Api, electionId: string): Promise<ServedAnswered | undefined> {
+  try {
+    return (await api.elections.getAnswered({ electionId })).tiers;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The served counts on `poll`'s own tiers, in the definition's order, a
+ * tier with none served at 0. A tier the definition doesn't name has no
+ * ballot the poll counts, so a count the API claims for one is left out
+ * rather than shown under a tier nobody could answer in. Each tier stays on
+ * its own (T-01).
+ */
+export function cardAnswered(poll: PollView, served: ServedAnswered): CardAnswered {
+  const tiers = [...new Set(poll.electorate.map((group) => group.tier))];
+  return tiers.map((tier) => ({
+    tier,
+    answered: served.find((count) => count.tier === tier)?.answered ?? "0",
+  }));
 }
 
 export type ShortLink =
@@ -749,8 +781,8 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * leaves out delisted and hidden polls (T-68) and orders by public data only
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/server/stream-card.ts), and its tags read as the poll
- * page reads them (`tagsOf`), and who asked it as `readAskedBy` reads it
- * (`askedByOf`). A poll the database lost between the listing and its
+ * page reads them (`tagsOf`), who asked it as `readAskedBy` reads it
+ * (`askedByOf`), and how many have answered it so far (`answeredOf`). A poll the database lost between the listing and its
  * definition drops out of the page. A page holds `limit` polls at most.
  */
 export async function loadStream(
@@ -781,14 +813,21 @@ export async function loadStream(
   const cards = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const [{ definition }, displayText, tags, askedBy] = await Promise.all([
+        const [{ definition }, displayText, tags, askedBy, answered] = await Promise.all([
           api.elections.getDefinition({ electionId }),
           displayTextOf(api, electionId),
           tagsOf(api, electionId),
           askedByOf(readAskedBy, electionId),
+          answeredOf(api, electionId),
         ]);
         const card = streamCard(electionId, definition, displayText, locale, tags);
-        return card.kind === "poll" ? { ...card, askedBy } : card;
+        return card.kind === "poll"
+          ? {
+              ...card,
+              askedBy,
+              answered: answered === undefined ? undefined : cardAnswered(card.poll, answered),
+            }
+          : card;
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;

@@ -677,6 +677,18 @@ export function stubApi(): Server {
               "This poll's tags are withheld under the moderation policy; see GET /moderation/status.",
           });
         return json(200, TAGS.get(electionId) ?? {});
+      case "/elections/answered":
+        // A count claimed for tier 1, which STREAM_V5's definition doesn't name, is
+        // left out; its tier 2, with none served, counts 0.
+        if (electionId === STREAM_V5)
+          return json(200, {
+            tiers: [
+              { tier: 0, answered: "1204" },
+              { tier: 1, answered: "7" },
+            ],
+          });
+        if (electionId === STREAM_V1) return json(500, {});
+        return json(200, { tiers: [] });
       case "/elections/results": {
         if (electionId === RESULTS_FAILS_ID) return json(500, {});
         if (electionId === RESULTS_NOT_READY_ID)

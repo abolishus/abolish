@@ -78,7 +78,7 @@ const meta = {
       </SiteLayout>
     ),
   ],
-  args: { newest: { cards, ballot: "https://ballot.example/" } },
+  args: { newest: { cards, ballot: "https://ballot.example/", phoneVerification: false } },
 } satisfies Meta<typeof HomePage>;
 
 export default meta;
@@ -210,7 +210,7 @@ export const Phone: Story = {
  * "See all questions" to a page that says there are none either.
  */
 export const Empty: Story = {
-  args: { newest: { cards: [], ballot: "https://ballot.example/" } },
+  args: { newest: { cards: [], ballot: "https://ballot.example/", phoneVerification: false } },
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
     await expect(main.getByText(/No questions are open just now/)).toBeVisible();

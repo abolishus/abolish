@@ -166,6 +166,8 @@ export const fetchStream = createServerFn({ method: "GET" })
         data.limit,
       ),
       ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
+      // Names Tier 0 on each card's count, as the poll page names it (P2-31 part 6a).
+      phoneVerification: process.env["PHONE_VERIFICATION"] === "on",
     })),
   );
 

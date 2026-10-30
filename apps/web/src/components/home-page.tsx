@@ -11,6 +11,8 @@ export interface Newest {
   readonly cards: readonly Card[];
   /** The ballot client's address the cards' answers open, or `null` if none is set. */
   readonly ballot: string | null;
+  /** Whether Tier 0 asks for a phone here, which names it on each card's count. */
+  readonly phoneVerification: boolean;
 }
 
 /**
@@ -112,7 +114,12 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
                 key={card.kind === "poll" ? card.poll.electionId : card.electionId}
                 className="grid"
               >
-                <StreamCard card={card} ballot={newest.ballot} explained />
+                <StreamCard
+                  card={card}
+                  ballot={newest.ballot}
+                  phoneVerification={newest.phoneVerification}
+                  explained
+                />
               </li>
             ))}
           </ol>

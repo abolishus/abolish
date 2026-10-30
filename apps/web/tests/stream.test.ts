@@ -32,7 +32,8 @@ import {
   streamPlace,
   streamQuery,
 } from "../src/stream.ts";
-import { NO_TAGS } from "../src/poll.ts";
+import { NO_TAGS, type PollView, type Tier } from "../src/poll.ts";
+import { cardAnswered } from "../src/server/load.ts";
 import { streamCard } from "../src/server/stream-card.ts";
 import { ballotBase, ballotLink, fromHex, toHex } from "../src/values.ts";
 
@@ -424,5 +425,34 @@ describe("streamPlace", () => {
     );
     expect(streamHref("new", { topic: "transport" })).toBe("/discover?topic=transport");
     expect(streamHref("new", {})).toBe("/discover");
+  });
+});
+
+// A card's count (P2-23 part 2c): the poll's own tiers, each on its own,
+// whatever tiers the API claims counts for (T-01).
+describe("cardAnswered", () => {
+  const tier = fc.constantFrom<Tier>(0, 1, 2);
+  test("shows each tier the definition names once, in its order, with the served count or 0", () => {
+    fc.assert(
+      fc.property(
+        fc.array(tier, { minLength: 1, maxLength: 6 }),
+        fc.uniqueArray(
+          fc.record({ tier, answered: fc.bigInt({ min: 0n, max: 2n ** 64n - 1n }).map(String) }),
+          {
+            selector: (c) => c.tier,
+          },
+        ),
+        (tiers, served) => {
+          const poll = {
+            electorate: tiers.map((t) => ({ tier: t, groupSize: "1" })),
+          } as unknown as PollView;
+          const shown = cardAnswered(poll, served);
+          expect(shown.map((c) => c.tier)).toEqual([...new Set(tiers)]);
+          for (const { tier: t, answered } of shown)
+            expect(answered).toBe(served.find((c) => c.tier === t)?.answered ?? "0");
+        },
+      ),
+      runs,
+    );
   });
 });

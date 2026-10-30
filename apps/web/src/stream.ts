@@ -3,7 +3,7 @@
 // here imports a decoder, so the pages' script doesn't carry one (P2-28
 // part 2b).
 
-import type { AskedBy, DefinitionProblem, PollTags, PollView } from "./poll.ts";
+import type { AskedBy, DefinitionProblem, PollTags, PollView, Tier } from "./poll.ts";
 import type { StreamFilter } from "./server/load.ts";
 
 /** The stream's orders, as `GET /elections` names them: each lists only the polls open now. */
@@ -140,6 +140,13 @@ export interface PollWords {
  */
 export type CardProblem = DefinitionProblem | "text";
 
+/**
+ * How many have answered a poll so far on our board, for each of its tiers
+ * on its own, never summed (T-01): a decimal count of distinct voters, a
+ * re-vote once. The API's claim, which anyone can recount from the board.
+ */
+export type CardAnswered = readonly { readonly tier: Tier; readonly answered: string }[];
+
 export type StreamCard =
   | {
       readonly kind: "poll";
@@ -148,6 +155,8 @@ export type StreamCard =
       readonly tags: PollTags;
       /** Who asked it, where the card says so (the stream's); none on a profile's own page. */
       readonly askedBy?: AskedBy | undefined;
+      /** How many have answered it so far, where the card says so (the stream's). */
+      readonly answered?: CardAnswered | undefined;
     }
   | { readonly kind: "unavailable"; readonly electionId: string; readonly problem: CardProblem };
 

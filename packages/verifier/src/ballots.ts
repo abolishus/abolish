@@ -596,6 +596,62 @@ function stepOf(checked: BallotCheckV5): number {
   return checked.step;
 }
 
+// The rejections that rest on a rolling chain's step roots or registration
+// time: none of them can be told from a ballot that is fine against the
+// registries' true records.
+const ROOT_CODES: ReadonlySet<string> = new Set<AdmissionCode>([
+  "root-step-range",
+  "root-step-mismatch",
+  "membership-proof",
+]);
+
+/**
+ * 5.1 to 5.3 under a chain built from the archive's replay
+ * (docs/spec/verifier.md, Electorate, The rolling chain, From the archive):
+ * the archive's records are its own word until P1-19 reads each evidence
+ * record's output root on L1 (T-71), so a rejection that rests on the step
+ * roots or the registration time (`root-step-range`, `root-step-mismatch`,
+ * `membership-proof`) leaves its rows unverifiable with `not-implemented` at
+ * its entry, never failed, and a row fails only through a rejection that
+ * doesn't, as 4.4 never fails on the archive's word alone (T-53). The
+ * ballot stays rejected: no row passes over it. Every other row is as given.
+ */
+export function unprovenRoots(
+  rows: ReadonlyMap<string, BallotOutcome>,
+  rejected: readonly RejectedBallot[],
+): ReadonlyMap<string, BallotOutcome> {
+  const out = new Map(rows);
+  for (const id of ROWS) {
+    const on = rejected.filter(
+      (r) => Object.hasOwn(ROWS_OF, r.code) && ROWS_OF[r.code as AdmissionCode].includes(id),
+    );
+    const failing = on.find((r) => !ROOT_CODES.has(r.code));
+    const unproven = on.find((r) => ROOT_CODES.has(r.code));
+    if (failing !== undefined)
+      out.set(id, {
+        status: "fail",
+        code: failing.code as NonNullable<BallotOutcome["code"]>,
+        at: { entry: failing.entry },
+      });
+    else if (unproven !== undefined)
+      out.set(id, {
+        status: "unverifiable",
+        code: "not-implemented",
+        at: { entry: unproven.entry },
+      });
+  }
+  return out;
+}
+
+/**
+ * Whether any rejection rests on a rolling chain's step roots or
+ * registration time. Under the archive's chain such a rejection leaves
+ * selection (6.1) unsettled even where another rejection fails its row, so
+ * no selection is decided over a set the archive alone chose (T-53, T-71).
+ */
+export const restsOnChain = (rejected: readonly RejectedBallot[]): boolean =>
+  rejected.some((r) => ROOT_CODES.has(r.code));
+
 /** Whether a definition is live: version 6, or a fixed version 7, with `results_mode` 2. */
 export function isLive(definition: VerifiedDefinition): definition is PanelledRecord {
   return isPanelled(definition) && definition.value.results_mode === RESULTS_MODES.live;

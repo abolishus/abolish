@@ -21,7 +21,9 @@
 // releases (7.5, 7.6; live.ts), and, for formats 3 to 5, 4.4's event and
 // L1-origin checks over the board's contract-event records, which can fail
 // 4.4 but never pass it, and, for a run that read the archive
-// (`readArchive`), 4.3, which can pass but never fail;
+// (`readArchive`), 4.3, which can pass but never fail, and, under a
+// rolling definition, admission and selection against the chain from the
+// archive's replay once the release pins the registries (rolling-chain.ts);
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
@@ -50,6 +52,8 @@ import {
   readBoardCopy,
   type ReceiptVerdict,
   RECORD_TYPES,
+  RESULTS_MODES,
+  type RollingBallotChain,
   SEAT_PANELS,
   verifyBoard,
 } from "@abolishus/crypto";
@@ -62,6 +66,8 @@ import {
   isLive,
   judgeFor,
   readsEvents,
+  restsOnChain,
+  unprovenRoots,
   type WindowCode,
 } from "./ballots.ts";
 import { earlierLocators } from "./anchor-logs.ts";
@@ -119,6 +125,7 @@ import type { CloseReport } from "./close.ts";
 import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import { releaseChecks, type ReleasesReport } from "./live.ts";
 import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
+import { archivedChain, PINNED_REGISTRIES, type RollingChainRelease } from "./rolling-chain.ts";
 import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
@@ -309,6 +316,11 @@ const carriesDestruction = (v: BoardEntryVersion) =>
  * otherwise waits on 7.1's pass, which `verifyBundle` checks next.
  */
 function releaseGate(definition: VerifiedDefinition): Outcome {
+  // A live rolling poll's running copies aren't read yet (P2-17 part
+  // 4d-2b-2b), so its releases can't pass, as a live poll's can't before
+  // 7.1 (T-16, T-45).
+  if (definition.version === 7 && isRolling(definition))
+    return definition.value.results_mode === RESULTS_MODES.live ? NOT_REACHED : PASS;
   if (!isLive(definition)) return PASS;
   if (pinnedVersion(definition.value, RECORD_TYPES.tallyOpening) !== 2) return UNSUPPORTED;
   return { status: "unverifiable", code: "not-reached", at: {} };
@@ -421,11 +433,16 @@ function provedUnderPinnedKey(d: VerifiedDefinition["value"]): boolean {
  * A format-3, 4 or 5 bundle's definition (docs/spec/verifier.md, Definition): its
  * decoding and well-formedness, which are part of 2.1, the board-entry
  * version its profile pins, and the board checks' inputs taken from it. Any
- * other format gives them as they are.
+ * other format gives them as they are. A rolling definition whose profile
+ * fits goes on only with its chain from the bundle's archive under
+ * `registries` (Electorate, The rolling chain), except `forArchive`, where
+ * the archive is yet to be read and only the deployment is wanted.
  */
 function fromDefinition(
   bundle: Bundle,
   pins: readonly PinnedPanel[] = PINNED_PANELS,
+  registries: RollingChainRelease | undefined = PINNED_REGISTRIES,
+  forArchive = false,
 ):
   | {
       readonly inputs: BoardInputs;
@@ -434,6 +451,8 @@ function fromDefinition(
       readonly stubHash?: Uint8Array;
       /** 2.3's row when the profile's versions don't fit together, or pin one this verifier doesn't know. */
       readonly profile?: Outcome;
+      /** A rolling definition's chain, from the archive's replay. */
+      readonly rolling?: RollingBallotChain;
     }
   | {
       readonly rows: ReadonlyMap<string, Outcome>;
@@ -512,9 +531,12 @@ function fromDefinition(
   let combination: Outcome | undefined;
   // The live restriction counts the seats the release pins as ours on the
   // definition's default panel (docs/spec/verifier.md, 2.3; T-16, T-45).
+  // A rolling profile that fits is read as fitting here, and goes on below
+  // only with its chain.
   const combinationRule = profileCombinationRule(
     definition,
     pinnedOurs(bytesToHex(definition.panel_id), definition.panel_size, pins),
+    isRolling(record),
   );
   switch (combinationRule) {
     case undefined:
@@ -534,18 +556,32 @@ function fromDefinition(
       throw new Error(`unmapped profile rule ${String(unknown)}`);
     }
   }
-  // A rolling electorate's roots are its steps', which only 2.4's rolling
-  // replay computes, and its ballots are version 5, which 5.1 and 5.2 don't
-  // read yet: a later release verifies it, so a profile that fits is
-  // unverifiable, never failed, and the board checks have no election to
-  // run for until then (P2-17 part 4d-2; T-36). One that doesn't fit
-  // fails 2.3 under every release, as any other definition's does.
-  if (isRolling(record)) return stopped("2.3", combination ?? UNSUPPORTED, hash);
+  // A rolling electorate's roots are its steps', which 5.1 and 5.2 read
+  // from the chain 2.4's rolling replay of the archive gives, under the
+  // registries the release pins. Without it a later release may verify the
+  // poll, so a profile that fits is unverifiable, never failed, and the
+  // board checks have no election to run for (P2-17 part 4d-2b; T-36). One
+  // that doesn't fit fails 2.3 under every release, as any other
+  // definition's does, and one pinning a version this verifier doesn't know
+  // is a later release's.
+  let rolling: RollingBallotChain | undefined;
+  if (record.version === 7 && isRolling(record)) {
+    if (combination !== undefined) return stopped("2.3", combination, hash);
+    const replay = archivedEvents(bundle);
+    if (!forArchive) {
+      rolling =
+        registries === undefined || replay === undefined
+          ? undefined
+          : archivedChain(record, replay, registries);
+      if (rolling === undefined) return stopped("2.3", UNSUPPORTED, hash);
+    }
+  }
   return {
     hash,
     definition: record,
     stubHash,
     ...(combination !== undefined && { profile: combination }),
+    ...(rolling !== undefined && { rolling }),
     inputs: {
       electionId: definition.election_id,
       boardEntryVersion: version,
@@ -721,7 +757,7 @@ export async function readArchive(
     bundle: { ...bundle, archive },
     blocks,
   });
-  const definition = fromDefinition(bundle);
+  const definition = fromDefinition(bundle, PINNED_PANELS, undefined, true);
   // No definition to name the deployment, so no anchor and no chain.
   if ("rows" in definition || definition.definition === undefined || !("l1" in definition.inputs))
     return done({ stopped: "not-reached" });
@@ -966,11 +1002,16 @@ export async function readBoardByCid(
  * Runs every check over one bundle and reports it (docs/spec/verifier.md,
  * Report). `pins` are the panels the release pins, whose kinds 2.5 and whose
  * seats marked ours 2.3's live restriction read: `PINNED_PANELS` unless a
- * test gives others. Changing them changes the trust roots, as a new release
- * would (T-64).
+ * test gives others, and `registries` those a rolling poll's chain is built
+ * under: `PINNED_REGISTRIES` unless a test gives others. Changing either
+ * changes the trust roots, as a new release would (T-64).
  */
-export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINNED_PANELS): Report {
-  const definition = fromDefinition(bundle, pins);
+export function verifyBundle(
+  bundle: Bundle,
+  pins: readonly PinnedPanel[] = PINNED_PANELS,
+  registries: RollingChainRelease | undefined = PINNED_REGISTRIES,
+): Report {
+  const definition = fromDefinition(bundle, pins, registries);
   const unsplit = { entries: bundle.entries.length, unreadableBytes: bundle.unreadableBytes };
   let board: Report["board"] = unsplit;
   let input: ReturnType<typeof anchoring> | undefined;
@@ -1099,14 +1140,24 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
         definition.inputs.boardEntryVersion,
         bundle.clock,
         "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
+        definition.rolling,
       );
-      implemented = new Map<string, Outcome>([...implemented, ...admission.rows]);
+      // Under the archive's chain a rejection resting on it leaves its rows
+      // unverifiable and selection unsettled, even beside another rejection
+      // that fails the same row (6.1, condition 1).
+      const admissionRows =
+        definition.rolling === undefined
+          ? admission.rows
+          : unprovenRoots(admission.rows, admission.report?.rejected ?? []);
+      implemented = new Map<string, Outcome>([...implemented, ...admissionRows]);
       ballots = admission.report;
       // Selection is decided over the counted extent alone, so it needs what
       // admission doesn't: the anchored extent, the seal and 4.4
       // (docs/spec/verifier.md, Selection).
       const chosen = selectionCheck({
-        admissionSettled: admissionSettled(admission.rows),
+        admissionSettled:
+          admissionSettled(admissionRows) &&
+          !(definition.rolling !== undefined && restsOnChain(admission.report?.rejected ?? [])),
         candidates: admission.candidates,
         ordinary: admission.ordinary ?? [],
         // Set only when 4.1 and 4.2 pass.
@@ -1127,7 +1178,11 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       const destructionApplies = carriesDestruction(definition.inputs.boardEntryVersion);
       const extent =
         board.unauthenticated === undefined ? undefined : board.entries - board.unauthenticated;
+      // Under a rolling definition delivery (5.9) doesn't read ballot
+      // version 5's delivery fields yet (P2-17 part 4d-2b-2b), so neither it
+      // nor anything after it is reached.
       if (
+        definition.rolling !== undefined ||
         chosen.report === undefined ||
         checked.registered === undefined ||
         extent === undefined ||
@@ -1213,37 +1268,48 @@ export function verifyBundle(bundle: Bundle, pins: readonly PinnedPanel[] = PINN
       // versions 3 to 6 against their cells, beside an author panel per panel
       // with its own key set (docs/spec/verifier.md, Tally openings); the
       // counted set, once known, settles the rest, `tally-early` included.
-      const opened = tallyChecks(
-        definition.definition,
-        definition.hash,
-        checked.registered,
-        checked.authorRegistered,
-        bundle.entries,
-        definition.inputs.boardEntryVersion,
-        counted.tallyBreaks === undefined || extent === undefined
-          ? undefined
-          : {
-              extent,
-              breaks: counted.tallyBreaks,
-              ...(counted.tallyEarly !== undefined && { early: counted.tallyEarly }),
-            },
-      );
-      implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
-      tallies = opened.report;
-      // An opening is checked against the same registered election, and
-      // `opening-cast` against the ballots admission admitted, so 6.2 is
-      // reached exactly where admission is.
-      const spoiled = openingChecks(
-        definition.definition,
-        checked.registered,
-        checked.authorRegistered,
-        admission.admitted,
-        bundle.entries,
-        definition.inputs.boardEntryVersion,
-        bundle.clock,
-      );
-      implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
-      openings = spoiled.report;
+      // Under a rolling definition the tally openings' cells and the
+      // spoiled-ballot openings' version-5 cores aren't read yet (P2-17
+      // part 4d-2b-2b): neither row is reached.
+      if (definition.rolling !== undefined)
+        implemented = new Map<string, Outcome>([
+          ...implemented,
+          ["7.4", NOT_REACHED],
+          ["6.2", NOT_REACHED],
+        ]);
+      else {
+        const opened = tallyChecks(
+          definition.definition,
+          definition.hash,
+          checked.registered,
+          checked.authorRegistered,
+          bundle.entries,
+          definition.inputs.boardEntryVersion,
+          counted.tallyBreaks === undefined || extent === undefined
+            ? undefined
+            : {
+                extent,
+                breaks: counted.tallyBreaks,
+                ...(counted.tallyEarly !== undefined && { early: counted.tallyEarly }),
+              },
+        );
+        implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
+        tallies = opened.report;
+        // An opening is checked against the same registered election, and
+        // `opening-cast` against the ballots admission admitted, so 6.2 is
+        // reached exactly where admission is.
+        const spoiled = openingChecks(
+          definition.definition,
+          checked.registered,
+          checked.authorRegistered,
+          admission.admitted,
+          bundle.entries,
+          definition.inputs.boardEntryVersion,
+          bundle.clock,
+        );
+        implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
+        openings = spoiled.report;
+      }
       // 4.6 reads L1's counted checkpoints and the board contract's events
       // alone, never the copy, so it runs whatever 4.1 and 4.2 found
       // (docs/spec/availability.md, Availability check, Precedence).

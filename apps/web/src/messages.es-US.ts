@@ -1231,6 +1231,8 @@ export const esUS: Messages = {
     "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. Puedes salir de esta página, o seguir la preparación paso a paso.",
   pollsFollowSetup: "Seguir la preparación",
   pollsPage: "Ir a su página",
+  pollsResults: "Ver sus resultados",
+  pollsStartNew: "Crear una encuesta nueva",
   pollsDelete: "Eliminar borrador…",
   pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
   pollsDeleteConfirm: "Eliminar el borrador para siempre",

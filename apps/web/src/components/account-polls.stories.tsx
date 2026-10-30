@@ -180,9 +180,13 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   await expect(closed!.getByText("Closed", { exact: true })).toBeVisible();
   await expect(closed!.queryByText("Open", { exact: true })).toBeNull();
   await expect(closed!.getByText("Closed October 17, 2026 at 12:00 AM UTC")).toBeVisible();
-  await expect(
-    closed!.getByRole("link", { name: "Go to its page", description: "Light the pier at night?" }),
-  ).toHaveAttribute("href", `/polls/${"1e".repeat(32)}`);
+  // Once closed, its results come first, then its page.
+  const closedLinks = closed!.getAllByRole("link", { description: "Light the pier at night?" });
+  await expect(closedLinks.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
+    ["See its results", `/polls/${"1e".repeat(32)}/results`],
+    ["Go to its page", `/polls/${"1e".repeat(32)}`],
+  ]);
+  await expect(open!.queryByRole("link", { name: "See its results" })).toBeNull();
   // A failure in its own words, with what the author can do.
   await expect(timedOut!.getByText("Didn't open")).toBeVisible();
   await expect(
@@ -202,9 +206,20 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
     timedOut!.getByText(/couldn't finish preparing its keys/),
     timedOut!.getByRole("button", { name: "Try again" }),
   );
-  // A registered poll stays: nothing to retry or discard.
+  // A registered poll stays: nothing to retry or discard. Its reason ends
+  // "start a new poll", and the row has the way to, after the reason.
   await expect(registered!.getByText(/It will never take answers/)).toBeVisible();
   await expect(registered!.queryByRole("button")).toBeNull();
+  await expect(
+    registered!.getByRole("link", {
+      name: "Start a new poll",
+      description: "Move the market to Saturdays?",
+    }),
+  ).toHaveAttribute("href", "/account/polls/new");
+  await before(
+    registered!.getByText(/start a new poll\.$/),
+    registered!.getByRole("link", { name: "Start a new poll" }),
+  );
   // A time is in the state's face and size, never the evidence's monospace.
   for (const item of items) {
     const style = (e: Element) => getComputedStyle(e);

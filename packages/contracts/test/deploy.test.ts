@@ -160,7 +160,16 @@ function forgeScript(sig: string, url: string, cfg: object, { broadcast = true }
     ],
     {
       cwd: PKG,
-      env: { ...process.env, DEPLOY_CONFIG: JSON.stringify(cfg), L1_RPC_URL: l1.url },
+      env: {
+        ...process.env,
+        DEPLOY_CONFIG: JSON.stringify(cfg),
+        L1_RPC_URL: l1.url,
+        // foundry.toml turns the compilation cache off, for the release
+        // build (README, Release build). Here each of the test's ~30 runs
+        // would otherwise recompile, competing with the other packages'
+        // tests on the same runner; the cache is gitignored.
+        FOUNDRY_CACHE: "true",
+      },
       encoding: "utf8",
     },
   );

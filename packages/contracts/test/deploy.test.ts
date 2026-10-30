@@ -28,6 +28,8 @@ const REGISTRARS = [
 const CLOCK = { epoch: 1767225600, period: 3600, deadline: 43200 };
 /** A 1-of-1 Safe: code, but one key. */
 const SOLE_OWNER = "0x00000000000000000000000000000000000000cc";
+const OVER_THRESHOLD = "0x00000000000000000000000000000000000000cd";
+const REPEATED_OWNER = "0x00000000000000000000000000000000000000ce";
 /** MockSafe's owners and threshold (test/utils/MockSafe.sol). */
 const SAFE_OWNERS = [
   "0x00000000000000000000000000000000000005A1",
@@ -224,6 +226,8 @@ beforeAll(async () => {
   await rpc(l1.url, "anvil_setCode", [PORTAL, "0x00"]);
   await rpc(l1.url, "anvil_setCode", [AUTHORITY, deployedCode("MockSafe")]);
   await rpc(l1.url, "anvil_setCode", [SOLE_OWNER, deployedCode("MockSoleOwnerSafe")]);
+  await rpc(l1.url, "anvil_setCode", [OVER_THRESHOLD, deployedCode("MockOverThresholdSafe")]);
+  await rpc(l1.url, "anvil_setCode", [REPEATED_OWNER, deployedCode("MockRepeatedOwnerSafe")]);
 }, 60_000);
 afterAll(() => {
   l1?.process.kill();
@@ -268,6 +272,21 @@ describe("refusals, before anything is sent", () => {
       "ClockRefused",
     ],
     [
+      "another deadline",
+      { anchor: { ...CLOCK, deadline: 1800, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "a threshold above the owner count",
+      { anchor: { ...CLOCK, authority: OVER_THRESHOLD } },
+      "AuthorityNotMultisig",
+    ],
+    [
+      "an owner listed twice",
+      { anchor: { ...CLOCK, authority: REPEATED_OWNER } },
+      "AuthorityNotMultisig",
+    ],
+    [
       "a 1-of-1 Safe as the authority",
       { anchor: { ...CLOCK, authority: SOLE_OWNER } },
       "AuthorityNotMultisig",
@@ -276,6 +295,20 @@ describe("refusals, before anything is sent", () => {
     "the L1 run: %s",
     async (_, change, error) => {
       await refused("runL1()", l1.url, config(change), error);
+    },
+    MANY,
+  );
+
+  test.each([
+    ["code with no Safe getters", PORTAL],
+    ["an account with no code", "0x00000000000000000000000000000000000000dd"],
+  ])(
+    "the L1 run: an authority that is %s",
+    async (_, authority) => {
+      // The getters don't answer, so it fails before the anchor's own code check could.
+      const run = forgeScript("runL1()", l1.url, config({ anchor: { ...CLOCK, authority } }));
+      expect(run.status, run.output).not.toBe(0);
+      expect(await nonce(l1.url)).toBe(0);
     },
     MANY,
   );
@@ -333,6 +366,13 @@ describe("the staging deployment on a local Anvil pair", () => {
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x1"]);
     await refused("runL2()", l2.url, config({ l2Nonce: 1 }), "L1RelayBoard");
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x0"]);
+    // Another deployer than the L1 record's (Anvil's second account, at nonce 0).
+    await refused(
+      "runL2()",
+      l2.url,
+      config({ deployer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" }),
+      "L1RecordMismatch",
+    );
     // An L2 run from another commit than the L1's.
     await refused(
       "runL2()",

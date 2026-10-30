@@ -28,3 +28,29 @@ contract MockSoleOwnerSafe {
         return 1;
     }
 }
+
+/// More signatures needed than there are owners: no transaction could pass.
+contract MockOverThresholdSafe {
+    function getOwners() external pure returns (address[] memory owners) {
+        owners = new address[](2);
+        owners[0] = address(0x5a1);
+        owners[1] = address(0x5a2);
+    }
+
+    function getThreshold() external pure returns (uint256) {
+        return 3;
+    }
+}
+
+/// Answers like a Safe, with one owner listed twice.
+contract MockRepeatedOwnerSafe {
+    function getOwners() external pure returns (address[] memory owners) {
+        owners = new address[](2);
+        owners[0] = address(0x5a1);
+        owners[1] = address(0x5a1);
+    }
+
+    function getThreshold() external pure returns (uint256) {
+        return 2;
+    }
+}

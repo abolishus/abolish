@@ -116,7 +116,10 @@ contract Deploy {
     /// The anchoring authority's owners and threshold, read from the Safe
     /// on this chain. Code alone doesn't prove a multisig (a 1-of-1 Safe
     /// passes the anchor's check), so a threshold below 2 is refused: it is
-    /// one key (T-69).
+    /// one key (T-69). Only the owners and threshold are checked here: a
+    /// module or guard that lets one key act as the Safe is the anchoring
+    /// runner's check before it signs (P4-1 part 2b; contracts.md, Board
+    /// anchor, Known-weak).
     function _multisig(address authority)
         private
         view
@@ -126,6 +129,14 @@ contract Deploy {
         threshold = ISafeOwners(authority).getThreshold();
         if (threshold < 2 || threshold > owners.length) {
             revert AuthorityNotMultisig(threshold, owners.length);
+        }
+        // A Safe's owners are distinct and non-zero; a contract that only
+        // answers like one may not be.
+        for (uint256 i; i < owners.length; i++) {
+            if (owners[i] == address(0)) revert AuthorityNotMultisig(threshold, owners.length);
+            for (uint256 j; j < i; j++) {
+                if (owners[j] == owners[i]) revert AuthorityNotMultisig(threshold, owners.length);
+            }
         }
     }
 
@@ -281,7 +292,8 @@ contract Deploy {
     /// Before the L2 pins anything of the L1's: on the configured L1
     /// (`L1_RPC_URL`), the anchor and the relay are at their predicted
     /// addresses with the code the L1 record names, that record is this
-    /// deployer's, and the relay pins this run's board. Returns the anchor's
+    /// configuration's (deployer, target and commit), and the relay pins
+    /// this run's board. Returns the anchor's
     /// epoch, which the election registry pins.
     function _checkL1(Config memory c) private returns (uint64 epoch) {
         string memory record = VM.readFile(

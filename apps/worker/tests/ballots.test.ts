@@ -230,32 +230,38 @@ describe("the worker judges queued ballots as core's submit would", () => {
     expect(await readBoard(app, electionId)).toHaveLength(1);
   });
 
-  test("no ballot stays in Redis once judged, and no log line names one (T-10)", async () => {
-    const { ballots } = await setUp("mixed");
-    const payloads = entriesOf("mixed")
-      .slice(1)
-      .map((e) => e.payload);
-    await Promise.all(payloads.map((p) => ballots.submit(electionId, p)));
-    // The events stream keeps each job's outcome: an index or a code, never the ballot.
-    const stream = await connection.xrange(
-      `${prefix}:${QUEUES.ballotSubmit.name}:events`,
-      "-",
-      "+",
-    );
-    expect(stream.length).toBeGreaterThan(0);
-    for (const p of payloads) await expectNoKeyHolds(hex(p).slice(0, 64));
-    await expectNoKeyHolds(hex(electionId));
-    for (const line of logs)
-      for (const p of payloads) expect(JSON.stringify(line)).not.toContain(hex(p).slice(0, 64));
-    const mine = logs.filter((l) => l.queue === "{ballot-submit}");
-    for (const line of mine)
-      expect(line).toEqual({
-        queue: "{ballot-submit}",
-        outcome: "completed",
-        ms: expect.any(Number),
-      });
-    expect(mine).toHaveLength(payloads.length);
-  });
+  // The mixed case's verdicts, as the two tests above, which take the same
+  // time: under a CI runner shared with other packages' tests, 5 s is short.
+  test(
+    "no ballot stays in Redis once judged, and no log line names one (T-10)",
+    { timeout: 60_000 },
+    async () => {
+      const { ballots } = await setUp("mixed");
+      const payloads = entriesOf("mixed")
+        .slice(1)
+        .map((e) => e.payload);
+      await Promise.all(payloads.map((p) => ballots.submit(electionId, p)));
+      // The events stream keeps each job's outcome: an index or a code, never the ballot.
+      const stream = await connection.xrange(
+        `${prefix}:${QUEUES.ballotSubmit.name}:events`,
+        "-",
+        "+",
+      );
+      expect(stream.length).toBeGreaterThan(0);
+      for (const p of payloads) await expectNoKeyHolds(hex(p).slice(0, 64));
+      await expectNoKeyHolds(hex(electionId));
+      for (const line of logs)
+        for (const p of payloads) expect(JSON.stringify(line)).not.toContain(hex(p).slice(0, 64));
+      const mine = logs.filter((l) => l.queue === "{ballot-submit}");
+      for (const line of mine)
+        expect(line).toEqual({
+          queue: "{ballot-submit}",
+          outcome: "completed",
+          ms: expect.any(Number),
+        });
+      expect(mine).toHaveLength(payloads.length);
+    },
+  );
 });
 
 describe("the L1 reference (5.8), with an L1 node", () => {

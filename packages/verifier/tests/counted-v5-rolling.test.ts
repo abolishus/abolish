@@ -12,12 +12,13 @@ import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition
 import { splitEntries } from "../src/index.ts";
 import { partitionSize, tallyChecks } from "../src/tallies.ts";
 
-// Delivery (5.9) and the counted set (7.1 to 7.3, 8.5) under a rolling
-// definition (definition version 7, `electorate_mode` 2) without an author
-// panel (docs/spec/verifier.md, Counted set and tally; P2-17 part
-// 4d-2b-2b-2a): ballot version 5's delivery records are version 2, each
-// naming the ballot by version 5's ballot hash, which binds the step (T-38),
-// and the partition is one cell per rolling tier (tally.md, Rolling tiers).
+// Delivery (5.9), the counted set (7.1 to 7.3, 8.5) and the tally openings
+// (7.4) under a rolling definition (definition version 7, `electorate_mode`
+// 2) without an author panel (docs/spec/verifier.md, Counted set and tally,
+// Tally openings; P2-17 parts 4d-2b-2b-2a and 4d-2b-2b-2b-1): ballot version
+// 5's delivery records are version 2, each naming the ballot by version 5's
+// ballot hash, which binds the step (T-38), and the partition is one cell per
+// rolling tier (tally.md, Rolling tiers), into which 7.4 sorts the openings.
 // Fixtures: docs/spec/vectors/verifier-counted-v5-rolling.json
 // (packages/crypto/scripts/verifier-counted-v5-rolling-vectors.py, an
 // independent implementation), whose ballots are verifier-ballots-v5.json's,
@@ -42,6 +43,7 @@ interface Case {
   };
   readonly counted: readonly number[];
   readonly cells: readonly Record<string, unknown>[];
+  readonly tallies: readonly Record<string, unknown>[];
 }
 
 const file = read("verifier-counted-v5-rolling.json") as {
@@ -82,7 +84,7 @@ const clockOf = (c: Case): AnchorClock => ({
   lastSegment: Number(c.clock["lastSegment"]),
 });
 
-/** The ceremony, admission under the chain and the counted-set checks over a case's copy. */
+/** The ceremony, admission under the chain, the counted-set checks and 7.4 once they're known over a case's copy. */
 function run(c: Case, override?: (d: ReturnType<typeof decodeDefinition>) => typeof d) {
   const panel = { threshold: Number(file.panel.threshold), keys: file.panel.keys.map(hex) };
   const decoded = decodeDefinition(hex(c.definition));
@@ -101,8 +103,9 @@ function run(c: Case, override?: (d: ReturnType<typeof decodeDefinition>) => typ
     chain,
   );
   const candidates = admission.candidates ?? [];
+  const definition = override === undefined ? decoded : override(decoded);
   const r = countedChecks({
-    definition: override === undefined ? decoded : override(decoded),
+    definition,
     definitionHash: hash,
     registered: ceremony.registered ?? [],
     selected: candidates.map(({ entry, tally }) => ({
@@ -118,13 +121,25 @@ function run(c: Case, override?: (d: ReturnType<typeof decodeDefinition>) => typ
     admitted: candidates,
     blocks: undefined,
   });
-  return { candidates, r };
+  const opened = tallyChecks(
+    definition,
+    hash,
+    ceremony.registered,
+    undefined,
+    entries,
+    5,
+    r.tallyBreaks === undefined ? undefined : { extent: entries.length, breaks: r.tallyBreaks },
+  );
+  return { candidates, r, opened };
 }
 
 // A not-reached row carries an empty `at`, which the vectors leave out.
-const rows = (r: ReturnType<typeof countedChecks>) =>
+const rows = (
+  r: ReturnType<typeof countedChecks>,
+  opened: ReturnType<typeof tallyChecks>,
+): Record<string, unknown> =>
   Object.fromEntries(
-    [...r.rows].map(([id, { status, code, at }]) => [
+    [...r.rows, ["7.4", opened.row] as const].map(([id, { status, code, at }]) => [
       id,
       {
         status,
@@ -140,10 +155,10 @@ const countedOf = (r: ReturnType<typeof countedChecks>, selected: readonly numbe
   return selected.filter((entry) => !excluded.has(entry));
 };
 
-describe("5.9 and the counted set under a rolling definition against the independent implementation", () => {
+describe("5.9, the counted set and 7.4 under a rolling definition against the independent implementation", () => {
   for (const c of file.cases)
     test(c.id, { timeout: 60_000 }, () => {
-      const { candidates, r } = run(c);
+      const { candidates, r, opened } = run(c);
       // dan's (cell 0), tess's (cell 1) and eve's (cell 0) ballots, each
       // admitted against its step's root.
       expect(candidates.map((x) => [x.entry, x.tally?.cell])).toEqual([
@@ -151,10 +166,11 @@ describe("5.9 and the counted set under a rolling definition against the indepen
         [2, 1],
         [3, 0],
       ]);
-      expect(rows(r)).toEqual(c.expected);
+      expect(rows(r, opened)).toEqual(c.expected);
       expect(r.delivery).toEqual(c.delivery);
       expect(countedOf(r, [1, 2, 3])).toEqual(c.counted);
       expect(r.cells).toEqual(c.cells);
+      expect(opened.report).toEqual(c.tallies);
     });
 });
 
@@ -191,11 +207,52 @@ test("beside an author panel a rolling poll's delivery isn't read: 5.9 and every
   expect(r.delivery).toBeUndefined();
 });
 
-test("7.4 doesn't sort or attribute a rolling poll's openings yet: not reached", () => {
+test(
+  "7.4 sorts a rolling poll's openings into one cell per rolling tier, the next number stray",
+  { timeout: 60_000 },
+  () => {
+    // The definition states no fixed electorate: read as one, every opening
+    // would be stray.
+    const c = byId("tally-breaks");
+    const d = decodeDefinition(hex(c.definition));
+    if (d.version !== 7) throw new Error("not version 7");
+    expect(d.value.electorate).toEqual([]);
+    const { opened } = run(c);
+    expect(opened.report?.map((o) => o.cell ?? null)).toEqual([0, 1, null, 0, 1, 1]);
+    expect(opened.row).toEqual({ status: "fail", code: "tally-stray", at: { entry: 15 } });
+  },
+);
+
+test("before the counted set is known an honest opening of a rolling poll stays unsettled", () => {
   const c = byId("delivered");
   const d = decodeDefinition(hex(c.definition));
+  const { stubHash, hash } = readDefinition(d);
   const { entries } = splitEntries(hex(c.board));
-  expect(tallyChecks(d, readDefinition(d).hash, [], undefined, entries, 5)).toEqual({
-    row: { status: "unverifiable", code: "not-reached", at: {} },
+  const panel = { threshold: Number(file.panel.threshold), keys: file.panel.keys.map(hex) };
+  const { registered } = ceremonyChecks(d.value, stubHash, panel, authorRunOf(d), entries, 5);
+  const r = tallyChecks(d, hash, registered, undefined, entries, 5);
+  expect(r.row).toEqual({ status: "unverifiable", code: "not-implemented" });
+  expect(r.report).toEqual(c.tallies);
+  // With no registered key set nothing is attributed.
+  expect(tallyChecks(d, hash, undefined, undefined, entries, 5).row).toEqual({
+    status: "unverifiable",
+    code: "not-reached",
   });
+});
+
+test("beside an author panel 7.4 doesn't read a rolling poll's openings: not reached (T-37)", () => {
+  const c = byId("delivered");
+  const d = decodeDefinition(hex(c.definition));
+  if (d.version !== 7) throw new Error("not version 7");
+  const panelled = { ...d, value: { ...d.value, author_keys: [new Uint8Array(33)] } };
+  const { entries } = splitEntries(hex(c.board));
+  // Even given a key set for each panel and a counted set.
+  expect(
+    tallyChecks(panelled, readDefinition(d).hash, [], [], entries, 5, {
+      extent: entries.length,
+      breaks: new Map(),
+    }),
+  ).toEqual({ row: { status: "unverifiable", code: "not-reached", at: {} } });
+  const { opened } = run(c, () => panelled);
+  expect(opened.row).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
 });

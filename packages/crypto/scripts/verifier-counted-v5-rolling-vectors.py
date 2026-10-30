@@ -6,15 +6,17 @@ definition (definition version 7, `electorate_mode` 2), whose ballots are
 version 5 (docs/spec/verifier.md, Counted set and tally; 5.9, 7.1 to 7.3;
 delivery.md, Versions and Delivery check (version 2); tally.md, Rolling
 tiers): each is a definition, a clock, a board copy and the panel a bundle
-pins, with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5 a verifier reports, the
-report's `delivery`, the counted ballots' entries and the report's `cells`.
+pins, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5 a verifier reports, the
+report's `delivery`, the counted ballots' entries and the report's `cells`
+and `tallies`.
 Ballot version 5 fixes its delivery records at version 2, as version 4 does,
 and each names the ballot by version 5's ballot hash, which binds the step,
 so a receipt for the same fields at another step, or read as version 4,
 delivers nothing (T-38). The partition is one cell per rolling tier, each
 opened under tally-opening version 1 against the aggregate of its counted
-ballots' default halves. The poll has no author panel, as
-verifier-ballots-v5.json's has none.
+ballots' default halves, and 7.4 sorts each opening into one of those cells
+or a stray one (verifier.md, Tally openings). The poll has no author panel,
+as verifier-ballots-v5.json's has none.
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier: verifier-ballots-v5-vectors.py
@@ -164,6 +166,41 @@ def main(constants, out_dir):
     clock["lastSegment"] = floor + 2
     assert 3 <= seg_d < floor
 
+    def tally_report(tally, openings, opening_at):
+        """7.4 under tally-opening version 1, with the counted set known (verifier.md, Tally openings): each opening, sorted into one of the rolling tiers' cells or stray, with its breaks in the boarding rule's order (tally.md, Boarding), and the row at the first opening with a code or a break."""
+        failing = {f["at"]: f for c in tally["cells"] for f in c["failing"]}
+        first, out = {}, []
+        for i, b in enumerate(openings):
+            entry = opening_at[i]
+            try:
+                o = tov.decode(b)
+            except tov.Reject as err:
+                out.append({"entry": entry, "code": "decode", "decodeError": err.code, "breaks": []})
+                continue
+            signer = tov.attribution(signing, o)
+            if o["definitionHash"] != defh or o["cell"] >= len(ev["cells"]):
+                breaks = [{"code": "tally-stray"}] + ([{"code": "tally-unattributed"}] if signer is None else [])
+                out.append({"entry": entry, "signer": signer, "breaks": breaks})
+                continue
+            breaks = []
+            if i in failing:
+                f = failing[i]
+                breaks.append({"code": f["code"], **({"option": f["option"]} if "option" in f else {})})
+            if signer is None:
+                breaks.append({"code": "tally-unattributed"})
+            else:
+                signed = tov.statement(o["definitionHash"], o["cell"], o["aggregateHash"], o["signer"], o["opening"])
+                if (o["cell"], signer) in first:
+                    of, earlier = first[(o["cell"], signer)]
+                    breaks.append({"code": "tally-repeat" if earlier == signed else "tally-second", "of": of})
+                else:
+                    first[(o["cell"], signer)] = (entry, signed)
+            out.append({"entry": entry, "cell": o["cell"], "signer": signer, "breaks": breaks})
+        head = next((o for o in out if "code" in o or o["breaks"]), None)
+        if head is None:
+            return out, outcome("pass")
+        return out, outcome("fail", head.get("code") or head["breaks"][0]["code"], {"entry": head["entry"], **({"decodeError": head["decodeError"]} if "decodeError" in head else {})})
+
     def board(segments):
         out = []
         for seg, payloads in segments:
@@ -189,7 +226,7 @@ def main(constants, out_dir):
         payloads = [p for _, ps in segments for p in ps]
         segment_of = [seg for seg, ps in segments for _ in ps]
         at_ballot = [payloads.index(recs[w]) for w in order]
-        delivery, at_record, openings = [], [], []
+        delivery, at_record, openings, opening_at = [], [], [], []
         for i, p in enumerate(payloads):
             kind = int.from_bytes(p[:2], "big")
             if kind == RECEIPT_TYPE and segment_of[i] <= floor:
@@ -197,6 +234,7 @@ def main(constants, out_dir):
                 at_record.append(i)
             elif kind == TALLY_OPENING_TYPE:
                 openings.append(p)
+                opening_at.append(i)
         selected = [ballots[w] for w in order]
         result = dv2.check_delivery(defh, registered, seg_d, seg_k, t_d, t_k, selected, delivery, hash_of=lambda b: b["hash"])
         counted = [w for w, b in zip(order, result["ballots"]) if b["counted"]]
@@ -204,6 +242,7 @@ def main(constants, out_dir):
         tiers = [c["tier"] for c in ev["cells"]]
         cells = [[ballots[w]["vote"]["vss"] for w in counted if ballots[w]["cell"] == c] for c in range(len(tiers))]
         tally = tov.check_tally(defh, m, k, signing, cells, openings)
+        tallies, tally_row = tally_report(tally, openings, opening_at)
         rows = {
             # 5.9 has no failure of its own; 7.1 and 7.3 pass once the counted
             # set is known; the close check needs the run of L1 headers these
@@ -213,6 +252,7 @@ def main(constants, out_dir):
             "7.1": outcome("pass"),
             "7.2": outcome("pass") if tally["ok"] else outcome("fail", tally["failure"]["code"], dict({"cell": tally["failure"]["cell"]}, **({"option": tally["failure"]["option"]} if "option" in tally["failure"] else {}))),
             "7.3": outcome("pass"),
+            "7.4": tally_row,
             # No seat states destruction: each registered seat is
             # destruction-missing, decided whatever s_T is, so 8.5 fails at
             # the first (tally.md, Destruction checks).
@@ -249,6 +289,7 @@ def main(constants, out_dir):
             },
             "counted": [at_ballot[order.index(w)] for w in counted],
             "cells": report_cells,
+            "tallies": tallies,
         }
         cases.append(c)
         return c
@@ -265,7 +306,8 @@ def main(constants, out_dir):
         ],
     )
     assert delivered["delivery"] == {"excluded": [], "records": [], "rejected": []} and len(delivered["counted"]) == 3
-    assert delivered["expected"]["7.2"] == outcome("pass")
+    assert delivered["expected"]["7.2"] == outcome("pass") and delivered["expected"]["7.4"] == outcome("pass")
+    assert [(o["cell"], o["signer"]) for o in delivered["tallies"]] == [(0, 1), (1, 2)]
 
     relabel = case(
         "step-relabelled",
@@ -296,6 +338,7 @@ def main(constants, out_dir):
         [head, (3, every_receipt), (4, [opening(0, 1, ["eve"]), opening(1, 2, ["tess"])])],
     )
     assert stale["expected"]["7.2"]["status"] == "fail" and stale["expected"]["7.2"]["at"] == {"cell": 0}
+    assert stale["expected"]["7.4"] == outcome("fail", "tally-aggregate", {"entry": stale["tallies"][0]["entry"]})
 
     missing = case(
         "cell-missing",
@@ -303,10 +346,27 @@ def main(constants, out_dir):
         [head, (3, every_receipt), (4, [opening(0, 1, ["dan", "eve"])])],
     )
     assert missing["expected"]["7.2"] == outcome("fail", "tally-missing", {"cell": 1})
+    assert missing["expected"]["7.4"] == outcome("pass")
+
+    honest_1 = opening(1, 2, ["tess"])
+    breaks = case(
+        "tally-breaks",
+        "Every ballot delivered and each cell opened honestly (cell 0 by seat 1, cell 1 by seat 2), then: seat 3's opening naming cell 2, a stray opening, since the partition is one cell per rolling tier and there are two (tally-stray); seat 1's second opening of cell 0, over eve's ballot alone (tally-aggregate, and tally-second: evidence against the seat); seat 2's opening of cell 1 boarded again byte for byte (tally-repeat, the operator's alone); and seat 3's honest opening of cell 1, which passes beside seat 2's. 7.2 passes; 7.4 fails at the first break, tally-stray.",
+        [
+            head,
+            (3, every_receipt),
+            (4, [opening(0, 1, ["dan", "eve"]), honest_1, opening(2, 3, []), opening(0, 1, ["eve"]), honest_1, opening(1, 3, ["tess"])]),
+        ],
+    )
+    assert breaks["expected"]["7.2"] == outcome("pass")
+    first_opening = breaks["tallies"][0]["entry"]
+    assert breaks["expected"]["7.4"] == outcome("fail", "tally-stray", {"entry": first_opening + 2})
+    assert [[b["code"] for b in o["breaks"]] for o in breaks["tallies"]] == [[], [], ["tally-stray"], ["tally-aggregate", "tally-second"], ["tally-repeat"], []]
+    assert breaks["tallies"][3]["breaks"][1]["of"] == first_opening and breaks["tallies"][4]["breaks"][0]["of"] == first_opening + 1
 
     doc = {
         "format": "abolish-verifier-counted-vectors/1",
-        "title": "The verifier's delivery check and counted set under a rolling definition (definition version 7, electorate_mode 2; ballot version 5, delivery records version 2, tally-opening version 1, without an author panel): definitions, clocks, boards and the pinned panel, with the rows 5.9, 6.3, 7.1 to 7.3 and 8.5, the report's delivery and cells and the counted ballots' entries, beside verifier-ballots-v5.json's group registry events and registration time",
+        "title": "The verifier's delivery check, counted set and tally openings under a rolling definition (definition version 7, electorate_mode 2; ballot version 5, delivery records version 2, tally-opening version 1, without an author panel): definitions, clocks, boards and the pinned panel, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5, the report's delivery, cells and tallies and the counted ballots' entries, beside verifier-ballots-v5.json's group registry events and registration time",
         "spec": "docs/spec/verifier.md",
         "generator": (
             "packages/crypto/scripts/verifier-counted-v5-rolling-vectors.py, from verifier-ballots-v5-vectors.py, ballot-v5-records-vectors.py, "

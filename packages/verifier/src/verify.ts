@@ -23,8 +23,8 @@
 // 4.4 but never pass it, and, for a run that read the archive
 // (`readArchive`), 4.3, which can pass but never fail, and, under a
 // rolling definition, admission, selection, the spoiled-ballot openings and,
-// without an author panel, delivery and the counted set against the chain
-// from the archive's replay once the release pins the registries
+// without an author panel, delivery, the counted set and the tally openings
+// against the chain from the archive's replay once the release pins the registries
 // (rolling-chain.ts);
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
@@ -1183,7 +1183,7 @@ export function verifyBundle(
       // Under a rolling definition delivery (5.9) reads ballot version 5's
       // fields, its hash binding the step, and the counted set is per rolling
       // tier; beside an author panel `countedChecks` stops at 5.9 (P2-17
-      // part 4d-2b-2b-2b).
+      // part 4d-2b-2b-2b-2).
       if (
         chosen.report === undefined ||
         checked.registered === undefined ||
@@ -1267,32 +1267,28 @@ export function verifyBundle(
       }
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
-      // versions 3 to 6 against their cells, beside an author panel per panel
-      // with its own key set (docs/spec/verifier.md, Tally openings); the
-      // counted set, once known, settles the rest, `tally-early` included.
-      // Under a rolling definition the tally openings' cells aren't read yet
-      // (P2-17 part 4d-2b-2b): 7.4 isn't reached.
-      if (definition.rolling !== undefined)
-        implemented = new Map<string, Outcome>([...implemented, ["7.4", NOT_REACHED]]);
-      else {
-        const opened = tallyChecks(
-          definition.definition,
-          definition.hash,
-          checked.registered,
-          checked.authorRegistered,
-          bundle.entries,
-          definition.inputs.boardEntryVersion,
-          counted.tallyBreaks === undefined || extent === undefined
-            ? undefined
-            : {
-                extent,
-                breaks: counted.tallyBreaks,
-                ...(counted.tallyEarly !== undefined && { early: counted.tallyEarly }),
-              },
-        );
-        implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
-        tallies = opened.report;
-      }
+      // versions 3 to 7 against their cells, a rolling one's one per rolling
+      // tier, beside an author panel per panel with its own key set (docs/
+      // spec/verifier.md, Tally openings), except a rolling one's beside an
+      // author panel, which `tallyChecks` leaves not reached; the counted
+      // set, once known, settles the rest, `tally-early` included.
+      const opened = tallyChecks(
+        definition.definition,
+        definition.hash,
+        checked.registered,
+        checked.authorRegistered,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+        counted.tallyBreaks === undefined || extent === undefined
+          ? undefined
+          : {
+              extent,
+              breaks: counted.tallyBreaks,
+              ...(counted.tallyEarly !== undefined && { early: counted.tallyEarly }),
+            },
+      );
+      implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
+      tallies = opened.report;
       // An opening is checked against the same registered election, under a
       // rolling definition the context made from the same chain, and
       // `opening-cast` against the ballots admission admitted, so 6.2 is

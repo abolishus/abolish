@@ -7,8 +7,10 @@
 // or fails anything: 7.4 reports and attributes (T-29, T-15, T-17).
 //
 // The partition is the definition's (2.8): under version 1 its tiers, under
-// versions 3 to 6 every tier's stated cells, numbered across the tiers, so
-// an opening's `cell` is a position among those, never a tier (T-16).
+// versions 3 to 6 and a fixed version 7 every tier's stated cells, numbered
+// across the tiers, so an opening's `cell` is a position among those, never a
+// tier (T-16); under a rolling version 7 one cell per rolling tier, in
+// `rolling_electorate` order (tally.md, Rolling tiers).
 //
 // What is decided without the counted set: a stray opening, an opening of a
 // cell with another number of entries than options (`tally-missing`), an
@@ -169,9 +171,16 @@ export function tallyChecks(
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
-  // A rolling poll's openings aren't sorted or attributed yet (P2-17 part
-  // 4d-2b-2b-2b): never judged here, whatever a caller passes.
-  if (isRolling(definition))
+  // A rolling poll's partition is one cell per rolling tier, its openings
+  // version 1's (or a live one's version 2) over ballot version 5's default
+  // half, the whole sharing (tally.md, Rolling tiers). Beside an author panel
+  // its partial openings aren't read yet (P2-17 part 4d-2b-2b-2b-2): never
+  // judged here, whatever a caller passes (T-37).
+  if (
+    definition.version === 7 &&
+    isRolling(definition) &&
+    definition.value.author_keys.length !== 0
+  )
     return { row: { status: "unverifiable", code: "not-reached", at: {} } };
   // Under definition version 6 and a fixed version 7 tally-opening version 1
   // opens ballot version 4's default half, which without an author panel is
@@ -262,7 +271,7 @@ export function tallyChecks(
               },
         );
   // `m`, the options an opening of a cell opens: under definition versions 5
-  // and 6 the total over the questions, for each panel's partial opening as
+  // to 7 the total over the questions, for each panel's partial opening as
   // for a whole one (tally.md, Context). 2.1 passed, so the definition is
   // well formed.
   const m = (author ? panelTallyRules(definition as PanelledRecord, 1) : tallyRules(definition))

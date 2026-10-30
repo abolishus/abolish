@@ -59,5 +59,6 @@ The deploy workflow builds and signs the worker and seat images on every push to
 1. Providers: the RPC endpoints and the bundler.
 2. Keys: generate them all, fund the deployer from faucets.
 3. The anchoring Safe on Sepolia, with its owners and a threshold of 2 or more: the deploy script refuses a 1-of-1 Safe, which is one key.
+   Also, on Base Sepolia: a Safe of your choosing with a threshold of 2 or more, and an OpenZeppelin `TimelockController` with a non-zero minimum delay (two days, say). The Safe must be its only proposer and canceller. No one else may hold its admin role: renounce it, or give it to the timelock itself. That timelock is the registration paymaster's `admin`, the only party that can withdraw its deposit. The deploy script refuses an admin with no code or no delay, but checks nothing about its roles.
 4. The launch panel's seats and the two workers as Railway services, created with no variables and not yet in the GitHub `staging` variables.
 5. When the deploy script lands: deploy, record the deployment, fund the creation key and the paymaster deposit, register the receipt keys, follow Deploy day above for the seats and workers, set the staging `api` variables, and run [[P2-22]]'s end-to-end check.

@@ -8,6 +8,11 @@ import {ElectionRegistry} from "../src/ElectionRegistry.sol";
 import {TrusteeRegistry} from "../src/TrusteeRegistry.sol";
 import {ScriptVm} from "./ScriptVm.sol";
 
+/// The getter of an OpenZeppelin `TimelockController` the script reads.
+interface ITimelockDelay {
+    function getMinDelay() external view returns (uint256);
+}
+
 /// The two getters of a Safe the script reads.
 interface ISafeOwners {
     function getOwners() external view returns (address[] memory);
@@ -57,7 +62,9 @@ contract Deploy {
     error CreateFailed(string artifact);
     error ClockRefused(uint64 epoch, uint64 period, uint64 deadline);
     error AuthorityNotMultisig(uint256 threshold, uint256 owners);
+    error AuthorityOwnerInvalid(uint256 index);
     error L1RecordMismatch(string field);
+    error RegistrationRefused(string field);
 
     struct Config {
         string target;
@@ -133,9 +140,9 @@ contract Deploy {
         // A Safe's owners are distinct and non-zero; a contract that only
         // answers like one may not be.
         for (uint256 i; i < owners.length; i++) {
-            if (owners[i] == address(0)) revert AuthorityNotMultisig(threshold, owners.length);
+            if (owners[i] == address(0)) revert AuthorityOwnerInvalid(i);
             for (uint256 j; j < i; j++) {
-                if (owners[j] == owners[i]) revert AuthorityNotMultisig(threshold, owners.length);
+                if (owners[j] == owners[i]) revert AuthorityOwnerInvalid(i);
             }
         }
     }
@@ -177,6 +184,7 @@ contract Deploy {
         p.panels = _panels(json);
         p.registrarThreshold = _u8(json, ".registrars.threshold");
         p.registrars = VM.parseJsonAddressArray(json, ".registrars.addresses");
+        _registration(json, p);
 
         VM.startBroadcast(c.deployer);
         address trustees = _create("TrusteeRegistry.sol:TrusteeRegistry", abi.encode(p.panels));
@@ -200,6 +208,15 @@ contract Deploy {
             )
         );
         address board = _create("Board.sol:Board", abi.encode(elections, trustees, c.l1Relay));
+        // The signing service's account, then the paymaster that sponsors its
+        // batches to this group registry and nothing else.
+        address account = _create(
+            "RegistrationAccount.sol:RegistrationAccount", abi.encode(p.entryPoint, p.serviceOwner)
+        );
+        address paymaster = _create(
+            "RegistrationPaymaster.sol:RegistrationPaymaster",
+            abi.encode(p.entryPoint, groups, account, p.admin, p.maxCost)
+        );
         VM.stopBroadcast();
 
         _write(
@@ -215,7 +232,11 @@ contract Deploy {
                 ",",
                 _entry("Board", board),
                 ",",
-                _entry("BallotCheck", address(Board(board).ballotCheck()))
+                _entry("BallotCheck", address(Board(board).ballotCheck())),
+                ",",
+                _entry("RegistrationAccount", account),
+                ",",
+                _entry("RegistrationPaymaster", paymaster)
             ),
             _l2Pins(c, p)
         );
@@ -228,6 +249,30 @@ contract Deploy {
         bytes32 panelId;
         uint8 registrarThreshold;
         address[] registrars;
+        address entryPoint;
+        address serviceOwner;
+        address admin;
+        uint256 adminMinDelay;
+        uint256 maxCost;
+    }
+
+    /// The registration paymaster's and account's pins, checked before
+    /// anything is sent: the EntryPoint has code on this chain, the service's
+    /// key is an address, the cap isn't zero, and the admin is a timelock
+    /// with a delay. Code doesn't prove a timelock behind our Safe (contracts.md,
+    /// Registration paymaster, Deployment), so the record names its delay;
+    /// which roles it grants is the Safe's owners' to check (T-62).
+    function _registration(string memory json, L2Pins memory p) private view {
+        p.entryPoint = VM.parseJsonAddress(json, ".registration.entryPoint");
+        p.serviceOwner = VM.parseJsonAddress(json, ".registration.serviceOwner");
+        p.admin = VM.parseJsonAddress(json, ".registration.admin");
+        p.maxCost = VM.parseJsonUint(json, ".registration.maxCost");
+        if (p.entryPoint.code.length == 0) revert RegistrationRefused("entryPoint");
+        if (p.serviceOwner == address(0)) revert RegistrationRefused("serviceOwner");
+        if (p.maxCost == 0) revert RegistrationRefused("maxCost");
+        if (p.admin.code.length == 0) revert RegistrationRefused("admin");
+        p.adminMinDelay = ITimelockDelay(p.admin).getMinDelay();
+        if (p.adminMinDelay == 0) revert RegistrationRefused("admin");
     }
 
     function _l2Pins(Config memory c, L2Pins memory p) private pure returns (string memory) {
@@ -246,6 +291,16 @@ contract Deploy {
             VM.toString(uint256(p.registrarThreshold)),
             ',"addresses":',
             _addresses(p.registrars),
+            '},"registration":{"entryPoint":"',
+            VM.toString(p.entryPoint),
+            '","serviceOwner":"',
+            VM.toString(p.serviceOwner),
+            '","admin":{"address":"',
+            VM.toString(p.admin),
+            '","minDelay":',
+            VM.toString(p.adminMinDelay),
+            '},"maxCost":',
+            VM.toString(p.maxCost),
             "}"
         );
     }

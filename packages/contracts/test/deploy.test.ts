@@ -28,6 +28,17 @@ const REGISTRARS = [
 const CLOCK = { epoch: 1767225600, period: 3600, deadline: 43200 };
 /** A 1-of-1 Safe: code, but one key. */
 const SOLE_OWNER = "0x00000000000000000000000000000000000000cc";
+/** On L2: EntryPoint v0.8's stand-in (test/utils/MockEntryPoint.sol) and the paymaster's admin. */
+const ENTRY_POINT = "0x0000000000000000000000000000000000000e01";
+const TIMELOCK = "0x0000000000000000000000000000000000000e02";
+const NO_DELAY = "0x0000000000000000000000000000000000000E03";
+const SERVICE_OWNER = "0x0000000000000000000000000000000000000e04";
+const REGISTRATION = {
+  entryPoint: ENTRY_POINT,
+  serviceOwner: SERVICE_OWNER,
+  admin: TIMELOCK,
+  maxCost: String(10 ** 15),
+};
 const OVER_THRESHOLD = "0x00000000000000000000000000000000000000cd";
 const REPEATED_OWNER = "0x00000000000000000000000000000000000000ce";
 /** MockSafe's owners and threshold (test/utils/MockSafe.sol). */
@@ -139,6 +150,7 @@ function config(overrides: Record<string, unknown> = {}) {
       points: PANEL.keys.flatMap(point),
     },
     registrars: { threshold: 2, addresses: REGISTRARS },
+    registration: REGISTRATION,
     ...overrides,
   };
 }
@@ -176,9 +188,9 @@ function forgeScript(sig: string, url: string, cfg: object, { broadcast = true }
   return { status: run.status, output: `${run.stdout}${run.stderr}` };
 }
 
-/** A contract's runtime code from the build's `out/`. */
-function deployedCode(name: string): string {
-  const artifact = JSON.parse(readFileSync(`${PKG}/out/MockSafe.sol/${name}.json`, "utf8")) as {
+/** The runtime code of contract `name` in test/utils/`file` (.sol), from the build's `out/`. */
+function deployedCode(file: string, name: string): string {
+  const artifact = JSON.parse(readFileSync(`${PKG}/out/${file}.sol/${name}.json`, "utf8")) as {
     deployedBytecode: { object: string };
   };
   return artifact.deployedBytecode.object;
@@ -233,10 +245,20 @@ beforeAll(async () => {
   cleanUp();
   [l1, l2] = await Promise.all([anvil(31337), anvil(31338)]);
   await rpc(l1.url, "anvil_setCode", [PORTAL, "0x00"]);
-  await rpc(l1.url, "anvil_setCode", [AUTHORITY, deployedCode("MockSafe")]);
-  await rpc(l1.url, "anvil_setCode", [SOLE_OWNER, deployedCode("MockSoleOwnerSafe")]);
-  await rpc(l1.url, "anvil_setCode", [OVER_THRESHOLD, deployedCode("MockOverThresholdSafe")]);
-  await rpc(l1.url, "anvil_setCode", [REPEATED_OWNER, deployedCode("MockRepeatedOwnerSafe")]);
+  const safes = [
+    [AUTHORITY, "MockSafe"],
+    [SOLE_OWNER, "MockSoleOwnerSafe"],
+    [OVER_THRESHOLD, "MockOverThresholdSafe"],
+    [REPEATED_OWNER, "MockRepeatedOwnerSafe"],
+  ];
+  for (const [at, name] of safes)
+    await rpc(l1.url, "anvil_setCode", [at, deployedCode("MockSafe", name!)]);
+  await rpc(l2.url, "anvil_setCode", [ENTRY_POINT, deployedCode("MockEntryPoint", "MockEntryPoint")]);
+  await rpc(l2.url, "anvil_setCode", [TIMELOCK, deployedCode("MockTimelock", "MockTimelock")]);
+  await rpc(l2.url, "anvil_setCode", [
+    NO_DELAY,
+    deployedCode("MockTimelock", "MockNoDelayTimelock"),
+  ]);
 }, 60_000);
 afterAll(() => {
   l1?.process.kill();
@@ -293,7 +315,7 @@ describe("refusals, before anything is sent", () => {
     [
       "an owner listed twice",
       { anchor: { ...CLOCK, authority: REPEATED_OWNER } },
-      "AuthorityNotMultisig",
+      "AuthorityOwnerInvalid(1)",
     ],
     [
       "a 1-of-1 Safe as the authority",
@@ -365,6 +387,19 @@ describe("the staging deployment on a local Anvil pair", () => {
       config({ panel: { ...config().panel, quorum: 5 } }),
       "BadQuorum",
     );
+    for (const [change, field] of [
+      [{ entryPoint: "0x00000000000000000000000000000000000000ee" }, "entryPoint"],
+      [{ serviceOwner: "0x0000000000000000000000000000000000000000" }, "serviceOwner"],
+      [{ maxCost: 0 }, "maxCost"],
+      [{ admin: "0x00000000000000000000000000000000000000ef" }, "admin"],
+      [{ admin: NO_DELAY }, "admin"],
+    ] as const)
+      await refused(
+        "runL2()",
+        l2.url,
+        config({ registration: { ...REGISTRATION, ...change } }),
+        `RegistrationRefused("${field}")`,
+      );
     await refused(
       "runL2()",
       l2.url,
@@ -416,6 +451,8 @@ describe("the staging deployment on a local Anvil pair", () => {
       "ElectionRegistry",
       "Board",
       "BallotCheck",
+      "RegistrationAccount",
+      "RegistrationPaymaster",
     ]);
     expect(Object.keys(l1Record.contracts)).toEqual(["BoardAnchor", "BallotRelay"]);
   });
@@ -468,6 +505,12 @@ describe("the staging deployment on a local Anvil pair", () => {
         keys: `0x${PANEL.keys.join("")}`,
       },
       registrars: { threshold: 2, addresses: REGISTRARS },
+      registration: {
+        entryPoint: ENTRY_POINT,
+        serviceOwner: SERVICE_OWNER,
+        admin: { address: TIMELOCK, minDelay: 2 * 24 * 60 * 60 },
+        maxCost: 10 ** 15,
+      },
     });
   });
 
@@ -509,6 +552,14 @@ describe("the staging deployment on a local Anvil pair", () => {
     expect(call(u, b!.address, "ballotCheck()(address)")).toBe(
       l2Record.contracts["BallotCheck"]!.address,
     );
+    const { RegistrationAccount: account, RegistrationPaymaster: paymaster } = l2Record.contracts;
+    expect(call(u, account!.address, "entryPoint()(address)")).toBe(ENTRY_POINT);
+    expect(call(u, account!.address, "owner()(address)")).toBe(SERVICE_OWNER);
+    expect(call(u, paymaster!.address, "entryPoint()(address)")).toBe(ENTRY_POINT);
+    expect(call(u, paymaster!.address, "registry()(address)")).toBe(g!.address);
+    expect(call(u, paymaster!.address, "service()(address)")).toBe(account!.address);
+    expect(call(u, paymaster!.address, "admin()(address)")).toBe(TIMELOCK);
+    expect(call(u, paymaster!.address, "maxCost()(uint256)")).toBe(String(10 ** 15));
   });
 
   test("the L1 contracts hold what their record pins", () => {

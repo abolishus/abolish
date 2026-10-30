@@ -232,7 +232,7 @@ export class IntakeSeat {
     // `ballot_hash` binds every share hash, so a held record names this one.
     if (!equal(decode(TAKEN, stored.value).share_hash, taken.shareHash))
       throw new Error("trustee node: a held ballot's share hash differs from its ballot hash's");
-    await this.#config.store.putOnce(
+    const copy = await this.#config.store.putOnce(
       `copies/${hex(stubHash)}/${ballot}/${taken.l1RefNumber}-${hex(taken.l1RefHash)}`,
       encode(COPY, { l1_ref_number: taken.l1RefNumber, l1_ref_hash: taken.l1RefHash }),
     );
@@ -250,11 +250,16 @@ export class IntakeSeat {
     // (T-25). The same ballot signs the same bytes (RFC 6979), so a second
     // delivery finds them held.
     await this.#config.store.putOnce(`receipts/${hex(stubHash)}/${ballot}`, receipt);
-    // After the receipt, so a repeat that finds this record finds the receipt.
-    await this.#config.store.putOnce(
-      `repeats/${hex(stubHash)}/${recordName(record)}`,
-      encode(REPEAT, { ballot_hash: taken.ballotHash, share_hash: taken.shareHash }),
-    );
+    // After the receipt, so a repeat that finds this record finds the
+    // receipt; and only for the delivery that wrote the copy, so one copy
+    // has one: anyone can re-randomise a Groth16 proof into other bytes of
+    // the same copy, and each would otherwise leave a record (T-52). Those
+    // run intake in full, as a repeat did before.
+    if (copy.created)
+      await this.#config.store.putOnce(
+        `repeats/${hex(stubHash)}/${recordName(record)}`,
+        encode(REPEAT, { ballot_hash: taken.ballotHash, share_hash: taken.shareHash }),
+      );
     return { ok: true, ballotHash: taken.ballotHash, receipt };
   }
 

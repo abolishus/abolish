@@ -216,6 +216,56 @@ describe("intake", () => {
       );
     });
 
+    it("keeps one repeat record per copy: another proof of the same copy runs in full and adds none", async () => {
+      const store = new MemoryStore();
+      const [seat] = seatsOf(s, { store }).intake;
+      // Proved again under the same L1 reference: other bytes, the same copy,
+      // as a re-randomised proof would be.
+      const reproved = await castAgain(s, 0, honest, {
+        number: honest.record.l1_ref_number,
+        hash: honest.record.l1_ref_hash,
+      });
+      expect(hex(reproved.bytes)).not.toBe(hex(honest.bytes));
+      const repeats = () => store.list(`repeats/${hex(s.e.stubHash)}`);
+      const first = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      expect(await repeats()).toHaveLength(1);
+      const again = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        reproved.bytes,
+        reproved.ciphertexts[0] as Uint8Array,
+      );
+      if (!first.ok || !again.ok) expect.fail("an honest delivery was refused");
+      expect(hex(again.receipt)).toBe(hex(first.receipt));
+      expect(await repeats()).toHaveLength(1);
+    });
+
+    it("runs intake in full when the receipt a repeat record names isn't held", async () => {
+      const m = await marked();
+      const store = new MemoryStore();
+      const stub = hex(s.e.stubHash);
+      for (const name of await m.store.list(`repeats/${stub}`))
+        await store.putOnce(
+          `repeats/${stub}/${name}`,
+          (await m.store.get(`repeats/${stub}/${name}`))!,
+        );
+      const [seat] = seatsOf(s, { store }).intake;
+      const out = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(`refused: ${out.code}`);
+      expect(hex(out.receipt)).toBe(hex(m.receipt));
+      expect(await store.list(`intake/${stub}`)).toEqual([hex(m.ballotHash)]);
+    });
+
     it("answers no repeat from the intake cutoff on (T-54)", async () => {
       const m = await marked();
       const [seat] = seatsOf(s, { store: m.store, now: () => s.cutoff }).intake;

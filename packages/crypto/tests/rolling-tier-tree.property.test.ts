@@ -9,6 +9,7 @@ import {
   RollingTierTree,
   rootClockBoundary,
   rootClockStepAtOrBefore,
+  rootStepFinal,
   rootStepWindow,
   tierTreeRoot,
 } from "../src/index.ts";
@@ -276,5 +277,30 @@ describe("the root clock and the window (docs/spec/membership.md, Root clock and
     expect(rootStepWindow(1n, tau(1n) - 1n)).toBe("future");
     expect(rootStepWindow(1n, tau(1n) + window - 1n)).toBe("in");
     expect(rootStepWindow(1n, tau(1n) + window)).toBe("stale");
+  });
+
+  test("a live poll reads a step as final exactly from τ_n + ROOT_FINALITY", () => {
+    // Forty minutes, the spec's figure (docs/spec/parameters.md).
+    const finality = 2400n;
+    expect(BigInt(PARAMETERS.ROOT_FINALITY)).toBe(finality);
+    fc.assert(
+      fc.property(u32, fc.bigInt({ min: -2n * finality, max: 2n * finality }), (n, d) => {
+        const t = tau(n) + d;
+        fc.pre(t >= 0n);
+        expect(rootStepFinal(n, t)).toBe(d >= finality);
+      }),
+      { numRuns },
+    );
+    // The edge, and the step at the head's own time, which never is.
+    expect(rootStepFinal(1n, tau(1n) + finality - 1n)).toBe(false);
+    expect(rootStepFinal(1n, tau(1n) + finality)).toBe(true);
+    expect(rootStepFinal(1n, tau(1n))).toBe(false);
+    for (const [n, t] of [
+      [-1n, 0n],
+      [1n << 32n, 0n],
+      [0n, -1n],
+      [0n, 1n << 64n],
+    ] as const)
+      expect(() => rootStepFinal(n, t)).toThrow(RangeError);
   });
 });

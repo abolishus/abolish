@@ -510,6 +510,7 @@ export {
   rootClockBoundary,
   rootClockStepAtOrBefore,
   type RootStepWindow,
+  rootStepFinal,
   rootStepWindow,
 } from "./rolling-tier-tree.ts";
 export {

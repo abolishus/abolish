@@ -833,4 +833,7 @@ export {
   type DeploymentRecordError,
   DeploymentRecordRefused,
   type DeploymentRecordSource,
+  type DeploymentVariables,
+  deploymentVariables,
+  type ServiceVariables,
 } from "./deployment-record.ts";

@@ -1202,6 +1202,8 @@ const enUS = {
     "Setting up takes a while, mostly waiting for the public record to settle. You can leave this page, or follow its setup step by step.",
   pollsFollowSetup: "Follow its setup",
   pollsPage: "Go to its page",
+  pollsResults: "See its results",
+  pollsStartNew: "Start a new poll",
   pollsDelete: "Delete draft…",
   pollsDeleteQuestion: "Delete this draft? This can't be undone.",
   pollsDeleteConfirm: "Delete draft permanently",

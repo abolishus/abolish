@@ -243,15 +243,28 @@ export function AccountPolls({
           </Button>
         </span>
       );
-    const link = (href: string, words: "pollsFollowSetup" | "pollsPage") => (
+    const link = (
+      href: string,
+      words: "pollsFollowSetup" | "pollsPage" | "pollsResults" | "pollsStartNew",
+    ) => (
       <a href={href} aria-describedby={which} className={LINK}>
         {t(words)}
       </a>
     );
     if (shown === "setup") return link(`/account/polls/${p.id}/setup`, "pollsFollowSetup");
-    if (shown === "open" || shown === "closed")
+    if (shown === "open")
       return p.electionId === undefined ? null : link(`/polls/${p.electionId}`, "pollsPage");
-    if (p.state !== "failed" || !p.retryable) return null;
+    // Once closed, what its author comes back for is how it came out.
+    if (shown === "closed")
+      return p.electionId === undefined ? null : (
+        <span className="flex flex-wrap gap-x-4 md:justify-end">
+          {link(`/polls/${p.electionId}/results`, "pollsResults")}
+          {link(`/polls/${p.electionId}`, "pollsPage")}
+        </span>
+      );
+    if (p.state !== "failed") return null;
+    // Its reason ends "start a new poll": the way to do it is here, not at the list's top.
+    if (!p.retryable) return link("/account/polls/new", "pollsStartNew");
     return (
       <span className="flex flex-wrap gap-x-4 md:justify-end">
         <Button

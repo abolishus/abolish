@@ -4,10 +4,11 @@ The checklist for putting staging's contracts on Base Sepolia (L2) and Sepolia (
 
 ## Not yet possible
 
-There is no deploy script or deployment record yet ([[P2-32]]). A testnet deployment may go ahead before six of the spec's pre-deployment conditions are met: definition versions 1 and 3 still admitted, the decoder's gas at the record's limits, Tier 2's addition path, the nullifier-key events' contract-event version, a contract path for tally openings, and verifier 1.2's creation-code binding ([[0044-testnet-deployments]]; [[contracts]], Testnet deployments). It waits on your decision on [[delivery]]'s three residuals (in [[STATUS]], Waiting on the owner). On the testnet:
+There is no deploy script or deployment record yet ([[P2-32]]). A testnet deployment may go ahead before seven of the spec's pre-deployment conditions are met: definition versions 1 and 3 still admitted, the decoder's gas at the record's limits, Tier 2's addition path, the nullifier-key events' contract-event version, a contract path for tally openings, verifier 1.2's creation-code binding, and regions at group creation ([[0044-testnet-deployments]]; [[contracts]], Testnet deployments). It waits on your decision on [[delivery]]'s three residuals (in [[STATUS]], Waiting on the owner). On the testnet:
 
 - Create polls only through staging's poll creation, which registers version 5.
 - Never have the launch seats record a nullifier key.
+- Publish one Tier 0 group and serve region 0 only.
 - Never pin the deployment in a release for real polls.
 - Treat the deployment as disposable: a later one replaces it, and staging's polls stay on the old one.
 

@@ -336,18 +336,19 @@ The only evidence archived for contract events is, per contract and per anchored
 
 ## Testnet deployments
 
-A deployment to Base Sepolia (84532), Sepolia (11155111) or a local Anvil (31337) may precede six conditions that this page, [[election-definition]], [[tally]] and [[verifier]] give as "before any registry is deployed" or "before any deployment" ([[0044-testnet-deployments]]):
+A deployment to Base Sepolia (84532), Sepolia (11155111) or a local Anvil (31337) may precede seven conditions that this page, [[election-definition]], [[tally]], [[verifier]] and [[0019-regional-cells]] give as "before any registry is deployed" or "before any deployment" ([[0044-testnet-deployments]]):
 
 1. definition versions 1 and 3 refused (Election registry, Known-weak);
 2. the registry's decoder budgeted to the record's limits under the L2's transaction gas cap (Election registry, Known-weak);
 3. Tier 2's addition path ([[P3-4]]; Group registry, Known-weak);
 4. the nullifier-key events in a contract-event version (Group registry, Known-weak);
 5. a contract path for tally openings ([[tally]], Residuals, The operator can withhold every opening);
-6. the binding of each deployment to the release creation code and its constructor arguments, specified ([[verifier]] 1.2), without which 1.2 stays `not-implemented` on the testnet as everywhere.
+6. the binding of each deployment to the release creation code and its constructor arguments, specified ([[verifier]] 1.2), without which 1.2 stays `not-implemented` on the testnet as everywhere;
+7. each group's region fixed at creation, logged in `GroupCreated` and bound by every signed addition and removal ([[0019-regional-cells]], Consequences), without which registration serves region 0 only, with one published group ([[registration]]).
 
-Three residuals of [[delivery]] that must be closed or accepted by the owner before any election registry is deployed (Residuals: a newest ballot that never reached the board, approved stubs holding capacity, withheld board data and the complaint scope) are the owner's to accept for a testnet; no testnet deployment is made before the owner has accepted them or they are closed. Every other condition holds for a testnet as for any deployment. None of the six is waived beyond a testnet.
+Three residuals of [[delivery]] that must be closed or accepted by the owner before any election registry is deployed (Residuals: a newest ballot that never reached the board, approved stubs holding capacity, withheld board data and the complaint scope) are the owner's to accept for a testnet; no testnet deployment is made before the owner has accepted them or they are closed. Every other condition holds for a testnet as for any deployment. None of the seven is waived beyond a testnet, and neither are the conditions this page already gives as before any registry is deployed beyond a testnet (Group registry, Known-weak, Paid floods of self-paid additions).
 
-The deploy script refuses any other chain while any of the six is open. No verifier or ballot-client release offered for real polls pins a deployment on chain 84532, 11155111 or 31337: that is a rule of the release procedure ([[release]]), not something a contract can enforce, since anyone can deploy the same bytecode anywhere. A testnet deployment is never upgraded: closing a condition means a new deployment, and nothing carries the old one's elections forward.
+The deploy script refuses any other chain while any of the seven, or any of those, is open. No verifier or ballot-client release offered for real polls pins a deployment on chain 84532, 11155111 or 31337: that is a rule of the release procedure ([[release]]), not something a contract can enforce, since anyone can deploy the same bytecode anywhere. A testnet deployment is never upgraded: closing a condition means a new deployment, and nothing carries the old one's elections forward.
 
 ## Election registry
 

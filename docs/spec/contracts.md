@@ -336,14 +336,18 @@ The only evidence archived for contract events is, per contract and per anchored
 
 ## Testnet deployments
 
-A deployment to Base Sepolia (84532), Sepolia (11155111) or a local Anvil (31337) may precede four conditions this page and [[election-definition]] give as "before any registry is deployed" ([[0044-testnet-deployments]]). Every other condition holds for a testnet as for any deployment, and none of the four is waived beyond a testnet:
+A deployment to Base Sepolia (84532), Sepolia (11155111) or a local Anvil (31337) may precede six conditions that this page, [[election-definition]], [[tally]] and [[verifier]] give as "before any registry is deployed" or "before any deployment" ([[0044-testnet-deployments]]):
 
 1. definition versions 1 and 3 refused (Election registry, Known-weak);
 2. the registry's decoder budgeted to the record's limits under the L2's transaction gas cap (Election registry, Known-weak);
 3. Tier 2's addition path ([[P3-4]]; Group registry, Known-weak);
-4. the nullifier-key events in a contract-event version (Group registry, Known-weak).
+4. the nullifier-key events in a contract-event version (Group registry, Known-weak);
+5. a contract path for tally openings ([[tally]], Residuals, The operator can withhold every opening);
+6. the binding of each deployment to the release creation code and its constructor arguments, specified ([[verifier]] 1.2), without which 1.2 stays `not-implemented` on the testnet as everywhere.
 
-The deploy script refuses any other chain while any of the four is open. No release offered for real polls pins a testnet deployment. A testnet deployment is never upgraded: closing one of the four means a new deployment, and nothing carries the old one's elections forward.
+Three residuals of [[delivery]] that must be closed or accepted by the owner before any election registry is deployed (Residuals: a newest ballot that never reached the board, approved stubs holding capacity, withheld board data and the complaint scope) are the owner's to accept for a testnet; no testnet deployment is made before the owner has accepted them or they are closed. Every other condition holds for a testnet as for any deployment. None of the six is waived beyond a testnet.
+
+The deploy script refuses any other chain while any of the six is open. No verifier or ballot-client release offered for real polls pins a deployment on chain 84532, 11155111 or 31337: that is a rule of the release procedure ([[release]]), not something a contract can enforce, since anyone can deploy the same bytecode anywhere. A testnet deployment is never upgraded: closing a condition means a new deployment, and nothing carries the old one's elections forward.
 
 ## Election registry
 
@@ -839,7 +843,7 @@ Each event goes through the event accumulator, with topic 0 the keccak-256 of it
 
 `Tier1MemberAdded` indexes no group: a verifier takes the group from the record ([[vouching]], Counting across the deployment, Checks, `group`), so a topic would be a second copy of it that could disagree. Indexers decode it from the data. `SelfPaidMemberAdded` carries `index` only as a topic, since its record names no position: the registry assigns it, and a verifier checks it against its own count (Verification).
 
-The two nullifier-key events join the contract-event record's tables in a new record version, with the Tier 2 additions, before any registry is deployed (Contract-event record); no profile pins a version that has them yet. Until then a registry logs them only when a quorum of its initial panel records a key, which no deployment does before that version, so readers of the sequence under earlier versions never meet them; `packages/contracts`' `contract-events.test.ts` compares the registry's other events with versions 7 and 8 and requires these two to be in no version's table yet. Their records' topics repeat fields of the record, and a verifier compares each with its record before using either (Verification).
+The two nullifier-key events join the contract-event record's tables in a new record version, with the Tier 2 additions, before any registry is deployed beyond a testnet (Contract-event record; Testnet deployments); no profile pins a version that has them yet. Until then a registry logs them only when a quorum of its initial panel records a key, which no deployment does before that version, so readers of the sequence under earlier versions never meet them; `packages/contracts`' `contract-events.test.ts` compares the registry's other events with versions 7 and 8 and requires these two to be in no version's table yet. Their records' topics repeat fields of the record, and a verifier compares each with its record before using either (Verification).
 
 The registrars are logged at deployment, so they are the registry's first event (which, until 1.2 binds creation code, only the release constructor guarantees: Board anchor, Known-weak, Constructor effects aren't bound).
 

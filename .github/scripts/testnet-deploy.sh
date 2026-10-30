@@ -3,8 +3,10 @@
 # testnet-deploy.yml; P2-32 part 3b; packages/contracts/README.md, Deploy
 # script and Confirming a deployment). Threats: T-64, T-34, T-65, T-56.
 #
-# Every RPC URL is read from the environment, never an argument: a provider's
-# URL can carry its key, and arguments end up in logs.
+# Every RPC URL is read from the environment, never this script's argument: a
+# provider's URL can carry its key, and a step's arguments end up in its log.
+# forge and anvil still take them as arguments, so any process in the job can
+# read them; the jobs run no dependency code beside forge and confirm.ts.
 #
 #   config                          print DEPLOY_CONFIG for this commit: the
 #                                   owner's TESTNET_DEPLOY_CONFIG with the
@@ -132,7 +134,8 @@ confirm() {
   RPC_URL="${L2_RPC_URL:?}" vp node script/confirm.ts "deployments/$L2_CHAIN.json" \
     "broadcast/Deploy.s.sol/$L2_CHAIN/runL2-latest.json" "$artifacts" >"$out/$L2_CHAIN.json"
   # The records the script wrote are the deployment the config describes.
-  jq -e --slurpfile c "$config" '.commit == $c[0].commit and .deployer == $c[0].deployer' \
+  jq -s -e --slurpfile c "$config" \
+    'all(.[]; .commit == $c[0].commit and (.deployer | ascii_downcase) == ($c[0].deployer | ascii_downcase))' \
     "$out/$L1_CHAIN.json" "$out/$L2_CHAIN.json" >/dev/null ||
     fail "the records aren't this run's commit and deployer"
 }
@@ -160,8 +163,10 @@ finalized() {
   local want have deadline=$((SECONDS + 5400))
   want="$(jq -e '[.contracts[].block] | max' "$1")"
   while :; do
-    have="$(ETH_RPC_URL="${RPC_URL:?}" cast block finalized --field number)"
-    ((have >= want)) && return
+    # A provider's passing error is waited out like an unfinalized block.
+    if have="$(ETH_RPC_URL="${RPC_URL:?}" cast block finalized --field number)" && ((have >= want)); then
+      return
+    fi
     ((SECONDS < deadline)) || fail "block $want of chain $(jq .chainId "$1") wasn't finalized within 90 minutes"
     sleep 30
   done
@@ -171,8 +176,12 @@ verify() {
   local record artifacts broadcast chain name address tx input bytecode args
   record="$(abspath "$1")" artifacts="$(abspath "$2")"
   chain="$(jq -r .chainId "$record")"
+  case "$chain" in
+    "$L1_CHAIN") broadcast="broadcast/Deploy.s.sol/$L1_CHAIN/runL1-latest.json" ;;
+    "$L2_CHAIN") broadcast="broadcast/Deploy.s.sol/$L2_CHAIN/runL2-latest.json" ;;
+    *) fail "unexpected chain $chain in the record" ;;
+  esac
   cd "$CONTRACTS"
-  broadcast="$(ls broadcast/Deploy.s.sol/"$chain"/run*-latest.json)"
   while read -r name address tx; do
     [[ "$name" =~ ^[A-Za-z0-9]+$ ]] || fail "unexpected contract name in the record"
     # A contract's constructor arguments follow its creation code in the

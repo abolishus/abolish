@@ -15,8 +15,8 @@
 #   checks         broadcast only: ci, repro-build and reference-election
 #                  passed on this commit.
 #   deploy         broadcast only, `staging` environment: the deploy script on
-#                  both chains with TESTNET_DEPLOYER_KEY. Runs no npm code:
-#                  only the hash-verified toolchain, bash and jq see the key.
+#                  both chains with TESTNET_DEPLOYER_KEY. Runs no dependency
+#                  code: only the hash-verified toolchain, bash and jq see the key.
 #   confirm        each record confirmed against its chain and the release
 #                  build, then again once both chains have finalized every
 #                  block it names, through the main provider and through a
@@ -203,8 +203,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # No vp, no Node and no dependency installs in the job that holds the
-      # key: only the pinned, hash-verified forge and cast, bash and jq.
+      # No vp and no dependency code in the job that holds the key: only the
+      # pinned, hash-verified forge and cast, bash and jq, beside the
+      # SHA-pinned checkout and upload actions, in steps without the key.
       - name: Install Noir, Barretenberg and Foundry
         run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
       - name: Deploy to Sepolia, then Base Sepolia
@@ -224,17 +225,18 @@ jobs:
             exit 1
           fi
           "$s" deploy "$out/config.json" --private-key "$TESTNET_DEPLOYER_KEY"
-      # Whatever was sent, even if the L2 run failed after the L1's: the
-      # broadcast files are the only record of the transactions.
+      # Whatever was sent, even if the L2 run failed after the L1's, or the
+      # job timed out or was cancelled mid-broadcast: the broadcast files are
+      # the only record of the transactions.
       - name: Collect the records and broadcast files
-        if: ${{ !cancelled() }}
+        if: always()
         run: |
           out="$RUNNER_TEMP/deployment"
           mkdir -p "$out"
           cd packages/contracts
           find deployments broadcast -name '*.json' -print0 2>/dev/null | xargs -0 -r cp --parents -t "$out"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: ${{ !cancelled() }}
+        if: always()
         with:
           name: deployment
           path: ${{ runner.temp }}/deployment/

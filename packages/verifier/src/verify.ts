@@ -22,9 +22,10 @@
 // L1-origin checks over the board's contract-event records, which can fail
 // 4.4 but never pass it, and, for a run that read the archive
 // (`readArchive`), 4.3, which can pass but never fail, and, under a
-// rolling definition, admission, selection and the spoiled-ballot openings
-// against the chain from the archive's replay once the release pins the
-// registries (rolling-chain.ts);
+// rolling definition, admission, selection, the spoiled-ballot openings and,
+// without an author panel, delivery and the counted set against the chain
+// from the archive's replay once the release pins the registries
+// (rolling-chain.ts);
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
@@ -1179,11 +1180,11 @@ export function verifyBundle(
       const destructionApplies = carriesDestruction(definition.inputs.boardEntryVersion);
       const extent =
         board.unauthenticated === undefined ? undefined : board.entries - board.unauthenticated;
-      // Under a rolling definition delivery (5.9) doesn't read ballot
-      // version 5's delivery fields yet (P2-17 part 4d-2b-2b), so neither it
-      // nor anything after it is reached.
+      // Under a rolling definition delivery (5.9) reads ballot version 5's
+      // fields, its hash binding the step, and the counted set is per rolling
+      // tier; beside an author panel `countedChecks` stops at 5.9 (P2-17
+      // part 4d-2b-2b-2b).
       if (
-        definition.rolling !== undefined ||
         chosen.report === undefined ||
         checked.registered === undefined ||
         extent === undefined ||

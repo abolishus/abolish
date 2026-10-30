@@ -156,9 +156,9 @@ def entry_error(b):
 # --- The delivery check (version 2) -----------------------------------------------
 
 
-def check_delivery(definition_hash, registered, seg_d, seg_k, t_d, t_k, ballots, entries):
-    """docs/spec/delivery.md, Delivery check (version 2), from the spec's text: version 1's check over every seat of both panels, each record against its own panel's share hashes and key set. `registered[panel]` maps each qualified seat to its keys."""
-    hashes = [b4.ballot_hash(b["ctx"], b["vote"]) for b in ballots]
+def check_delivery(definition_hash, registered, seg_d, seg_k, t_d, t_k, ballots, entries, hash_of=None):
+    """docs/spec/delivery.md, Delivery check (version 2), from the spec's text: version 1's check over every seat of both panels, each record against its own panel's share hashes and key set. `registered[panel]` maps each qualified seat to its keys. `hash_of` gives a ballot's hash under its own version, version 4's by default (ballot version 5's binds its step)."""
+    hashes = [b4.ballot_hash(b["ctx"], b["vote"]) if hash_of is None else hash_of(b) for b in ballots]
     index = {h: i for i, h in enumerate(hashes)}
     delivered = [set() for _ in ballots]
     reports, rejected = [], []

@@ -19,11 +19,16 @@ import {
   type ElectionDefinitionV5,
   electionDefinitionV5Rule,
   type ElectionDefinitionV6,
+  type ElectionDefinitionV7,
+  electionDefinitionV7Rule,
+  ELECTORATE_MODES,
 } from "./election-definition.ts";
 import { type Element, G, GENERATOR_H, GROUP_ORDER, IDENTITY } from "./group.ts";
 import { PARAMETERS } from "./parameters.ts";
 import {
   type AnyElectionDefinitionRecord,
+  decodeElectionDefinitionV7,
+  encodeElectionDefinitionV7,
   type ElectionDefinitionV7Record,
   type PanelledDefinition,
   panelledFacts,
@@ -143,7 +148,9 @@ export function checkRules(rules: TallyRules): void {
  * (`panelTallyRules`) and it is refused here, so no caller sums a half under
  * one panel's rules as the whole vote (T-28, T-37). A version-7 definition
  * under a fixed electorate is read as version 6 is (`panelledFacts`); a
- * rolling one, and any later version, is `UnsupportedVersionError` (T-36). A definition that isn't well-formed is
+ * rolling one without an author panel is tallied per rolling tier under its
+ * own rules (tally.md, Rolling tiers), and any later version is
+ * `UnsupportedVersionError` (T-36). A definition that isn't well-formed is
  * refused: its questions could hold limits no ballot proves, which would
  * make `tally-question-range` judge an honest cell (T-28, T-34).
  */
@@ -173,10 +180,27 @@ export function tallyRules(
     case 6:
     case 7: {
       const notWellFormed = () => new RangeError("tallyRules: the definition isn't well-formed");
-      let d: ElectionDefinitionV5 | PanelledDefinition;
+      let d: ElectionDefinitionV5 | PanelledDefinition | ElectionDefinitionV7;
       if (definition.version === 5) {
         if (electionDefinitionV5Rule(definition.value) !== undefined) throw notWellFormed();
         d = definition.value;
+      } else if (
+        definition.version === 7 &&
+        definition.value.electorate_mode === ELECTORATE_MODES.rolling
+      ) {
+        // A rolling poll's cells are its rolling tiers, each tallied as a
+        // fixed poll's cell is, over ballot version 5's default half
+        // (tally.md, Rolling tiers). Read from one decoded copy, so the
+        // rules judged are the rules returned.
+        const v = decodeElectionDefinitionV7(encodeElectionDefinitionV7(definition.value));
+        if (
+          v.electorate_mode !== ELECTORATE_MODES.rolling ||
+          electionDefinitionV7Rule(v) !== undefined
+        )
+          throw notWellFormed();
+        if (v.author_keys.length !== 0)
+          throw new RangeError("tallyRules: an author panel's halves are tallied per panel");
+        d = v;
       } else {
         // Read from its one decoded copy, which its rules were judged on.
         const facts = panelledOf(definition);

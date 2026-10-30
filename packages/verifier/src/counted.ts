@@ -71,7 +71,12 @@ import {
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { BallotTally } from "./ballots.ts";
-import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
+import {
+  isPanelled,
+  isRolling,
+  type PanelledRecord,
+  type VerifiedDefinition,
+} from "./definition.ts";
 import { type CloseCandidate, closeChecks, type CloseReport } from "./close.ts";
 import type { L1Header } from "./l1.ts";
 import { countedFloor } from "./openings.ts";
@@ -404,6 +409,18 @@ export function deliverSelected(
   const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
   if (author && inputs.authorRegistered === undefined)
     return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
+  // A rolling poll's ballots (version 5) are version 4's halves with a step,
+  // delivered by the same records (delivery.md, Versions). Beside an author
+  // panel its delivery and per-panel tally aren't read yet (P2-17 part
+  // 4d-2b-2b-2b): nothing is decided, never over the default panel alone
+  // (T-37).
+  const halved = isPanelled(definition) || isRolling(definition);
+  if (
+    definition.version === 7 &&
+    isRolling(definition) &&
+    definition.value.author_keys.length !== 0
+  )
+    return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   // Ordinary ballots can't be found under a contract-event version this
   // release doesn't read, so 5.5 is unsupported, admission never settles and
   // 6.1 never passes there, whatever the copy holds; a caller that gets here
@@ -469,19 +486,19 @@ export function deliverSelected(
       if (BigInt(segment) > floor && record.l2_timestamp > deadlines.complaint) continue;
       if (!("record" in checked.event)) continue;
       // Only a record of the version the ballot version fixes (2 under
-      // ballot version 4, 1 under the others) delivers or excludes
+      // ballot versions 4 and 5, 1 under the others) delivers or excludes
       // ([[delivery]], Versions): any other is a rejected entry wherever it
       // sits, so one above the floor isn't read, as a board-path one isn't,
       // and can't hold the rows open. Versions 9 to 13 frame both.
-      const fixed = checked.event.record[2] === (isPanelled(definition) ? 2 : 1);
+      const fixed = checked.event.record[2] === (halved ? 2 : 1);
       if (BigInt(segment) > floor && !fixed) continue;
-      // Under ballot version 4 one naming another definition is stray
+      // Under ballot versions 4 and 5 one naming another definition is stray
       // wherever it sits and delivers nothing here, so above the floor it
       // isn't read either: another election's seat can't hold these rows
       // open from the board's shared sequence (T-53).
       if (
         BigInt(segment) > floor &&
-        isPanelled(definition) &&
+        halved &&
         "definitionHash" in checked.event &&
         !equal(checked.event.definitionHash, definitionHash)
       )
@@ -500,7 +517,7 @@ export function deliverSelected(
       // election's seat can't stall this one's rows from the board's shared
       // sequence.
       if (
-        isPanelled(definition) &&
+        halved &&
         fixed &&
         checked.event.event === "ObligationRootSubmitted" &&
         equal(checked.event.definitionHash, definitionHash)
@@ -508,7 +525,7 @@ export function deliverSelected(
         return { stop: { status: "unverifiable", code: "not-implemented", at: { entry: at } } };
       // A root of another version is a rejected entry the delivery check
       // lists, whatever it names.
-      if (checked.event.event === "ObligationRootSubmitted" && !isPanelled(definition) && fixed) {
+      if (checked.event.event === "ObligationRootSubmitted" && !halved && fixed) {
         // A root for this election may deliver for every ballot by its leaves,
         // which only the counted-extent attestations make available and
         // `checkDelivery` doesn't read yet (P1-12f parts 2 and 3; P4-3 part
@@ -531,7 +548,7 @@ export function deliverSelected(
   }
 
   const against: DeliveryWindow = { definitionHash, registered, segments, deadlines };
-  const delivered = isPanelled(definition)
+  const delivered = halved
     ? deliveryV2(inputs, against, records, recordAt)
     : deliveryV1(inputs, against, records, recordAt, strays);
   return { eventVersion, own, floor, ...delivered };
@@ -904,12 +921,14 @@ function deliveryV1(
 }
 
 /**
- * 5.9 under ballot version 4: delivery records version 2, over every
+ * 5.9 under ballot versions 4 and 5: delivery records version 2, over every
  * qualified seat of both panels, each record against its own panel's share
  * hashes and key set (docs/spec/delivery.md, Delivery check (version 2);
  * T-37). Beside an author panel its seats are the key set its own run
  * registered and its approvals approved; without one that set is empty, so a
  * record naming an author seat is `delivery-seat` and delivers nothing.
+ * A rolling poll reaches here only without one, each ballot hashed with its
+ * step (`deliveryBallotHashV2`).
  */
 function deliveryV2(
   inputs: DeliveryInputs,
@@ -917,7 +936,9 @@ function deliveryV2(
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],
 ): { readonly ballots: DeliveryCheckV2["ballots"]; readonly delivery: DeliveryReportV2 } {
-  const d = (inputs.definition as PanelledRecord).value;
+  // A version-6 or fixed version-7 definition, or, past `deliverSelected`'s
+  // guard, a rolling one without an author panel.
+  const d = inputs.definition.value as PanelledRecord["value"];
   const delivered = checkDeliveryV2(
     {
       definitionHash: window.definitionHash,
@@ -1189,7 +1210,8 @@ function panelTally(
  * Each cell's tier, in partition order: under definition version 1 the
  * cells are the tiers, under versions 3 to 6 and a fixed version 7 every
  * tier's cells in `electorate` order (election-definition.md, Notes, Tally
- * partition).
+ * partition), and under a rolling version 7 one cell per rolling tier, in
+ * `rolling_electorate` order (tally.md, Rolling tiers).
  */
 export function cellTiers(definition: VerifiedDefinition): readonly number[] {
   switch (definition.version) {
@@ -1201,10 +1223,8 @@ export function cellTiers(definition: VerifiedDefinition): readonly number[] {
     case 6:
       return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     case 7:
-      // A rolling version 7 stops at 2.3 (verify.ts) until 2.4's rolling
-      // replay gives its cells (P2-17 part 4c).
       if (definition.value.electorate_mode === ELECTORATE_MODES.rolling)
-        throw new RangeError("cellTiers: a rolling electorate's cells aren't read yet");
+        return definition.value.rolling_electorate.map((t) => t.tier);
       return definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
     default: {
       const unread: never = definition;

@@ -108,7 +108,8 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * The number of cells in a definition's partition (docs/spec/
  * election-definition.md, Notes, Tally partition): version 1's tiers, or
  * versions 3 to 6's and a fixed version 7's cells of every tier, as the
- * definition states them. 2.1's rules keep it from 1 to 256, as
+ * definition states them, or a rolling version 7's rolling tiers, one cell
+ * each (tally.md, Rolling tiers). 2.1's rules keep it from 1 to 256, as
  * `sortTallyOpenings` requires: a non-empty electorate, and under versions 3
  * to 7 the `cells` rule, which caps the total and gives every tier at least
  * one cell.
@@ -123,10 +124,9 @@ export function partitionSize(definition: VerifiedDefinition): number {
     case 6:
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     case 7:
-      // A rolling version 7 stops at 2.3 (verify.ts) until 2.4's rolling
-      // replay gives its cells (P2-17 part 4c).
+      // One cell per rolling tier (tally.md, Rolling tiers).
       if (definition.value.electorate_mode === ELECTORATE_MODES.rolling)
-        throw new RangeError("partitionSize: a rolling electorate's cells aren't read yet");
+        return definition.value.rolling_electorate.length;
       return definition.value.electorate.reduce((n, t) => n + t.cells.length, 0);
     default: {
       const unread: never = definition;

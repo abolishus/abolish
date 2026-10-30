@@ -196,7 +196,7 @@ describe("what a rolling ballot is judged against", { timeout: 60_000 }, () => {
     for (const entry of [4, 5]) expect(codes.has(entry), String(entry)).toBe(false);
   });
 
-  test("the admitted ballots count in the cell they name, with no delivery fields yet", () => {
+  test("the admitted ballots count in the cell they name, delivered by version 5's fields with the step", () => {
     const r = admit(byId("board"));
     expect(r.candidates?.map((x) => [x.entry, x.tally?.cell])).toEqual([
       [1, 0],
@@ -206,8 +206,14 @@ describe("what a rolling ballot is judged against", { timeout: 60_000 }, () => {
       [5, 0],
     ]);
     for (const x of r.candidates ?? []) {
+      const record = decodeBallot(x.record, 5);
       expect(x.tally?.delivery).toBeUndefined();
-      expect(x.tally?.deliveryV4).toBeUndefined();
+      expect(x.tally?.deliveryV4).toEqual({
+        cell: record.cell,
+        nullifier: record.nullifier,
+        vote: record.committed_vote,
+        step: record.step,
+      });
     }
   });
 

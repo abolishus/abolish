@@ -174,7 +174,8 @@ export interface CountedCandidate {
  * counts in, by its position (docs/spec/tally.md, Context), its VSS
  * commitments and, for the ballot versions whose delivery this release
  * checks, what the delivery check recomputes its ballot hash from: under
- * versions 1 to 3 `delivery`, under version 4 `deliveryV4`.
+ * versions 1 to 3 `delivery`, under versions 4 and 5 `deliveryV4` (with its
+ * `step` under version 5).
  */
 export interface BallotTally {
   readonly cell: number;
@@ -916,9 +917,18 @@ export function steppedJudgeFor(
       return {
         core: { definitionHash: record.definition_hash, vss, authorVss },
         step: stepBallotV5(election, record, suppliedRoot),
-        // No delivery fields: 5.9 under ballot version 5, whose ballot hash
-        // binds the step, isn't read yet (P2-17 part 4d-2b).
-        tally: { cell: record.cell, vss },
+        // Version 5 keeps version 4's delivery records; the delivery check
+        // recomputes version 5's ballot hash, which binds the step (T-38).
+        tally: {
+          cell: record.cell,
+          vss,
+          deliveryV4: {
+            cell: record.cell,
+            nullifier: record.nullifier,
+            vote: record.committed_vote,
+            step: record.step,
+          },
+        },
       };
     };
   }

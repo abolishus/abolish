@@ -59,9 +59,10 @@ export type PanelledRecord = Extract<VerifiedDefinition, { readonly version: 6 |
 /**
  * Whether the definition is read as version 6 is: version 6, or version 7
  * under a fixed electorate, which pins ballot version 4 and states its roots
- * as version 6 does (docs/spec/verifier.md, 2.3). A rolling version 7 never
- * reaches the checks that ask: verify.ts leaves it unverifiable at 2.3
- * first, and @abolishus/crypto refuses it as unsupported (T-36).
+ * as version 6 does (docs/spec/verifier.md, 2.3). A rolling version 7
+ * isn't: its ballots are version 5, read by the checks that ask beside
+ * `isRolling` (admission, 6.2, and without an author panel 5.9 and the
+ * counted set), and left `not-reached` by the others (T-36).
  */
 export const isPanelled = (record: VerifiedDefinition): record is PanelledRecord =>
   record.version === 6 ||

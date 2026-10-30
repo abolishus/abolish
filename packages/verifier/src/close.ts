@@ -17,7 +17,7 @@
 
 import {
   type AdmittedBallot,
-  ballotHashV4,
+  deliveryBallotHashV2,
   type CloseBallot,
   closeCheck,
   closeDeadline,
@@ -220,16 +220,14 @@ export function closeChecks(inputs: CloseInputs): {
   const ballots: CloseBallot[] = inputs.ballots.map((b) => {
     const t = b.tally;
     // Delivery kept each ballot by the hash of its own version: version 4's
-    // over both halves.
-    if (t?.deliveryV4 !== undefined) {
-      const { cell, nullifier, vote } = t.deliveryV4;
+    // over both halves, and version 5's with its step too.
+    if (t?.deliveryV4 !== undefined)
       return {
         ...b.ballot,
-        cell,
-        ballotHash: ballotHashV4({ definitionHash, cell, nullifier }, vote),
+        cell: t.deliveryV4.cell,
+        ballotHash: deliveryBallotHashV2(definitionHash, t.deliveryV4),
         path: "board",
       };
-    }
     if (t?.delivery === undefined)
       throw new Error("closeChecks: an admitted ballot without its delivery fields");
     return {

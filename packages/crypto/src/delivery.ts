@@ -12,6 +12,7 @@ import {
   ballotHash,
   ballotHashV3,
   ballotHashV4,
+  ballotHashV5,
   type BallotHashContextV3,
   type BallotLabel,
   type CommittedVote,
@@ -2767,11 +2768,32 @@ export interface DeliveryElectionV2 {
   readonly deadlines: DeliveryDeadlines;
 }
 
-/** A selected version-4 ballot, decoded, with its cell and nullifier; it passed `validity-shape`. */
+/**
+ * A selected version-4 ballot, decoded, with its cell and nullifier; it
+ * passed `validity-shape`. A version-5 ballot, which ballot version 5 delivers
+ * under the same records (Versions), carries its `step` too.
+ */
 export interface DeliveryBallotV4 {
   readonly cell: number;
   readonly nullifier: bigint;
   readonly vote: CommittedVoteV4;
+  /** Ballot version 5's root-clock step; absent for a version-4 ballot. */
+  readonly step?: number;
+}
+
+/**
+ * The ballot hash a version-2 delivery record names for `ballot`: version 5's,
+ * which binds the step, where the ballot names one, and otherwise version
+ * 4's, so a receipt for a version-5 ballot never delivers the same fields
+ * relabelled to another step or read as version 4 (T-38).
+ */
+export function deliveryBallotHashV2(
+  definitionHash: Uint8Array,
+  ballot: DeliveryBallotV4,
+): Uint8Array {
+  const { cell, nullifier, vote, step } = ballot;
+  const ctx: BallotHashContextV3 = { definitionHash, cell, nullifier };
+  return step === undefined ? ballotHashV4(ctx, vote) : ballotHashV5({ ...ctx, step }, vote);
 }
 
 /** A version-2 record the check ignored or attributed, with the panel and seat the record names. */
@@ -2814,8 +2836,8 @@ export interface DeliveryRootsV2 {
 }
 
 /**
- * The delivery check for ballot version 4 (docs/spec/delivery.md, Delivery
- * check (version 2); verifier 5.9), over delivery records of version 2 and
+ * The delivery check for ballot versions 4 and 5 (docs/spec/delivery.md,
+ * Delivery check (version 2); verifier 5.9), over delivery records of version 2 and
  * every seat of both panels: each record checked against its own panel's
  * share hashes and registered key set, so a record for one panel's seat `i`
  * never delivers, excludes or contradicts the other's (T-37). Otherwise
@@ -2829,7 +2851,9 @@ export interface DeliveryRootsV2 {
  * on trust could drop a seat that withheld its share, or add one no seat
  * holds (T-37, T-17, T-25). Beside an author panel `definition` is required;
  * without one it may be omitted, the author key set must then be empty, and
- * the default set is the caller's. A contract-path obligation root is read
+ * the default set is the caller's, as it is for a rolling poll's version-5
+ * ballots, each hashed with its step (`deliveryBallotHashV2`), which only
+ * a poll without an author panel reaches here. A contract-path obligation root is read
  * against `roots`, as `checkDelivery`'s are, judged available only by its own
  * panel's threshold and attestations; given `definition`, the thresholds must
  * be its own, since a lower or higher one would let fewer seats withhold or
@@ -2863,6 +2887,10 @@ export function checkDeliveryV2(
   // version but 6 and a fixed 7 is refused (T-36).
   const facts = panelledFacts(definition);
   const d = facts.value;
+  // A version-6 or fixed version-7 definition's ballots are version 4,
+  // which names no step (T-38).
+  if (ballots.some((b) => b.step !== undefined))
+    throw new RangeError(`${name}: a version-4 ballot names no step`);
   const transcript = checkedTranscriptHash(e.registered.default);
   if (
     !(e.definitionHash instanceof Uint8Array) ||
@@ -2932,6 +2960,9 @@ export function checkDeliveryV2With(
   const reader =
     roots === undefined ? undefined : rootReader(name, roots, roots.attestations, panels);
 
+  // One election's ballots share one version: all name a step or none does.
+  if (new Set(ballots.map((b) => b.step === undefined)).size > 1)
+    throw new RangeError(`${name}: ballots of versions 4 and 5 together`);
   const hashes = ballots.map((b) => {
     const v = b.vote;
     // validity-shape: one share hash per seat of each panel, and an author
@@ -2942,8 +2973,7 @@ export function checkDeliveryV2With(
       (v.author_vss.length === 0) !== (authorPanelSize === 0)
     )
       throw new RangeError(`${name}: every ballot must have passed validity-shape`);
-    const ctx: BallotHashContextV3 = { definitionHash, cell: b.cell, nullifier: b.nullifier };
-    return ballotHashV4(ctx, v);
+    return deliveryBallotHashV2(definitionHash, b);
   });
   const vote = (ballot: number) => (ballots[ballot] as DeliveryBallotV4).vote;
   const ctx = { definitionHash };

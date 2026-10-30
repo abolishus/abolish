@@ -3,26 +3,29 @@
 // every copy admission read, the anchored extent's share receipts and
 // running openings, and the bundle's run of finalized L1 headers go through
 // releases.ts's two steps. What is this module's is gathering them: each
-// copy keyed by its tier and nullifier and by its `M`, and when each ballot
-// is fully receipted, by @abolishus/crypto's `checkDeliveryV2` over the
-// receipts boarded by each scheduled snapshot, so no receipt is judged here
-// (T-16, T-29, T-45). Nothing comes from a release, a coordinator or the
+// copy keyed by its tier and nullifier and by its `M`; when each ballot is
+// fully receipted, by @abolishus/crypto's `checkDeliveryV2` over the
+// receipts boarded by each scheduled snapshot, so no receipt is judged here;
+// and, under a rolling definition, from which header of the run each
+// version-5 copy's step is final, by @abolishus/crypto's `rootStepFinal`
+// (T-16, T-29, T-45, T-34). Nothing comes from a release, a coordinator or the
 // operator's word: a release the verifier recomputes differently is the
 // opening's breach (T-34).
 
 import {
   type AnchorClock,
-  ballotHashV4,
   type BoardEntryVersion,
   checkDeliveryV2,
   DecodeError,
   decodeBoardEntry,
   type DeliveryBallotV4,
   type DeliveryElectionV2,
+  deliveryBallotHashV2,
   deliveryDeadlines,
   deliverySegments,
   RECORD_TYPES,
   type RegisteredKeys,
+  rootStepFinal,
   tallyRules,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -63,7 +66,7 @@ export interface ReleaseOutcome {
 }
 
 export interface ReleaseInputs {
-  /** A live version-6 or fixed version-7 definition without an author panel. */
+  /** A live version-6 or version-7 definition, under either electorate mode, without an author panel. */
   readonly definition: PanelledRecord;
   readonly definitionHash: Uint8Array;
   /** The registered key set the transcript check returned (3.2 passed). */
@@ -157,6 +160,7 @@ export function releaseChecks(inputs: ReleaseInputs): {
     snapshots,
   );
 
+  const finalAt = stepFinality(inputs.blocks);
   const copies = own.map((c): LiveCopy<string, string> => ({
     entry: c.entry,
     segment: c.segment,
@@ -164,8 +168,9 @@ export function releaseChecks(inputs: ReleaseInputs): {
     nullifier: `${c.tier}:${c.nullifier}`,
     ballot: bytesToHex(c.message),
     cell: c.cell,
-    // Definition version 6 and a fixed version 7 have no rolling tier.
-    stepFinalAt: null,
+    // Only a version-5 copy, a rolling definition's, names a step; version 4
+    // proves against its cell's stated root, which needs no finality.
+    stepFinalAt: c.step === undefined ? null : finalAt(c.step),
     member: c.member,
     rejected: c.rejected,
     reference: c.reference,
@@ -180,7 +185,9 @@ export function releaseChecks(inputs: ReleaseInputs): {
   });
   const rules = tallyRules(definition);
   if (rules.questions === undefined)
-    throw new Error("releaseChecks: a version-6 definition's rules have its questions");
+    throw new Error(
+      "releaseChecks: a version-6 or version-7 definition's rules have its questions",
+    );
   const facts = runningOpeningFacts(
     { definitionHash, rules, registered },
     running,
@@ -218,6 +225,34 @@ export function releaseChecks(inputs: ReleaseInputs): {
 }
 
 /**
+ * The block from which a step is final ([[membership]], Root clock and
+ * steps): the number of the run's first header whose timestamp is at least
+ * `τ_n + ROOT_FINALITY`, or one past the run's last if none is, which no
+ * snapshot's head reaches, so the step stays pending at every snapshot. A
+ * parsed run is consecutive with increasing timestamps (Bundle), so the
+ * step is final at exactly the heads from that header on, and a binary
+ * search finds it for any number of copies (T-52). The rule reads the clock
+ * and the head alone, never the L2's own derivation, which the headers don't
+ * show, so every node and verifier reads the same pending copies (T-34).
+ */
+function stepFinality(blocks: readonly L1Header[]): (step: number) => bigint {
+  const last = blocks.at(-1);
+  if (last === undefined) throw new Error("releaseChecks: no run of headers past the snapshots");
+  const past = last.number + 1n;
+  return (step) => {
+    const n = BigInt(step);
+    let lo = 0;
+    let hi = blocks.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (rootStepFinal(n, (blocks[mid] as L1Header).timestamp)) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo === blocks.length ? past : (blocks[lo] as L1Header).number;
+  };
+}
+
+/**
  * The least scheduled snapshot's `σ_r` by which each admitted ballot, by
  * `M`, is fully receipted: `S_r` holds, for every qualified seat, a share
  * receipt that passes the delivery check's receipt checks, each read by its
@@ -231,7 +266,9 @@ export function releaseChecks(inputs: ReleaseInputs): {
  * a run up to it found it not missing: no receipt is verified twice, however
  * many snapshots there are or however long a seat withholds (T-52). Only
  * receipts are given, so a seat a posting would deliver stays missing (a
- * posting never lets a ballot enter; T-15).
+ * posting never lets a ballot enter; T-15). A version-5 ballot's hash binds
+ * its step (`deliveryBallotHashV2`), so a receipt for its fields under
+ * another step never receipts it (T-38).
  */
 function receiptSegments(
   election: DeliveryElectionV2,
@@ -244,13 +281,8 @@ function receiptSegments(
   for (const [m, t] of ballots) {
     const b = t.deliveryV4;
     if (b === undefined)
-      throw new Error("releaseChecks: an admitted version-4 ballot without its delivery fields");
-    const h = bytesToHex(
-      ballotHashV4(
-        { definitionHash: election.definitionHash, cell: b.cell, nullifier: b.nullifier },
-        b.vote,
-      ),
-    );
+      throw new Error("releaseChecks: an admitted ballot without its delivery fields");
+    const h = bytesToHex(deliveryBallotHashV2(election.definitionHash, b));
     hashOf.set(m, h);
     if (!byHash.has(h)) byHash.set(h, b);
   }

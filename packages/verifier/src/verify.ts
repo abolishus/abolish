@@ -54,7 +54,6 @@ import {
   readBoardCopy,
   type ReceiptVerdict,
   RECORD_TYPES,
-  RESULTS_MODES,
   type RollingBallotChain,
   SEAT_PANELS,
   verifyBoard,
@@ -318,11 +317,6 @@ const carriesDestruction = (v: BoardEntryVersion) =>
  * otherwise waits on 7.1's pass, which `verifyBundle` checks next.
  */
 function releaseGate(definition: VerifiedDefinition): Outcome {
-  // A live rolling poll's running copies aren't read yet (P2-17 part
-  // 4d-2b-2b-2b-2b-2), so its releases can't pass, as a live poll's can't before
-  // 7.1 (T-16, T-45).
-  if (definition.version === 7 && isRolling(definition))
-    return definition.value.results_mode === RESULTS_MODES.live ? NOT_REACHED : PASS;
   if (!isLive(definition)) return PASS;
   if (pinnedVersion(definition.value, RECORD_TYPES.tallyOpening) !== 2) return UNSUPPORTED;
   return { status: "unverifiable", code: "not-reached", at: {} };

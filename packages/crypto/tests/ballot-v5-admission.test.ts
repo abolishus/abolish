@@ -5,6 +5,7 @@ import { rollingBallotElectionWith, rollingStepRootOf } from "../src/ballot.ts";
 import { checkedKeySetForTests } from "../src/ceremony.ts";
 import {
   type BallotCheckV5,
+  type BallotMembershipV5,
   ballotHashV4,
   ballotHashV5,
   ballotSignalsV5,
@@ -20,6 +21,7 @@ import {
   type ElectionDefinitionV7,
   encodeBallotV5,
   encodeElectionDefinitionV7,
+  finishBallotStep,
   finishBallotSteps,
   kemKeygen,
   panelBallotElection,
@@ -30,9 +32,11 @@ import {
   rollingBallotElection,
   rollingTierSteps,
   rootClockBoundary,
+  semaphoreField,
   statementHashV4,
   statementHashV5,
   stepBallotV5,
+  stepMembershipV5,
   UnsupportedVersionError,
   verifyMembershipProof,
 } from "../src/index.ts";
@@ -339,6 +343,70 @@ describe("ballot-v5-records.json through packages/crypto", () => {
     else expect(supplied).toEqual(alone);
     if (r.rootCheck === "not-reached") expect(before).toBe(true);
   });
+
+  // Live results' running sets count a ballot whose membership check passes
+  // whatever its other checks find, and read one whose step isn't final as
+  // pending (docs/spec/tally.md, Running set, condition 1; T-45): the
+  // verdict is snarkjs's on the vector's own signals, and a step the poll
+  // doesn't accept fails it with no proof to check.
+  test("membership alone: admission's 5.1 to 5.3 over the ballot's own M and step, whatever else rejects it", () => {
+    const steps = vectors.ballots.map((b) =>
+      stepMembershipV5(contextOf(b), decodeBallot(hex(b.encoding), 5)),
+    );
+    const held = steps.flatMap((s) => (s === undefined ? [] : [s]));
+    const batched = finishBallotSteps(held);
+    let next = 0;
+    const rejectedMembers = new Set<string>();
+    for (const [i, b] of vectors.ballots.entries()) {
+      const step = steps[i];
+      const record = decodeBallot(hex(b.encoding), 5);
+      if (b.admission.code === "ballot-stray" || b.admission.code === "ballot-cell") {
+        expect(step).toBeUndefined();
+        continue;
+      }
+      if (step === undefined) throw new Error(`${b.id}: no membership step`);
+      const m = batched[next++] as BallotMembershipV5;
+      expect(m).toEqual(finishBallotStep(step));
+      // Without signals there is no root: the poll doesn't accept the step.
+      expect(m.member).toBe(b.signals === undefined ? false : b.snarkjs);
+      if (b.signals !== undefined)
+        expect(String(semaphoreField(m.message))).toBe(b.signals.message);
+      expect(m).toMatchObject({
+        nullifier: record.nullifier,
+        cell: record.cell,
+        step: record.step,
+        l1RefNumber: record.l1_ref_number,
+        tier: vectors.elections[b.election]?.cells.find((c) => c.cell === record.cell)?.tier,
+      });
+      if (b.admission.code === "ok") expect(toHex(m.message)).toBe(b.admission.message);
+      if (["membership-proof", "root-step-range"].includes(b.admission.code))
+        expect(m.member).toBe(false);
+      else if (m.member) rejectedMembers.add(b.admission.code);
+    }
+    // A ballot rejected after its membership proof, or before it for its
+    // share hashes, is still a member's.
+    for (const code of ["share-hash-unqualified", "option-proof", "sum-proof"])
+      expect(rejectedMembers.has(code)).toBe(true);
+  }, 60_000);
+
+  test.each(roots.rollingRoots.map((r) => [r.record, r] as const))(
+    "membership alone, supplied root %s: a root other than the step's fails it",
+    (_, r) => {
+      const b = vector(r.ballot);
+      const record = decodeBallot(hex(b.encoding), 5);
+      const election = contextOf(b);
+      const step = stepMembershipV5(election, record, BigInt(r.suppliedRoot));
+      const alone = stepMembershipV5(election, record);
+      if (step === undefined || alone === undefined) {
+        expect(step).toBe(alone);
+        return;
+      }
+      const m = finishBallotStep(step);
+      const unsupplied = finishBallotStep(alone);
+      if (r.rootCheck === "root-step-mismatch") expect(m).toEqual({ ...unsupplied, member: false });
+      else expect(m).toEqual(unsupplied);
+    },
+  );
 
   test("the supplied roots include a mismatch the verifier reaches", () => {
     expect(

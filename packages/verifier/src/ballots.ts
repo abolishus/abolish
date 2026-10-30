@@ -50,6 +50,7 @@ import {
   type BallotCheckV5,
   type BallotCode,
   type BallotMembership,
+  type BallotMembershipV5,
   type BallotCore,
   type CellBallotCoreV4,
   ballotElection,
@@ -77,6 +78,7 @@ import {
   type RegisteredKeys,
   RESULTS_MODES,
   type RollingBallotChain,
+  type RollingBallotElection,
   rollingBallotElection,
   selectBallots,
   stepBallot,
@@ -85,6 +87,7 @@ import {
   stepBallotV4,
   stepBallotV5,
   stepMembershipV4,
+  stepMembershipV5,
   type SeatPanel,
 } from "@abolishus/crypto";
 import {
@@ -199,6 +202,11 @@ export interface LiveBallotCopy {
   readonly nullifier: bigint;
   /** `M`, recomputed: copies with the same one are one ballot (5.7). */
   readonly message: Uint8Array;
+  /**
+   * A version-5 copy's root-clock step: its membership verdict stands only
+   * at a snapshot whose head the step is final at (tally.md, Running set).
+   */
+  readonly step?: number;
   /** Whether its membership proof passes, whatever its other checks find (tally.md, Running set). */
   readonly member: boolean;
   /**
@@ -362,10 +370,17 @@ export function ballotChecks(
   // Under a live definition, every copy the running sets read
   // (docs/spec/verifier.md, Releases, step 3), judged against the default
   // panel's key set alone: an author panel's poll pins no tally-opening
-  // version 2, so 7.5 and 7.6 never read its copies.
+  // version 2, so 7.5 and 7.6 never read its copies. A rolling one's are
+  // judged against the step roots of the same chain admission's judge was
+  // made from, which it had, since it is a function.
   const live =
     isLive(definition) && definition.value.author_keys.length === 0 && registered !== undefined
-      ? new LiveCopies(panelBallotElection(definition.value, registered, []))
+      ? definition.version === 7 && isRolling(definition)
+        ? new LiveCopies(
+            rollingBallotElection(definition.value, registered, rolling as RollingBallotChain),
+            true,
+          )
+        : new LiveCopies(panelBallotElection(definition.value, registered, []))
       : undefined;
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
@@ -424,9 +439,9 @@ export function ballotChecks(
     // rejects counts toward the one-ballot rule whichever path boarded it,
     // and one 5.4 admits leaves `live` unreturned until 4.5 settles its
     // window (T-45, T-71). Only contract-event versions 9 to 13 frame a
-    // version-4 ballot's ordinary and relayed copies. `live` is made only
-    // under a panelled definition, whose judge gives version 4's checks.
-    live?.judged(at, path.segment, payload, checked as BallotCheckV2, judged.tally);
+    // version-4 or version-5 ballot's ordinary and relayed copies, and a
+    // rolling path's supplied root is judged as admission judged it.
+    live?.judged(at, path.segment, payload, checked, judged.tally, supplied);
     if (!checked.ok) {
       rejected.push({
         entry: at,
@@ -653,48 +668,65 @@ export function unprovenRoots(
 export const restsOnChain = (rejected: readonly RejectedBallot[]): boolean =>
   rejected.some((r) => ROOT_CODES.has(r.code));
 
-/** Whether a definition is live: version 6, or a fixed version 7, with `results_mode` 2. */
+/** Whether a definition is live: version 6, or a version 7 under either electorate mode, with `results_mode` 2. */
 export function isLive(definition: VerifiedDefinition): definition is PanelledRecord {
-  return isPanelled(definition) && definition.value.results_mode === RESULTS_MODES.live;
+  return (
+    (definition.version === 6 || definition.version === 7) &&
+    definition.value.results_mode === RESULTS_MODES.live
+  );
 }
 
 /**
  * The running sets' copies, gathered as admission judges each one. A copy
  * that 5.1 to 5.4 admit carries its own `M`; one they reject for its shape,
  * share hashes or validity proofs has its membership proof checked alone, by
- * @abolishus/crypto's `stepMembershipV4`, batched, since a member's ballot
- * counts toward the one-ballot rule whatever else rejects it
- * (docs/spec/tally.md, Running set, condition 1; T-45). One naming another
- * definition or cell isn't the tier's, and a `membership-proof` failure
- * never counts under definition version 6 or a fixed version 7, which have
- * no rolling step to leave it pending: neither is read. Exported for its tests; the package
- * entry point doesn't export it.
+ * @abolishus/crypto's `stepMembershipV4` or `stepMembershipV5`, batched,
+ * since a member's ballot counts toward the one-ballot rule whatever else
+ * rejects it (docs/spec/tally.md, Running set, condition 1; T-45). One naming
+ * another definition or cell isn't the tier's: it isn't read. Under
+ * definition version 6 or a fixed version 7 a `membership-proof` failure
+ * never counts, with no rolling step to leave it pending, so it isn't read
+ * either; under a rolling version 7 a copy whose membership check fails
+ * (`root-step-range`, `root-step-mismatch`, `membership-proof`) is read with
+ * its step, since it is pending at every snapshot whose head the step isn't
+ * final at (Releases, step 3). Exported for its tests; the package entry
+ * point doesn't export it.
  */
 export class LiveCopies {
-  readonly #election: PanelBallotElection;
+  readonly #election:
+    | { readonly rolling: false; readonly election: PanelBallotElection }
+    | { readonly rolling: true; readonly election: RollingBallotElection };
   readonly #copies: (
     | {
         readonly at: number;
         readonly segment: number;
-        readonly admitted: Extract<BallotCheckV2, { readonly ok: true }>;
+        readonly admitted: Extract<BallotCheckV2 | BallotCheckV5, { readonly ok: true }>;
         readonly tally: BallotTally;
       }
-    | { readonly at: number; readonly segment: number; readonly step: BallotStep<BallotMembership> }
+    | {
+        readonly at: number;
+        readonly segment: number;
+        readonly step: BallotStep<BallotMembership | BallotMembershipV5>;
+      }
   )[] = [];
 
-  constructor(election: PanelBallotElection) {
-    this.#election = election;
+  constructor(election: PanelBallotElection | RollingBallotElection, rolling = false) {
+    this.#election = rolling
+      ? { rolling, election: election as RollingBallotElection }
+      : { rolling, election: election as PanelBallotElection };
   }
 
+  /** `suppliedRoot` is a rolling path's, as admission was given it. */
   judged(
     at: number,
     segment: number,
     payload: Uint8Array,
-    checked: BallotCheck | BallotCheckV2,
+    checked: AnyBallotCheck,
     tally: BallotTally,
+    suppliedRoot?: bigint,
   ): void {
     if (checked.ok) {
-      // Version 4 names its cell, so its admission carries it.
+      // Versions 4 and 5 name their cell, so their admission carries it.
       if (!("cell" in checked)) throw new Error("LiveCopies: an admitted ballot without its cell");
       this.#copies.push({ at, segment, admitted: checked, tally });
       return;
@@ -702,11 +734,14 @@ export class LiveCopies {
     if (
       checked.code === "ballot-stray" ||
       checked.code === "ballot-cell" ||
-      checked.code === "ballot-tier" ||
-      checked.code === "membership-proof"
+      checked.code === "ballot-tier"
     )
       return;
-    const step = stepMembershipV4(this.#election, decodeBallot(payload, 4));
+    const e = this.#election;
+    let step;
+    if (e.rolling) step = stepMembershipV5(e.election, decodeBallot(payload, 5), suppliedRoot);
+    else if (checked.code === "membership-proof") return;
+    else step = stepMembershipV4(e.election, decodeBallot(payload, 4));
     // It named this definition and a cell of the partition, so it has a step.
     if (step === undefined) throw new Error("LiveCopies: a judged ballot has no membership step");
     this.#copies.push({ at, segment, step });
@@ -719,7 +754,7 @@ export class LiveCopies {
     let next = 0;
     return this.#copies.map((c): LiveBallotCopy => {
       if ("step" in c) {
-        const m = members[next++] as BallotMembership;
+        const m = members[next++] as BallotMembership | BallotMembershipV5;
         return {
           entry: c.at,
           segment: c.segment,
@@ -727,6 +762,7 @@ export class LiveCopies {
           cell: m.cell,
           nullifier: m.nullifier,
           message: m.message,
+          ...("step" in m && { step: m.step }),
           member: m.member,
           rejected: true,
           reference: m.l1RefNumber,
@@ -742,6 +778,7 @@ export class LiveCopies {
         cell: a.cell,
         nullifier: a.nullifier,
         message: a.message,
+        ...("step" in a && { step: a.step }),
         member: true,
         // An unknown reference is judged at each snapshot's head instead:
         // pending while it names a block above the head (Releases, step 3).

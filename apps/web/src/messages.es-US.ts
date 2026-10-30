@@ -1259,6 +1259,7 @@ export const esUS: Messages = {
   pollsDelete: "Eliminar borrador…",
   pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
   pollsDeleteConfirm: "Eliminar el borrador para siempre",
+  pollsReload: "Volver a cargar tus encuestas",
   pollsRetry: "Intentar de nuevo",
   pollsDiscard: "Descartar…",
   pollsDiscardQuestion: "¿Descartar esta encuesta y su borrador? No se puede deshacer.",
@@ -1275,7 +1276,7 @@ export const esUS: Messages = {
   pollsFailure_tooManyDrafts:
     "Tienes tantos borradores como admite una cuenta. Elimina uno e inténtalo de nuevo.",
   pollsFailure_failed: "No funcionó. No cambió nada; inténtalo de nuevo en un momento.",
-  pollsFailure_unlisted: "No se pudieron cargar tus encuestas. Inténtalo de nuevo en un momento.",
+  pollsFailure_unlisted: "No se pudieron cargar tus encuestas en este momento.",
   pollsFailure_refused:
     "El servidor encontró un problema con ese borrador, así que no se guardó. Revísalo e inténtalo de nuevo.",
   moderationOfPoll: "Moderación",

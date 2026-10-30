@@ -421,19 +421,54 @@ export const RefusedAsRegistered: Story = {
   },
 };
 
-export const ListUnavailable: Story = {
-  args: {
-    client: {
-      ...fakeDrafts([]),
-      list: async () => {
-        throw new DraftsError("failed");
-      },
+/** A list that fails to load until the story lets it. */
+const flaky = (() => {
+  const drafts = fakeDrafts([DRAFT]);
+  const state = { down: true };
+  const client: DraftsClient = {
+    ...drafts,
+    list: async () => {
+      if (state.down) throw new DraftsError("failed");
+      return drafts.list();
     },
+  };
+  return { client, state };
+})();
+
+/**
+ * A list that couldn't be loaded says so where the list would be, and loads
+ * again from there: "Try again shortly" alone left reloading the page.
+ */
+export const ListUnavailable: Story = {
+  args: { client: flaky.client },
+  beforeEach: () => {
+    flaky.state.down = true;
   },
   play: async ({ canvasElement }) => {
-    await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
-      "Your polls couldn't be loaded. Try again shortly.",
+    const canvas = within(canvasElement);
+    await expect(await canvas.findByRole("alert")).toHaveTextContent(
+      "Your polls couldn't be loaded just now.",
     );
+    await expect(canvas.queryByRole("list")).toBeNull();
+    const again = canvas.getByRole("button", { name: "Load your polls again" });
+    // The way to load it again sits right under the words saying it failed.
+    await expect(
+      again.getBoundingClientRect().top - canvas.getByRole("alert").getBoundingClientRect().bottom,
+    ).toBeLessThan(8);
+    await expect(again.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
+    flaky.state.down = false;
+    await userEvent.click(again);
+    await expect(
+      await canvas.findByRole("heading", {
+        level: 3,
+        name: "Should the harbor library open on Sundays?",
+      }),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Load your polls again" })).toBeNull();
+    await expect(
+      canvas.getByRole("heading", { level: 2, name: "Polls you created" }),
+    ).toHaveFocus();
   },
 };
 

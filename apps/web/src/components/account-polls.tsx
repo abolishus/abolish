@@ -175,6 +175,20 @@ export function AccountPolls({
     }
   };
 
+  /** Reads the list again after it couldn't be loaded, without reloading the page. */
+  const reload = async () => {
+    setBusy(true);
+    setFailure(undefined);
+    try {
+      await refresh();
+    } catch (e) {
+      failed(e, "unlisted");
+    } finally {
+      setBusy(false);
+      heading.current?.focus();
+    }
+  };
+
   const formatted = (date: Date) => formatUtcWhole(locale, date);
   const at = (iso: string) => formatted(new Date(iso));
 
@@ -380,14 +394,22 @@ export function AccountPolls({
             })}
           </ul>
         )}
+        {/* Where the list would be, with the way to load it again rather than the whole page. */}
+        {failure === undefined ? null : (
+          <div className="grid justify-items-start gap-1">
+            <p role="alert" className="m-0 text-destructive">
+              {t(`pollsFailure_${failure}`)}
+            </p>
+            {failure === "unlisted" ? (
+              <Button variant="link" className="px-0" disabled={busy} onClick={reload}>
+                {t("pollsReload")}
+              </Button>
+            ) : null}
+          </div>
+        )}
         <div role="status" className="min-h-6 text-base">
           {done === undefined ? null : t(done)}
         </div>
-        {failure === undefined ? null : (
-          <p role="alert" className="m-0 text-destructive">
-            {t(`pollsFailure_${failure}`)}
-          </p>
-        )}
       </div>
     </Section>
   );

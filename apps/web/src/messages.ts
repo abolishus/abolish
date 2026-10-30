@@ -1231,6 +1231,7 @@ const enUS = {
   pollsDelete: "Delete draft…",
   pollsDeleteQuestion: "Delete this draft? This can't be undone.",
   pollsDeleteConfirm: "Delete draft permanently",
+  pollsReload: "Load your polls again",
   pollsRetry: "Try again",
   pollsDiscard: "Discard…",
   pollsDiscardQuestion: "Discard this poll and its draft? This can't be undone.",
@@ -1246,7 +1247,7 @@ const enUS = {
   pollsFailure_tooManyDrafts:
     "You have as many drafts as an account can hold. Delete one, then try again.",
   pollsFailure_failed: "That didn't work. Nothing changed; try again shortly.",
-  pollsFailure_unlisted: "Your polls couldn't be loaded. Try again shortly.",
+  pollsFailure_unlisted: "Your polls couldn't be loaded just now.",
   pollsFailure_refused:
     "The server found a problem with that draft, so it wasn't saved. Check it and try again.",
   moderationOfPoll: "Moderation",

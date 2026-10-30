@@ -38,7 +38,7 @@ The nine stay binding on any deployment beyond a testnet. A deployment to Base S
 - **The deploy script refuses any other chain** while any of the nine is open.
 - **No release offered for real polls pins a testnet deployment.** This is a release-procedure rule ([[release]]), since anyone can deploy the same bytecode on any chain without the script.
 - **Staging's own path never depends on what is open.**
-  - Poll creation registers definition version 5 only ([[poll-creation]]), which binds receipt keys.
+  - Poll creation registers definition version 5 only ([[0032-poll-creation-operations]]; `packages/core/src/poll-registration.ts`), which binds receipt keys. Moving it to version 6 ([[P2-16]] part 5) doesn't reopen condition 1, which concerns versions 1 and 3 only.
   - Staging's polls are a few hundred bytes, far below any gas cap.
   - Staging uses Tier 0 groups only, and its registration serves region 0 only, with one published group, so no result depends on a group's region.
   - The launch panel's seats are ours, and they never record a nullifier key.
@@ -82,7 +82,7 @@ B. The conditions protect elections that can't be redone. A testnet holds none o
   - Staging's operator could withhold openings unattributed.
   - A testnet group's region is only the release's word, so staging can't show regional results.
   - A root sent for a staging poll leaves it unverifiable.
-- Nothing but release procedure checks the rule that no release for real polls binds a testnet deployment. A verifier or release-builder check that reports or refuses a definition or deployment record on chain 84532, 11155111 or 31337 is owed before the first release that binds a deployment record ([[P4-4]]'s release checks, or [[P1-19]] 2.3).
+- Nothing but release procedure checks the rule that no release for real polls binds a testnet deployment. A verifier or release-builder check that reports or refuses a definition or deployment record on chain 84532, 11155111 or 31337 is owed before the first release offered for real polls ([[P4-4]]'s release checks, or [[P1-19]] 2.3). Staging's own releases rightly bind the testnet deployment, so that check first needs a definition of a release offered for real polls, recorded where the check can read it (a field of the release or deployment record, or the registry it is published in). Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on a testnet deployment from verifying.
 
 ## Decision
 

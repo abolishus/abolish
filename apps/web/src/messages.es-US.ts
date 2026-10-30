@@ -1090,6 +1090,24 @@ export const esUS: Messages = {
   pushNoticeTitle: "Algo nuevo en Abolish",
   pushNoticeBody:
     "Una decisión de moderación, o resultados de una encuesta que sigues. Abre la página de tu cuenta para ver cuál.",
+  followResultsMark: "Encuestas que sigues",
+  followResultsTitle: "Resultados de encuestas que seguiste",
+  followResultsLede:
+    "Cuando una encuesta que sigues tiene sus resultados, pasa aquí, y te avisamos por correo sin nombrarla. Solo tú puedes ver esta lista.",
+  followResultsEmpty:
+    "Todavía no hay nada aquí. Cuando una encuesta que sigues tenga sus resultados, la encontrarás aquí.",
+  followResultsNoWords: "Una encuesta cuyas palabras no se pueden mostrar",
+  followResultsSee: "Ver los resultados",
+  followResultsRemove: "Quitarla de esta lista",
+  followResultsRemoved: "Quitada de la lista.",
+  followResultsMore: "Mostrar {count} más",
+  followResultsReload: "Volver a cargar la lista",
+  followResultsFailure_unlisted: "No se pudo cargar esta lista en este momento.",
+  followResultsFailure_more:
+    "No se pudo cargar el resto de la lista en este momento. Inténtalo de nuevo.",
+  followResultsFailure_dropped: "Esa encuesta no se quitó de la lista. Inténtalo de nuevo.",
+  followResultsFailure_signedOut:
+    "Se cerró tu sesión. Vuelve a iniciar sesión para ver esta lista.",
   exportMark: "Tus datos",
   exportTitle: "Descarga tus datos",
   exportLede:

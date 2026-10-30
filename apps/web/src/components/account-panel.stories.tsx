@@ -150,6 +150,8 @@ const meta = {
     verify: fakeVerify(),
     accountExport: { download: async () => {} },
     push: { state: async () => "off", enable: async () => {}, disable: async () => {} },
+    // None yet: the list's own stories are in account-follow-results.stories.tsx.
+    followResults: { list: async () => [], drop: async () => {}, headings: async () => [] },
     phone: true,
   },
 } satisfies Meta<typeof AccountPanel>;
@@ -256,6 +258,11 @@ export const SignedIn: Story = {
     await expect(await canvas.findByText("You haven't created a poll yet.")).toBeVisible();
     // What it's told by e-mail, then its data, before its deletion.
     await expect(canvas.getByRole("heading", { name: "What we tell you about" })).toBeVisible();
+    // Beside them, the polls it followed whose results are in.
+    await expect(
+      canvas.getByRole("heading", { name: "Results for polls you followed" }),
+    ).toBeVisible();
+    await expect(await canvas.findByText(/^Nothing here yet\./)).toBeVisible();
     await expect(canvas.getByRole("heading", { name: "Download your data" })).toBeVisible();
     const remove = canvas.getAllByRole("button", { name: /^Remove the passkey added/ });
     await expect(remove).toHaveLength(2);

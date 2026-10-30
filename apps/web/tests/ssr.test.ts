@@ -1903,7 +1903,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(11);
+    expect(ids.length).toBe(12);
     return ids;
   }
 
@@ -1948,7 +1948,7 @@ describe("server functions", () => {
         // The site key's and the phone setting's take no input, and answer
         // the key and the setting: off here, which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
+          `expected an election ID|expected 1 to 10 distinct election IDs|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }

@@ -12,6 +12,7 @@ import {
   emailKeys,
   type EmailMessage,
   exportAccount,
+  landResults,
   MAX_FOLLOW_CHANGES_PER_HOUR,
   MAX_REACTION_CHANGES_PER_HOUR,
   parseKeyring,
@@ -1155,6 +1156,8 @@ describe("failures", () => {
         "/reactions/own",
         "/reactions/set",
         "/follows/set",
+        "/follows/results",
+        "/follows/results/drop",
         "/profiles/report",
         "/profiles/moderation",
         "/profiles/appeal",
@@ -1183,6 +1186,8 @@ describe("failures", () => {
         ["/reactions/own", `${SESSION}=tok`],
         ["/reactions/set", `${SESSION}=tok`],
         ["/follows/set", `${SESSION}=tok`],
+        ["/follows/results", `${SESSION}=tok`],
+        ["/follows/results/drop", `${SESSION}=tok`],
         ["/profiles/report", null],
         ["/profiles/moderation", `${SESSION}=tok`],
         ["/profiles/appeal", `${SESSION}=tok`],
@@ -2408,6 +2413,87 @@ describe("following a poll under /follows", () => {
     expect((await browser.call("POST", `/follows/${electionId}`, body)).status).toBe(404);
     // None of it was recorded.
     expect(await followers(electionId)).toEqual([]);
+  });
+
+  test("an account reads its own polls with results and takes them off, and no one else's", async () => {
+    const [p1, p2] = [await newElection(sql), await newElection(sql)].sort(Buffer.compare);
+    const a = await signedIn();
+    const b = await signedIn();
+    for (const p of [p2!, p1!])
+      await a.browser.call("POST", "/follows/set", { electionId: hex(p), on: true });
+    await b.browser.call("POST", "/follows/set", { electionId: hex(p2!), on: true });
+    const results = async (browser: Browser) => {
+      const res = await browser.call("POST", "/follows/results", {});
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.json();
+    };
+    // Following isn't on the list until the poll's results land.
+    expect(await results(a.browser)).toEqual({ polls: [] });
+    await landResults(sql, p1!, { now: new Date() });
+    await landResults(sql, p2!, { now: new Date() });
+    // In byte order, each account its own.
+    expect(await results(a.browser)).toEqual({ polls: [hex(p1!), hex(p2!)] });
+    expect(await results(b.browser)).toEqual({ polls: [hex(p2!)] });
+
+    const drop = async (browser: Browser, electionId: string) =>
+      (await browser.call("POST", "/follows/results/drop", { electionId })).json();
+    expect(await drop(a.browser, hex(p2!))).toEqual({ dropped: true });
+    // Taking off one already gone, or one never there, is no refusal.
+    expect(await drop(a.browser, hex(p2!))).toEqual({ dropped: false });
+    expect(await drop(a.browser, "00".repeat(32))).toEqual({ dropped: false });
+    expect(await results(a.browser)).toEqual({ polls: [hex(p1!)] });
+    // Another account's list is untouched.
+    expect(await results(b.browser)).toEqual({ polls: [hex(p2!)] });
+
+    // T-10, T-11, T-67: the log has the route class, never the poll or the account.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "follows", status: 200 });
+    const log = JSON.stringify(logged);
+    for (const p of [p1!, p2!]) expect(log).not.toContain(hex(p));
+    expect(log).not.toContain(a.account);
+  });
+
+  test("refuses reading or changing the list signed out, malformed, or from another origin", async () => {
+    const electionId = hex(await newElection(sql));
+    const { browser } = await signedIn();
+    await browser.call("POST", "/follows/set", { electionId, on: true });
+    await landResults(sql, fromHex(electionId), { now: new Date() });
+    const anyone = new Browser();
+    expect(await (await anyone.call("POST", "/follows/results", {})).json()).toEqual({
+      code: "SIGNED_OUT",
+      status: 401,
+    });
+    expect(
+      await (await anyone.call("POST", "/follows/results/drop", { electionId })).json(),
+    ).toEqual({ code: "SIGNED_OUT", status: 401 });
+    for (const [path, bad] of [
+      ["/follows/results", { electionId }],
+      ["/follows/results/drop", {}],
+      ["/follows/results/drop", { electionId: electionId.toUpperCase() }],
+      ["/follows/results/drop", { electionId, on: false }],
+    ] as const)
+      expect(await (await browser.call("POST", path, bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    expect(
+      await (
+        await browser.call(
+          "POST",
+          "/follows/results/drop",
+          { electionId },
+          {
+            origin: "https://evil.test",
+          },
+        )
+      ).json(),
+    ).toEqual({ code: "FORBIDDEN_ORIGIN", status: 403 });
+    expect((await browser.call("GET", "/follows/results")).status).toBe(404);
+    expect((await browser.call("POST", "/follows/results?x=1", {})).status).toBe(404);
+    // None of it changed the list.
+    expect(await (await browser.call("POST", "/follows/results", {})).json()).toEqual({
+      polls: [electionId],
+    });
   });
 });
 

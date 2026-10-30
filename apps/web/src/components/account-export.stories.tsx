@@ -21,7 +21,7 @@ function fakeExport(
 
 const meta = {
   component: AccountExport,
-  args: { index: "06", onSignedOut: fn() },
+  args: { index: "07", onSignedOut: fn() },
 } satisfies Meta<typeof AccountExport>;
 
 export default meta;

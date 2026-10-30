@@ -1067,6 +1067,22 @@ const enUS = {
   pushNoticeTitle: "Something new on Abolish",
   pushNoticeBody:
     "A moderation decision, or results for a poll you follow. Open your account page to see which.",
+  followResultsMark: "Followed polls",
+  followResultsTitle: "Results for polls you followed",
+  followResultsLede:
+    "When a poll you follow has its results, it moves here, and we tell you by e-mail without naming it. Only you can see this list.",
+  followResultsEmpty:
+    "Nothing here yet. When a poll you follow has its results, you'll find it here.",
+  followResultsNoWords: "A poll whose words can't be shown",
+  followResultsSee: "See the results",
+  followResultsRemove: "Take it off this list",
+  followResultsRemoved: "Taken off the list.",
+  followResultsMore: "Show {count} more",
+  followResultsReload: "Load the list again",
+  followResultsFailure_unlisted: "This list couldn't be loaded just now.",
+  followResultsFailure_more: "The rest of the list couldn't be loaded just now. Try again.",
+  followResultsFailure_dropped: "That poll wasn't taken off the list. Try again.",
+  followResultsFailure_signedOut: "You've been signed out. Sign in again to see this list.",
   exportMark: "Your data",
   exportTitle: "Download your data",
   exportLede: "A copy of your account's data, as one JSON file you can open in any text editor.",

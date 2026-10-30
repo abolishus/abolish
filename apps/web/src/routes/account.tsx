@@ -3,11 +3,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import { accountClient } from "../account/client.ts";
 import { draftsClient } from "../account/drafts.ts";
 import { exportClient } from "../account/export.ts";
+import { followResultsClient } from "../account/follow-results.ts";
 import { profilesClient } from "../account/profiles.ts";
 import { pushClient } from "../account/push.ts";
 import { verifyClient } from "../account/verify.ts";
 import { AccountPanel } from "../components/account-panel.tsx";
-import { fetchPhoneVerification } from "../data.ts";
+import { fetchFollowedPolls, fetchPhoneVerification } from "../data.ts";
 import { titles } from "../titles.ts";
 import { searchText } from "../values.ts";
 
@@ -15,6 +16,8 @@ import { searchText } from "../values.ts";
 // one whose policy allows Turnstile (src/security.ts), and a document keeps
 // the policy it was served with. Replaced, so Back doesn't land here again.
 const ask = () => window.location.replace("/account/polls/new");
+
+const followResults = followResultsClient(fetchFollowedPolls);
 
 export const Route = createFileRoute("/account")({
   // `?next=new-poll`, from home's "Ask a question": signed in, the visitor
@@ -41,6 +44,7 @@ export const Route = createFileRoute("/account")({
         verify={verifyClient}
         accountExport={exportClient}
         push={pushClient}
+        followResults={followResults}
         phone={phone}
         ask={next === "new-poll" ? ask : undefined}
       />

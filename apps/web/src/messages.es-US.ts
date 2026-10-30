@@ -1286,6 +1286,8 @@ export const esUS: Messages = {
   pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
   pollsDeleteConfirm: "Eliminar el borrador para siempre",
   pollsReload: "Volver a cargar tus encuestas",
+  pollsProfileHelp:
+    "Al marcar “Mostrar en tu perfil” bajo una encuesta, tu perfil la lista, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Una encuesta que aún no se ha abierto se lista cuando se abra. Desmarca una casilla cuando quieras.",
   pollsRetry: "Intentar de nuevo",
   pollsDiscard: "Descartar…",
   pollsDiscardQuestion: "¿Descartar esta encuesta y su borrador? No se puede deshacer.",

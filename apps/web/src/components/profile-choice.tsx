@@ -22,6 +22,8 @@ export interface ProfileChoiceProps {
   readonly onWant?: (on: boolean) => void;
   /** A saved poll that hasn't opened yet, and may yet: the profile shows it only once it opens. */
   readonly unopened?: boolean;
+  /** Help said once for a list of boxes, which describes this one; none to draw the box's own. */
+  readonly helpId?: string;
   /** The element naming the poll, so each row's box says which poll it is. */
   readonly describedBy?: string;
   /** Called after every change sent, refused or not, so the page reads the profile again. */
@@ -45,6 +47,7 @@ export function ProfileChoice({
   wanted = false,
   onWant,
   unopened = false,
+  helpId,
   describedBy,
   onChanged,
   onSignedOut,
@@ -91,7 +94,7 @@ export function ProfileChoice({
     }
   };
 
-  const help = `${id}-help`;
+  const help = helpId ?? `${id}-help`;
   return (
     <div className="grid gap-1">
       <Label className="flex min-h-12 items-center gap-3 text-base font-normal">
@@ -106,15 +109,17 @@ export function ProfileChoice({
           {t("profileChoiceLabel")} <bdi className="font-semibold">{profile.name}</bdi>
         </span>
       </Label>
-      <p id={help} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
-        {t(
-          pollId === undefined
-            ? "profileChoiceHelpUnsaved"
-            : unopened
-              ? "profileChoiceHelpUnopened"
-              : "profileChoiceHelp",
-        )}
-      </p>
+      {helpId === undefined ? (
+        <p id={help} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
+          {t(
+            pollId === undefined
+              ? "profileChoiceHelpUnsaved"
+              : unopened
+                ? "profileChoiceHelpUnopened"
+                : "profileChoiceHelp",
+          )}
+        </p>
+      ) : null}
       <div role="status" className="text-sm">
         {done === undefined ? null : t(done)}
       </div>

@@ -225,7 +225,8 @@ export async function landResults(
     throw new TypeError("now must be a valid Date");
   const id = new Uint8Array(electionId);
   // A notice already waiting carries the results too, with its tries reset,
-  // as `queueNotice` renews one for a decision.
+  // as `queueNotice` renews one for a decision. In account order, so two
+  // landings with followers in common take the notices' locks in one order.
   const told = await client`
     WITH gone AS (
       DELETE FROM account_follows WHERE election_id = ${id} RETURNING user_id
@@ -235,7 +236,7 @@ export async function landResults(
       ON CONFLICT DO NOTHING
     )
     INSERT INTO account_notices (user_id, not_before, moderation, results)
-    SELECT user_id, ${noticeDue(now).toISOString()}, false, true FROM gone
+    SELECT user_id, ${noticeDue(now).toISOString()}, false, true FROM gone ORDER BY user_id
     ON CONFLICT (user_id) DO UPDATE SET
       tries = 0,
       not_before = greatest(account_notices.not_before, excluded.not_before),

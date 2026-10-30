@@ -202,7 +202,7 @@ const WORDS: Record<
         text: [
           "Results are in for a poll you follow on Abolish.",
           "",
-          "Sign in to Abolish to see which: your account page lists it. You won't hear about that poll again.",
+          "Sign in to Abolish to see which: your account page lists it. You stop following it once its results are in.",
           "",
           "These notices never say which poll, so the service that delivers them can't tell.",
         ].join("\n"),
@@ -262,7 +262,7 @@ const WORDS: Record<
         text: [
           "Ya hay resultados de una encuesta que sigues en Abolish.",
           "",
-          "Inicia sesión en Abolish para ver cuál: aparece en la página de tu cuenta. No volverás a recibir avisos de esa encuesta.",
+          "Inicia sesión en Abolish para ver cuál: aparece en la página de tu cuenta. Dejas de seguirla una vez que tiene resultados.",
           "",
           "Estos avisos nunca dicen qué encuesta, así que el servicio que los entrega no puede saberlo.",
         ].join("\n"),

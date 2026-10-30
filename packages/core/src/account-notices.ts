@@ -44,8 +44,9 @@
 //
 // T-10: account-side only; nothing here reads the board or a ballot, and a
 // notice keeps nothing to join the log on but its day. T-52: only a
-// moderator's decision queues one, so no one else can make us mail an
-// address, and an address gets one a day at most however many decisions.
+// moderator's decision, or a followed poll's results landing for an account
+// verified and following, queues one, so no one else can make us mail an
+// address, and an address gets one a day at most however many events.
 
 import { and, asc, eq, lt, lte, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";

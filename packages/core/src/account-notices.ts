@@ -39,6 +39,13 @@
 // account followed some poll whose results came in that day (T-73); which one
 // is on the account page.
 //
+// Choices (part 3c-2a): an account may turn the results off
+// (`setNoticeChoices`). Its followed polls still go on its page's list when
+// their results land, and only the notice is left out: `landResults` queues
+// none for it, and turning them off takes them off a notice already waiting,
+// or drops one that carried nothing else. One already claimed by a sender
+// still goes as claimed. Moderation notices have no choice.
+//
 // A notice is written in the language its account verified its address in
 // (P2-28 part 4c-3): a timer sends it, with no request to take one from.
 //
@@ -57,7 +64,12 @@ import {
   type NoticeAbout,
   unsealEmailAddress,
 } from "./account-emails.ts";
-import { accountEmails, accountNotices, accountPushSubscriptions } from "./db/schema/index.ts";
+import {
+  accountEmails,
+  accountNoticeChoices,
+  accountNotices,
+  accountPushSubscriptions,
+} from "./db/schema/index.ts";
 import type { ModerationTx } from "./moderation.ts";
 import type { PushOutcome, PushSender } from "./web-push.ts";
 
@@ -109,6 +121,63 @@ export async function queueNotice(
         moderation: true,
       },
     });
+}
+
+/** What an account chose to be told of beyond moderation, which it always is. */
+export interface NoticeChoices {
+  /** Results landing for a poll it followed. */
+  readonly results: boolean;
+}
+
+/** The choices of an account that has made none. */
+const DEFAULT_CHOICES: NoticeChoices = { results: true };
+
+/** An account ID as `newAccountId` makes them. */
+const ACCOUNT_ID = /^[a-z0-9]{32}$/;
+
+function checkAccountId(accountId: string): void {
+  if (!ACCOUNT_ID.test(accountId)) throw new RangeError("not an account ID");
+}
+
+/** The signed-in `accountId`'s choices, the defaults if it made none: for its own page only. */
+export async function noticeChoices(client: Sql, accountId: string): Promise<NoticeChoices> {
+  checkAccountId(accountId);
+  const c = accountNoticeChoices;
+  const [row] = await drizzle({ client })
+    .select({ results: c.results })
+    .from(c)
+    .where(eq(c.userId, accountId));
+  return row ?? DEFAULT_CHOICES;
+}
+
+/**
+ * Sets the signed-in `accountId`'s choices. Turning the results off also
+ * takes them off its notice waiting, in the same transaction, and drops a
+ * notice that carried nothing else, so no e-mail says results are in after
+ * the account said not to; a notice a sender has already claimed keeps its
+ * own copy of what it carries and goes as claimed.
+ */
+export async function setNoticeChoices(
+  client: Sql,
+  accountId: string,
+  choices: NoticeChoices,
+): Promise<void> {
+  checkAccountId(accountId);
+  if (typeof choices?.results !== "boolean") throw new TypeError("results must be a boolean");
+  const { results } = choices;
+  const c = accountNoticeChoices;
+  const n = accountNotices;
+  await drizzle({ client }).transaction(async (tx) => {
+    await tx
+      .insert(c)
+      .values({ userId: accountId, results })
+      .onConflictDoUpdate({ target: c.userId, set: { results } });
+    if (results) return;
+    // Neither touches the due time or the tries, so a sender holding the
+    // notice still deletes it as claimed once sent.
+    await tx.delete(n).where(and(eq(n.userId, accountId), eq(n.moderation, false)));
+    await tx.update(n).set({ results: false }).where(eq(n.userId, accountId));
+  });
 }
 
 /** What one `sendNotices` call did. */

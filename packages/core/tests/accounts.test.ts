@@ -189,6 +189,8 @@ describe("schema", () => {
       // Set or stopped, never changed in place (follows.test.ts).
       ["account_follows", "DELETE,INSERT,SELECT"],
       ["account_moderators", "INSERT,SELECT"],
+      // Plus UPDATE of the choice; never deleted but with its account (account-notices.test.ts).
+      ["account_notice_choices", "INSERT,SELECT"],
       // Plus UPDATE of the tries, the due time and the flags (account-notices.test.ts).
       ["account_notices", "DELETE,INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],

@@ -13,7 +13,7 @@ const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
 
 const ACCOUNT = "a".repeat(32);
 const EXPORT = {
-  version: 4,
+  version: 5,
   exportedAt: "2026-10-23T09:15:00.000Z",
   account: { id: ACCOUNT, createdAt: "2026-10-01T09:00:00.000Z" },
   email: { address: "ana@example.org", verifiedOn: "2026-10-02T00:00:00.000Z", locale: "en-US" },

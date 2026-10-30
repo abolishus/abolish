@@ -18,6 +18,7 @@ import {
   REACTIONS,
   requestEmailCode,
   setFollow,
+  setNoticeChoices,
   setReaction,
   showOnProfile,
   storeDefinition,
@@ -131,6 +132,7 @@ describe("exportAccount", () => {
       reactions: [],
       follows: [],
       followResults: [],
+      noticeChoices: null,
       tier0Tokens: [],
       moderator: null,
     });
@@ -169,6 +171,7 @@ describe("exportAccount", () => {
     const counted = await openPoll(await newAccount());
     await setFollow(app, user, counted.electionId, true, { now: NOW });
     await landResults(app, counted.electionId, { now: NOW });
+    await setNoticeChoices(app, user, { results: false });
     await app`INSERT INTO account_tokens VALUES (${user}, 84532, ${registry}, 7, ${randomBytes(32)},
       3, ${blinded})`;
     await addModerator(app, "moderator-one", user);
@@ -258,6 +261,7 @@ describe("exportAccount", () => {
       ],
       follows: [hex(reacted.electionId)],
       followResults: [hex(counted.electionId)],
+      noticeChoices: { results: false },
       tier0Tokens: [{ chainId: "84532", groupRegistry: hex(registry), region: 7, keyPeriod: 3 }],
       moderator: { handle: "moderator-one", addedAt: expect.any(String) },
     });

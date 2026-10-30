@@ -74,7 +74,7 @@ import {
   postingSpend,
 } from "./postings.ts";
 import { accountFollowHours, accountFollowResults, accountFollows } from "./follows.ts";
-import { accountNotices } from "./notices.ts";
+import { accountNoticeChoices, accountNotices } from "./notices.ts";
 import { accountPushSubscriptions } from "./push.ts";
 import { accountReactionHours, accountReactions } from "./reactions.ts";
 import { accountTokens, tier0TokenIssuances } from "./tokens.ts";
@@ -92,6 +92,7 @@ export {
   accountFollowResults,
   accountFollows,
   accountModerators,
+  accountNoticeChoices,
   accountNotices,
   accountPhoneCodes,
   accountPhoneHolds,
@@ -200,6 +201,7 @@ export const TABLE_CLASSES = {
     "account_follow_results",
     "account_follows",
     "account_moderators",
+    "account_notice_choices",
     "account_notices",
     "account_passkeys",
     "account_phone_codes",

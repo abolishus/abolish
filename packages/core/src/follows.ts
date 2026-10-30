@@ -210,8 +210,9 @@ export async function followedPolls(
  * Results are in for `electionId`'s poll, as of `now`: each of its follows
  * becomes a row of its account's list of polls with results, and that
  * account's notice says results are in, due after the UTC midnight that
- * follows `now` (T-73). One statement, so a follow set or stopped meanwhile
- * is either told or still following. Returns how many accounts were told;
+ * follows `now` (T-73), unless it turned the results off. One statement, so
+ * a follow set or stopped meanwhile is either told or still following.
+ * Returns how many accounts' notices it queued;
  * a poll no one follows tells no one, so calling it again changes nothing.
  * The caller judges that the results are in: core holds no results.
  */
@@ -225,7 +226,8 @@ export async function landResults(
     throw new TypeError("now must be a valid Date");
   const id = new Uint8Array(electionId);
   // A notice already waiting carries the results too, with its tries reset,
-  // as `queueNotice` renews one for a decision. In account order, so two
+  // as `queueNotice` renews one for a decision; an account that turned the
+  // results off (`setNoticeChoices`) is listed and gets none. In account order, so two
   // landings with followers in common take the notices' locks in one order.
   const told = await client`
     WITH gone AS (
@@ -236,7 +238,11 @@ export async function landResults(
       ON CONFLICT DO NOTHING
     )
     INSERT INTO account_notices (user_id, not_before, moderation, results)
-    SELECT user_id, ${noticeDue(now).toISOString()}, false, true FROM gone ORDER BY user_id
+    SELECT user_id, ${noticeDue(now).toISOString()}, false, true FROM gone
+    WHERE NOT EXISTS (
+      SELECT 1 FROM account_notice_choices c WHERE c.user_id = gone.user_id AND NOT c.results
+    )
+    ORDER BY user_id
     ON CONFLICT (user_id) DO UPDATE SET
       tries = 0,
       not_before = greatest(account_notices.not_before, excluded.not_before),

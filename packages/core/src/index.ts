@@ -180,6 +180,7 @@ export {
   accountFollowResults,
   accountFollows,
   accountModerators,
+  accountNoticeChoices,
   accountNotices,
   accountPolls,
   accountPollSubmissions,
@@ -298,10 +299,13 @@ export {
   noticeDue,
   NOTICE_TRIES,
   NOTICE_WAIT_SECONDS,
+  type NoticeChoices,
+  noticeChoices,
   type NoticeRun,
   queueNotice,
   sendNotices,
   type SendNoticesOptions,
+  setNoticeChoices,
 } from "./account-notices.ts";
 export {
   ACCOUNT_EXPORT,

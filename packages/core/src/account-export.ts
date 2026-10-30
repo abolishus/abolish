@@ -37,6 +37,7 @@ import {
   accountFollowResults,
   accountFollows,
   accountModerators,
+  accountNoticeChoices,
   accountPasskeys,
   accountPhones,
   accountPolls,
@@ -51,7 +52,7 @@ import {
 } from "./db/schema/index.ts";
 
 /** The export's layout; a change to it is a new version. */
-export const ACCOUNT_EXPORT_VERSION = 4;
+export const ACCOUNT_EXPORT_VERSION = 5;
 
 /**
  * What the export takes from each account table: `"exported"`, or why it
@@ -71,6 +72,7 @@ export const ACCOUNT_EXPORT = {
   account_follow_results: "exported",
   account_follows: "exported",
   account_moderators: "exported",
+  account_notice_choices: "exported",
   account_notices:
     "a moderation or results notice waiting to be e-mailed, gone once sent: a due time, a try count and which words it goes in",
   account_passkeys: "exported",
@@ -153,6 +155,8 @@ export interface AccountExport {
   readonly follows: readonly string[];
   /** The polls it followed whose results are in, by election ID (version 4). */
   readonly followResults: readonly string[];
+  /** The notification choices it made, or `null` for the defaults (version 5). */
+  readonly noticeChoices: { readonly results: boolean } | null;
   readonly tier0Tokens: readonly {
     readonly chainId: string;
     readonly groupRegistry: string;
@@ -318,6 +322,10 @@ export async function exportAccount(
         .from(accountFollowResults)
         .where(eq(accountFollowResults.userId, accountId))
         .orderBy(asc(accountFollowResults.electionId));
+      const [choices] = await tx
+        .select({ results: accountNoticeChoices.results })
+        .from(accountNoticeChoices)
+        .where(eq(accountNoticeChoices.userId, accountId));
       const tokens = await tx
         .select({
           chainId: accountTokens.chainId,
@@ -375,6 +383,7 @@ export async function exportAccount(
         reactions: reactions.map((r) => ({ electionId: hex(r.electionId), reaction: r.reaction })),
         follows: follows.map((f) => hex(f.electionId)),
         followResults: followResults.map((f) => hex(f.electionId)),
+        noticeChoices: choices ?? null,
         tier0Tokens: tokens.map((t) => ({
           chainId: t.chainId.toString(),
           groupRegistry: hex(t.groupRegistry),

@@ -16,3 +16,14 @@ export const accountNotices = pgTable("account_notices", {
   moderation: boolean("moderation").notNull().default(true),
   results: boolean("results").notNull().default(false),
 });
+
+// Drizzle view of migrations/0052_notice_choices.sql; a test checks they
+// agree. The account class: whether results of the polls an account followed
+// join its notices, no row being the default ([[P2-27]] part 3c-2a; T-10).
+
+export const accountNoticeChoices = pgTable("account_notice_choices", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => accountUsers.id, { onDelete: "cascade" }),
+  results: boolean("results").notNull(),
+});

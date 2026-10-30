@@ -6,6 +6,7 @@ import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
+  accountNoticeChoices,
   accountNotices,
   decideAppeal,
   decideProfileAppeal,
@@ -24,6 +25,7 @@ import {
   moderate,
   moderateProfile,
   newAccountId,
+  noticeChoices,
   noticeDue,
   NOTICE_TRIES,
   NOTICE_WAIT_SECONDS,
@@ -37,6 +39,7 @@ import {
   RESTORE_REASONS,
   sendNotices,
   setFollow,
+  setNoticeChoices,
   storeDefinition,
   subscribePush,
   verifyEmailCode,
@@ -733,6 +736,231 @@ describe("results notices (P2-25 part 4c)", () => {
       { kind: "notice", to: address, locale: "en-US", about: "moderation" },
       { kind: "notice", to: address, locale: "en-US", about: "both" },
     ]);
+  });
+});
+
+describe("notification choices (P2-27 part 3c-2a)", () => {
+  /** A fresh verified account following a fresh poll. */
+  async function following() {
+    const account = await newAccount(app);
+    const address = await verified(account);
+    const { electionId } = await poll();
+    await setFollow(app, account, electionId, true, { now: NOW });
+    return { account, address, electionId };
+  }
+
+  test("the Drizzle table matches the migrated one, keyed only by the account", async () => {
+    const config = getTableConfig(accountNoticeChoices);
+    const cols = await db.admin`
+      SELECT column_name, data_type, is_nullable FROM information_schema.columns
+      WHERE table_schema = ${db.schema} AND table_name = ${config.name} ORDER BY ordinal_position`;
+    expect(cols.map((c) => [c["column_name"], c["data_type"], c["is_nullable"]])).toEqual(
+      config.columns.map((c) => [c.name, c.getSQLType(), c.notNull ? "NO" : "YES"]),
+    );
+    // A choice names no poll: only the account and what it chose.
+    expect(cols.map((c) => c["column_name"])).toEqual(["user_id", "results"]);
+    const keys = await db.admin`
+      SELECT confrelid::regclass::text AS target FROM pg_constraint
+      WHERE conrelid = ${`"${db.schema}".account_notice_choices`}::regclass AND contype = 'f'`;
+    expect(keys.map((k) => k["target"])).toEqual(["account_users"]);
+  });
+
+  test("the app role changes only the choice, and never deletes or truncates", async () => {
+    const cols = await db.admin`
+      SELECT column_name FROM information_schema.column_privileges
+      WHERE table_schema = ${db.schema} AND grantee = 'abolish_app' AND privilege_type = 'UPDATE'
+        AND table_name = 'account_notice_choices'`;
+    expect(cols.map((c) => c["column_name"])).toEqual(["results"]);
+    const account = await newAccount(app);
+    await setNoticeChoices(app, account, { results: false });
+    const other = await newAccount(app);
+    expect(
+      await failsWith(
+        app`UPDATE account_notice_choices SET user_id = ${other} WHERE user_id = ${account}`,
+      ),
+    ).toBe("42501");
+    expect(await failsWith(app`DELETE FROM account_notice_choices`)).toBe("42501");
+    expect(await failsWith(app`TRUNCATE account_notice_choices`)).toBe("42501");
+  });
+
+  test("an account that chose nothing is told of results, and the last choice stands", async () => {
+    const account = await newAccount(app);
+    const other = await newAccount(app);
+    expect(await noticeChoices(app, account)).toEqual({ results: true });
+    await fc.assert(
+      fc.asyncProperty(fc.array(fc.boolean(), { minLength: 1, maxLength: 5 }), async (choices) => {
+        for (const results of choices) await setNoticeChoices(app, account, { results });
+        expect(await noticeChoices(app, account)).toEqual({ results: choices.at(-1) });
+        // One account's choice is its own.
+        expect(await noticeChoices(app, other)).toEqual({ results: true });
+      }),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+
+  test("with results off, a followed poll is listed when they land but no notice is queued", async () => {
+    await clear();
+    const off = await following();
+    const on = await newAccount(app);
+    const onAddress = await verified(on);
+    await setFollow(app, on, off.electionId, true, { now: NOW });
+    await setNoticeChoices(app, off.account, { results: false });
+    // Only the account that kept them on is told.
+    expect(await landResults(app, off.electionId, { now: NOW })).toBe(1);
+    expect(await followResults(app, off.account)).toEqual([off.electionId]);
+    expect(await noticeOf(off.account)).toBeUndefined();
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([
+      { kind: "notice", to: onAddress, locale: "en-US", about: "results" },
+    ]);
+  });
+
+  test("with results off, a moderation notice waiting is still sent, saying only that", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await setNoticeChoices(app, author, { results: false });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    await landResults(app, followed.electionId, { now: new Date() });
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "en-US", about: "moderation" },
+    ]);
+  });
+
+  test("turning results off takes them off a notice waiting, and drops one that held only them", async () => {
+    await clear();
+    const only = await following();
+    expect(await landResults(app, only.electionId, { now: NOW })).toBe(1);
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    await landResults(app, followed.electionId, { now: new Date() });
+    const before = await noticeOf(author);
+
+    await setNoticeChoices(app, only.account, { results: false });
+    await setNoticeChoices(app, author, { results: false });
+    expect(await noticeOf(only.account)).toBeUndefined();
+    // Its due time and tries are untouched, so a sender holding it still deletes it.
+    expect(await noticeOf(author)).toEqual(before);
+    // The lists stay: only the e-mail is left out.
+    expect(await followResults(app, only.account)).toEqual([only.electionId]);
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "en-US", about: "moderation" },
+    ]);
+  });
+
+  test("turning results off while a sender holds the notice sends it once, as claimed", async () => {
+    await clear();
+    const only = await following();
+    await landResults(app, only.electionId, { now: NOW });
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    await landResults(app, followed.electionId, { now: new Date() });
+    const messages: EmailMessage[] = [];
+    let second: { electionId: Uint8Array } | undefined;
+    const sender: EmailSender = {
+      send: async (m) => {
+        messages.push(m);
+        // Both accounts turn results off while the provider takes their notices.
+        await setNoticeChoices(app2, only.account, { results: false });
+        await setNoticeChoices(app2, author, { results: false });
+        if (second === undefined) {
+          // A new decision renews the author's notice meanwhile; it must survive the send.
+          second = await poll(author);
+          await moderate(app2, second.electionId, {
+            action: "hide",
+            reason: "illegal",
+            moderator: "mod-2",
+          });
+        }
+        return "sent";
+      },
+    };
+    const run = await sendNotices(app, { sender, keys: KEYS, now: later() });
+    expect(run).toMatchObject({ sent: 2, retrying: 0, dropped: 0 });
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: only.address,
+      locale: "en-US",
+      about: "results",
+    });
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: address,
+      locale: "en-US",
+      about: "both",
+    });
+    // The results-only notice is gone; the renewed one waits, saying only moderation.
+    expect(await noticeOf(only.account)).toBeUndefined();
+    expect(await noticeOf(author)).toMatchObject({ tries: 0 });
+    messages.length = 0;
+    const { messages: next, sender: recording } = recorder();
+    expect(await drain(recording, new Date(Date.now() + 4 * DAY))).toEqual({
+      sent: 1,
+      retrying: 0,
+      dropped: 0,
+    });
+    expect(next).toEqual([{ kind: "notice", to: address, locale: "en-US", about: "moderation" }]);
+  });
+
+  test("turning results off deletes a notice that carries only results, never leaving it bare", async () => {
+    await clear();
+    const account = await newAccount(app);
+    // A results-only notice, as a landing that judged the choice first leaves it.
+    await app`INSERT INTO account_notices (user_id, not_before, moderation, results)
+      VALUES (${account}, ${NOW.toISOString()}, false, true)`;
+    await setNoticeChoices(app, account, { results: false });
+    expect(await noticeOf(account)).toBeUndefined();
+  });
+
+  test("turning results back on tells of the next landing, not the ones left out", async () => {
+    await clear();
+    const { account, address, electionId } = await following();
+    await setNoticeChoices(app, account, { results: false });
+    expect(await landResults(app, electionId, { now: NOW })).toBe(0);
+    await setNoticeChoices(app, account, { results: true });
+    expect(await noticeOf(account)).toBeUndefined();
+    const next = await poll();
+    await setFollow(app, account, next.electionId, true, { now: NOW });
+    expect(await landResults(app, next.electionId, { now: NOW })).toBe(1);
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US", about: "results" }]);
+  });
+
+  test("a choice goes with its account", async () => {
+    const account = await newAccount(app);
+    await setNoticeChoices(app, account, { results: false });
+    await db.admin`DELETE FROM account_users WHERE id = ${account}`;
+    expect(
+      await db.admin`SELECT 1 FROM account_notice_choices WHERE user_id = ${account}`,
+    ).toHaveLength(0);
+  });
+
+  test("refuses a malformed account or choice, writing nothing", async () => {
+    const account = await newAccount(app);
+    await expect(noticeChoices(app, "Not-an-ID")).rejects.toThrow(RangeError);
+    await expect(setNoticeChoices(app, "Not-an-ID", { results: true })).rejects.toThrow(RangeError);
+    for (const bad of [undefined, null, {}, { results: "false" }, { results: 0 }])
+      await expect(
+        setNoticeChoices(app, account, bad as unknown as { results: boolean }),
+      ).rejects.toThrow(TypeError);
+    expect(await noticeChoices(app, account)).toEqual({ results: true });
   });
 });
 

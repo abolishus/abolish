@@ -8,7 +8,7 @@
 // nothing about it is sent anywhere else (T-11, T-67).
 
 /** The export's layout this page knows (packages/core's `ACCOUNT_EXPORT_VERSION`). */
-export const ACCOUNT_EXPORT_VERSION = 4;
+export const ACCOUNT_EXPORT_VERSION = 5;
 
 const ISO = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const ACCOUNT_ID = /^[a-z0-9]{32}$/;

@@ -224,7 +224,8 @@ export interface DeploymentVariables {
  * Each value comes from that record, except the registration account, the
  * paymaster and the EntryPoint, which the record doesn't carry: they come
  * from the L2 file, the account and paymaster at their CREATE addresses
- * after the board. `coordinator` is the staging `api`'s HTTPS address, which
+ * after the board, and the EntryPoint is the file's pin, which the Tier 0
+ * job checks against both on chain at start. `coordinator` is the staging `api`'s HTTPS address, which
  * each seat's `TRUSTEE_CONFIG` names; the seat judges it at start. What
  * isn't the deployment's (node and bundler URLs, keys, receipt keys, each
  * contract's creation block) is the owner's to add (the [[staging-testnet]]

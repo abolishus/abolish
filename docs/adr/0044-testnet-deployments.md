@@ -1,8 +1,8 @@
-# ADR 0044: What a testnet deployment needs before the pre-deployment conditions are met
+# ADR 0044: What the staging deployment needs before the pre-deployment conditions are met
 
 - Status: Accepted (agent) — owner may veto
 - Date: 2026-10-30
-- Deciders: agent, owner may veto (rule A). Two things stay the owner's: accepting [[delivery]]'s three owner-reserved residuals for a testnet, and any deployment beyond a testnet (mainnet).
+- Deciders: agent, owner may veto (rule A). Two things stay the owner's: accepting [[delivery]]'s three owner-reserved residuals for the staging deployment, and any deployment other than the staging one, mainnet included.
 - Threats addressed: T-25, T-34, T-53, T-54, T-26, T-64 (see [[THREAT_MODEL]])
 
 ## Context
@@ -23,7 +23,7 @@ Three more are [[delivery]]'s residuals, which "MUST be closed, or accepted by t
 
 Each condition guards elections that matter: once a registry holds real polls it can't change, so a condition it fails is failed for good. [[P3-4]] is deferred until [[P2-29]] is done (the owner, 2026-10-21, [[STATUS]], Queue), so "every condition first" puts staging behind the whole everyday app.
 
-What is one-way here is the deployment itself: a deployed registry and board are immutable. A testnet deployment, though, holds only staging's polls, which are tests. A later deployment replaces it with new addresses, and nothing carries its elections forward.
+What is one-way here is the deployment itself: a deployed registry and board are immutable. The staging deployment, though, holds only staging's polls, which are tests, and this ADR waives nothing for any other. A later deployment replaces it with new addresses, and nothing carries its elections forward.
 
 ## Options
 
@@ -31,12 +31,13 @@ What is one-way here is the deployment itself: a deployed registry and board are
 
 Close all nine (and the three residuals) before any deployment. Pros: one rule everywhere, and the first deployment has production's shape. Cons: [[P3-4]] is a large item the owner has deferred, and so is [[P4-3]]'s data availability, which closes two of the residuals. Retiring versions 1 and 3 also means moving the reference election's single-question elections and much of the Foundry suite onto version 4. Staging waits on all of it, against the owner's stated priority.
 
-### B. A testnet waiver for the nine, named and enforced, with the residuals put to the owner
+### B. A waiver for the staging deployment only, named and enforced, with the residuals put to the owner
 
-The nine stay binding on any deployment beyond a testnet. A deployment to Base Sepolia, Sepolia or a local Anvil may go ahead with them open, on these terms:
+The waiver is scoped to staging's deployment, not to chain IDs: every deployment before mainnet runs on Base Sepolia and Sepolia, a public or production one included (the brief allows testnets only until mainnet). The staging deployment is the one made for the `staging` environment: the deploy workflow's input names it, its deployment files record it, and only staging releases bind it. It may go ahead with the nine open, on these terms:
 
-- **The deploy script refuses any other chain** while any of the nine is open.
-- **No release offered for real polls pins a testnet deployment.** This is a release-procedure rule ([[release]]), since anyone can deploy the same bytecode on any chain without the script.
+- **Any other deployment meets all nine and the owner's three residuals,** whatever chain it is on. That includes a public or production deployment on a testnet before mainnet.
+- **The deploy script requires the explicit staging target** while any of the nine is open, refuses any other target, and refuses every chain but 84532, 11155111 and 31337.
+- **A release offered for real polls is any release not built for the staging environment.** None binds the staging deployment. This is a release-procedure rule ([[release]]), since anyone can deploy the same bytecode on any chain without the script.
 - **Staging's own path never depends on what is open.**
   - Poll creation registers definition version 5 only ([[0032-poll-creation-operations]]; `packages/core/src/poll-registration.ts`), which binds receipt keys. Moving it to version 6 ([[P2-16]] part 5) doesn't reopen condition 1, which concerns versions 1 and 3 only.
   - Staging's polls are a few hundred bytes, far below any gas cap.
@@ -46,9 +47,9 @@ The nine stay binding on any deployment beyond a testnet. A deployment to Base S
   - Staging's seats are ours and send no roots ([[P1-12f]] part 3c builds them). A leaked seat key could hold a staging poll unverifiable, which costs a test.
   - Staging's verifier runs report 1.2 `not-implemented`, as any run does today.
 - **The runbook names the waiver** ([[staging-testnet]]).
-- **The owner decides the three residuals.** No testnet deployment is made until the owner has accepted them for testnets or they are closed. The deploy itself is the owner's in any case: part 3's workflow is a `ci:` PR the owner reviews and runs.
+- **The owner decides the three residuals.** The staging deployment isn't made until the owner has accepted them for it or they are closed. The deploy itself is the owner's in any case: part 3's workflow is a `ci:` PR the owner reviews and runs.
 
-Pros: staging gets real contracts as soon as the owner runs the workflow. Every open condition still binds production. Cons: the testnet contracts aren't production's bytecode, so staging's verifier runs check a registry that will be replaced. Anyone may still register a version-1 or version-3 poll on the testnet registry, or a large definition that fails. These are liveness and fidelity costs on a testnet, not risks to real polls.
+Pros: staging gets real contracts as soon as the owner runs the workflow. Every open condition still binds production. Cons: the testnet contracts aren't production's bytecode, so staging's verifier runs check a registry that will be replaced. Anyone may still register a version-1 or version-3 poll on the testnet registry, or a large definition that fails. These are liveness and fidelity costs on staging, not risks to real polls. If 1.2's binding is later specified in a form an earlier deployment can't meet (a pinned factory, say), the staging deployment never passes 1.2, which costs only its tests.
 
 ### C. Close the cheap ones first, waive only the large ones
 
@@ -56,13 +57,13 @@ Retire versions 1 and 3, budget the decoder and specify 1.2's binding, then depl
 
 ## Recommendation
 
-B. The conditions protect elections that can't be redone. A testnet holds none of those, and the script's chain check and the release rule keep the waiver from reaching anything else. B would change if the owner wanted staging to exercise production's exact bytecode (then C or A), or if a waived condition ever touched staging's own path. For example, if poll creation moved to version 3, condition 1 would bind the testnet too.
+B. The conditions protect elections that can't be redone. The staging deployment holds none of those. The script's staging target and the release rule keep the waiver from reaching any other deployment, a public one on a testnet included. B would change if the owner wanted staging to exercise production's exact bytecode (then C or A), or if a waived condition ever touched staging's own path. For example, if poll creation moved to version 3, condition 1 would bind the testnet too.
 
 ## Consequences
 
 - [[contracts]] gains a Testnet deployments section that lists the nine and the owner's three. Each condition's own statement names that section.
-- [[P2-32]] part 1b's deploy script checks the chain ID against 84532, 11155111 and 31337 and stops otherwise.
-- The owner is asked to accept, for testnets only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
+- [[P2-32]] part 1b's deploy script takes an explicit target, and while any of the nine is open it deploys only the staging target, and only on 84532, 11155111 or 31337. Its deployment files record the target.
+- The owner is asked to accept, for the staging deployment only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
 - Closing the nine is still owed before production:
   - versions 1 and 3 and the decoder budget, with [[P1-18]]'s remaining deployment needs;
   - Tier 2 and the nullifier-key events, with [[P3-4]];
@@ -72,9 +73,9 @@ B. The conditions protect elections that can't be redone. A testnet holds none o
   - the obligation roots' leaves, with [[P1-12f]] part 3;
   - `tally-late`, with [[P1-19]].
 
-  So are the two conditions [[contracts]] already gives as before any registry is deployed beyond a testnet: the operator's boarding throughput against self-paid floods ([[P4-3]]) and the review of `SELF_PAID_FEE` (Group registry, Known-weak, Paid floods of self-paid additions). The chain check covers them too.
+  So are the two conditions [[contracts]] already gives as "before any registry is deployed beyond a testnet", read as binding every deployment but the staging one: the operator's boarding throughput against self-paid floods ([[P4-3]]) and the review of `SELF_PAID_FEE` (Group registry, Known-weak, Paid floods of self-paid additions). The chain check covers them too.
 
-  Each one closed comes off the list. Once the list is empty, the chain check goes, at the owner's mainnet decision.
+  Each one closed comes off the list. Once the list is empty, the staging-only check goes.
 
 - Known-weak:
   - A testnet registry admits versions 1 and 3, and has the decoder's gas limits.
@@ -82,7 +83,7 @@ B. The conditions protect elections that can't be redone. A testnet holds none o
   - Staging's operator could withhold openings unattributed.
   - A testnet group's region is only the release's word, so staging can't show regional results.
   - A root sent for a staging poll leaves it unverifiable.
-- Nothing but release procedure checks the rule that no release for real polls binds a testnet deployment. A verifier or release-builder check that reports or refuses a definition or deployment record on chain 84532, 11155111 or 31337 is owed before the first release offered for real polls ([[P4-4]]'s release checks, or [[P1-19]] 2.3). Staging's own releases rightly bind the testnet deployment, so that check first needs a definition of a release offered for real polls, recorded where the check can read it (a field of the release or deployment record, or the registry it is published in). Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on a testnet deployment from verifying.
+- Nothing but release procedure checks the rule that no release for real polls binds the staging deployment, or any deployment on chain 84532, 11155111 or 31337 while one of the nine is open. A release offered for real polls is defined now, as any release not built for the staging environment, so a reviewer can apply the rule. A verifier or release-builder check is owed before the first such release ([[P4-4]]'s release checks, or [[P1-19]] 2.3). It needs the distinction recorded where the check can read it, for example a field of the release or deployment record, or the registry it is published in. Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on the staging deployment from verifying.
 
 ## Decision
 

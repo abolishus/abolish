@@ -321,6 +321,28 @@ describe("the relay", () => {
     expect((await from("203.0.113.1")).status).toBe(200);
   });
 
+  it("never asks the node for a request past the rate", async () => {
+    const { n, url } = await setup(answering, { rate: { requests: 1, windowSeconds: 60 } });
+    expect((await send(url, { body: request16k })).status).toBe(200);
+    expect((await send(url, { body: request16k })).status).toBe(429);
+    expect(n.seen).toHaveLength(1);
+  });
+
+  it("counts an IPv6 address by its /64, and a header holding no address as the socket's peer (T-54)", async () => {
+    const { url } = await setup(answering, {
+      rate: { requests: 1, windowSeconds: 60, addressHeader: "x-real-ip" },
+    });
+    const from = (address: string) =>
+      send(url, { body: request16k, headers: { "x-real-ip": address } });
+    expect((await from("2001:db8:1:2::1")).status).toBe(200);
+    expect((await from("2001:0db8:0001:0002:ffff::9")).status).toBe(429);
+    expect((await from("2001:db8:1:3::1")).status).toBe(200);
+    // Junk falls back to the socket's peer, 127.0.0.1, whichever junk it is.
+    expect((await from("x".repeat(4000))).status).toBe(200);
+    expect((await from("not an address")).status).toBe(429);
+    expect((await from("::ffff:127.0.0.1")).status).toBe(429);
+  });
+
   it("leaves a new address unlimited once a window's table is full, so filling it holds no one off", async () => {
     const { url } = await setup(
       answering,
@@ -335,6 +357,69 @@ describe("the relay", () => {
     expect((await from("203.0.113.3")).status).toBe(200);
     // The tracked ones are still limited.
     expect((await from("203.0.113.1")).status).toBe(429);
+  });
+
+  it("gives up on a node that trickles its answer past the deadline (T-52)", async () => {
+    const { url } = await setup(
+      (_, res) => {
+        res.writeHead(200, { "content-type": "message/ohttp-res" });
+        const timer = setInterval(() => res.write(Buffer.alloc(1)), 300);
+        res.on("close", () => clearInterval(timer));
+      },
+      { timeoutSeconds: 1 },
+    );
+    const started = Date.now();
+    expect((await send(url, { body: request16k })).status).toBe(502);
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it("lets a stalled node hold at most half the queue, so other seats keep their route (T-25)", async () => {
+    const stalled = await node(() => undefined);
+    const healthy = await node(answering);
+    const relay = await serveRelay(
+      parseRelayConfig(
+        JSON.stringify({
+          host: "127.0.0.1",
+          port: 0,
+          queue: 2,
+          resources: [
+            { path: "seats/1", node: `http://127.0.0.1:${stalled.port}` },
+            { path: "seats/2", node: `http://127.0.0.1:${healthy.port}` },
+          ],
+        }),
+      ),
+    );
+    stop.push(stalled.close, healthy.close, relay.close);
+    void send(`${relay.origin}/seats/1`, { body: request16k }).catch(() => undefined);
+    while (stalled.seen.length === 0) await new Promise((r) => setTimeout(r, 5));
+    expect((await send(`${relay.origin}/seats/1`, { body: request16k })).status).toBe(503);
+    expect((await send(`${relay.origin}/seats/2`, { body: request16k })).status).toBe(200);
+  });
+
+  it("releases a place when its client goes away mid-forward", async () => {
+    let held: ServerResponse | undefined;
+    const { url } = await setup(
+      (s, res) => {
+        if (held === undefined) held = res;
+        else answering(s, res);
+      },
+      { queue: 1 },
+    );
+    const req = request(url, {
+      method: "POST",
+      headers: { "content-type": "message/ohttp-req", "content-length": String(request16k.length) },
+    });
+    req.on("error", () => undefined);
+    req.end(request16k);
+    while (held === undefined) await new Promise((r) => setTimeout(r, 5));
+    req.destroy();
+    held.end();
+    let status = 503;
+    for (let i = 0; i < 100 && status === 503; i++) {
+      status = (await send(url, { body: request16k })).status;
+      if (status === 503) await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(status).toBe(200);
   });
 
   it("counts requests per resource and nothing else", async () => {
@@ -386,8 +471,8 @@ describe("the relay's connection to a node over TLS", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  const tlsNode = (ecdhCurve: string) =>
-    node(answering, (h) => createHttpsServer({ cert, key, ecdhCurve }, h));
+  const tlsNode = (ecdhCurve: string, maxVersion: "TLSv1.2" | "TLSv1.3" = "TLSv1.3") =>
+    node(answering, (h) => createHttpsServer({ cert, key, ecdhCurve, maxVersion }, h));
 
   const relayTo = async (port: number, ca: string | undefined) => {
     const relay = await serveRelay(
@@ -417,13 +502,18 @@ describe("the relay's connection to a node over TLS", () => {
     expect(reply.body.equals(sealedAnswer)).toBe(true);
   });
 
-  it("gives no answer from a node offering only a classical group, or one it can't authenticate", async () => {
+  it("gives no answer from a node offering only a classical group or TLS 1.2, or one it can't authenticate", async () => {
     const classical = await tlsNode("X25519:P-256");
     stop.push(classical.close);
     expect((await send(await relayTo(classical.port, cert), { body: request16k })).status).toBe(
       502,
     );
     expect(classical.seen).toHaveLength(0);
+
+    const old = await tlsNode("X25519MLKEM768:X25519", "TLSv1.2");
+    stop.push(old.close);
+    expect((await send(await relayTo(old.port, cert), { body: request16k })).status).toBe(502);
+    expect(old.seen).toHaveLength(0);
 
     const unpinned = await tlsNode("X25519MLKEM768");
     stop.push(unpinned.close);

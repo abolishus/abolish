@@ -9,7 +9,7 @@ Status: not deployable yet. The deploy workflow doesn't build or deploy its imag
 - **One Railway service, `intake-relay`**, from the relay's image, with a public domain (its origin is what the deployment record lists, [[deployment]], `relay`) and no volume: it keeps no state. Any number of replicas; each limits rates on its own.
 - **Its own origin**, never the API's, the website's or an RPC's: the record refuses a relay at an endpoint's origin (`relay-endpoint`), and one under `backup_rp_id` (`relay-rp`).
 - **`RELAY_CONFIG`** (`apps/intake-relay`, README, Configuration): `host` `0.0.0.0`, `port` the service's target port, and one resource per seat, `{ "path": "seat-<i>", "node": "https://seat-<i>.railway.internal:<port>", "ca": "<the seat's certificate>" }`, over the private network. Set `rate` with `addressHeader` set to the header Railway's edge puts the client's address in, and check on deploy day that a client can't set its last value: otherwise every client is limited as the edge's address, or spoofs another's.
-- **Logs** hold a count per resource each minute and nothing else. Railway's own edge logs requests with the client's address (T-11, the platform's logs are a residual, as for the API): turn off what the project can, and treat the rest as part of staging's relaxation.
+- **Logs** hold a count per resource each hour and nothing else. Railway's own edge logs requests with the client's address (T-11, the platform's logs are a residual, as for the API): turn off what the project can, and treat the rest as part of staging's relaxation.
 
 ## Deploy and roll back
 

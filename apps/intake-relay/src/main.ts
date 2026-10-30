@@ -5,7 +5,8 @@
 import { ConfigError, parseRelayConfig } from "./config.ts";
 import { serveRelay } from "./relay.ts";
 
-const COUNT_INTERVAL_MS = 60_000;
+// An hour, so a quiet seat's single delivery is dated to the hour at best (T-13).
+const COUNT_INTERVAL_MS = 3_600_000;
 
 const out = (v: unknown) => process.stdout.write(`${JSON.stringify(v)}\n`);
 

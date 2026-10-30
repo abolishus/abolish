@@ -15,7 +15,7 @@ import {
   request as httpRequest,
   type ServerResponse,
 } from "node:http";
-import type { AddressInfo } from "node:net";
+import { type AddressInfo, isIPv4, isIPv6 } from "node:net";
 import type { Server } from "node:http";
 import { MAX_SEALED_REQUEST, SEALED_ANSWER_LENGTH } from "@abolishus/crypto";
 import type { RelayConfig, RelayResource } from "./config.ts";
@@ -103,6 +103,11 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
     );
   let counts = zero();
   let held = 0;
+  // Places each resource holds, and the most one may: a node that stalls
+  // can take at most half the queue, so the other seats behind the relay
+  // keep their sealed route (T-52, T-25).
+  const heldBy = new Map<string, number>();
+  const perResource = Math.ceil(config.queue / 2);
   // Fixed windows: the whole table is dropped when one ends.
   let window = { start: now(), seen: new Map<string, number>() };
 
@@ -131,7 +136,9 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
           method: "POST",
           // The body's type and length alone: no header of the client's.
           headers: { "content-type": REQUEST_TYPE, "content-length": String(body.length) },
-          timeout: config.timeoutSeconds * 1000,
+          // The whole exchange's deadline, not an idle timeout, which a node
+          // trickling its answer could reset at every byte.
+          signal: AbortSignal.timeout(config.timeoutSeconds * 1000),
           ...(url.protocol === "https:" ? { agent: agents.get(resource.path) } : {}),
         },
         (res) => {
@@ -152,7 +159,6 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
           );
         },
       );
-      req.on("timeout", () => req.destroy());
       req.on("error", () => resolve(undefined));
       req.end(body);
     });
@@ -161,10 +167,12 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
     if (req.headers["content-type"] !== REQUEST_TYPE) return end(res, 415, BASE);
     const length = Number(req.headers["content-length"] ?? Number.NaN);
     if (length > MAX_SEALED_REQUEST) return end(res, 413, BASE);
-    if (limited(req)) return end(res, 429, { ...BASE, "retry-after": String(BUSY_RETRY_SECONDS) });
-    if (held >= config.queue)
+    const mine = heldBy.get(resource.path) ?? 0;
+    if (held >= config.queue || mine >= perResource)
       return end(res, 503, { ...BASE, "retry-after": String(BUSY_RETRY_SECONDS) });
+    if (limited(req)) return end(res, 429, { ...BASE, "retry-after": String(BUSY_RETRY_SECONDS) });
     held++;
+    heldBy.set(resource.path, mine + 1);
     void (async () => {
       try {
         let body;
@@ -189,6 +197,7 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
         end(res, 500, BASE);
       } finally {
         held--;
+        heldBy.set(resource.path, (heldBy.get(resource.path) ?? 1) - 1);
       }
     })();
   };
@@ -248,14 +257,48 @@ export async function serveRelay(config: RelayConfig, options: RelayOptions = {}
   };
 }
 
-/** The address a rate window counts: the edge's header's last value, or the socket's peer. */
+/**
+ * The key a rate window counts: the edge's header's last value, or the
+ * socket's peer when the header holds no IP address, so no key is longer
+ * than an address. An IPv6 address counts by its /64, the block one host
+ * is commonly given, so one host can't take a fresh key per request (T-54).
+ */
 function clientAddress(req: IncomingMessage, header: string | undefined): string {
   if (header !== undefined) {
     const value = req.headers[header];
     const last = (Array.isArray(value) ? value.at(-1) : value)?.split(",").at(-1)?.trim();
-    if (last !== undefined && last !== "") return last;
+    if (last !== undefined) {
+      const key = addressKey(last);
+      if (key !== undefined) return key;
+    }
   }
-  return req.socket.remoteAddress ?? "";
+  return addressKey(req.socket.remoteAddress ?? "") ?? "";
+}
+
+function addressKey(address: string): string | undefined {
+  if (isIPv4(address)) return address;
+  if (!isIPv6(address)) return undefined;
+  // An IPv4-mapped address is its IPv4 address.
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
+  if (mapped !== undefined && isIPv4(mapped)) return mapped;
+  return `${prefix64(address)}::/64`;
+}
+
+/** The first four groups of an IPv6 address, `::` expanded. */
+function prefix64(address: string): string {
+  const [head = "", tail] = address.toLowerCase().split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  // A trailing embedded IPv4 address fills two groups.
+  const width = (g: string[]) => g.reduce((n, x) => n + (x.includes(".") ? 2 : 1), 0);
+  const groups =
+    tail === undefined
+      ? left
+      : [...left, ...Array<string>(8 - width(left) - width(right)).fill("0"), ...right];
+  return groups
+    .slice(0, 4)
+    .map((g) => g.replace(/^0+(?=.)/, ""))
+    .join(":");
 }
 
 function end(res: ServerResponse, status: number, headers: Headers, body?: Uint8Array): void {

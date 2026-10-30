@@ -4,7 +4,7 @@ The checklist for putting staging's contracts on Base Sepolia (L2) and Sepolia (
 
 ## Not yet possible
 
-There is no deploy script or deployment record yet ([[P1-18]]), and the spec lists conditions that must hold before any registry is deployed: the close rule's contracts ([[P1-18]] part 4, [[close]]), membership-checked intake ([[P1-12c]], [[0002-everlasting-privacy]], Decision) and retiring definition versions 1 and 3 ([[contracts]], Election registry, Known-weak). The anchoring Safe's sender is [[P4-1]] part 2b-2. Until those land, prepare everything below; the deploy itself comes with the script.
+There is no deploy script or deployment record yet ([[P2-32]]). A testnet deployment may go ahead before four of the spec's pre-deployment conditions are met: definition versions 1 and 3 still admitted, the decoder's gas at the record's limits, Tier 2's addition path, and the nullifier-key events' contract-event version ([[0044-testnet-deployments]]; [[contracts]], Testnet deployments). So on the testnet: create polls only through staging's poll creation, which registers version 5. Never have the launch seats record a nullifier key. Treat the deployment as disposable: a later one replaces it, and staging's polls stay on the old one. Until the script lands, prepare everything below.
 
 ## Accounts with providers
 

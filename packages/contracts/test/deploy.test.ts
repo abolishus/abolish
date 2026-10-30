@@ -13,11 +13,26 @@
 // that doesn't match what the chain holds.
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
-import { confirm, ConfirmError, type DeploymentRecord, httpRpc } from "../script/confirm.ts";
+import {
+  confirm,
+  ConfirmError,
+  createAddress,
+  type DeploymentRecord,
+  httpRpc,
+  type Rpc,
+} from "../script/confirm.ts";
 
 const PKG = new URL("..", import.meta.url).pathname;
 /** Anvil's first development account: unlocked, so forge sends with no key. */
@@ -670,37 +685,78 @@ describe("the staging deployment on a local Anvil pair", () => {
       }
     });
 
+    /**
+     * The command, run by the Node running these tests (CI's test job has
+     * no `vp node`): `script` is its path, which may be a link to it.
+     */
+    const command = (script: string, ...args: string[]) =>
+      spawnSync(process.execPath, [script, ...args], {
+        cwd: PKG,
+        env: { ...process.env, RPC_URL: l1.url },
+        encoding: "utf8",
+      });
+    const L1_FILES = ["deployments/31337.json", "broadcast/Deploy.s.sol/31337/runL1-latest.json"];
+
     test("the command prints the confirmed record and keeps the URL out of its arguments", () => {
-      const run = spawnSync(
-        "vp",
-        [
-          "node",
-          "script/confirm.ts",
-          "deployments/31337.json",
-          "broadcast/Deploy.s.sol/31337/runL1-latest.json",
-          "out",
-        ],
-        { cwd: PKG, env: { ...process.env, RPC_URL: l1.url }, encoding: "utf8" },
-      );
+      const run = command("script/confirm.ts", ...L1_FILES, "out");
       expect(run.status, run.stderr).toBe(0);
       const printed = JSON.parse(run.stdout) as { contracts: { BoardAnchor: { block: number } } };
       expect(printed.contracts.BoardAnchor.block).toBeGreaterThan(0);
       // No artifacts directory: the build compared against is always named.
-      const bare = spawnSync(
-        "vp",
-        [
-          "node",
-          "script/confirm.ts",
-          "deployments/31337.json",
-          "broadcast/Deploy.s.sol/31337/runL1-latest.json",
-        ],
-        {
-          cwd: PKG,
-          env: { ...process.env, RPC_URL: l1.url },
-          encoding: "utf8",
-        },
+      expect(command("script/confirm.ts", ...L1_FILES).status).toBe(2);
+    });
+
+    test("the command runs through a link to it, never exiting 0 unchecked", () => {
+      // A path with a space, reached through a symlink: neither may skip the
+      // command, which would print nothing and exit 0.
+      const dir = mkdtempSync(`${tmpdir()}/confirm link-`);
+      try {
+        symlinkSync(`${PKG}/script/confirm.ts`, `${dir}/confirm.ts`);
+        const run = command(`${dir}/confirm.ts`, ...L1_FILES, "out");
+        expect(run.status, run.stderr).toBe(0);
+        expect(run.stdout).toContain('"BoardAnchor"');
+        expect(command(`${dir}/confirm.ts`, ...L1_FILES).status).toBe(2);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test("CREATE addresses: Anvil's deployer at nonces 1 and 2, and no nonce RLP can't carry in one byte", () => {
+      // The addresses every Hardhat and Anvil user sees for the first
+      // development account's second and third deployments.
+      expect(createAddress(DEPLOYER, 1)).toBe("0xe7f1725e7734ce288f8367e1bb143e90bb3f0512");
+      expect(createAddress(DEPLOYER, 2)).toBe("0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0");
+      expect(() => createAddress(DEPLOYER, 0)).toThrow(RangeError);
+      expect(() => createAddress(DEPLOYER, 0x80)).toThrow(RangeError);
+    });
+
+    /** The chain as `rpc` gives it, with `method`'s answers changed by `change`. */
+    const altered =
+      (rpc: Rpc, method: string, change: (result: unknown) => unknown): Rpc =>
+      async <T>(m: string, params: readonly unknown[]) => {
+        const result = await rpc<T>(m, params);
+        return (m === method ? change(result) : result) as T;
+      };
+
+    test("refuses a transaction whose receipt says it reverted", async () => {
+      const rpc = altered(httpRpc(l2.url), "eth_getTransactionReceipt", (r) => ({
+        ...(r as object),
+        status: "0x0",
+      }));
+      expect(await refusal(confirm(l2Record, broadcast(31338, "runL2"), rpc, OUT))).toBe(
+        "TrusteeRegistry: transaction reverted",
       );
-      expect(bare.status).toBe(2);
+    });
+
+    test("refuses a board whose immutable names another ballot check", async () => {
+      const rpc = altered(
+        httpRpc(l2.url),
+        "eth_call",
+        () => `0x${"00".repeat(12)}${"ab".repeat(20)}`,
+      );
+      expect(await refusal(confirm(l2Record, broadcast(31338, "runL2"), rpc, OUT))).toMatch(
+        /^Board: pins ballot check/,
+      );
     });
 
     test.each<

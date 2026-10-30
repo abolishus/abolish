@@ -20,7 +20,8 @@
 // the default `out/` is what `forge script` itself rebuilt, so comparing
 // against it couldn't catch a build that differs from the release build.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -106,7 +107,7 @@ function expected(artifacts: string, name: string, code: Uint8Array): Uint8Array
 }
 
 /** The address `creator` gives its CREATE at `nonce`, which here is below 0x80. */
-function createAddress(creator: string, nonce: number): string {
+export function createAddress(creator: string, nonce: number): string {
   // RLP of [creator, nonce]: a 21-byte string and a one-byte integer, which
   // a larger nonce wouldn't be.
   if (nonce < 1 || nonce >= 0x80) throw new RangeError(`nonce ${nonce}`);
@@ -194,10 +195,29 @@ export async function confirm(
       throw new ConfirmError(name, "code isn't the build's beyond its immutables");
     contracts[name] = { ...c, transaction: creator.hash, block: Number(receipt.blockNumber) };
   }
+  // The comparison above lets any immutable through, so the board's pin of
+  // its ballot check is read back: a board built from other creation code
+  // could name other code while a genuine ballot check sits at its first
+  // CREATE address (T-64).
+  const { Board: board, BallotCheck: ballotCheck } = record.contracts;
+  if (board !== undefined && ballotCheck !== undefined) {
+    const selector = bytesToHex(
+      keccak_256(new TextEncoder().encode("ballotCheck()")).subarray(0, 4),
+    );
+    const word = await rpc<string>("eth_call", [
+      { to: board.address, data: `0x${selector}` },
+      "latest",
+    ]);
+    if (!same(`0x${word.slice(-40)}`, ballotCheck.address) || word.length !== 66)
+      throw new ConfirmError("Board", `pins ballot check ${word}`);
+  }
   return { ...record, contracts };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Compared as resolved file URLs: a path that needs encoding or a symlink
+// would otherwise skip the command and exit 0 having checked nothing.
+const main = process.argv[1];
+if (main !== undefined && import.meta.url === pathToFileURL(realpathSync(main)).href) {
   const [recordFile, broadcastFile, artifacts] = process.argv.slice(2);
   const url = process.env["RPC_URL"];
   if (

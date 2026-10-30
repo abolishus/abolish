@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import type { ReactionsClient } from "../account/reactions.ts";
 import { catalogs, type Messages, tierMessage } from "../messages.ts";
+import type { ReportPoll } from "../poll-report.ts";
 import {
   type AskedBy as Asker,
   type Instant,
@@ -22,6 +23,7 @@ import { PollReactions } from "./poll-reactions.tsx";
 import { PollResults } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
+import { ReportSection, type ReportWords } from "./report-section.tsx";
 import { When } from "./when.tsx";
 
 export interface PollSummaryProps {
@@ -46,7 +48,17 @@ export interface PollSummaryProps {
   results?: Results | undefined;
   /** Every question's words, which name the results' questions and options. */
   words?: PollWords | undefined;
+  /** Where a report of the poll goes; without one, it offers none. */
+  report?: ReportPoll | undefined;
 }
+
+const POLL_WORDS = {
+  title: "pollReportTitle",
+  help: "pollReportHelp",
+  open: "pollReport",
+  legend: "pollReportLegend",
+  gone: "pollReportGone",
+} as const satisfies ReportWords;
 
 const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
 
@@ -121,6 +133,7 @@ export function PollSummary({
   askedBy,
   results,
   words,
+  report,
 }: PollSummaryProps) {
   const t = useTranslate(catalogs);
   const latest = moderation.latest;
@@ -392,6 +405,11 @@ export function PollSummary({
           </section>
         </div>
       </details>
+
+      {/* Not for a hidden poll: moderators have already removed its text (T-68). */}
+      {report === undefined || moderation.state === "hidden" ? null : (
+        <ReportSection words={POLL_WORDS} send={(reason) => report(poll.electionId, reason)} />
+      )}
     </article>
   );
 }

@@ -1,136 +1,25 @@
-import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
-import { Label } from "@abolishus/ui/ui/label";
-import { RadioGroup, RadioGroupItem } from "@abolishus/ui/ui/radio-group";
-import { ArrowRight, EyeOff, Flag } from "lucide-react";
-import { type FormEvent, useId, useRef, useState } from "react";
+import { buttonVariants, useTranslate } from "@abolishus/ui";
+import { ArrowRight, EyeOff } from "lucide-react";
 
 import { catalogs } from "../messages.ts";
-import type { ReportOutcome, ReportProfile } from "../profile-report.ts";
+import type { ReportProfile } from "../profile-report.ts";
 import type { ProfilePage as Profile } from "../server/load.ts";
-import { REMOVAL_GROUNDS, type RemovalGround } from "./moderation-log.tsx";
 import { PageHeader } from "./page-parts.tsx";
+import { ReportSection, type ReportWords } from "./report-section.tsx";
 import { Notice } from "./site-layout.tsx";
 import { StreamCard } from "./stream.tsx";
 
-const OUTCOME = {
-  reported: "byReportDone",
+const PROFILE_WORDS = {
+  title: "byReportTitle",
+  help: "byReportHelp",
+  open: "byReport",
+  legend: "byReportLegend",
   gone: "byReportGone",
-  failed: "byReportFailed",
-} as const satisfies Record<ReportOutcome, string>;
+} as const satisfies ReportWords;
 
-/**
- * Reporting the profile to moderators, under one of the policy's removal
- * grounds (docs/moderation-policy.md): nothing is sent until a ground is
- * chosen and the report confirmed, and nothing about the reporter is sent
- * at all (src/profile-report.ts; T-10, T-11).
- */
+/** Reporting the profile to moderators (src/profile-report.ts; T-10, T-11). */
 export function ProfileReport({ handle, report }: { handle: string; report: ReportProfile }) {
-  const t = useTranslate(catalogs);
-  const legendId = useId();
-  const helpId = useId();
-  const [open, setOpen] = useState(false);
-  const [reason, setReason] = useState<RemovalGround | undefined>();
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<ReportOutcome | undefined>();
-  const legend = useRef<HTMLLegendElement>(null);
-  const opener = useRef<HTMLButtonElement>(null);
-
-  const start = () => {
-    setOutcome(undefined);
-    setReason(undefined);
-    setOpen(true);
-    // The form replaces the button: focus goes to its question.
-    requestAnimationFrame(() => legend.current?.focus());
-  };
-
-  const close = () => {
-    setOpen(false);
-    requestAnimationFrame(() => opener.current?.focus());
-  };
-
-  const send = async (e: FormEvent) => {
-    e.preventDefault();
-    if (reason === undefined) return;
-    setBusy(true);
-    const result = await report(handle, reason);
-    setBusy(false);
-    setOutcome(result);
-    if (result !== "failed") close();
-  };
-
-  return (
-    <section
-      aria-labelledby={`${legendId}-title`}
-      className="grid gap-4 border-t border-border pt-8"
-    >
-      <h2 id={`${legendId}-title`} className="m-0 font-heading text-xl font-semibold">
-        {t("byReportTitle")}
-      </h2>
-      <p id={helpId} className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
-        {t("byReportHelp")}{" "}
-        <a className="underline underline-offset-4" href="/moderation">
-          {t("byReportPolicy")}
-        </a>
-      </p>
-      {open ? (
-        <form className="grid gap-4" aria-busy={busy} onSubmit={(e) => void send(e)}>
-          <fieldset className="m-0 grid gap-3 border-0 p-0" aria-describedby={helpId}>
-            <legend
-              id={legendId}
-              ref={legend}
-              tabIndex={-1}
-              className="mb-3 p-0 text-base font-semibold outline-none"
-            >
-              {t("byReportLegend")}
-            </legend>
-            <RadioGroup
-              aria-labelledby={legendId}
-              value={reason ?? ""}
-              onValueChange={(value) => setReason(value as RemovalGround)}
-              className="flex flex-wrap gap-2"
-            >
-              {REMOVAL_GROUNDS.map((r) => (
-                <Label
-                  key={r}
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 border px-4 text-sm leading-tight font-normal",
-                    reason === r
-                      ? "border-2 border-primary px-[15px] font-semibold"
-                      : "border-border",
-                  )}
-                >
-                  <RadioGroupItem value={r} />
-                  {t(`reason_${r}`)}
-                </Label>
-              ))}
-            </RadioGroup>
-          </fieldset>
-          <div className="flex flex-wrap gap-3">
-            <Button type="submit" disabled={busy || reason === undefined}>
-              {t("byReportSend")}
-            </Button>
-            <Button type="button" variant="outline" disabled={busy} onClick={close}>
-              {t("byReportCancel")}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <Button
-          ref={opener}
-          type="button"
-          variant="outline"
-          className="justify-self-start"
-          onClick={start}
-        >
-          <Flag aria-hidden="true" />
-          {t("byReport")}
-        </Button>
-      )}
-      <p role="status" className="m-0 text-sm empty:hidden">
-        {outcome === undefined ? null : t(OUTCOME[outcome])}
-      </p>
-    </section>
-  );
+  return <ReportSection words={PROFILE_WORDS} send={(reason) => report(handle, reason)} />;
 }
 
 export interface ProfilePageProps {

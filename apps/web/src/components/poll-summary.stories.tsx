@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, userEvent, within } from "storybook/test";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
 import type { ReactionsClient } from "../account/reactions.ts";
 import type { PollView } from "../poll.ts";
+import type { ReportOutcome } from "../profile-report.ts";
 import { PollSummary } from "./poll-summary.tsx";
 
 const poll: PollView = {
@@ -38,6 +39,9 @@ const reactions: ReactionsClient = {
   },
 };
 
+const reporting = (outcome: ReportOutcome) =>
+  fn(async (_electionId: string, _reason: string) => outcome);
+
 const meta = {
   component: PollSummary,
   args: {
@@ -48,6 +52,7 @@ const meta = {
     code: "mhanrsz",
     share: { url: "https://abolish.us/p/mhanrsz", title: "Poll mhanrsz" },
     reactions,
+    report: reporting("reported"),
     phoneVerification: false,
   },
 } satisfies Meta<typeof PollSummary>;
@@ -151,8 +156,11 @@ export const NoShortCode: Story = {
     const canvas = within(canvasElement);
     await openEvidence(canvasElement);
     await expect(canvas.queryByText("Short link")).toBeNull();
-    // The board's link is the only one left.
-    await expect(canvas.getByRole("link")).toHaveAccessibleName("Read the board, entry by entry");
+    // The board's link is the only one left, beside the report's link to the policy.
+    await expect(canvas.getAllByRole("link").map((l) => l.textContent)).toEqual([
+      "Read the board, entry by entry",
+      "What moderation can and can't do",
+    ]);
   },
 };
 
@@ -187,6 +195,10 @@ export const Hidden: Story = {
     await expect(note).toHaveTextContent("withheld (Personal data)");
     // No reactions on a hidden poll, and no counts (T-68).
     await expect(within(canvasElement).queryByRole("heading", { name: "Reactions" })).toBeNull();
+    // Nor a report: moderators have already removed its text.
+    await expect(
+      within(canvasElement).queryByRole("button", { name: "Report this poll" }),
+    ).toBeNull();
     await expect(
       within(note).getByRole("link", { name: "See the moderation log" }),
     ).toHaveAttribute("href", "/moderation");
@@ -386,5 +398,73 @@ export const IllFormedQuestion: Story = {
     await expect(within(canvasElement).getByRole("alert")).toHaveTextContent(
       "(selection limits) in question 4",
     );
+  },
+};
+
+/** The poll's report section, where its outcome is said. */
+const reportSection = (canvasElement: HTMLElement) =>
+  within(within(canvasElement).getByRole("region", { name: "Something wrong with this poll?" }));
+
+const choose = async (section: ReturnType<typeof within>, ground: string) => {
+  await userEvent.click(section.getByRole("button", { name: "Report this poll" }));
+  await expect(section.getByRole("button", { name: "Send report" })).toBeDisabled();
+  await userEvent.click(section.getByRole("radio", { name: ground }));
+  await userEvent.click(section.getByRole("button", { name: "Send report" }));
+};
+
+/** Nothing is sent until a ground is chosen and the report sent; then the poll and the ground alone. */
+export const Report: Story = {
+  args: { report: reporting("reported") },
+  play: async ({ canvasElement, args }) => {
+    const section = reportSection(canvasElement);
+    await expect(section.getByText(/Anyone can report a poll, without an account/)).toBeVisible();
+    await choose(section, "Personal data");
+    await expect(await section.findByRole("status")).toHaveTextContent(
+      "Reported. A moderator will look at it.",
+    );
+    await expect(args.report).toHaveBeenCalledTimes(1);
+    await expect(args.report).toHaveBeenCalledWith(poll.electionId, "personal-data");
+    // The form closes and focus goes back to the button that opened it.
+    await waitFor(() =>
+      expect(section.getByRole("button", { name: "Report this poll" })).toHaveFocus(),
+    );
+  },
+};
+
+export const ReportCancelled: Story = {
+  args: { report: reporting("reported") },
+  play: async ({ canvasElement, args }) => {
+    const section = reportSection(canvasElement);
+    await userEvent.click(section.getByRole("button", { name: "Report this poll" }));
+    await userEvent.click(section.getByRole("radio", { name: "Spam" }));
+    await userEvent.click(section.getByRole("button", { name: "Cancel" }));
+    await expect(section.getByRole("button", { name: "Report this poll" })).toBeVisible();
+    await expect(args.report).not.toHaveBeenCalled();
+  },
+};
+
+export const ReportedPollGone: Story = {
+  parameters: { theme: "dark" },
+  args: { report: reporting("gone") },
+  play: async ({ canvasElement }) => {
+    const section = reportSection(canvasElement);
+    await choose(section, "Threat");
+    await expect(await section.findByRole("status")).toHaveTextContent(
+      "This poll isn't on our server any more, so nothing was reported.",
+    );
+  },
+};
+
+/** A failure keeps the form and the chosen ground, so the report can be sent again. */
+export const ReportFailed: Story = {
+  args: { report: reporting("failed") },
+  play: async ({ canvasElement }) => {
+    const section = reportSection(canvasElement);
+    await choose(section, "Harassment");
+    await expect(await section.findByRole("status")).toHaveTextContent(
+      "That didn't work. Nothing was reported; try again shortly.",
+    );
+    await expect(section.getByRole("radio", { name: "Harassment" })).toBeChecked();
+    await expect(section.getByRole("button", { name: "Send report" })).toBeEnabled();
   },
 };

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import {
   type AnchorClock,
   checkContractEvent,
+  decodeBallot,
   decodeContractEvent,
   PARAMETERS,
   type RollingBallotChain,
@@ -266,15 +267,32 @@ describe("the operator's admission of a rolling poll's ballots", { timeout: 60_0
           ...(want.decodeError !== undefined && { decodeError: want.decodeError }),
         });
     }
+    // The five the vectors admit, and the two repeats (entries 23 and 24),
+    // which only 5.7 rejects.
     expect(results.filter((r) => r.ok)).toHaveLength(c.ballots.admitted + 2);
   });
 
-  test("an admitted ballot carries the step 5.8's window is judged at", () => {
+  test("a chain that doesn't give the definition's opening state is refused, never judged against", () => {
+    // The first addition dropped: the opening tree is another (2.4 fails it).
+    expect(() =>
+      electionAdmission(hex(c.definition), panel, entries, undefined, {
+        ...chain,
+        events: events.slice(1),
+      }),
+    ).toThrow(RangeError);
+  });
+
+  test("an admitted ballot carries the step its record names, which 5.8's window is judged at", () => {
     const admission = electionAdmission(hex(c.definition), panel, entries, undefined, chain);
     if (!admission.ok) throw new Error(admission.code);
+    const results = admission.admitAll(payloads);
+    for (const [i, r] of results.entries()) {
+      if (!r.ok) continue;
+      expect(r.step, String(i + 1)).toBe(decodeBallot(payloads[i] as Uint8Array, 5).step);
+    }
     // Entries 1 to 3 name step N0 or an earlier one and entries 4 and 5
     // later ones, as a registration at N0's boundary shows above.
-    const steps = admission.admitAll(payloads.slice(0, 5)).map((r) => (r.ok ? r.step : undefined));
+    const steps = results.slice(0, 5).map((r) => (r.ok ? r.step : undefined));
     for (const s of steps.slice(0, 3)) expect(s).toBeLessThanOrEqual(2_966_400);
     for (const s of steps.slice(3)) expect(s).toBeGreaterThan(2_966_400);
   });

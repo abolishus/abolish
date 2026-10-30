@@ -155,6 +155,25 @@ describe("admits exactly the ballots the verifier's 5.1 to 5.4 admit", () => {
   });
 });
 
+test("a rolling chain given beside a fixed definition changes nothing", { timeout: 60_000 }, () => {
+  // Only a rolling definition's ballots read a chain (P2-17 part 4d-2b).
+  const c = byId("mixed");
+  const entries = bundleOf(c).entries;
+  const admission = electionAdmission(hex(c.definition), panelOf(c.panel), entries, undefined, {
+    events: [],
+    registeredAt: 0n,
+  });
+  if (!admission.ok) throw new Error(admission.code);
+  const verdicts = new Map<number, string>();
+  for (const [at, entry] of entries.entries()) {
+    const payload = payloadOf(entry);
+    if ((((payload[0] as number) << 8) | (payload[1] as number)) !== BALLOT) continue;
+    const r = admission.admit(payload);
+    verdicts.set(at, r.ok ? "admitted" : r.code);
+  }
+  expect(verdicts).toEqual(admissions(c));
+});
+
 describe("admitAll gives each payload the verdict admit gives, its membership proofs batched", () => {
   for (const id of ["mixed", "admitted", "repeats", "repeat-of-rejected", "unqualified-first"])
     test(`${id}: the verifier's 5.1 to 5.4 verdicts`, { timeout: 60_000 }, () => {

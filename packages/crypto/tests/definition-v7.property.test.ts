@@ -430,6 +430,11 @@ describe("2.3's profile combination under version 7", () => {
       [v7(1, { [RECORD_TYPES.ballot]: 5 }), 0],
       [v7(1, { [RECORD_TYPES.contractEvent]: 255 }), 0],
     ];
+    // Only `true` reads it, whatever an untyped caller passes.
+    for (const flag of [1, "true", {}])
+      expect(profileCombinationRule(v7(2), 0, flag as unknown as boolean)).toBe(
+        "unsupported-version",
+      );
     for (const [d, seats] of others) {
       expect(profileCombinationRule(d, seats, true)).toBe(profileCombinationRule(d, seats));
     }

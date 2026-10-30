@@ -721,9 +721,10 @@ export function profileCombinationRule(
   // A rolling profile that fits waits on 5.1 and 5.2 against step roots,
   // which only a caller holding the poll's chain reads (`readsRolling`, the
   // verifier's admission given it, P2-17 part 4d-2b): to any other it is
-  // unverifiable, never passed (T-36). Only a rolling definition gets here
-  // with ballot version 5.
-  if (ballot === 5 && !readsRolling) return "unsupported-version";
+  // unverifiable, never passed (T-36). Only `true` lifts it, so a truthy
+  // value from an untyped caller never does. Only a rolling definition gets
+  // here with ballot version 5.
+  if (ballot === 5 && readsRolling !== true) return "unsupported-version";
   return undefined;
 }
 

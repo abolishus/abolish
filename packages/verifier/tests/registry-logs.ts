@@ -465,7 +465,7 @@ const rollingTypical = decodeElectionDefinitionV7(
 export const rolling = (
   tiers: ElectionDefinitionV7["rolling_electorate"],
   closesAt: bigint,
-  version = 11,
+  version = 13,
 ): { version: 7; value: ElectionDefinitionV7 } => ({
   version: 7,
   value: {
@@ -474,9 +474,9 @@ export const rolling = (
     group_registry: registry,
     closes_at: closesAt,
     rolling_electorate: [...tiers],
-    // Contract-event version 11 unless given: a profile pinning ballot
-    // version 5 must pin 10 or later (2.3), and only 13 reads a version-7
-    // definition's registration.
+    // Contract-event version 13 unless given, the only one 2.3 lets a
+    // version-7 definition pin, since only it reads the definition's own
+    // registration; 2.4 reads the group registry's records under 1 to 13.
     profile: {
       protocol_major: 1,
       pins: rollingTypical.profile.pins.map((p) => (p.record_type === 8 ? { ...p, version } : p)),

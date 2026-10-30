@@ -77,7 +77,7 @@ function withStray(t: ReturnType<typeof rollingTree>, group: bigint) {
   const { block, timestamp } = t.events[first] as (typeof t.events)[number];
   const stray = { ...added(group, 5n, [1_000_000_000_999n]), block, timestamp };
   const registration = definitionRegistered(
-    rolling([t.tier], t.closesAt, 13),
+    rolling([t.tier], t.closesAt),
     undefined,
     undefined,
     99n,
@@ -147,15 +147,15 @@ describe("rollingChain", () => {
       stopped({ status: "fail", code: "group-registry", at: {} }),
     );
     // An opening state the records don't reach.
-    const overstated = rolling([{ ...t.tier, group_size: t.tier.group_size + 1n }], t.closesAt, 13);
+    const overstated = rolling([{ ...t.tier, group_size: t.tier.group_size + 1n }], t.closesAt);
     expect(rollingChain(overstated, records, pinned)).toEqual(
       stopped({ status: "fail", code: "electorate", at: { tier: 0 } }),
     );
     // A Tier 2 tier, which this release can't recount, and a contract-event
     // version it doesn't read: unverifiable, still no chain (T-36).
-    expect(
-      rollingChain(rolling([{ ...t.tier, tier: 2 }], t.closesAt, 13), records, pinned),
-    ).toEqual(stopped({ status: "unverifiable", code: "tier-unsupported", at: { tier: 0 } }));
+    expect(rollingChain(rolling([{ ...t.tier, tier: 2 }], t.closesAt), records, pinned)).toEqual(
+      stopped({ status: "unverifiable", code: "tier-unsupported", at: { tier: 0 } }),
+    );
     expect(rollingChain(rolling([t.tier], t.closesAt, 14), records, pinned)).toEqual(
       stopped({ status: "unverifiable", code: "unsupported-version", at: {} }),
     );

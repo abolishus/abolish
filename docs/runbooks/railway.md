@@ -77,6 +77,7 @@ Images go to `ghcr.io/abolishus/abolish-api`, `-web`, `-ballot`, `-worker` and `
 
 - DNS: add `api.<domain>` as a custom domain on the `api` service first (Railway routes by host name), then a proxied (orange cloud) CNAME to the target Railway gives; SSL mode Full (strict).
 - WAF managed rules on; a rate-limiting rule per client address on `POST /ballots`, a tighter one on `POST /moderation/reports` (a report is anonymous, so the proxy is the only bound on how many one client makes), and one on the whole API host (T-48, T-52). The API also caps requests in flight (`apps/api` README, Transport); per-address limits are Cloudflare's job.
+- On the website's host, the same tight rule per client address on `POST` to `/_serverFn/*`: the poll page's report is the only server function that takes a `POST`, and it reaches the API over the private network (`API_URL`), so the API host's rule never sees it (T-52).
 - Logs (T-11): no Logpush job and no Log Explorer. That doesn't make Cloudflare forget addresses: every WAF or rate-limit match is kept as a security event with the client address, path and query string, and analytics keep sampled requests. A rate-limit match on `POST /ballots` thus records an address next to the time of a ballot submission. Cloudflare sees every address in transit anyway; that's T-11's residual, and voters who need more use Tor or direct submit.
 - Turnstile on Tier 0 actions comes with the web app (P2-9); never on ballot submission, which must work without our domain (T-25).
 

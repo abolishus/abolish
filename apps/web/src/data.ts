@@ -14,11 +14,13 @@ import {
   loadProfile,
   loadResultsPage,
   loadStream,
+  reportPoll,
   resolveShortLink,
   STREAM_PAGE,
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { isLocale } from "./locales.ts";
+import { REMOVAL_GROUNDS, type RemovalGround } from "./components/moderation-log.tsx";
 import {
   ballotBase,
   isCanonicalU64,
@@ -79,6 +81,22 @@ export const fetchModerationLog = createServerFn({ method: "GET" })
     return after;
   })
   .handler(({ data }) => opaque(() => loadModerationLog(api(), data)));
+
+/**
+ * A visitor's report of a poll to the moderators, from its page
+ * (src/poll-report.ts). The only POST among the server functions: like
+ * every server function it never gets the account cookie (src/node/serve.ts),
+ * and the API is asked with the poll and the ground alone (T-10, T-11).
+ */
+export const sendPollReport = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) => {
+    const { electionId, reason } = (input ?? {}) as Record<string, unknown>;
+    if (!isElectionId(electionId)) throw new TypeError("expected an election ID");
+    if (!REMOVAL_GROUNDS.some((g) => g === reason))
+      throw new TypeError("expected a removal ground");
+    return { electionId, reason: reason as RemovalGround };
+  })
+  .handler(({ data }) => opaque(() => reportPoll(api(), data.electionId, data.reason)));
 
 export const fetchPollList = createServerFn({ method: "GET" })
   .inputValidator((after: unknown) => {

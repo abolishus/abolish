@@ -9,6 +9,7 @@ import { embedHeight } from "../embed.ts";
 import { catalogs } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
 import { previewMeta } from "../og/poll.ts";
+import { reportPoll } from "../poll-report.ts";
 import { PREVIEW_SIZE } from "../og/model.ts";
 import { isolated, titles } from "../titles.ts";
 import { isElectionId } from "../values.ts";
@@ -107,6 +108,7 @@ export const Route = createFileRoute("/polls/$electionId")({
           {...page}
           share={share}
           reactions={reactionsClient}
+          report={reportPoll}
           phoneVerification={phoneVerification}
         />
       );

@@ -1212,6 +1212,12 @@ export const esUS: Messages = {
   byReportDone: "Denunciado. Un moderador lo revisará.",
   byReportGone: "Este perfil ya no existe, así que no se denunció nada.",
   byReportFailed: "No funcionó. No se denunció nada; inténtalo de nuevo en un momento.",
+  pollReportTitle: "¿Algo anda mal con esta encuesta?",
+  pollReportHelp:
+    "Cualquiera puede denunciar una encuesta, sin cuenta. Se cuentan las denuncias, nunca quién las envió, y un moderador evalúa la encuesta según la política: el número de denuncias nunca decide nada.",
+  pollReport: "Denunciar esta encuesta",
+  pollReportLegend: "¿Por qué debería revisarla un moderador?",
+  pollReportGone: "Esta encuesta ya no está en nuestro servidor, así que no se denunció nada.",
   pollsMark: "Tus encuestas",
   pollsTitle: "Encuestas que creaste",
   pollsLede:

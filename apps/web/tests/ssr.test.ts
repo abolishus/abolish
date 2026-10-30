@@ -326,6 +326,15 @@ describe("poll page", () => {
     expect(html).toContain("Loading reactions…");
   });
 
+  test("offers anyone a report of the poll, with nothing sent until a ground is chosen", async () => {
+    const response = await get(`/polls/${ID}`);
+    const html = await response.text();
+    expect(html).toContain("Something wrong with this poll?");
+    expect(html).toContain(">Report this poll<");
+    // The grounds appear only once the page's script opens the form.
+    expect(html).not.toContain("Why should a moderator look at it?");
+  });
+
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
     const response = await get(`/polls/${QUESTIONS_ID}`);
     expect(response.status).toBe(200);
@@ -428,6 +437,8 @@ describe("poll page", () => {
     expect(html).not.toContain("Share this poll");
     // And it takes no reactions and shows no counts (T-68).
     expect(html).not.toContain("reactions-title");
+    // Nor a report: moderators have already removed its text.
+    expect(html).not.toContain("Report this poll");
   });
 
   test("refuses a definition that names another election (T-34)", async () => {
@@ -1880,11 +1891,12 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(10);
+    expect(ids.length).toBe(11);
     return ids;
   }
 
   test("refuse a call from another site before running", async () => {
+    let posts = 0;
     for (const id of serverFnIds()) {
       seen.length = 0;
       const response = await get(`/_serverFn/${id}`, {
@@ -1897,10 +1909,28 @@ describe("server functions", () => {
       expect(seen).toEqual([]);
       // The same call from our own pages gets past the check: with no input, the
       // function's own input check answers, so it was the CSRF check that refused above.
-      const own = await get(`/_serverFn/${id}`, {
-        "sec-fetch-site": "same-origin",
-        "x-tsr-serverfn": "true",
-      });
+      const headers = { "sec-fetch-site": "same-origin", "x-tsr-serverfn": "true" };
+      let own = await get(`/_serverFn/${id}`, headers);
+      // The poll page's report is the one POST function (src/data.ts): it refuses a GET.
+      if (own.status === 405) {
+        posts++;
+        seen.length = 0;
+        const cross = await handler.fetch(
+          new Request(`http://localhost/_serverFn/${id}`, {
+            method: "POST",
+            headers: {
+              origin: "https://attacker.example",
+              "sec-fetch-site": "cross-site",
+              "x-tsr-serverfn": "true",
+            },
+          }),
+        );
+        expect(cross.status).toBe(403);
+        expect(seen).toEqual([]);
+        own = await handler.fetch(
+          new Request(`http://localhost/_serverFn/${id}`, { method: "POST", headers }),
+        );
+      }
       expect(own.status).toBe(200);
       expect(await own.text()).toMatch(
         // The site key's and the phone setting's take no input, and answer
@@ -1910,6 +1940,7 @@ describe("server functions", () => {
         ),
       );
     }
+    expect(posts).toBe(1);
   });
 });
 
@@ -2175,7 +2206,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 175, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 209, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 213, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },

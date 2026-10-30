@@ -1183,6 +1183,12 @@ const enUS = {
   byReportDone: "Reported. A moderator will look at it.",
   byReportGone: "This profile no longer exists, so nothing was reported.",
   byReportFailed: "That didn't work. Nothing was reported; try again shortly.",
+  pollReportTitle: "Something wrong with this poll?",
+  pollReportHelp:
+    "Anyone can report a poll, without an account. Reports are counted, never who sent them, and a moderator judges the poll against the policy: the number of reports never decides anything.",
+  pollReport: "Report this poll",
+  pollReportLegend: "Why should a moderator look at it?",
+  pollReportGone: "This poll isn't on our server any more, so nothing was reported.",
   pollsMark: "Your polls",
   pollsTitle: "Polls you created",
   pollsLede:

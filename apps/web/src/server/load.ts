@@ -533,6 +533,26 @@ export async function loadModerationLog(api: Api, after: string): Promise<Modera
   return api.moderation.getLog({ after, limit: String(LOG_PAGE) });
 }
 
+/**
+ * Reports the poll `electionId` to the moderators under `reason`, as a
+ * visitor asked on its page: `"gone"` if the API keeps no definition for it.
+ * The request names the poll and the ground only (src/server/api.ts; T-10,
+ * T-11).
+ */
+export async function reportPoll(
+  api: Api,
+  electionId: string,
+  reason: RemovalGround,
+): Promise<"reported" | "gone"> {
+  try {
+    await api.moderation.report({ electionId, reason });
+    return "reported";
+  } catch (error) {
+    if (notFound(error)) return "gone";
+    throw error;
+  }
+}
+
 export type ListedPoll =
   | { readonly kind: "poll"; readonly poll: PollView }
   | {

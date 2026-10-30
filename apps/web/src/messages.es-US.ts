@@ -1150,10 +1150,10 @@ export const esUS: Messages = {
   profileMeans_visible: "Nuestras páginas vuelven a mostrar este perfil.",
   profileMeans_hidden:
     "Nuestras páginas muestran solo esta decisión en lugar del nombre y las encuestas del perfil, y tus encuestas no dicen quién las hizo. Las encuestas en sí no se ven afectadas.",
-  profileAppeal_upheld: "aceptada el {when} UTC, y el perfil restaurado",
-  profileAppeal_rejected: "rechazada el {when} UTC",
+  profileAppeal_upheld: "aceptada el {when}\u00a0UTC, y el perfil restaurado",
+  profileAppeal_rejected: "rechazada el {when}\u00a0UTC",
   profileAppeal_superseded:
-    "cerrada el {when} UTC, porque una decisión posterior cambió antes el perfil",
+    "cerrada el {when}\u00a0UTC, porque una decisión posterior cambió antes el perfil",
   profileVerifyPhone: "Verifica tu teléfono",
   profileFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para ver tu perfil.",
   profileFailure_phoneUnverified:
@@ -1262,18 +1262,18 @@ export const esUS: Messages = {
   pollsFailure_refused:
     "El servidor encontró un problema con ese borrador, así que no se guardó. Revísalo e inténtalo de nuevo.",
   moderationOfPoll: "Moderación",
-  moderationDecision: "{action}: {reason}, {when} UTC",
+  moderationDecision: "{action}: {reason}, {when}\u00a0UTC",
   moderationMeans_visible: "Nuestras páginas vuelven a listar y mostrar esta encuesta.",
   moderationMeans_delisted:
     "Nuestras páginas no listan esta encuesta, pero sigue abierta en su dirección. El tablero, el conteo y el resultado no se ven afectados.",
   moderationMeans_hidden:
     "Nuestras páginas no muestran el texto de esta encuesta. El tablero, el conteo y el resultado no se ven afectados.",
-  moderationAppealed: "Apelaste la decisión N.º {seq} el {when} UTC: {outcome}.",
+  moderationAppealed: "Apelaste la decisión N.º {seq} el {when}\u00a0UTC: {outcome}.",
   moderationAppealPending: "en espera de un moderador distinto del que decidió",
-  moderationAppeal_upheld: "aceptada el {when} UTC, y la encuesta restaurada",
-  moderationAppeal_rejected: "rechazada el {when} UTC",
+  moderationAppeal_upheld: "aceptada el {when}\u00a0UTC, y la encuesta restaurada",
+  moderationAppeal_rejected: "rechazada el {when}\u00a0UTC",
   moderationAppeal_superseded:
-    "cerrada el {when} UTC, porque una decisión posterior cambió antes la encuesta",
+    "cerrada el {when}\u00a0UTC, porque una decisión posterior cambió antes la encuesta",
   moderationAppeal: "Apelar esta decisión…",
   moderationAppealQuestion:
     "¿Apelar esta decisión? La revisa un moderador distinto del que decidió. Solo puedes apelar una decisión una vez.",

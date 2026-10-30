@@ -19,7 +19,7 @@ import {
 } from "../account/drafts.ts";
 import type { OwnProfileView, ProfilesClient } from "../account/profiles.ts";
 import { catalogs, type Messages, POLL_FAILURE_MESSAGES } from "../messages.ts";
-import { formatUtc } from "./format.ts";
+import { formatUtcWhole } from "./format.ts";
 import { Section } from "./page-parts.tsx";
 import { PollModeration } from "./poll-moderation.tsx";
 import { ProfileChoice } from "./profile-choice.tsx";
@@ -175,10 +175,7 @@ export function AccountPolls({
     }
   };
 
-  // The time's last space is a no-break one, as is the one before "UTC" in
-  // the words, so a phone wraps "2:20 PM UTC" whole: never "2:20" over "PM
-  // UTC", nor "UTC" alone.
-  const formatted = (date: Date) => formatUtc(locale, date).replace(/\s(?=\S+$)/, "\u00a0");
+  const formatted = (date: Date) => formatUtcWhole(locale, date);
   const at = (iso: string) => formatted(new Date(iso));
 
   const when = (p: PollSummary, shown: Shown) => {

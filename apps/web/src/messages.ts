@@ -1123,10 +1123,10 @@ const enUS = {
   profileMeans_visible: "Our pages show this profile again.",
   profileMeans_hidden:
     "Our pages show only this decision in place of the profile's name and polls, and your polls don't say who asked them. The polls themselves aren't affected.",
-  profileAppeal_upheld: "upheld on {when} UTC, and the profile restored",
-  profileAppeal_rejected: "rejected on {when} UTC",
+  profileAppeal_upheld: "upheld on {when}\u00a0UTC, and the profile restored",
+  profileAppeal_rejected: "rejected on {when}\u00a0UTC",
   profileAppeal_superseded:
-    "closed on {when} UTC, because a later decision changed the profile first",
+    "closed on {when}\u00a0UTC, because a later decision changed the profile first",
   profileVerifyPhone: "Verify your phone",
   profileFailure_signedOut: "You've been signed out. Sign in again to see your profile.",
   profileFailure_phoneUnverified: "A profile needs your phone number verified first.",
@@ -1233,18 +1233,18 @@ const enUS = {
   pollsFailure_refused:
     "The server found a problem with that draft, so it wasn't saved. Check it and try again.",
   moderationOfPoll: "Moderation",
-  moderationDecision: "{action}: {reason}, {when} UTC",
+  moderationDecision: "{action}: {reason}, {when}\u00a0UTC",
   moderationMeans_visible: "Our pages list and show this poll again.",
   moderationMeans_delisted:
     "Our pages don't list this poll, but it stays open at its address. The board, the count and the result aren't affected.",
   moderationMeans_hidden:
     "Our pages don't show this poll's text. The board, the count and the result aren't affected.",
-  moderationAppealed: "You appealed decision No. {seq} on {when} UTC: {outcome}.",
+  moderationAppealed: "You appealed decision No. {seq} on {when}\u00a0UTC: {outcome}.",
   moderationAppealPending: "waiting for a moderator other than the one who decided",
-  moderationAppeal_upheld: "upheld on {when} UTC, and the poll restored",
-  moderationAppeal_rejected: "rejected on {when} UTC",
+  moderationAppeal_upheld: "upheld on {when}\u00a0UTC, and the poll restored",
+  moderationAppeal_rejected: "rejected on {when}\u00a0UTC",
   moderationAppeal_superseded:
-    "closed on {when} UTC, because a later decision changed the poll first",
+    "closed on {when}\u00a0UTC, because a later decision changed the poll first",
   moderationAppeal: "Appeal this decision…",
   moderationAppealQuestion:
     "Appeal this decision? A moderator other than the one who decided reviews it. You can appeal a decision only once.",

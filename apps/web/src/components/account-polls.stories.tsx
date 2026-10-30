@@ -449,7 +449,7 @@ export const AppealADecision: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const block = await canvas.findByRole("group", {
-      name: "Delisted: Spam, October 17, 2026 at 4:45 PM UTC",
+      name: /^Delisted: Spam, October 17, 2026 at 4:45\sPM\sUTC$/,
     });
     const moderation = within(block);
     await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
@@ -536,7 +536,7 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const hidden = within(
     await canvas.findByRole("group", {
-      name: "Text hidden: Personal data, October 16, 2026 at 8:00 AM UTC",
+      name: /^Text hidden: Personal data, October 16, 2026 at 8:00\sAM\sUTC$/,
     }),
   );
   await expect(hidden.getByText(/don't show this poll's text/)).toBeVisible();
@@ -550,7 +550,9 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   ).toBeVisible();
   await expect(hidden.queryByRole("button")).toBeNull();
   const restored = within(
-    canvas.getByRole("group", { name: "Restored: Appeal upheld, October 17, 2026 at 3:00 PM UTC" }),
+    canvas.getByRole("group", {
+      name: /^Restored: Appeal upheld, October 17, 2026 at 3:00\sPM\sUTC$/,
+    }),
   );
   await expect(restored.getByText("Our pages list and show this poll again.")).toBeVisible();
   await expect(
@@ -573,6 +575,36 @@ export const ModerationHistoryDark: Story = {
   args: { client: MODERATED },
   parameters: { theme: "dark" },
   play: showsModeration,
+};
+
+/**
+ * Where the list is narrow, the moderation history's times broke as the
+ * rows' did before iteration 6, "…at 8:00 AM" over "UTC" (P2-29, the
+ * author's list's iteration 7). Every time in it now wraps whole.
+ */
+export const ModerationHistoryFolded: Story = {
+  args: { client: MODERATED },
+  globals: { viewport: { value: "folded", isRotated: false } },
+  play: async (context) => {
+    await showsModeration(context);
+    await expect(context.canvasElement.ownerDocument.documentElement.clientWidth).toBe(280);
+    let times = 0;
+    for (const group of within(context.canvasElement).getAllByRole("group")) {
+      const walker = document.createTreeWalker(group, NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+        for (const m of text.textContent!.matchAll(/\d{1,2}:\d{2}\s[AP]M\sUTC/g)) {
+          const range = document.createRange();
+          range.setStart(text, m.index);
+          range.setEnd(text, m.index + m[0].length);
+          // One box: the hour, its "AM" or "PM" and "UTC" on one line.
+          await expect(range.getClientRects()).toHaveLength(1);
+          times += 1;
+        }
+      }
+    }
+    // The two decisions and the three appeals, each filed and reviewed.
+    await expect(times).toBe(8);
+  },
 };
 
 export const AppealRefusedAsChanged: Story = {

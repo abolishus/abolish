@@ -1,15 +1,19 @@
 import fc from "fast-check";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 
-import { FollowResultsError, followResultsClient } from "../src/account/follow-results.ts";
+import {
+  FollowResultsError,
+  followResultsClient as client,
+} from "../src/account/follow-results.ts";
 
 // The account page's list of polls with results (src/account/follow-results.ts),
 // with the browser's fetch and the server function stubbed: what it sends to
 // the follows handler (src/node/follows.ts), what it accepts from it and from
 // the server function, and how each refusal reaches the page.
 
-const fetchFollowedPolls = vi.hoisted(() => vi.fn());
-vi.mock("../src/data.ts", () => ({ fetchFollowedPolls }));
+// The server function's stand-in.
+const fetchFollowedPolls = vi.fn();
+const followResultsClient = client(fetchFollowedPolls);
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
 

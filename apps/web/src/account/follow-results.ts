@@ -2,14 +2,14 @@
 // ([[P2-25]] part 4c-2b): read from and cleared through the follows handler
 // on our own origin (src/node/follows.ts, /follows/results), and each poll's
 // heading through a server function by the polls' IDs alone
-// (`fetchFollowedPolls`). The session cookie goes only to the follows
+// (`fetchFollowedPolls`, handed in by the route, so this module and its
+// stories carry no server function). The session cookie goes only to the follows
 // handler, because the call is same-origin, as the account client's does
 // (src/account/client.ts); the server functions never get it, so the
 // server that reads the polls' words never learns whose list they are on
 // (T-10). Following is not answering: nothing here knows whether this
 // browser answered any of them (T-10, T-11).
 
-import { fetchFollowedPolls } from "../data.ts";
 import { isElectionId } from "../values.ts";
 
 /** A poll on the list, as the list shows it. */
@@ -86,8 +86,13 @@ async function call(path: string, body: object): Promise<unknown> {
   return answer;
 }
 
-/** The client for this origin's follows handler and the polls' server function. */
-export const followResultsClient: FollowResultsClient = {
+/** The polls' server function (src/data.ts, `fetchFollowedPolls`), as the client calls it. */
+export type ReadFollowedPolls = (input: {
+  data: { electionIds: string[]; locale: string };
+}) => Promise<readonly FollowedPoll[]>;
+
+/** The client for this origin's follows handler, and `read` for the polls' headings. */
+export const followResultsClient = (read: ReadFollowedPolls): FollowResultsClient => ({
   list: async () => {
     const polls = exactly(await call("/follows/results", {}), "polls");
     // Election IDs in strictly increasing byte order, as core lists them;
@@ -107,7 +112,7 @@ export const followResultsClient: FollowResultsClient = {
       throw new FollowResultsError("failed");
   },
   headings: async (electionIds, locale) => {
-    const polls = await fetchFollowedPolls({
+    const polls = await read({
       data: { electionIds: [...electionIds], locale },
     }).catch(() => {
       throw new FollowResultsError("failed");
@@ -120,4 +125,4 @@ export const followResultsClient: FollowResultsClient = {
       throw new FollowResultsError("failed");
     return polls;
   },
-};
+});

@@ -1364,6 +1364,8 @@ export function PollFormPage({
                     client={profiles}
                     profile={profile}
                     pollId={savedId.current}
+                    // The form edits only drafts, which the profile lists once they open.
+                    unopened
                     wanted={wantShown}
                     onWant={(on) => {
                       setWantShown(on);

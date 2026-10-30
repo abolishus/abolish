@@ -6,7 +6,7 @@ import { useEffect, useId, useState } from "react";
 import { type OwnProfileView, ProfilesError, type ProfilesClient } from "../account/profiles.ts";
 import { catalogs } from "../messages.ts";
 
-type Done = "profileChoiceShown" | "profileChoiceUnshown";
+type Done = "profileChoiceShown" | "profileChoiceShownOnceOpen" | "profileChoiceUnshown";
 /** `show` refuses only these: the session ended, or the profile or poll is gone. */
 type Failure = "signedOut" | "changed" | "failed";
 
@@ -20,6 +20,8 @@ export interface ProfileChoiceProps {
   readonly wanted?: boolean;
   /** Before the first save: the author's choice, which the form applies after saving. */
   readonly onWant?: (on: boolean) => void;
+  /** A saved poll that hasn't opened yet, and may yet: the profile shows it only once it opens. */
+  readonly unopened?: boolean;
   /** The element naming the poll, so each row's box says which poll it is. */
   readonly describedBy?: string;
   /** Called after every change sent, refused or not, so the page reads the profile again. */
@@ -42,6 +44,7 @@ export function ProfileChoice({
   pollId,
   wanted = false,
   onWant,
+  unopened = false,
   describedBy,
   onChanged,
   onSignedOut,
@@ -65,7 +68,14 @@ export function ProfileChoice({
     setBusy(true);
     try {
       await client.show(pollId, on);
-      setDone(on ? "profileChoiceShown" : "profileChoiceUnshown");
+      // The public profile lists only registered polls, so a tick on one not yet open is a promise.
+      setDone(
+        on
+          ? unopened
+            ? "profileChoiceShownOnceOpen"
+            : "profileChoiceShown"
+          : "profileChoiceUnshown",
+      );
     } catch (e) {
       const why: Failure =
         e instanceof ProfilesError && (e.failure === "signedOut" || e.failure === "changed")
@@ -97,7 +107,13 @@ export function ProfileChoice({
         </span>
       </Label>
       <p id={help} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
-        {t(pollId === undefined ? "profileChoiceHelpUnsaved" : "profileChoiceHelp")}
+        {t(
+          pollId === undefined
+            ? "profileChoiceHelpUnsaved"
+            : unopened
+              ? "profileChoiceHelpUnopened"
+              : "profileChoiceHelp",
+        )}
       </p>
       <div role="status" className="text-sm">
         {done === undefined ? null : t(done)}

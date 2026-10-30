@@ -747,13 +747,54 @@ export const ChooseWhatTheProfileShows: Story = {
     await expect(choice(open!)).toHaveAccessibleDescription(/^Name the new ferry /);
     await expect(choice(draft!)).not.toBeChecked();
     await userEvent.click(choice(draft!));
-    await expect(await draft!.findByText("Your profile shows this poll.")).toBeVisible();
+    // The public profile lists only polls that opened: a draft's tick is a promise.
+    await expect(
+      await draft!.findByText("Your profile will show this poll once it opens."),
+    ).toBeVisible();
     await waitFor(() => expect(choice(draft!)).toBeChecked());
     await userEvent.click(choice(open!));
     await waitFor(() => expect(choice(open!)).not.toBeChecked());
     const profiles = args.profiles as ReturnType<typeof fakeProfiles>;
     await expect(profiles.calls).toEqual([`show ${DRAFT.id} true`, `show ${OPEN.id} false`]);
     await expect(args.onProfileChanged).toHaveBeenCalledTimes(2);
+  },
+};
+
+/**
+ * A poll that hasn't opened isn't on the public profile yet, so its box says
+ * when it will be, where an open poll's says while it is (P2-29, the
+ * author's list's iteration 10). One that failed for good keeps the open
+ * poll's words: its election is on the record.
+ */
+export const ChoiceBeforeAPollOpens: Story = {
+  args: {
+    client: fakeDrafts(EVERY),
+    profiles: fakeProfiles({ profile: PROFILE }),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await waitFor(() => expect(canvas.getAllByRole("checkbox")).toHaveLength(EVERY.length));
+    const rows = canvas.getAllByRole("listitem").map((i) => within(i));
+    const once = /once the poll is open and listed\. Untick it at any time\.$/;
+    const whilst = /while the poll is listed\. Untick it at any time\.$/;
+    const said = EVERY.map((p, i) => [
+      p.title,
+      once.test(rows[i]!.getByText(/^Your profile lists this poll/).textContent!),
+    ]);
+    await expect(said).toEqual([
+      [DRAFT.title, true],
+      [UNTITLED.title, true],
+      [SETTING_UP.title, true],
+      [OPEN.title, false],
+      [CLOSED.title, false],
+      [TIMED_OUT.title, true],
+      [REGISTERED.title, false],
+    ]);
+    await expect(rows[3]!.getByText(whilst)).toBeVisible();
+    // The words that describe each box are the ones drawn under it.
+    await expect(choice(rows[2]!)).toHaveAccessibleDescription(
+      /^Which crossing should get a signal first\? .*once the poll is open and listed/,
+    );
   },
 };
 

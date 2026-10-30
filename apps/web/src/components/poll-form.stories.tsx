@@ -1560,7 +1560,10 @@ export const ShowANewPollOnTheProfile: Story = {
     await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
     await expect(profileCalls(args.profiles)).toEqual([`show ${NEW_ID} true`]);
     await expect(await profileBox(canvas)).toBeChecked();
-    await expect(canvas.getByText(/^Your profile lists this poll/)).toBeVisible();
+    // Saved, it's still a draft: the profile lists it once it opens.
+    await expect(
+      canvas.getByText(/^Your profile lists this poll.*once the poll is open and listed\./),
+    ).toBeVisible();
   },
 };
 
@@ -1577,7 +1580,11 @@ export const ChooseOnASavedDraft: Story = {
     await waitFor(() => expect(box).toBeChecked());
     await userEvent.click(box);
     await expect(await canvas.findByText("Your profile doesn't show this poll.")).toBeVisible();
-    await expect(profileCalls(args.profiles)).toEqual([`show ${ID} false`]);
+    await userEvent.click(box);
+    await expect(
+      await canvas.findByText("Your profile will show this poll once it opens."),
+    ).toBeVisible();
+    await expect(profileCalls(args.profiles)).toEqual([`show ${ID} false`, `show ${ID} true`]);
     await expect(writes(args.client)).toEqual([]);
   },
 };

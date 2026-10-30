@@ -1209,7 +1209,10 @@ export const esUS: Messages = {
     "Tu perfil lista esta encuesta, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Desmárcala cuando quieras.",
   profileChoiceHelpUnsaved:
     "Al guardar el borrador, se agrega a tu perfil. Tu perfil la lista, y su página dice que tu perfil la hizo, cuando la encuesta esté abierta y listada.",
+  profileChoiceHelpUnopened:
+    "Tu perfil lista esta encuesta, y su página dice que tu perfil la hizo, cuando la encuesta esté abierta y listada. Desmárcala cuando quieras.",
   profileChoiceShown: "Tu perfil muestra esta encuesta.",
+  profileChoiceShownOnceOpen: "Tu perfil mostrará esta encuesta cuando se abra.",
   profileChoiceUnshown: "Tu perfil no muestra esta encuesta.",
   profileChoiceNone:
     "Tus encuestas no dicen quién las hizo. Para poner un nombre junto a ellas, crea un perfil público.",

@@ -391,6 +391,11 @@ export function AccountPolls({
                         client={profiles}
                         profile={profile}
                         pollId={p.id}
+                        unopened={
+                          shown === "drafted" ||
+                          shown === "setup" ||
+                          (shown === "failed" && p.retryable)
+                        }
                         describedBy={`poll-${p.id}-title`}
                         onChanged={choiceChanged}
                         {...(onSignedOut === undefined ? {} : { onSignedOut })}

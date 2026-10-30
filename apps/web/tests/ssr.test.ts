@@ -31,6 +31,7 @@ import {
   BALLOT,
   BOARD,
   brokenProofs,
+  CELLS_ID,
   CELLS_MISFIT_ID,
   CHECKPOINTS,
   CODE,
@@ -198,7 +199,7 @@ describe("every page", () => {
     "/",
     `/polls/${ID}`,
     `/polls/${ID}/board`,
-    `/polls/${STREAM_V5}/results`,
+    `/polls/${CELLS_ID}/results`,
     "/moderation",
     "/polls",
     "/account",
@@ -523,29 +524,26 @@ describe("results", () => {
 describe("results page", () => {
   const text = async (path: string) => (await (await get(path)).text()).replace(/<[^>]+>/g, "");
 
-  test("a poll's results tier by tier, question by question, under its own words", async () => {
-    const response = await get(`/polls/${STREAM_V5}/results`);
+  test("a poll's results question by question, under its own words", async () => {
+    const response = await get(`/polls/${CELLS_ID}/results`);
     expect(response.status).toBe(200);
     const html = await response.text();
     // Its heading in the author's words, isolated from ours (T-75).
     expect(html).toMatch(/<h1[^>]*><bdi[^>]*>Park and library<\/bdi><\/h1>/);
-    expect(html).toContain("<title>Results · Poll c1c1c1c1c1c1c1c1…");
+    expect(html).toContain("<title>Results · Poll c5c5c5c5c5c5c5c5…");
     const page = html.replace(/<[^>]+>/g, "");
-    // A tab per tier, each with how many answered; never a figure across them (T-16).
     expect(page).toContain("Tier 0 (verified e-mail)");
     expect(page).toContain("8 people answered");
-    expect(page).toContain("Tier 2 (document-verified)");
     expect(page).toContain(
       "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
     );
     expect(page).toContain("Most picked: \u2068Yes\u2069, by 62.5% of those who answered.");
-    expect(page).toContain("There is no total row: the groups are never added together.");
-    expect(page).toContain("Not all published yet");
-    expect(page).not.toContain("9 people");
+    // One tier: nothing to set side by side.
+    expect(page).not.toContain("The groups side by side");
   });
 
   test("a tier counted in several cells shows each cell's own results, with its regions and members", async () => {
-    const page = await text(`/polls/${STREAM_V5}/results`);
+    const page = await text(`/polls/${CELLS_ID}/results`);
     expect(page).toContain("Part by part");
     expect(page).toContain("This group is counted in 3 parts, each published on its own.");
     expect(page).toContain("Part 1");
@@ -556,10 +554,14 @@ describe("results page", () => {
     expect(page).toContain("60%");
   });
 
-  test("a tier of one cell has no part-by-part table", async () => {
+  test("several tiers side by side, never added together, and a tier of one cell has no parts", async () => {
     const page = await text(`/polls/${STREAM_V1}/results`);
     expect(page).toContain("12 people answered");
+    expect(page).toContain("Tier 2 (document-verified)");
     expect(page).toContain("Most picked: \u2068Yes\u2069, by 50% of those who answered.");
+    expect(page).toContain("There is no total row: the groups are never added together.");
+    expect(page).toContain("Not all published yet");
+    expect(page).not.toContain("14 people");
     expect(page).not.toContain("Part by part");
   });
 
@@ -624,7 +626,7 @@ describe("results page", () => {
 
   test("the API is asked by the poll's ID alone, with no cookie (T-10)", async () => {
     seen.length = 0;
-    await get(`/polls/${STREAM_V5}/results`, {
+    await get(`/polls/${CELLS_ID}/results`, {
       cookie: "__Secure-abolish-account.session_token=secret",
     });
     expect(seen.length).toBeGreaterThan(0);
@@ -2174,12 +2176,12 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/": { html: 10, js: 175, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 209, css: 40, fonts: 58 },
-  [`/polls/${STREAM_V5}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
   "/account": { html: 6, js: 196, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 171, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

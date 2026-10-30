@@ -297,6 +297,10 @@ describe("cellResultsView", () => {
       withCells(honest.tiers, [unopened(0, 0, 5), ...cells.slice(1)]),
     ],
     [
+      "a tier without counts while every one of its cells has them",
+      withCells([{ tier: 0, counted: 9 }, honest.tiers[1]!], cells),
+    ],
+    [
       "a cell with too few options",
       withCells(honest.tiers, [opened(0, 0, 5, ["3", "2"]), ...cells.slice(1)]),
     ],

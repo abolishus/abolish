@@ -80,8 +80,8 @@ export interface CellResults {
  * `undefined` unless they fit the poll's partition: one report per cell in
  * partition order, each in its cell's tier, its counts the definition's
  * questions and options, none above the ballots it counted, and every tier
- * the sum of its cells, its counted ballots always and its counts once it
- * has them (docs/spec/election-definition.md, Notes, Tally partition). So
+ * the sum of its cells, its counted ballots always and its counts exactly
+ * once every cell has them (docs/spec/election-definition.md, Notes, Tally partition). So
  * the page can't print a cell's figures that disagree with its tier's, or
  * under another cell (T-34); whether either is right is the verifier's to
  * say.
@@ -113,9 +113,12 @@ export function cellResultsView(
     if (own.reduce((n, c) => n + c.counted, 0) !== t.counted) return undefined;
     const counts =
       t.counts === undefined ? undefined : poll.version === 5 ? t.byQuestion : [t.counts];
-    if (counts === undefined) continue;
+    // A tier has counts exactly once every one of its cells does.
+    if (counts === undefined) {
+      if (own.length > 0 && own.every((c) => c.questions !== undefined)) return undefined;
+      continue;
+    }
     if (!fits(poll.questions, t.counted, counts)) return undefined;
-    // A tier has counts only once every one of its cells does.
     if (own.some((c) => c.questions === undefined)) return undefined;
     if (!counts.every((q, i) => q.every((n, j) => BigInt(n) === sumOf(own, i, j))))
       return undefined;

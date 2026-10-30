@@ -412,7 +412,7 @@ export function deliverSelected(
   // A rolling poll's ballots (version 5) are version 4's halves with a step,
   // delivered by the same records (delivery.md, Versions). Beside an author
   // panel its delivery and per-panel tally aren't read yet (P2-17 part
-  // 4d-2b-2b-2b): nothing is decided, never over the default panel alone
+  // 4d-2b-2b-2b-2): nothing is decided, never over the default panel alone
   // (T-37).
   const halved = isPanelled(definition) || isRolling(definition);
   if (

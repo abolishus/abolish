@@ -1141,18 +1141,19 @@ export function verifyBundle(
         "l1Blocks" in bundle ? bundle.l1Blocks : undefined,
         definition.rolling,
       );
-      implemented = new Map<string, Outcome>([
-        ...implemented,
-        ...(definition.rolling === undefined
+      // Under the archive's chain a rejection resting on it leaves its rows
+      // unverifiable, and so selection unsettled (6.1, condition 1).
+      const admissionRows =
+        definition.rolling === undefined
           ? admission.rows
-          : unprovenRoots(admission.rows, admission.report?.rejected ?? [])),
-      ]);
+          : unprovenRoots(admission.rows, admission.report?.rejected ?? []);
+      implemented = new Map<string, Outcome>([...implemented, ...admissionRows]);
       ballots = admission.report;
       // Selection is decided over the counted extent alone, so it needs what
       // admission doesn't: the anchored extent, the seal and 4.4
       // (docs/spec/verifier.md, Selection).
       const chosen = selectionCheck({
-        admissionSettled: admissionSettled(admission.rows),
+        admissionSettled: admissionSettled(admissionRows),
         candidates: admission.candidates,
         ordinary: admission.ordinary ?? [],
         // Set only when 4.1 and 4.2 pass.

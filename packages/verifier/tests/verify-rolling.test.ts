@@ -22,7 +22,8 @@ import {
   type RollingChainRelease,
   verifyBundle,
 } from "../src/index.ts";
-import { type BallotOutcome, unprovenRoots } from "../src/ballots.ts";
+import { ALL_ROWS, type BallotOutcome, unprovenRoots } from "../src/ballots.ts";
+import { admissionSettled } from "../src/selection.ts";
 import type { ContractSequence } from "../src/replay.ts";
 import { definitionRegistered } from "./registration-logs.ts";
 import { added, definitionOf, logs, release, rolling, rollingTree } from "./registry-logs.ts";
@@ -227,6 +228,21 @@ describe("the run builds a rolling poll's chain from the archive", () => {
   test("with the registries pinned and the archive proven past close, 2.3 fits and the board checks run", () => {
     const p = poll(TREE);
     expect(archivedChain(p.d, replayOf(p), p.registries)).toBeDefined();
+    // A record at exactly the latest root_l2_block is that block's end
+    // state, so it covers every event up to it.
+    const v = p.d.value;
+    const atRoot = {
+      block: v.rolling_electorate.reduce((b, t) => (t.root_l2_block > b ? t.root_l2_block : b), 0n),
+      timestamp: p.t.closesAt + 1n,
+    };
+    const honest = replayOf(p);
+    const rootBound: Replay = {
+      ...honest,
+      contracts: honest.contracts.map((c) =>
+        c.role === "group-registry" ? sequence(c.role, c.contract, p.t.records, atRoot) : c,
+      ),
+    };
+    expect(archivedChain(p.d, rootBound, p.registries)).toBeDefined();
     const r = verifyBundle(bundleOf(p, replayOf(p)), [], p.registries);
     expect(row(r, "2.1").status).not.toBe("fail");
     // A profile that fits leaves 2.3 to the checks not yet built, never
@@ -440,6 +456,17 @@ describe("5.1 to 5.3 under a chain from the archive's word", () => {
       ],
     );
     expect(out.get("5.1")).toEqual({ status: "fail", code: "ballot-stray", at: { entry: 4 } });
+  });
+
+  test("a rejection resting on the chain leaves selection unsettled", () => {
+    // 6.1 runs only where every admission row passed or failed (Selection,
+    // condition 1), so it's never decided over a set the archive alone chose.
+    const settled = new Map<string, BallotOutcome>(ALL_ROWS.map((id) => [id, pass]));
+    settled.set("5.1", { status: "fail", code: "root-step-mismatch", at: { entry: 2 } });
+    expect(admissionSettled(settled)).toBe(true);
+    expect(
+      admissionSettled(unprovenRoots(settled, [{ entry: 2, code: "root-step-mismatch" }])),
+    ).toBe(false);
   });
 
   test("every other row is left as given", () => {

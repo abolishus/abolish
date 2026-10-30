@@ -1,5 +1,5 @@
-# Builds, signs and deploys the API, web, ballot, worker and trustee-node
-# images to staging on every push to main (P2-11; docs/runbooks/railway.md).
+# Builds, signs and deploys the API, web, ballot, worker, trustee-node and
+# intake-relay images to staging on every push to main (P2-11; docs/runbooks/railway.md).
 # Threats: T-61 (release compromise), T-65 (deployer credential leak), T-56
 # (compromised action or runner), T-23.
 #
@@ -7,7 +7,7 @@
 #              timezone and umask; build the bundle and the image (.github/
 #              actions/image-build); output the image manifest digest. No
 #              secrets. One pair per service (api, web, ballot, worker,
-#              trustee-node).
+#              trustee-node, intake-relay).
 #   checks     ci, repro-build and reference-election passed on this commit.
 #   publish    per service: both digests match; the archive is that image;
 #              push it to GHCR by digest, sign it (cosign keyless) and attest SLSA build
@@ -15,8 +15,9 @@
 #   staging    in the `staging` environment (main only): verify signature and
 #              provenance of every image, run the API image's migrations,
 #              then point the Railway `api`, `web` and `ballot` services at
-#              their digests, in that order, then the workers and the
-#              launch panel's seats once their service IDs are set, and
+#              their digests, in that order, then the workers, the
+#              launch panel's seats and the intake relay once their
+#              service IDs are set, and
 #              wait for each deployment.
 #
 # Production is not here yet: its deploy needs the reference election to have
@@ -230,6 +231,44 @@ jobs:
           service: trustee-node
           variant: b
 
+  image-intake-relay-a:
+    name: image intake-relay (a)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: intake-relay
+          variant: a
+
+  image-intake-relay-b:
+    name: image intake-relay (b)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - id: build
+        uses: ./.github/actions/image-build
+        with:
+          service: intake-relay
+          variant: b
+
   checks:
     name: checks
     runs-on: ubuntu-24.04
@@ -287,6 +326,8 @@ jobs:
       - image-worker-b
       - image-trustee-node-a
       - image-trustee-node-b
+      - image-intake-relay-a
+      - image-intake-relay-b
       - checks
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -296,7 +337,7 @@ jobs:
       attestations: write
     strategy:
       matrix:
-        service: [api, web, ballot, worker, trustee-node]
+        service: [api, web, ballot, worker, trustee-node, intake-relay]
     env:
       SERVICE: ${{ matrix.service }}
       IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-${{ matrix.service }}
@@ -304,8 +345,8 @@ jobs:
       # service names its own pair and anything else is empty, so a missing
       # output fails the check below instead of falling through to another
       # service's digest.
-      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || matrix.service == 'web' && needs.image-web-a.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-a.outputs.digest || matrix.service == 'worker' && needs.image-worker-a.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-a.outputs.digest || '' }}
-      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || matrix.service == 'web' && needs.image-web-b.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-b.outputs.digest || matrix.service == 'worker' && needs.image-worker-b.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-b.outputs.digest || '' }}
+      DIGEST: ${{ matrix.service == 'api' && needs.image-api-a.outputs.digest || matrix.service == 'web' && needs.image-web-a.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-a.outputs.digest || matrix.service == 'worker' && needs.image-worker-a.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-a.outputs.digest || matrix.service == 'intake-relay' && needs.image-intake-relay-a.outputs.digest || '' }}
+      DIGEST_B: ${{ matrix.service == 'api' && needs.image-api-b.outputs.digest || matrix.service == 'web' && needs.image-web-b.outputs.digest || matrix.service == 'ballot' && needs.image-ballot-b.outputs.digest || matrix.service == 'worker' && needs.image-worker-b.outputs.digest || matrix.service == 'trustee-node' && needs.image-trustee-node-b.outputs.digest || matrix.service == 'intake-relay' && needs.image-intake-relay-b.outputs.digest || '' }}
     steps:
       - name: Both builds produced one image
         env:
@@ -400,12 +441,13 @@ jobs:
         image-ballot-a,
         image-worker-a,
         image-trustee-node-a,
+        image-intake-relay-a,
         publish,
         current,
       ]
     if: needs.current.outputs.deploy == 'true'
     runs-on: ubuntu-24.04
-    # Up to thirteen Railway deployments, one after another.
+    # Up to fourteen Railway deployments, one after another.
     timeout-minutes: 60
     # Secrets live only in this environment, which allows `main` alone
     # (owner setting): a workflow run for a PR branch can't read them (T-65).
@@ -420,6 +462,7 @@ jobs:
       BALLOT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-ballot@${{ needs.image-ballot-a.outputs.digest }}
       WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-worker@${{ needs.image-worker-a.outputs.digest }}
       SEAT_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-trustee-node@${{ needs.image-trustee-node-a.outputs.digest }}
+      RELAY_IMAGE: ghcr.io/${{ github.repository_owner }}/abolish-intake-relay@${{ needs.image-intake-relay-a.outputs.digest }}
     steps:
       # The fail-safe for the rule in `current`: a re-run deploys only main's
       # head, since it could otherwise point staging back at an older digest
@@ -454,7 +497,7 @@ jobs:
           IDENTITY: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/deploy.yml@refs/heads/main
           REPO: ${{ github.repository }}
         run: |
-          for image in "$API_IMAGE" "$WEB_IMAGE" "$BALLOT_IMAGE" "$WORKER_IMAGE" "$SEAT_IMAGE"; do
+          for image in "$API_IMAGE" "$WEB_IMAGE" "$BALLOT_IMAGE" "$WORKER_IMAGE" "$SEAT_IMAGE" "$RELAY_IMAGE"; do
             cosign verify "$image" \
               --certificate-identity "$IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
@@ -471,11 +514,12 @@ jobs:
           docker run --rm -e DATABASE_URL "$API_IMAGE" node migrate.mjs
       # The API first: the web app's pages and the ballot client call it, and
       # the API, web app and workers run against the migrations just applied.
-      # The workers and the seats can't run until staging's testnet contracts
-      # and keys exist (docs/runbooks/staging-testnet.md), so each is deployed
+      # The workers, the seats and the intake relay can't run until staging's
+      # testnet contracts and keys exist (docs/runbooks/staging-testnet.md,
+      # docs/runbooks/intake-relay.md), so each is deployed
       # only once its service ID is set and skipped with a notice until then;
       # their images are built, signed and verified either way.
-      - name: Deploy the API, the web app, the ballot client, the workers and the seats to Railway
+      - name: Deploy the API, the web app, the ballot client, the workers, the seats and the intake relay to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           API_SERVICE_ID: ${{ vars.RAILWAY_API_SERVICE_ID }}
@@ -486,6 +530,7 @@ jobs:
           POSTING_WORKER_SERVICE_ID: ${{ vars.RAILWAY_POSTING_WORKER_SERVICE_ID }}
           # Space- or comma-separated, seat 1 first.
           SEAT_SERVICE_IDS: ${{ vars.RAILWAY_SEAT_SERVICE_IDS }}
+          INTAKE_RELAY_SERVICE_ID: ${{ vars.RAILWAY_INTAKE_RELAY_SERVICE_ID }}
           # Railway's GraphQL API (backboard.railway.com/graphql/v2).
           Q_ENV: "query { projectToken { environmentId } }"
           Q_SOURCE: >-
@@ -566,3 +611,11 @@ jobs:
             echo "::notice::RAILWAY_SEAT_SERVICE_IDS is not set; not deploying the launch panel's seats"
           fi
           for seat in "${seats[@]}"; do deploy "$seat" "$SEAT_IMAGE"; done
+          # After the seats, whose nodes it forwards to: a relay with no node
+          # behind it answers 502, which a client falls back from
+          # (docs/runbooks/intake-relay.md).
+          if [ -n "$INTAKE_RELAY_SERVICE_ID" ]; then
+            deploy "$INTAKE_RELAY_SERVICE_ID" "$RELAY_IMAGE"
+          else
+            echo "::notice::RAILWAY_INTAKE_RELAY_SERVICE_ID is not set; not deploying the intake relay"
+          fi

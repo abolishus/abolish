@@ -103,10 +103,13 @@ export const PROVER_ARTIFACTS: Readonly<Record<string, string>> = {
  * the client treats a `moved` registration as real and offers a new identity
  * (T-16, T-11), so one lying endpoint can't make a voter give theirs up; and
  * one L1 JSON-RPC endpoint (Sepolia), for the L1 block a ballot names and the
- * voting window by chain time (docs/spec/revoting.md, Client rules). All are
- * untrusted: the client checks every answer against the registry or the chain
- * before acting on it, so a hostile one can refuse service but not change a
- * ballot. These are staging's. A release names its own, and a release build
+ * voting window by chain time (docs/spec/revoting.md, Client rules); and the
+ * intake relay a sealed delivery goes through to a seat's node
+ * (docs/spec/sealed-delivery.md, The relay; apps/intake-relay), on an origin of
+ * its own, never a node's. All are untrusted: the client checks every answer
+ * against the registry or the chain before acting on it, and the relay carries
+ * only a sealed request it can't read, so a hostile one can refuse service but
+ * not change a ballot. These are staging's. A release names its own, and a release build
  * naming a staging origin is a policy failure (owner review, rule B).
  */
 export const CONNECT_ORIGINS: readonly string[] = [
@@ -114,6 +117,7 @@ export const CONNECT_ORIGINS: readonly string[] = [
   "https://sepolia.base.org",
   "https://base-sepolia-rpc.publicnode.com",
   "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://intake-relay-staging.up.railway.app",
 ];
 
 /**

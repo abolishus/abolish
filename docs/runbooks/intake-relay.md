@@ -2,18 +2,18 @@
 
 How staging runs `apps/intake-relay`, the relay a ballot client sends sealed deliveries through to a seat's node ([[sealed-delivery]], The relay; [[0043-intake-anonymiser]]; [[P2-8]] part 3c-1b-2b-2b-2d-2b-2e-5). The relay sees each client's address beside the seat and election it delivers to, never the ballot (T-13); whoever runs it and the operator together recover what it hides, so staging's relay, on the operator's own Railway project, hides nothing from the operator ([[0043-intake-anonymiser]], Consequences). Production's relays are the owner's to choose and wait on them.
 
-Status: not deployable yet. The deploy workflow doesn't build or deploy its image, and the ballot client's `connect-src` doesn't list its origin, both a `ci:` change (part 2e-5b); and staging's seats serve no intake endpoint ([[trustee-node]], Staging on Railway: No inbound), so it has no node to reach until they do.
+Status: not deployed yet. The deploy workflow builds, signs and publishes its image (`ghcr.io/abolishus/abolish-intake-relay`) on every push to `main`, and deploys it once the GitHub `staging` variable `RAILWAY_INTAKE_RELAY_SERVICE_ID` is set, after the seats ([[railway]], Deploying). The ballot client's `connect-src` lists staging's relay origin, `https://intake-relay-staging.up.railway.app`. Staging's seats serve no intake endpoint yet ([[trustee-node]], Staging on Railway: No inbound), so it has no node to reach until they do: leave the variable unset until then.
 
 ## Service
 
-- **One Railway service, `intake-relay`**, from the relay's image, with a public domain (its origin is what the deployment record lists, [[deployment]], `relay`) and no volume: it keeps no state. Any number of replicas; each limits rates on its own.
+- **One Railway service, `intake-relay`**, from the relay's image, with the public Railway domain `intake-relay-staging.up.railway.app` (its origin, `https://intake-relay-staging.up.railway.app`, is what the deployment record lists, [[deployment]], `relay`, and what the ballot client's `connect-src` allows; another domain needs a `ci:` change to both) and no volume: it keeps no state. Any number of replicas; each limits rates on its own.
 - **Its own origin**, never the API's, the website's or an RPC's: the record refuses a relay at an endpoint's origin (`relay-endpoint`), and one under `backup_rp_id` (`relay-rp`).
 - **`RELAY_CONFIG`** (`apps/intake-relay`, README, Configuration): `host` `0.0.0.0`, `port` the service's target port, and one resource per seat, `{ "path": "seat-<i>", "node": "https://seat-<i>.railway.internal:<port>", "ca": "<the seat's certificate>" }`, over the private network. Set `rate` with `addressHeader` set to the header Railway's edge puts the client's address in, and check on deploy day that a client can't set its last value: otherwise every client is limited as the edge's address, or spoofs another's.
 - **Logs** hold a count per resource each hour and nothing else. Railway's own edge logs requests with the client's address (T-11, the platform's logs are a residual, as for the API): turn off what the project can, and treat the rest as part of staging's relaxation.
 
 ## Deploy and roll back
 
-As every image: built, signed and deployed by digest from the deploy workflow, rolled back by redeploying the previous digest ([[railway]], Deploying). A rollback loses nothing: the relay holds nothing between requests, and a client retries a failed attempt by its other routes ([[sealed-delivery]], Client rules, rule 6).
+As every image: built, signed and deployed by digest from the deploy workflow, once its service ID is in the GitHub `staging` variable `RAILWAY_INTAKE_RELAY_SERVICE_ID` (set it once `RELAY_CONFIG` is filled in and the seats serve their sealed route), rolled back by redeploying the previous digest ([[railway]], Deploying). A rollback loses nothing: the relay holds nothing between requests, and a client retries a failed attempt by its other routes ([[sealed-delivery]], Client rules, rule 6).
 
 ## Rotate
 

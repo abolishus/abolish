@@ -43,6 +43,7 @@ export const BALLOT_CSP: Csp = {
     "https://sepolia.base.org",
     "https://base-sepolia-rpc.publicnode.com",
     "https://ethereum-sepolia-rpc.publicnode.com",
+    "https://intake-relay-staging.up.railway.app",
   ],
   "frame-src": ["https://challenge-staging.up.railway.app"],
   "worker-src": ["'self'"],

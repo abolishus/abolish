@@ -530,6 +530,22 @@ export const esUS: Messages = {
     "Ya cambiaste tus reacciones todas las veces posibles en esta hora. Inténtalo más tarde.",
   reactionsFailed: "No se pudo completar. Inténtalo de nuevo en un momento.",
   reactionsUnread: "No se pudieron cargar las reacciones en este momento.",
+  followTitle: "Seguir",
+  followLede:
+    "Sigue esta encuesta para recibir un correo cuando estén sus resultados, la respondas o no. Seguirla no es responderla y no dice nada de si la respondiste.",
+  followJoin: "Seguir esta encuesta",
+  followStop: "Dejar de seguir",
+  followFollowing: "Estás siguiendo esta encuesta.",
+  followStopped: "Dejaste de seguir esta encuesta.",
+  followPrivacy: "Solo tú puedes ver que la sigues. Nadie ve cuántas personas la siguen.",
+  followSignIn: "Inicia sesión",
+  followSignedOut: "Para seguirla necesitas una cuenta con la sesión iniciada.",
+  followVerify: "Verifica tu correo",
+  followUnverified: "Para seguirla necesitas un correo verificado, que es adonde te escribiríamos.",
+  followHidden: "Esta encuesta está oculta, así que no se puede seguir.",
+  followTooManyThisHour:
+    "Ya seguiste y dejaste de seguir encuestas todas las veces que puedes en esta hora. Inténtalo más tarde.",
+  followFailed: "No se pudo completar. Inténtalo de nuevo en un momento.",
   shareOpen: "Compartir esta encuesta",
   shareNeverYourAnswer:
     "Al compartir se envía este enlace, nunca tu respuesta. El enlace es el mismo para todos, así que no dice quién lo compartió ni si respondió.",
@@ -1087,6 +1103,7 @@ export const esUS: Messages = {
   exportHolds_profile:
     "Tu perfil público, las encuestas que muestra, sus apelaciones y el día en que le pusiste nombre por última vez",
   exportHolds_reactions: "Tus reacciones a encuestas",
+  exportHolds_follows: "Las encuestas que sigues",
   exportHolds_token:
     "El grupo, la región y el periodo de clave de tu token de Nivel 0, nunca la identidad de votación a la que se entregó",
   exportNever:

@@ -260,6 +260,14 @@ describe("dist/node/main.mjs", () => {
       expect(await reactions.json()).toEqual({
         counts: { heart: 0, laugh: 0, wow: 0, thinking: 0, sad: 0, clap: 0 },
       });
+      // And the follows route, which needs a session (its writes as
+      // abolish_app are tests/serve.test.ts's).
+      const follow = await fetch(`${at}/follows/set`, {
+        method: "POST",
+        headers: { origin: "https://abolish.test", "content-type": "application/json" },
+        body: JSON.stringify({ electionId: "00".repeat(32), on: true }),
+      });
+      expect(await follow.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
       // And the profiles routes, whose report read account_profiles as
       // abolish_app: a missing table or grant would be a 500.
       const report = await fetch(`${at}/profiles/report`, {
@@ -293,6 +301,7 @@ describe("dist/node/main.mjs", () => {
       expect(lines.map((l) => l.route)).toContain("phone");
       expect(lines.map((l) => l.route)).toContain("token");
       expect(lines.map((l) => l.route)).toContain("reactions");
+      expect(lines.map((l) => l.route)).toContain("follows");
       expect(lines.map((l) => l.route)).toContain("profiles");
       expect(lines.map((l) => l.route)).toContain("export");
       // No start-up prune of the account tables failed as abolish_app.

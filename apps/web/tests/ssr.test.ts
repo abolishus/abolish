@@ -335,6 +335,17 @@ describe("poll page", () => {
     expect(html).not.toContain("Why should a moderator look at it?");
   });
 
+  test("offers following to everyone alike, reading nothing until the visitor asks", async () => {
+    // The page's server never gets the account cookie (src/node/serve.ts),
+    // and the page doesn't ask whether this account follows the poll (T-11).
+    const html = await (
+      await get(`/polls/${ID}`, { cookie: "__Secure-abolish-account.session_token=secret" })
+    ).text();
+    expect(html).toContain('<h2 id="follow-title"');
+    expect(html).toContain("Following isn&#x27;t answering");
+    expect(html).toContain(">Follow this poll<");
+  });
+
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
     const response = await get(`/polls/${QUESTIONS_ID}`);
     expect(response.status).toBe(200);
@@ -435,8 +446,9 @@ describe("poll page", () => {
     expect(html).toContain("Approve any number");
     // Moderation withheld its text: we don't offer to spread it.
     expect(html).not.toContain("Share this poll");
-    // And it takes no reactions and shows no counts (T-68).
+    // And it takes no reactions, shows no counts and takes no followers (T-68).
     expect(html).not.toContain("reactions-title");
+    expect(html).not.toContain("follow-title");
     // Nor a report: moderators have already removed its text.
     expect(html).not.toContain("Report this poll");
   });
@@ -2199,14 +2211,14 @@ const KB = 1024;
  * (T-55). On a slow phone connection (1.6 Mbit/s, Lighthouse's mobile
  * throttling) every 100 KiB is about half a second. Every page shares about
  * 155 KiB of script (React, the router, the message catalog, the frame) and
- * adds only its own (P2-28 part 2b): the poll page its share sheet and
- * reactions, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
+ * adds only its own (P2-28 part 2b): the poll page its share sheet,
+ * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
  * home the stream's cards beside its trust scene.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 175, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 213, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },

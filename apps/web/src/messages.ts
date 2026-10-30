@@ -518,6 +518,22 @@ const enUS = {
     "You've changed your reactions as often as you can this hour. Try again later.",
   reactionsFailed: "That didn't go through. Try again shortly.",
   reactionsUnread: "Reactions couldn't be loaded just now.",
+  followTitle: "Follow",
+  followLede:
+    "Follow this poll to be told by e-mail when its results are in, whether or not you answer it. Following isn't answering and says nothing about whether you answered.",
+  followJoin: "Follow this poll",
+  followStop: "Stop following",
+  followFollowing: "You're following this poll.",
+  followStopped: "You've stopped following this poll.",
+  followPrivacy: "Only you can see that you follow it. No one sees how many people do.",
+  followSignIn: "Sign in",
+  followSignedOut: "Following needs a signed-in account.",
+  followVerify: "Verify your e-mail",
+  followUnverified: "Following needs a verified e-mail address, where we'd write to you.",
+  followHidden: "This poll is hidden, so it can't be followed.",
+  followTooManyThisHour:
+    "You've followed and stopped following as often as you can this hour. Try again later.",
+  followFailed: "That didn't go through. Try again shortly.",
   shareOpen: "Share this poll",
   shareNeverYourAnswer:
     "Sharing sends this link, never your answer. The link is the same for everyone, so it doesn't say who shared it or whether they answered.",
@@ -1062,6 +1078,7 @@ const enUS = {
   exportHolds_profile:
     "Your public profile, the polls it shows, its appeals and the day you last named it",
   exportHolds_reactions: "Your reactions to polls",
+  exportHolds_follows: "The polls you follow",
   exportHolds_token:
     "The group, region and key period of your Tier 0 token, never the voting identity it went to",
   exportNever:

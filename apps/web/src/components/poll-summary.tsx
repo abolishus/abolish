@@ -2,6 +2,7 @@ import { cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
 import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
+import type { FollowsClient } from "../account/follows.ts";
 import type { ReactionsClient } from "../account/reactions.ts";
 import { catalogs, type Messages, tierMessage } from "../messages.ts";
 import type { ReportPoll } from "../poll-report.ts";
@@ -19,6 +20,7 @@ import type { BoardHead, ModerationState } from "../server/load.ts";
 import type { PollWords } from "../stream.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
+import { PollFollow } from "./poll-follow.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollResults } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
@@ -40,6 +42,8 @@ export interface PollSummaryProps {
   share?: PollShareProps | undefined;
   /** Where the poll's reactions are read and set; without one, none are shown. */
   reactions?: ReactionsClient | undefined;
+  /** Where the poll is followed; without one, following isn't offered. */
+  follows?: FollowsClient | undefined;
   /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
   phoneVerification: boolean;
   /** Who asked it, if its author chose to say; never shown while it's hidden. */
@@ -129,6 +133,7 @@ export function PollSummary({
   tags,
   share,
   reactions,
+  follows,
   phoneVerification,
   askedBy,
   results,
@@ -268,6 +273,11 @@ export function PollSummary({
       {/* Not for a hidden poll, which takes none and shows no counts (T-68). */}
       {reactions === undefined || moderation.state === "hidden" ? null : (
         <PollReactions electionId={poll.electionId} client={reactions} />
+      )}
+
+      {/* Not for a hidden poll, which takes no new followers (T-68). */}
+      {follows === undefined || moderation.state === "hidden" ? null : (
+        <PollFollow electionId={poll.electionId} client={follows} />
       )}
 
       <details className="group border-t border-border pt-8">

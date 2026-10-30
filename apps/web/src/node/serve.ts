@@ -4,7 +4,8 @@
 // e-mail address under /email (src/node/email.ts), its phone number under
 // /phone (src/node/phone.ts), its Tier 0 token under /token
 // (src/node/token.ts), reactions on a poll under /reactions
-// (src/node/reactions.ts), a profile's reports and its author's appeals
+// (src/node/reactions.ts), following a poll under /follows
+// (src/node/follows.ts), a profile's reports and its author's appeals
 // under /profiles (src/node/profiles.ts), an account's own data under
 // /export (src/node/export.ts), its web push subscriptions under /push
 // (src/node/push.ts), and the client's hashed assets from disk, with
@@ -60,6 +61,9 @@ export type TokenHandler = (request: Request) => Promise<Response>;
 /** The reactions handler (`createReactionsHandler(...)` from src/node/reactions.ts). */
 export type ReactionsHandler = (request: Request) => Promise<Response>;
 
+/** The follows handler (`createFollowsHandler(...)` from src/node/follows.ts). */
+export type FollowsHandler = (request: Request) => Promise<Response>;
+
 /** The profiles handler (`createProfilesHandler(...)` from src/node/profiles.ts). */
 export type ProfilesHandler = (request: Request) => Promise<Response>;
 
@@ -79,6 +83,7 @@ export type RouteClass =
   | "phone"
   | "token"
   | "reactions"
+  | "follows"
   | "profiles"
   | "export"
   | "push"
@@ -131,6 +136,7 @@ export interface WebServerOptions {
   readonly phone: PhoneHandler;
   readonly token: TokenHandler;
   readonly reactions: ReactionsHandler;
+  readonly follows: FollowsHandler;
   readonly profiles: ProfilesHandler;
   readonly accountExport: ExportHandler;
   readonly push: PushHandler;
@@ -200,6 +206,7 @@ const ACCOUNT_ROUTES: ReadonlySet<RouteClass> = new Set([
   "phone",
   "token",
   "reactions",
+  "follows",
   "profiles",
   "export",
   "push",
@@ -225,6 +232,7 @@ function classify(method: string, path: string): RouteClass {
   if (path === "/phone" || path.startsWith("/phone/")) return "phone";
   if (path === "/token" || path.startsWith("/token/")) return "token";
   if (path === "/reactions" || path.startsWith("/reactions/")) return "reactions";
+  if (path === "/follows" || path.startsWith("/follows/")) return "follows";
   if (path === "/profiles" || path.startsWith("/profiles/")) return "profiles";
   if (path === "/export" || path.startsWith("/export/")) return "export";
   if (path === "/push" || path.startsWith("/push/")) return "push";
@@ -305,6 +313,7 @@ export function createWebServer({
   phone,
   token,
   reactions,
+  follows,
   profiles,
   accountExport,
   push,
@@ -419,7 +428,7 @@ export function createWebServer({
     });
     if (!ACCOUNT_ROUTES.has(route))
       return send(res, await start.fetch(request, { context }), method === "HEAD");
-    // The account, drafts, e-mail, phone, token, reactions, profiles, export and push handlers
+    // The account, drafts, e-mail, phone, token, reactions, follows, profiles, export and push handlers
     // answer JSON and set few headers of their own (src/security.ts covers pages). A
     // copy: a response's own headers can be immutable.
     const handler =
@@ -435,11 +444,13 @@ export function createWebServer({
                 ? token
                 : route === "reactions"
                   ? reactions
-                  : route === "profiles"
-                    ? profiles
-                    : route === "export"
-                      ? accountExport
-                      : push;
+                  : route === "follows"
+                    ? follows
+                    : route === "profiles"
+                      ? profiles
+                      : route === "export"
+                        ? accountExport
+                        : push;
     const answer = await handler(request);
     const response = new Response(answer.body, answer);
     response.headers.set("cache-control", "no-store");

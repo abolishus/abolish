@@ -51,7 +51,7 @@ import {
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
-/** Nothing on these pages reaches drafts, e-mail, a token, reactions or profiles: they answer 404. */
+/** Nothing on these pages reaches drafts, e-mail, a token, reactions, follows or profiles: they answer 404. */
 const nothing = async () => new Response("{}", { status: 404 });
 /** No one is signed in: the session is `null`, as Better Auth answers a visitor without one. */
 const noSession = async () => Response.json(null);
@@ -145,6 +145,7 @@ beforeAll(async () => {
     phone: nothing,
     token: nothing,
     reactions: nothing,
+    follows: nothing,
     profiles: nothing,
     accountExport: nothing,
     push: nothing,

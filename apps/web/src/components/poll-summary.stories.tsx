@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
+import type { FollowsClient } from "../account/follows.ts";
 import type { ReactionsClient } from "../account/reactions.ts";
 import type { PollView } from "../poll.ts";
 import type { ReportOutcome } from "../profile-report.ts";
@@ -42,6 +43,13 @@ const reactions: ReactionsClient = {
 const reporting = (outcome: ReportOutcome) =>
   fn(async (_electionId: string, _reason: string) => outcome);
 
+/** A signed-out visitor's follow: refused, and never asked until pressed. */
+const follows: FollowsClient = {
+  set: async () => {
+    throw new Error("signed out");
+  },
+};
+
 const meta = {
   component: PollSummary,
   args: {
@@ -53,6 +61,7 @@ const meta = {
     share: { url: "https://abolish.us/p/mhanrsz", title: "Poll mhanrsz" },
     reactions,
     report: reporting("reported"),
+    follows,
     phoneVerification: false,
   },
 } satisfies Meta<typeof PollSummary>;
@@ -88,6 +97,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByRole("button", { name: "Share this poll" })).toBeVisible();
   // Reactions, offered alike whether or not this visitor answered (T-10, T-11).
   await expect(await canvas.findByText("Heart: 4 people")).toBeInTheDocument();
+  // And following, alike too.
+  await expect(canvas.getByRole("button", { name: "Follow this poll" })).toBeVisible();
   await openEvidence(canvasElement);
   await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();
@@ -199,6 +210,8 @@ export const Hidden: Story = {
     await expect(
       within(canvasElement).queryByRole("button", { name: "Report this poll" }),
     ).toBeNull();
+    // Nor following: it takes no new followers.
+    await expect(within(canvasElement).queryByRole("heading", { name: "Follow" })).toBeNull();
     await expect(
       within(note).getByRole("link", { name: "See the moderation log" }),
     ).toHaveAttribute("href", "/moderation");

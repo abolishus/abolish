@@ -13,6 +13,7 @@ const HOLDS = [
   "exportHolds_polls",
   "exportHolds_profile",
   "exportHolds_reactions",
+  "exportHolds_follows",
   "exportHolds_token",
 ] as const satisfies readonly (keyof Messages)[];
 

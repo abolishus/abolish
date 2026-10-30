@@ -10,7 +10,7 @@ import {
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
 import type { ExportClient } from "../account/export.ts";
-import type { FollowResultsClient } from "../account/follow-results.ts";
+import type { FollowResultsClient, NoticeChoicesClient } from "../account/follow-results.ts";
 import type { PushClient } from "../account/push.ts";
 import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
@@ -121,6 +121,8 @@ export interface AccountPanelProps {
   readonly push: PushClient;
   /** The polls the account followed whose results are in. */
   readonly followResults: FollowResultsClient;
+  /** Whether results of followed polls reach the account by e-mail. */
+  readonly noticeChoices: NoticeChoicesClient;
   /** Whether this deployment verifies a phone before an account votes. */
   readonly phone: boolean;
   /**
@@ -145,6 +147,7 @@ export function AccountPanel({
   accountExport,
   push,
   followResults,
+  noticeChoices,
   phone,
   ask,
 }: AccountPanelProps) {
@@ -303,7 +306,7 @@ export function AccountPanel({
             revision={profileRevision}
             onChanged={() => setPollsRevision((n) => n + 1)}
           />
-          <AccountNotices push={push} index="04" onSignedOut={signedOut} />
+          <AccountNotices push={push} choices={noticeChoices} index="04" onSignedOut={signedOut} />
           {/* Beside the notices, since the results e-mail sends the account here to see which poll (T-73). */}
           <AccountFollowResults client={followResults} index="05" onSignedOut={signedOut} />
           <Section

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 
+import { FollowResultsError, type NoticeChoicesClient } from "../account/follow-results.ts";
 import { type PushClient, PushError, type PushState } from "../account/push.ts";
 import { AccountNotices } from "./account-notices.tsx";
 
@@ -31,9 +32,30 @@ function fakePush(
   return client;
 }
 
+/**
+ * A stand-in for the account's results choice: starts at `results`, and
+ * each change succeeds unless told to fail, recording what was set.
+ */
+function fakeChoices(
+  results: boolean,
+  fails?: FollowResultsError,
+): NoticeChoicesClient & { set: boolean[] } {
+  let now = results;
+  const client = {
+    set: [] as boolean[],
+    results: async () => now,
+    async setResults(on: boolean) {
+      client.set.push(on);
+      if (fails !== undefined) throw fails;
+      now = on;
+    },
+  };
+  return client;
+}
+
 const meta = {
   component: AccountNotices,
-  args: { index: "04", push: fakePush("off"), onSignedOut: fn() },
+  args: { index: "04", push: fakePush("off"), choices: fakeChoices(true), onSignedOut: fn() },
 } satisfies Meta<typeof AccountNotices>;
 
 export default meta;
@@ -42,20 +64,35 @@ type Story = StoryObj<typeof meta>;
 const toggle = (canvas: ReturnType<typeof within>) =>
   canvas.getByRole("switch", { name: /Also notify this browser/ });
 
+const resultsToggle = (canvas: ReturnType<typeof within>) =>
+  canvas.getByRole("switch", { name: /Results of a poll you follow/ });
+
+const resultsUsable = async (canvas: ReturnType<typeof within>) =>
+  waitFor(() => expect(resultsToggle(canvas)).not.toHaveAttribute("aria-disabled", "true"));
+
+/** This browser's row's status line. */
+const pushStatus = (canvas: ReturnType<typeof within>) =>
+  canvas.getAllByRole("status")[1] as HTMLElement;
+
+/** The results row's status line. */
+const resultsStatus = (canvas: ReturnType<typeof within>) =>
+  canvas.getAllByRole("status")[0] as HTMLElement;
+
 // Base UI's switch is a span, disabled by `aria-disabled`, not the attribute.
 const usable = async (canvas: ReturnType<typeof within>) =>
   waitFor(() => expect(toggle(canvas)).not.toHaveAttribute("aria-disabled", "true"));
 
-/** The moderation notice, which can't be turned off, and what its e-mail says. */
+/** The moderation notice, which can't be turned off, the results choice, and what an e-mail says. */
 const tells = async (canvas: ReturnType<typeof within>) => {
   await expect(canvas.getByRole("heading", { name: "What we tell you about" })).toBeVisible();
   const kinds = canvas.getAllByRole("listitem");
-  await expect(kinds).toHaveLength(2);
+  await expect(kinds).toHaveLength(3);
   await expect(kinds[0]).toHaveTextContent("Always sent, so that you can appeal");
-  // The optional kinds wait on published results: only this browser's switch.
-  await expect(canvas.getAllByRole("switch")).toHaveLength(1);
+  await expect(kinds[1]).toHaveTextContent("only the e-mail is left out");
+  // The results choice and this browser's switch; moderation has none.
+  await expect(canvas.getAllByRole("switch")).toHaveLength(2);
   await expect(canvas.queryByRole("checkbox")).toBeNull();
-  await expect(canvas.getByText(/says only that there was one/)).toBeVisible();
+  await expect(canvas.getByText(/says only that there's a decision or results/)).toBeVisible();
   // T-76: the switch says who delivers a notification and what they learn.
   await expect(canvas.getByText(/learns that you use Abolish/)).toBeVisible();
 };
@@ -68,10 +105,10 @@ export const TurnOn: Story = {
     await tells(canvas);
     await usable(canvas);
     await expect(toggle(canvas)).not.toBeChecked();
-    await expect(canvas.getByRole("status")).toHaveTextContent("This browser won't be notified.");
+    await expect(pushStatus(canvas)).toHaveTextContent("This browser won't be notified.");
     await userEvent.click(toggle(canvas));
     await waitFor(() => expect(toggle(canvas)).toBeChecked());
-    await expect(canvas.getByRole("status")).toHaveTextContent("This browser will be notified.");
+    await expect(pushStatus(canvas)).toHaveTextContent("This browser will be notified.");
     await expect(canvas.queryByRole("alert")).toBeNull();
     await expect((args.push as ReturnType<typeof fakePush>).enabled).toBe(1);
   },
@@ -95,7 +132,7 @@ export const TurnOff: Story = {
     await waitFor(() => expect(toggle(canvas)).toBeChecked());
     await userEvent.click(toggle(canvas));
     await waitFor(() => expect(toggle(canvas)).not.toBeChecked());
-    await expect(canvas.getByRole("status")).toHaveTextContent("This browser won't be notified.");
+    await expect(pushStatus(canvas)).toHaveTextContent("This browser won't be notified.");
     await expect((args.push as ReturnType<typeof fakePush>).disabled).toBe(1);
   },
 };
@@ -131,7 +168,7 @@ const fixed = (state: "unsupported" | "unavailable" | "denied", words: RegExp): 
   args: { push: fakePush(state) },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await waitFor(() => expect(canvas.getByRole("status")).toHaveTextContent(words));
+    await waitFor(() => expect(pushStatus(canvas)).toHaveTextContent(words));
     await expect(toggle(canvas)).toHaveAttribute("aria-disabled", "true");
     await expect(toggle(canvas)).not.toBeChecked();
   },
@@ -142,3 +179,60 @@ export const Unsupported = fixed("unsupported", /can't show notifications/);
 export const Unavailable = fixed("unavailable", /doesn't send browser notifications yet/);
 
 export const Blocked = fixed("denied", /blocks notifications from this site/);
+
+/** Results are on until turned off; turning them off sets the account's choice, and says so. */
+export const ResultsOff: Story = {
+  args: { choices: fakeChoices(true) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await resultsUsable(canvas);
+    await expect(resultsToggle(canvas)).toBeChecked();
+    await expect(resultsStatus(canvas)).toHaveTextContent(
+      "We'll e-mail you when a poll you follow",
+    );
+    await userEvent.click(resultsToggle(canvas));
+    await waitFor(() => expect(resultsToggle(canvas)).not.toBeChecked());
+    await expect(resultsStatus(canvas)).toHaveTextContent("We won't e-mail you about results.");
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await expect((args.choices as ReturnType<typeof fakeChoices>).set).toEqual([false]);
+    // This browser's switch is its own, and untouched.
+    await expect((args.push as ReturnType<typeof fakePush>).enabled).toBe(0);
+  },
+};
+
+/** Turned off before, on another device: shown off here too, and turned back on. */
+export const ResultsOn: Story = {
+  args: { choices: fakeChoices(false) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await resultsUsable(canvas);
+    await expect(resultsToggle(canvas)).not.toBeChecked();
+    await userEvent.click(resultsToggle(canvas));
+    await waitFor(() => expect(resultsToggle(canvas)).toBeChecked());
+    await expect((args.choices as ReturnType<typeof fakeChoices>).set).toEqual([true]);
+  },
+};
+
+/** The change failed: the switch shows the choice as read again, and says so. */
+export const ResultsFailed: Story = {
+  args: { choices: fakeChoices(true, new FollowResultsError("failed")) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await resultsUsable(canvas);
+    await userEvent.click(resultsToggle(canvas));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("That didn't work.");
+    await waitFor(() => expect(resultsToggle(canvas)).toBeChecked());
+  },
+};
+
+/** The session ended meanwhile: the page is told, as for this browser's switch. */
+export const ResultsSignedOut: Story = {
+  args: { choices: fakeChoices(true, new FollowResultsError("signedOut")) },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await resultsUsable(canvas);
+    await userEvent.click(resultsToggle(canvas));
+    await expect(await canvas.findByRole("alert")).toHaveTextContent("You've been signed out.");
+    await expect(args.onSignedOut).toHaveBeenCalled();
+  },
+};

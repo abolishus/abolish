@@ -1158,6 +1158,8 @@ describe("failures", () => {
         "/follows/set",
         "/follows/results",
         "/follows/results/drop",
+        "/follows/notices",
+        "/follows/notices/set",
         "/profiles/report",
         "/profiles/moderation",
         "/profiles/appeal",
@@ -1188,6 +1190,8 @@ describe("failures", () => {
         ["/follows/set", `${SESSION}=tok`],
         ["/follows/results", `${SESSION}=tok`],
         ["/follows/results/drop", `${SESSION}=tok`],
+        ["/follows/notices", `${SESSION}=tok`],
+        ["/follows/notices/set", `${SESSION}=tok`],
         ["/profiles/report", null],
         ["/profiles/moderation", `${SESSION}=tok`],
         ["/profiles/appeal", `${SESSION}=tok`],
@@ -2493,6 +2497,87 @@ describe("following a poll under /follows", () => {
     // None of it changed the list.
     expect(await (await browser.call("POST", "/follows/results", {})).json()).toEqual({
       polls: [electionId],
+    });
+  });
+
+  test("an account reads and sets its own results choice, and results off leaves the list", async () => {
+    const a = await signedIn();
+    const b = await signedIn();
+    const choice = async (browser: Browser) => {
+      const res = await browser.call("POST", "/follows/notices", {});
+      expect(res.status).toBe(200);
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      return res.json();
+    };
+    // On until the account turns it off.
+    expect(await choice(a.browser)).toEqual({ results: true });
+    expect(
+      await (await a.browser.call("POST", "/follows/notices/set", { results: false })).json(),
+    ).toEqual({ results: false });
+    expect(await choice(a.browser)).toEqual({ results: false });
+    // Another account's choice is its own.
+    expect(await choice(b.browser)).toEqual({ results: true });
+
+    // Off, a landing still lists the poll but queues no notice for it.
+    const p = await newElection(sql);
+    for (const { browser } of [a, b])
+      await browser.call("POST", "/follows/set", { electionId: hex(p), on: true });
+    expect(await landResults(sql, p, { now: new Date() })).toBe(1);
+    expect(await (await a.browser.call("POST", "/follows/results", {})).json()).toEqual({
+      polls: [hex(p)],
+    });
+    expect(await sql`SELECT 1 FROM account_notices WHERE user_id = ${a.account}`).toHaveLength(0);
+    expect(await sql`SELECT 1 FROM account_notices WHERE user_id = ${b.account}`).toHaveLength(1);
+
+    // Back on, and the choice is read as set.
+    expect(
+      await (await a.browser.call("POST", "/follows/notices/set", { results: true })).json(),
+    ).toEqual({ results: true });
+    expect(await choice(a.browser)).toEqual({ results: true });
+
+    // T-10, T-11, T-67: the log has the route class, never the account.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "follows", status: 200 });
+    expect(JSON.stringify(logged)).not.toContain(a.account);
+  });
+
+  test("refuses reading or setting the choice signed out, malformed, or from another origin", async () => {
+    const { browser } = await signedIn();
+    const anyone = new Browser();
+    for (const [path, body] of [
+      ["/follows/notices", {}],
+      ["/follows/notices/set", { results: false }],
+    ] as const)
+      expect(await (await anyone.call("POST", path, body)).json()).toEqual({
+        code: "SIGNED_OUT",
+        status: 401,
+      });
+    for (const [path, bad] of [
+      ["/follows/notices", { results: false }],
+      ["/follows/notices/set", {}],
+      ["/follows/notices/set", { results: "false" }],
+      ["/follows/notices/set", { results: false, moderation: false }],
+    ] as const)
+      expect(await (await browser.call("POST", path, bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    expect(
+      await (
+        await browser.call(
+          "POST",
+          "/follows/notices/set",
+          { results: false },
+          { origin: "https://evil.test" },
+        )
+      ).json(),
+    ).toEqual({ code: "FORBIDDEN_ORIGIN", status: 403 });
+    expect((await browser.call("GET", "/follows/notices")).status).toBe(404);
+    expect(
+      (await browser.call("POST", "/follows/notices/set?x=1", { results: false })).status,
+    ).toBe(404);
+    // None of it changed the choice.
+    expect(await (await browser.call("POST", "/follows/notices", {})).json()).toEqual({
+      results: true,
     });
   });
 });

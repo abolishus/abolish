@@ -1049,7 +1049,12 @@ const enUS = {
   noticesModerationHelp:
     "Always sent, so that you can appeal. It can't be turned off. It comes in the language you verified your address in.",
   noticesWhen:
-    "It comes the day after the decision and says only that there was one. What was decided, and why, is here on this page and in the public moderation log: we keep it out of the e-mail, so the service that delivers it learns as little as it can.",
+    "Each comes the next day, one e-mail a day at most, and says only that there's a decision or results to see. What was decided, and why, is here on this page and in the public moderation log, and which poll has its results is in your list below: we keep both out of the e-mail, so the service that delivers it learns as little as it can.",
+  noticesResults: "Results of a poll you follow",
+  noticesResultsHelp:
+    "On unless you turn it off. Off, the poll still moves to your list below when its results are in; only the e-mail is left out. This is the same on every device you sign in on.",
+  noticesResultsOn: "We'll e-mail you when a poll you follow has its results.",
+  noticesResultsOff: "We won't e-mail you about results.",
   pushLabel: "Also notify this browser",
   pushHelp:
     "A notification on this device when the e-mail goes out, saying only that there's something to see here. Your browser's maker delivers it, so it learns that you use Abolish and the day it was sent.",
@@ -1070,7 +1075,7 @@ const enUS = {
   followResultsMark: "Followed polls",
   followResultsTitle: "Results for polls you followed",
   followResultsLede:
-    "When a poll you follow has its results, it moves here, and we tell you by e-mail without naming it. Only you can see this list.",
+    "When a poll you follow has its results, it moves here, and unless you turned it off above, we tell you by e-mail without naming it. Only you can see this list.",
   followResultsEmpty:
     "Nothing here yet. When a poll you follow has its results, you'll find it here.",
   followResultsNoWords: "A poll whose words can't be shown",

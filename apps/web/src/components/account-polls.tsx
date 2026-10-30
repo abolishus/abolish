@@ -338,9 +338,11 @@ export function AccountPolls({
         <div role="status" className="text-base empty:-mt-4">
           {done === undefined ? null : t(done)}
         </div>
-        {/* What a profile's box does is said once, not under every poll, where seven rows repeated it seven times; each box is described by it. */}
+        {/* What a profile's box does, and which profile, is said once, not under every poll, where seven rows repeated both seven times; each box is described by it. */}
         {profiles === undefined || profile === undefined || !polls?.length ? null : (
           <p id={profileHelp} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("pollsProfileIs")}{" "}
+            <bdi className="font-semibold text-foreground">{profile.name}</bdi>.{" "}
             {t("pollsProfileHelp")}
           </p>
         )}

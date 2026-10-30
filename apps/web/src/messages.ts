@@ -1179,6 +1179,7 @@ const enUS = {
   profileFailure_moderationUnloaded:
     "This profile's moderation couldn't be loaded. Try again shortly.",
   profileChoiceLabel: "Show on your profile,",
+  profileChoiceLabelInList: "Show on your profile",
   profileChoiceHelp:
     "Your profile lists this poll, and its page says your profile asked it, while the poll is listed. Untick it at any time.",
   profileChoiceHelpUnsaved:
@@ -1256,6 +1257,7 @@ const enUS = {
   pollsDeleteQuestion: "Delete this draft? This can't be undone.",
   pollsDeleteConfirm: "Delete draft permanently",
   pollsReload: "Load your polls again",
+  pollsProfileIs: "Your profile is",
   pollsProfileHelp:
     "Ticking “Show on your profile” under a poll lists it on your profile, and its page says your profile asked it, while the poll is listed. A poll that hasn't opened yet is listed once it opens. Untick a box at any time.",
   pollsRetry: "Try again",

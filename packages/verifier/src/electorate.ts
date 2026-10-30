@@ -33,6 +33,7 @@ import {
   type GroupRegistryPins,
   pinnedVersion,
   RECORD_TYPES,
+  type RollingTierEvent,
   rollingTierEvents,
   RollingTierTree,
   statedTierElectorate,
@@ -93,6 +94,9 @@ export type ElectorateOutcome =
       readonly at: ElectorateAt | Record<string, never>;
     };
 
+/** 2.4's outcome where it doesn't pass. */
+export type ElectorateStop = Exclude<ElectorateOutcome, { readonly status: "pass" }>;
+
 export type ElectorateAt =
   | { readonly tier: number }
   | { readonly tier: number; readonly group: bigint }
@@ -128,6 +132,28 @@ function fixedTiers(
   return definition.value.electorate;
 }
 
+// When the recount runs (verifier 2.4, step 1): the pins it replays under,
+// or the outcome that stops it.
+function pinsFor(
+  definition: AnyElectionDefinitionRecord | ElectionDefinitionV7Record,
+  release: GroupRegistryRelease,
+): GroupRegistryPins | ElectorateStop {
+  const d = definition.value;
+  const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  if (!isReadable(version)) return { status: "unverifiable", code: "unsupported-version", at: {} };
+  // T-71: a registry the release doesn't pin is anyone's, and a self-paid
+  // group in it needs no registrar's signature, so its records prove nothing.
+  if (d.l2_chain_id !== release.chainId || !equal(d.group_registry, release.registry))
+    return { status: "fail", code: "group-registry", at: {} };
+  return {
+    version,
+    chainId: release.chainId,
+    registry: release.registry,
+    registrars: release.registrars,
+    threshold: release.threshold,
+  };
+}
+
 /**
  * 2.4's recount of every tier of `definition` from `records`, the group
  * registry's records in order of `n` (others' are ignored), under `release`:
@@ -143,22 +169,10 @@ export function electorateCheck(
   records: readonly ContractEventRecord[],
   release: GroupRegistryRelease,
 ): ElectorateOutcome {
-  const d = definition.value;
-  const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
-  if (!isReadable(version)) return { status: "unverifiable", code: "unsupported-version", at: {} };
-  // T-71: a registry the release doesn't pin is anyone's, and a self-paid
-  // group in it needs no registrar's signature, so its records prove nothing.
-  if (d.l2_chain_id !== release.chainId || !equal(d.group_registry, release.registry))
-    return { status: "fail", code: "group-registry", at: {} };
-  const pins: GroupRegistryPins = {
-    version,
-    chainId: release.chainId,
-    registry: release.registry,
-    registrars: release.registrars,
-    threshold: release.threshold,
-  };
+  const pins = pinsFor(definition, release);
+  if ("status" in pins) return pins;
   if (definition.version === 7 && definition.value.electorate_mode !== ELECTORATE_MODES.fixed)
-    return rollingCheck(definition, records, pins);
+    return rollingCheck(definition, records, pins).outcome;
   const tiers = fixedTiers(definition);
   let undecided: ElectorateOutcome | undefined;
   for (const [i, tier] of tiers.entries()) {
@@ -196,9 +210,13 @@ function rollingCheck(
   definition: ElectionDefinitionV7Record,
   records: readonly ContractEventRecord[],
   pins: GroupRegistryPins,
-): ElectorateOutcome {
+): {
+  readonly outcome: ElectorateOutcome;
+  readonly events: readonly (readonly RollingTierEvent[])[];
+} {
   const d = definition.value;
   let undecided: ElectorateOutcome | undefined;
+  const replayed: (readonly RollingTierEvent[])[] = [];
   for (const [i, tier] of d.rolling_electorate.entries()) {
     let events: ReturnType<typeof rollingTierEvents>;
     try {
@@ -211,7 +229,7 @@ function rollingCheck(
     } catch (e) {
       if (!(e instanceof TierMembershipError)) throw e;
       const failed = failure(e, i);
-      if (failed.status === "fail") return failed;
+      if (failed.status === "fail") return { outcome: failed, events: [] };
       undecided ??= failed;
       continue;
     }
@@ -221,9 +239,35 @@ function rollingCheck(
       opening.apply(e);
     }
     if (opening.root() !== tier.root || BigInt(opening.memberCount) !== tier.group_size)
-      return { status: "fail", code: "electorate", at: { tier: i } };
+      return { outcome: { status: "fail", code: "electorate", at: { tier: i } }, events: [] };
+    replayed.push(events);
   }
-  return undecided ?? { status: "pass" };
+  return { outcome: undecided ?? { status: "pass" }, events: replayed };
+}
+
+/**
+ * 2.4's recount of a rolling `definition` (version 7 under `electorate_mode`
+ * 2) from `records` under `release`, as `electorateCheck` gives it, and,
+ * where it passes, each rolling tier's events through close in chain order,
+ * after its groups' strict replay: the events the tier's step roots are
+ * computed from (verifier 5.1; [[membership]], Rolling checks). No event is
+ * given for a recount that fails or can't be decided, so no step root is
+ * ever taken from records the recount didn't pass (T-08, T-13, T-71).
+ * Throws `TypeError` for a fixed definition.
+ */
+export function rollingElectorate(
+  definition: ElectionDefinitionV7Record,
+  records: readonly ContractEventRecord[],
+  release: GroupRegistryRelease,
+):
+  | { readonly status: "pass"; readonly events: readonly (readonly RollingTierEvent[])[] }
+  | ElectorateStop {
+  if (definition.value.electorate_mode !== ELECTORATE_MODES.rolling)
+    throw new TypeError("rollingElectorate: the definition's electorate isn't rolling");
+  const pins = pinsFor(definition, release);
+  if ("status" in pins) return pins;
+  const { outcome, events } = rollingCheck(definition, records, pins);
+  return outcome.status === "pass" ? { status: "pass", events } : outcome;
 }
 
 function failure(e: TierMembershipError, tier: number): ElectorateOutcome {

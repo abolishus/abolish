@@ -2,7 +2,7 @@ import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import type { ContractEventRecord } from "@abolishus/crypto";
 import { decodeDefinition } from "../src/definition.ts";
-import { registrationCheck } from "../src/index.ts";
+import { definitionRegistration, registrationCheck } from "../src/index.ts";
 import { hex, numRuns, read } from "./registry-logs.ts";
 import {
   type AnyDefinition,
@@ -228,5 +228,46 @@ describe("registrationCheck", () => {
       ),
       { numRuns },
     );
+  });
+});
+
+// The registration check's steps 1 to 3 over the election registry alone,
+// which a rolling poll's chain takes its registration time from
+// (docs/spec/verifier.md, Electorate, The rolling chain; P2-17 part 4d-2b).
+describe("definitionRegistration", () => {
+  const registration = (records: readonly ContractEventRecord[], d: AnyDefinition = v5) =>
+    definitionRegistration(d, records, releaseOf(d));
+
+  test("gives the record that registered the definition, whatever the trustee registry logs", () => {
+    const record = definitionRegistered(v5);
+    expect(registration([record])).toEqual({ status: "pass", record });
+    // No ceremony is read, and a trustee-registry record that fails the
+    // event check is the full check's to report.
+    const broken = { ...ceremonyRegistered(v5), topics: [] };
+    expect(registration([broken, record])).toEqual({ status: "pass", record });
+    expect(check([broken, record])).toEqual(fail("registry-records"));
+  });
+
+  test("fails and stops as the registration check's steps 1 to 3 do", () => {
+    const later = { ...v5, value: { ...v5.value, closes_at: v5.value.closes_at + 1n } };
+    for (const records of [
+      [],
+      [definitionRegistered(v5, encodingOf(later))],
+      [definitionRegistered(v5), definitionRegistered(v5, undefined, undefined, 30n)],
+      [{ ...definitionRegistered(v5), topics: [] }],
+    ]) {
+      const full = check([ceremonyRegistered(v5), ...records]);
+      expect(full.status).toBe("fail");
+      expect(registration(records)).toEqual(full);
+    }
+    const other = { ...releaseOf(v5), electionRegistry: new Uint8Array(20).fill(3) };
+    expect(definitionRegistration(v5, [definitionRegistered(v5)], other)).toEqual(
+      fail("registries"),
+    );
+    const unread = v5Definition(14);
+    expect(registration([definitionRegistered(unread)], unread)).toEqual({
+      status: "unverifiable",
+      code: "unsupported-version",
+    });
   });
 });

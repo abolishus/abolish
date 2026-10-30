@@ -8,6 +8,7 @@ import {
   type RollingTierEvent,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
+import { electionAdmission } from "../src/admission.ts";
 import { ballotChecks, judgeFor } from "../src/ballots.ts";
 import { ceremonyChecks } from "../src/ceremony.ts";
 import { authorRunOf, decodeDefinition, isRolling, readDefinition } from "../src/definition.ts";
@@ -221,5 +222,60 @@ describe("what a rolling ballot is judged against", { timeout: 60_000 }, () => {
     const own = judge(ballot, rootOfStepN0()).checked;
     expect(own).toEqual(alone);
     expect(judge(ballot, 1n).checked).toEqual({ ok: false, code: "root-step-mismatch" });
+  });
+});
+
+// The operator's admission before boarding (src/admission.ts) judges a
+// rolling poll's ballots with the same judge as 5.1 to 5.4, given the chain
+// from its own read of the registries (`rollingChain`), and never without
+// it (P2-17 part 4d-2b; T-08, T-17).
+describe("the operator's admission of a rolling poll's ballots", { timeout: 60_000 }, () => {
+  const c = byId("board");
+  const { entries } = election(c);
+  const p = file.panels[c.panel];
+  if (p === undefined) throw new Error(`no panel ${c.panel}`);
+  const panel = { threshold: Number(p.threshold), keys: p.keys.map(hex) };
+  // A board entry's payload follows its 51-byte header; entry 0 is the transcript.
+  const payloads = entries.slice(1).map((e) => e.subarray(51));
+
+  test("without the chain no ballot is admitted", () => {
+    expect(electionAdmission(hex(c.definition), panel, entries)).toEqual({
+      ok: false,
+      code: "unsupported-version",
+    });
+  });
+
+  test("with it each ballot is admitted or rejected as the vectors' 5.1 to 5.4 do", () => {
+    const admission = electionAdmission(hex(c.definition), panel, entries, undefined, chain);
+    if (!admission.ok) throw new Error(admission.code);
+    const results = admission.admitAll(payloads);
+    // Repeats (5.7) and the window (5.5) are the caller's, so a ballot the
+    // vectors reject only for those is admitted here.
+    const rejected = new Map(
+      c.ballots.rejected
+        .filter((x) => x.code !== "repeat" && !x.code.startsWith("window-"))
+        .map((x) => [x.entry, x]),
+    );
+    for (const [i, result] of results.entries()) {
+      const want = rejected.get(i + 1);
+      if (want === undefined) expect(result.ok, String(i + 1)).toBe(true);
+      else
+        expect(result, String(i + 1)).toEqual({
+          ok: false,
+          code: want.code,
+          ...(want.decodeError !== undefined && { decodeError: want.decodeError }),
+        });
+    }
+    expect(results.filter((r) => r.ok)).toHaveLength(c.ballots.admitted + 2);
+  });
+
+  test("an admitted ballot carries the step 5.8's window is judged at", () => {
+    const admission = electionAdmission(hex(c.definition), panel, entries, undefined, chain);
+    if (!admission.ok) throw new Error(admission.code);
+    // Entries 1 to 3 name step N0 or an earlier one and entries 4 and 5
+    // later ones, as a registration at N0's boundary shows above.
+    const steps = admission.admitAll(payloads.slice(0, 5)).map((r) => (r.ok ? r.step : undefined));
+    for (const s of steps.slice(0, 3)) expect(s).toBeLessThanOrEqual(2_966_400);
+    for (const s of steps.slice(3)) expect(s).toBeGreaterThan(2_966_400);
   });
 });

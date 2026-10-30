@@ -3,7 +3,6 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   type ContractEventRecord,
   decodeElectionDefinitionV7,
-  type ElectionDefinitionV7,
   type TierElectorate,
   tierTreeRoot,
 } from "@abolishus/crypto";
@@ -12,15 +11,16 @@ import {
   added,
   additions,
   chainId,
-  decimal,
   definitionOf,
   type Event,
   logs,
   numRuns,
-  read,
   registry,
   release,
   removed,
+  rolling,
+  rollingTree,
+  rollingTrees,
   ROOT_BLOCK,
   selfPaid,
   selfPaidTiers,
@@ -334,85 +334,6 @@ describe("electorateCheck", () => {
 // rolling-tier-tree.json, printed by an independent Python generator and
 // logged here as the registry logs it: every opening root and count is the
 // vectors' (T-08, T-13, T-16, T-71).
-
-interface RollingVectorEvent {
-  readonly block: string;
-  readonly timestamp: string;
-  readonly group: string;
-  readonly add?: readonly string[];
-  readonly remove?: readonly string[];
-}
-const rollingTrees = read<{
-  readonly trees: readonly {
-    readonly id: string;
-    readonly groups: readonly string[];
-    readonly events: readonly RollingVectorEvent[];
-    readonly rootL2Block: string;
-    readonly closesAt: string;
-    readonly opening: { readonly root: string; readonly memberCount: string };
-  }[];
-}>("rolling-tier-tree.json").trees.map((t) => {
-  // Every group the tree names, created at block 1, then each event signed
-  // at its group's running count, at the vector's block and timestamp.
-  const ids = [...new Set(t.events.map((e) => decimal(e.group)))].sort((a, b) => (a < b ? -1 : 1));
-  const created = decimal(t.events[0]?.timestamp) - 1_000n;
-  const events: (Event & { block: bigint; timestamp: bigint })[] = ids.map((groupId) => ({
-    kind: "created",
-    groupId,
-    tier: 0,
-    block: 1n,
-    timestamp: created,
-  }));
-  const count = new Map<bigint, bigint>();
-  for (const e of t.events) {
-    const id = decimal(e.group);
-    const at = { block: decimal(e.block), timestamp: decimal(e.timestamp) };
-    const c = count.get(id) ?? 0n;
-    if (e.remove !== undefined) events.push({ ...removed(id, c, e.remove.map(decimal)), ...at });
-    else {
-      const commitments = (e.add ?? []).map(decimal);
-      events.push({ ...added(id, c, commitments), ...at });
-      count.set(id, c + BigInt(commitments.length));
-    }
-  }
-  const tier = {
-    tier: 0 as const,
-    root_l2_block: decimal(t.rootL2Block),
-    groups: t.groups.map(decimal),
-    root: decimal(t.opening.root),
-    group_size: decimal(t.opening.memberCount),
-  };
-  return { id: t.id, events, records: logs(events), tier, closesAt: decimal(t.closesAt) };
-});
-const rollingTree = (id: string) => {
-  const found = rollingTrees.find((t) => t.id === id);
-  if (found === undefined) throw new Error(`no tree ${id}`);
-  return found;
-};
-
-const rollingTypical = decodeElectionDefinitionV7(
-  definitionOf("election-definition-v7.json", "definition-v7-rolling-typical"),
-);
-const rolling = (
-  tiers: ElectionDefinitionV7["rolling_electorate"],
-  closesAt: bigint,
-): { version: 7; value: ElectionDefinitionV7 } => ({
-  version: 7,
-  value: {
-    ...rollingTypical,
-    l2_chain_id: chainId,
-    group_registry: registry,
-    closes_at: closesAt,
-    rolling_electorate: [...tiers],
-    // Contract-event version 11, which a profile pinning ballot version 5 must pin (2.3).
-    profile: {
-      protocol_major: 1,
-      pins: rollingTypical.profile.pins.map((p) =>
-        p.record_type === 8 ? { ...p, version: 11 } : p,
-      ),
-    },
-  },
-});
 
 describe("electorateCheck under a rolling electorate", () => {
   test("passes every tree of rolling-tier-tree.json stated at its opening state", () => {

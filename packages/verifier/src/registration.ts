@@ -31,12 +31,16 @@ import {
 import { concatBytes } from "@noble/hashes/utils.js";
 import { authorRunOf, decodeDefinition, readDefinition } from "./definition.ts";
 
-/** The registries and their chain, as the release pins them. */
-export interface RegistrationRelease {
+/** The election registry and its chain, as the release pins them. */
+export interface ElectionRegistryRelease {
   /** The L2's chain ID. */
   readonly chainId: bigint;
   /** The election registry, 20 bytes. */
   readonly electionRegistry: Uint8Array;
+}
+
+/** The registries and their chain, as the release pins them. */
+export interface RegistrationRelease extends ElectionRegistryRelease {
   /** The trustee registry, 20 bytes. */
   readonly trusteeRegistry: Uint8Array;
 }
@@ -116,7 +120,8 @@ export function registrationCheck(
     groupRegistry: d.group_registry,
     board: d.board,
   };
-  const definitions: Uint8Array[] = [];
+  const definitions: { readonly record: ContractEventRecord; readonly definition: Uint8Array }[] =
+    [];
   const ceremonies: { transcriptHash: Uint8Array; registration: Uint8Array }[] = [];
   for (const record of records) {
     if (
@@ -128,7 +133,7 @@ export function registrationCheck(
     if (!checked.ok) return { status: "fail", code: "registry-records" };
     const e = checked.event;
     if (e.event === "DefinitionRegistered" && equal(e.electionId, d.election_id))
-      definitions.push(e.definition);
+      definitions.push({ record, definition: e.definition });
     else if (
       e.event === "CeremonyRegistered" &&
       equal(e.stubHash, read.stubHash) &&
@@ -137,14 +142,8 @@ export function registrationCheck(
       ceremonies.push({ transcriptHash: e.transcriptHash, registration: e.registration });
   }
 
-  // 2.1: the registry is write-once per election, so a second registration,
-  // or one of other bytes, means the definition checked isn't the election's
-  // (T-34). The hash is recomputed from the logged bytes, never taken from
-  // the event's topic, which the event check doesn't bind to them.
-  const [registered] = definitions;
-  if (registered === undefined) return { status: "fail", code: "definition-unregistered" };
-  if (definitions.length > 1 || !equal(hashOf(registered), read.hash))
-    return { status: "fail", code: "definition-registered" };
+  const registered = matchRegistration(definitions, read.hash);
+  if (registered.status !== "pass") return registered;
 
   // 3.1's registration part: the registry records one transcript per stub
   // and panel, and registers a definition only over the one it recorded.
@@ -174,6 +173,74 @@ export function registrationCheck(
   return equal(recorded, keySet)
     ? { status: "pass" }
     : { status: "fail", code: "key-set-mismatch" };
+}
+
+/** The definition's registration (2.1), or why it isn't found. */
+export type DefinitionRegistrationOutcome =
+  /** `record` is the election registry's `DefinitionRegistered` that registered it. */
+  | { readonly status: "pass"; readonly record: ContractEventRecord }
+  | {
+      readonly status: "fail";
+      readonly code: Extract<
+        RegistrationFailure,
+        "registries" | "registry-records" | "definition-unregistered" | "definition-registered"
+      >;
+    }
+  | { readonly status: "unverifiable"; readonly code: "unsupported-version" };
+
+/**
+ * The registration check's steps 1 to 3 over the election registry alone:
+ * the `DefinitionRegistered` record of `records` (others' contracts'
+ * ignored) that registered `definition`, under `release`, with the same
+ * outcomes as `registrationCheck` gives for those steps. Its block's
+ * timestamp is a rolling poll's registration time, before which no step is
+ * accepted ([[membership]], Root clock and steps), and the accumulator binds
+ * it (T-34, T-71). `definition` must be well formed (2.1). Throws
+ * `TypeError` or `RangeError` for malformed arguments.
+ */
+export function definitionRegistration(
+  definition: AnyElectionDefinitionRecord | ElectionDefinitionV7Record,
+  records: readonly ContractEventRecord[],
+  release: ElectionRegistryRelease,
+): DefinitionRegistrationOutcome {
+  const d = definition.value;
+  const version = pinnedVersion(d, RECORD_TYPES.contractEvent);
+  if (!isReadable(version)) return { status: "unverifiable", code: "unsupported-version" };
+  // T-71, as `registrationCheck`.
+  if (d.l2_chain_id !== release.chainId || !equal(d.election_registry, release.electionRegistry))
+    return { status: "fail", code: "registries" };
+  const contracts: EventContracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  const definitions: { readonly record: ContractEventRecord; readonly definition: Uint8Array }[] =
+    [];
+  for (const record of records) {
+    if (!equal(record.contract, contracts.electionRegistry)) continue;
+    const checked = checkContractEvent(record, contracts, version);
+    if (!checked.ok) return { status: "fail", code: "registry-records" };
+    const e = checked.event;
+    if (e.event === "DefinitionRegistered" && equal(e.electionId, d.election_id))
+      definitions.push({ record, definition: e.definition });
+  }
+  return matchRegistration(definitions, readDefinition(definition).hash);
+}
+
+// 2.1: the registry is write-once per election, so a second registration,
+// or one of other bytes, means the definition checked isn't the election's
+// (T-34). The hash is recomputed from the logged bytes, never taken from
+// the event's topic, which the event check doesn't bind to them.
+function matchRegistration(
+  definitions: readonly { readonly record: ContractEventRecord; readonly definition: Uint8Array }[],
+  hash: Uint8Array,
+): DefinitionRegistrationOutcome {
+  const [registered] = definitions;
+  if (registered === undefined) return { status: "fail", code: "definition-unregistered" };
+  if (definitions.length > 1 || !equal(hashOf(registered.definition), hash))
+    return { status: "fail", code: "definition-registered" };
+  return { status: "pass", record: registered.record };
 }
 
 // Every version crypto's event check decodes is one `decodeDefinition`

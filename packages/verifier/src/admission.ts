@@ -51,6 +51,7 @@ import {
   questionBallotElection,
   RECORD_TYPES,
   type RegisteredKeys,
+  type RollingBallotChain,
   SHARE_CIPHERTEXT,
   type Panel,
 } from "@abolishus/crypto";
@@ -99,6 +100,12 @@ export type BallotAdmission =
       /** The L1 block the ballot names (5.8 is the caller's), as `M` binds it. */
       readonly l1RefNumber: bigint;
       readonly l1RefHash: Uint8Array;
+      /**
+       * Under a rolling definition, the step the ballot names, which `M`
+       * binds too: 5.8's step window against its L1 reference is the
+       * caller's (`checkL1ReferenceV5`).
+       */
+      readonly step?: number;
     }
   | {
       readonly ok: false;
@@ -250,13 +257,17 @@ export interface ReadElection {
  * the pinned board-entry version, 2.3's combination under the release's
  * pins, then the transcript check (2.5's panel, 3.1, 3.2). The first that
  * stops them all is the refusal; otherwise the registered key sets every
- * ballot is judged against (T-37, T-04).
+ * ballot is judged against (T-37, T-04). A rolling definition is read only
+ * where the caller has its chain (`rolling`, from `rollingChain`), which
+ * the counted set and the tally reads don't take: they don't read a
+ * rolling electorate's cells yet.
  */
 export function readElection(
   definitionBytes: Uint8Array,
   panel: Panel,
   entries: readonly Uint8Array[],
   pins: readonly PinnedPanel[] = PINNED_PANELS,
+  rolling?: RollingBallotChain,
 ): ReadElection | { readonly ok: false; readonly code: ElectionAdmissionCode } {
   const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
   let record;
@@ -277,16 +288,17 @@ export function readElection(
   const boardEntryVersion = pinnedVersion(d, RECORD_TYPES.boardEntry);
   if (!isReadable(boardEntryVersion)) return refuse("unsupported-version");
   // As 2.3 reads it, with the release's pins: a live poll's ballots are
-  // admitted only under the live restriction (T-16, T-45).
+  // admitted only under the live restriction (T-16, T-45). A rolling
+  // electorate's ballots are judged against step roots from 2.4's rolling
+  // replay, which only its chain gives, so its profile fits only where the
+  // caller gave one; without it no ballot is judged (P2-17 part 4d-2b;
+  // T-08, T-36).
   const combination = profileCombinationRule(
     d,
     pinnedOurs(bytesToHex(d.panel_id), d.panel_size, pins),
+    rolling !== undefined,
   );
   if (combination !== undefined) return refuse(combination);
-  // As 2.3 reads it: a rolling electorate's ballots wait on 2.4's rolling
-  // replay and the rolling 5.1 and 5.2, whatever crypto's combination says
-  // of its profile (P2-17 part 4d-2; T-36).
-  if (isRolling(record)) return refuse("unsupported-version");
   const { rows, registered, authorRegistered } = ceremonyChecks(
     d,
     stubHash,
@@ -322,20 +334,30 @@ export function readElection(
  * `ceremony_transcript_hash` counts). Every input is what the verifier
  * would read, never a ballot's or a submitter's choice (T-37, T-04).
  * `pins` are the panels the release pins, as `verifyBundle` reads them, so
- * admission and 2.3 judge a live poll's restriction alike.
+ * admission and 2.3 judge a live poll's restriction alike. Under a rolling
+ * definition `rolling` is its chain, as `rollingChain` gives it from the
+ * caller's own finalized read of the registries, never a chain a submitter
+ * or a relay gives (T-08, T-25); without it every ballot is refused
+ * `unsupported-version`. Another definition's ballots never read it.
  */
 export function electionAdmission(
   definitionBytes: Uint8Array,
   panel: Panel,
   entries: readonly Uint8Array[],
   pins: readonly PinnedPanel[] = PINNED_PANELS,
+  rolling?: RollingBallotChain,
 ): ElectionAdmission | { readonly ok: false; readonly code: ElectionAdmissionCode } {
   const refuse = (code: ElectionAdmissionCode) => ({ ok: false, code }) as const;
-  const election = readElection(definitionBytes, panel, entries, pins);
+  const election = readElection(definitionBytes, panel, entries, pins, rolling);
   if (!election.ok) return election;
   const { record, registered, authorRegistered } = election;
   const d = record.value;
-  const judge = steppedJudgeFor(record, registered, authorRegistered);
+  const judge = steppedJudgeFor(
+    record,
+    registered,
+    authorRegistered,
+    isRolling(record) ? rolling : undefined,
+  );
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
   // Up to the membership proof: a payload decided before it, or its step.
@@ -364,6 +386,7 @@ export function electionAdmission(
           message: checked.message,
           l1RefNumber: checked.l1RefNumber,
           l1RefHash: new Uint8Array(checked.l1RefHash),
+          ...("step" in checked && { step: checked.step }),
         }
       : { ok: false, code: checked.code };
   const admitAll = (payloads: readonly Uint8Array[]): BallotAdmission[] => {

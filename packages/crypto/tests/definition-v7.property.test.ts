@@ -408,6 +408,33 @@ describe("2.3's profile combination under version 7", () => {
       ).toBe("profile-combination");
   });
 
+  test("a caller reading the rolling chain passes a rolling profile that fits, and nothing else changes", () => {
+    expect(profileCombinationRule(v7(2), 0, true)).toBeUndefined();
+    expect(
+      profileCombinationRule(v7(2, livePins, live), rollingTypical.threshold, true),
+    ).toBeUndefined();
+    // Every other verdict is the one a caller that doesn't read it gets:
+    // failures, later versions and fixed electorates alike (T-36).
+    const others: [ElectionDefinitionV7, number][] = [
+      [v7(2, livePins, live), 0],
+      [v7(2, { [RECORD_TYPES.contractEvent]: 255 }), 0],
+      [v7(2, { [RECORD_TYPES.spoiledBallotOpening]: 255 }), 0],
+      [v7(2, { [RECORD_TYPES.ballot]: 6 }), 0],
+      ...[1, 8, 11, 12].map((events): [ElectionDefinitionV7, number] => [
+        v7(2, { [RECORD_TYPES.contractEvent]: events }),
+        0,
+      ]),
+      [v7(2, { [RECORD_TYPES.ballot]: 4 }), 0],
+      [v7(2, {}, authorPanel), 0],
+      [v7(1), 0],
+      [v7(1, { [RECORD_TYPES.ballot]: 5 }), 0],
+      [v7(1, { [RECORD_TYPES.contractEvent]: 255 }), 0],
+    ];
+    for (const [d, seats] of others) {
+      expect(profileCombinationRule(d, seats, true)).toBe(profileCombinationRule(d, seats));
+    }
+  });
+
   test("ballot version 5 beside version 6 fails, whatever else it pins", () => {
     // Version 5 names a step, which only a rolling electorate has, so no
     // later release can read it beside version 6 (T-36).

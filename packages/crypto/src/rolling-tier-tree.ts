@@ -16,6 +16,7 @@ const MAX_U64 = (1n << 64n) - 1n;
 const PERIOD = BigInt(PARAMETERS.ROOT_PERIOD);
 const OFFSET = BigInt(PARAMETERS.ROOT_OFFSET);
 const WINDOW = BigInt(PARAMETERS.ROOT_WINDOW);
+const FINALITY = BigInt(PARAMETERS.ROOT_FINALITY);
 
 function uintArg(v: unknown, max: bigint, what: string): bigint {
   if (typeof v !== "bigint" || v < 0n || v > max)
@@ -57,6 +58,18 @@ export function rootStepWindow(step: bigint, l1Timestamp: bigint): RootStepWindo
   const t = uintArg(l1Timestamp, MAX_U64, "l1Timestamp");
   if (tau > t) return "future";
   return tau + WINDOW <= t ? "stale" : "in";
+}
+
+/**
+ * Whether a live poll's running sets read step `n` as final at an L1 head
+ * with timestamp `t`: `τ_n + ROOT_FINALITY ≤ t` (docs/spec/membership.md,
+ * Root clock and steps; docs/spec/tally.md, Running set). A bundle's L1
+ * headers don't show the L2's derivation, so the rule reads the clock and
+ * the head alone, and every node and verifier computes the same pending
+ * ballots at each snapshot (T-34, T-53).
+ */
+export function rootStepFinal(step: bigint, l1Timestamp: bigint): boolean {
+  return rootClockBoundary(step) + FINALITY <= uintArg(l1Timestamp, MAX_U64, "l1Timestamp");
 }
 
 /**

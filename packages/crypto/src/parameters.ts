@@ -75,10 +75,12 @@ export const PARAMETERS = Object.freeze({
   MIN_LIVE_BATCH: 20,
   // Seconds; the root clock of rolling electorates, election-definition
   // version 7: boundary n is n * ROOT_PERIOD + ROOT_OFFSET in UNIX time, and
-  // a ballot names a step within ROOT_WINDOW before its L1 reference.
+  // a ballot names a step within ROOT_WINDOW before its L1 reference, and a
+  // live poll's running sets read a step as final ROOT_FINALITY after it.
   ROOT_PERIOD: 600,
   ROOT_OFFSET: 300,
   ROOT_WINDOW: 7200,
+  ROOT_FINALITY: 2400,
   // L2 blocks before a Tier 2 key's deadline: a seat forces the record through
   // the L1 portal at FORCE_LEAD, and approves only with RECORD_MARGIN left; both
   // multiples of F, the forced path's bound (docs/spec/nullifier-key.md, Recording).

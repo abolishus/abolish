@@ -29,11 +29,13 @@ import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 import * as z from "zod";
 
+import { createApi } from "../server/api.ts";
 import type { ReadAskedBy, ReadProfile } from "../server/load.ts";
 import { ballotBase, fromHex, isSiteKey, toHex } from "../values.ts";
 import { createAnalytics, noAnalytics } from "./analytics.ts";
 import { createDraftsHandler } from "./drafts.ts";
 import { createEmailHandler, type EmailService } from "./email.ts";
+import { resultsInFrom, startResultsLanding } from "./landing.ts";
 import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
 import { createExportHandler } from "./export.ts";
@@ -493,6 +495,14 @@ const prune = startAccountPrune({
     : { emailKeys: emailVerification.keys, noticeSender: emailVerification.sender }),
   ...(pushService === undefined ? {} : { pushSender: pushService.sender }),
 });
+// Followed polls' results, read from the API by each poll's ID alone, as
+// the poll page reads them (T-10); landing one queues its followers' notices,
+// which the prune timer sends where the e-mail service is configured.
+const landing = startResultsLanding({
+  sql,
+  resultsIn: resultsInFrom(createApi(env.API_URL)),
+  log: write,
+});
 const analytics =
   env.POSTHOG_HOST === undefined || env.POSTHOG_KEY === undefined
     ? noAnalytics
@@ -524,5 +534,10 @@ server.listen(env.WEB_PORT, env.WEB_HOST);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const)
   process.once(signal, () => {
-    server.close(() => void prune.stop().then(() => Promise.all([sql.end(), analytics.close()])));
+    server.close(
+      () =>
+        void Promise.all([prune.stop(), landing.stop()]).then(() =>
+          Promise.all([sql.end(), analytics.close()]),
+        ),
+    );
   });

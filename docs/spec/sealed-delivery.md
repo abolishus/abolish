@@ -108,7 +108,7 @@ Every answer is 307 bytes. Its plaintext, also with no header (the answer's vers
 | `outcome` | `enum8<1, 2, 3>`         | 1: `receipt`, 2: `refused`, 3: `busy`                                                                                                                 |
 | `body`    | `bytes<MAX_ANSWER_BODY>` | For `receipt`, the share receipt record (`0x000c`, [[delivery]], Records), never empty; for `refused`, the refusal's code in ASCII; for `busy`, empty |
 
-then zero bytes to `ANSWER_PLAINTEXT`. A refusal's code is 1 to `MAX_REFUSAL_CODE` bytes of `a` to `z`, `0` to `9` and `-`, neither starting nor ending with `-` and with no two together: an intake code ([[share-encryption]], Intake and receipts; the node's own, such as `intake-unapproved`), or `sealed-envelope`. `busy` means the node opened the request but can't run its intake on it now, its queue of opened deliveries being full; the client asks again later.
+then zero bytes to `ANSWER_PLAINTEXT`. A refusal's code is 1 to `MAX_REFUSAL_CODE` bytes of `a` to `z`, `0` to `9` and `-`, neither starting nor ending with `-` and with no two together: an intake code ([[share-encryption]], Intake and receipts; the node's own, such as `intake-unapproved`), or `sealed-envelope`. `busy` means the node opened the request but can't run its intake on it now, its queue of opened deliveries being full, or failed inside after opening it (The node's route); the client asks again later.
 
 **Encryption.** With the request's `K` and `request_hash`, the node draws `answer_nonce` and computes:
 

@@ -138,7 +138,10 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
     chain = outcome.catch(() => undefined);
     return outcome;
   };
-  const log = (e: unknown) => options.log?.({ event: "intake-error", error: (e as Error).name });
+  // A rejection need not be an Error; a log line must never throw past an
+  // opened request's sealed answer (T-13).
+  const log = (e: unknown) =>
+    options.log?.({ event: "intake-error", error: e instanceof Error ? e.name : "unknown" });
   // The route's bounds, shared by both routes (T-52): the declared length
   // and the bodies held at once, before any of the body is read. Then the
   // body, or undefined once it has answered.

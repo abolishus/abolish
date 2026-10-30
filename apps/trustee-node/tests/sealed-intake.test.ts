@@ -243,10 +243,11 @@ describe("the sealed route", () => {
     const answers: (() => Promise<IntakeOutcome>)[] = [
       () => Promise.reject(new TypeError(`secret ${"ab".repeat(8)}`)),
       async () => ({ ok: false, code: "Not A Code" as "intake-closed" }),
+      () => Promise.reject(undefined),
     ];
     const s = seat(() => (answers.shift() as () => Promise<IntakeOutcome>)());
     const endpoint = await serve(s.intake, k.sealed, 4, (e) => logged.push(e));
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 3; i++) {
       const { request, sent } = sealDelivery(pair.publicKey, envelope);
       const res = await post(sealedUrl(endpoint), request);
       expect(res.status).toBe(200);
@@ -255,6 +256,7 @@ describe("the sealed route", () => {
     expect(logged).toEqual([
       { event: "intake-error", error: "TypeError" },
       { event: "intake-error", error: "RangeError" },
+      { event: "intake-error", error: "unknown" },
     ]);
   });
 

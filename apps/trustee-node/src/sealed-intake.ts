@@ -2,10 +2,9 @@
 // Request check): the per-election KEM secret of each election it approved
 // and hasn't begun destroying, found by the `kem_key_hash` a request names,
 // so a request costs one decapsulation, never one per open election (T-52).
-// Only key hashes and stub hashes are kept here; each request reads its
-// election's secret as one use destruction waits for, so none outlives
-// destruction (T-14, T-40).
-import { type DeliveryHolder, kemKeyHash } from "@abolishus/crypto";
+// Only key hashes and stub hashes are kept here; indexing an election and
+// each request read its secret as one use destruction waits for (T-14, T-40).
+import { type DeliveryHolder, deliveryHolder } from "@abolishus/crypto";
 import type { CeremonySeat } from "./ceremony.ts";
 
 /** What the sealed route opens a request with: a seat's keys, or a stand-in in tests. */
@@ -26,8 +25,8 @@ const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
 
 /**
  * The seat's `SealedKeys`. A key hash it hasn't seen sends it over the
- * approvals it hasn't indexed yet, so an election approved since is found
- * and an unknown hash costs one listing of the approvals, no secret read.
+ * approvals it hasn't indexed yet, each read once, so an election approved
+ * since is found and an unknown hash costs one listing of the approvals.
  */
 export function seatKeys(ceremony: CeremonySeat): SealedKeys {
   // `kem_key_hash` in hex → the stub hash whose approved run registered it.
@@ -38,15 +37,20 @@ export function seatKeys(ceremony: CeremonySeat): SealedKeys {
     for (const stubHash of await ceremony.approvedStubs()) {
       const name = hex(stubHash);
       if (indexed.has(name)) continue;
-      const election = await ceremony.approvedElection(stubHash);
-      // The public key the approved run registered: the one a client reads
-      // from the transcript it checked and seals to (Client rules, rule 2).
-      if (election !== undefined) {
-        stubs.set(hex(kemKeyHash(election.kemKeyPair.publicKey)), stubHash);
-        // Best effort: JavaScript can't guarantee erasure (T-39).
-        election.kemKeyPair.secretKey.seed.fill(0);
-        election.signingSecret.fill(0);
-      }
+      // The hash of the key the approved run's secret derives, the one its
+      // transcript registered and a client seals to (Client rules, rule 2),
+      // read as a counted use, so destruction waits for it and a destroyed
+      // election is skipped rather than read (T-14).
+      const keyHash = await ceremony.withSecrets(stubHash, async (secrets) => {
+        try {
+          return deliveryHolder(secrets.kemSecret).kemKeyHash;
+        } finally {
+          // Best effort: JavaScript can't guarantee erasure (T-39).
+          secrets.kemSecret.seed.fill(0);
+          secrets.signingSecret.fill(0);
+        }
+      });
+      if (keyHash !== undefined) stubs.set(hex(keyHash), stubHash);
       indexed.add(name);
     }
   };

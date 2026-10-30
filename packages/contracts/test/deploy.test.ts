@@ -8,12 +8,16 @@
 // its record's hash names, every pin must read back as the record gives it,
 // and each chain must name the other's contracts where they landed. Each
 // refusal must stop the run before it sends anything, and a dry run writes
-// no record.
+// no record. Then script/confirm.ts must confirm each record against its
+// chain and forge's broadcast file, and refuse each record or broadcast
+// that doesn't match what the chain holds.
 
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
+import { confirm, ConfirmError, type DeploymentRecord, httpRpc } from "../script/confirm.ts";
 
 const PKG = new URL("..", import.meta.url).pathname;
 /** Anvil's first development account: unlocked, so forge sends with no key. */
@@ -215,13 +219,9 @@ function cast(...args: string[]): string {
 const call = (url: string, to: string, sig: string, ...args: string[]) =>
   cast("call", "--rpc-url", url, to, sig, ...args).replace(/ \[[^\]]*\]/g, "");
 
-interface DeployRecord {
+interface DeployRecord extends DeploymentRecord {
   readonly target: string;
-  readonly chainId: number;
-  readonly deployer: string;
-  readonly deployerNonce: number;
   readonly commit: string;
-  readonly contracts: { readonly [name: string]: { address: string; codehash: string } };
   readonly pins: { readonly [name: string]: unknown };
 }
 
@@ -605,6 +605,211 @@ describe("the staging deployment on a local Anvil pair", () => {
     expect(call(u, anchor!.address, "authority()(address)").toLowerCase()).toBe(AUTHORITY);
     expect(call(u, relay!.address, "portal()(address)").toLowerCase()).toBe(PORTAL);
     expect(call(u, relay!.address, "board()(address)")).toBe(l2Record.contracts["Board"]!.address);
+  });
+
+  describe("confirmed against the chain (script/confirm.ts)", () => {
+    interface Broadcast {
+      chain: number;
+      transactions: {
+        hash: string;
+        transactionType: string;
+        contractName: string | null;
+        contractAddress: string | null;
+        additionalContracts: {
+          transactionType: string;
+          contractName: string | null;
+          address: string;
+        }[];
+      }[];
+    }
+    const broadcast = (chainId: number, sig: string): Broadcast =>
+      JSON.parse(
+        readFileSync(`${PKG}/broadcast/Deploy.s.sol/${chainId}/${sig}-latest.json`, "utf8"),
+      ) as Broadcast;
+    const OUT = `${PKG}/out`;
+    const refusal = (p: Promise<unknown>) =>
+      p.then(
+        () => {
+          throw new Error("confirmed");
+        },
+        (e: unknown) => {
+          if (!(e instanceof ConfirmError)) throw e;
+          return e.message;
+        },
+      );
+    /** A deep copy, so a test's tampering stays its own. */
+    const copy = <T>(x: T): T => structuredClone(x);
+
+    test("each record gains its contracts' creating transactions and blocks", async () => {
+      for (const [r, url, sig] of [
+        [l1Record, l1.url, "runL1"],
+        [l2Record, l2.url, "runL2"],
+      ] as const) {
+        const b = broadcast(r.chainId, sig);
+        const confirmed = await confirm(r, b, httpRpc(url), OUT);
+        expect({ ...confirmed, contracts: undefined }).toEqual({ ...r, contracts: undefined });
+        expect(Object.keys(confirmed.contracts)).toEqual(Object.keys(r.contracts));
+        for (const [name, c] of Object.entries(confirmed.contracts)) {
+          expect(c.address).toBe(r.contracts[name]!.address);
+          expect(c.codehash).toBe(r.contracts[name]!.codehash);
+          const tx = b.transactions.find(
+            (t) =>
+              t.contractName === name || t.additionalContracts.some((a) => a.contractName === name),
+          );
+          expect(c.transaction, name).toBe(tx!.hash);
+          const receipt = await rpc<{ blockNumber: string }>(url, "eth_getTransactionReceipt", [
+            c.transaction,
+          ]);
+          expect(c.block, name).toBe(Number(receipt.blockNumber));
+        }
+        // The board's ballot check is created by the board's constructor.
+        if (r.chainId === 31338)
+          expect(confirmed.contracts["BallotCheck"]!.transaction).toBe(
+            confirmed.contracts["Board"]!.transaction,
+          );
+      }
+    });
+
+    test("the command prints the confirmed record and keeps the URL out of its arguments", () => {
+      const run = spawnSync(
+        "vp",
+        [
+          "node",
+          "script/confirm.ts",
+          "deployments/31337.json",
+          "broadcast/Deploy.s.sol/31337/runL1-latest.json",
+        ],
+        { cwd: PKG, env: { ...process.env, RPC_URL: l1.url }, encoding: "utf8" },
+      );
+      expect(run.status, run.stderr).toBe(0);
+      const printed = JSON.parse(run.stdout) as { contracts: { BoardAnchor: { block: number } } };
+      expect(printed.contracts.BoardAnchor.block).toBeGreaterThan(0);
+      const bare = spawnSync("vp", ["node", "script/confirm.ts", "deployments/31337.json"], {
+        cwd: PKG,
+        env: { ...process.env, RPC_URL: l1.url },
+        encoding: "utf8",
+      });
+      expect(bare.status).toBe(2);
+    });
+
+    test.each<
+      [
+        string,
+        (
+          r: DeploymentRecord & {
+            contracts: Record<string, { address: string; codehash: string }>;
+          },
+          b: Broadcast,
+        ) => void,
+        RegExp,
+      ]
+    >([
+      ["another chain's record", (r) => Object.assign(r, { chainId: 31337 }), /^chain/],
+      [
+        "an edited code hash",
+        (r) => (r.contracts["Board"]!.codehash = `0x${"00".repeat(32)}`),
+        /^Board: code doesn't hash/,
+      ],
+      [
+        "an edited address",
+        (r) => (r.contracts["Board"]!.address = r.contracts["GroupRegistry"]!.address),
+        /not as recorded/,
+      ],
+      [
+        "a recorded contract no transaction created",
+        (_, b) => b.transactions.pop(),
+        /^RegistrationPaymaster: no transaction/,
+      ],
+      [
+        "a transaction that creates nothing recorded",
+        (_, b) => b.transactions.push({ ...b.transactions[0]!, contractName: "Extra" }),
+        /^Extra: creates/,
+      ],
+      [
+        "a transaction that isn't a CREATE",
+        (_, b) => (b.transactions[0]!.transactionType = "CALL"),
+        /not a CREATE/,
+      ],
+      [
+        "transactions out of the script's order",
+        (_, b) => b.transactions.reverse(),
+        /sent at nonce/,
+      ],
+      ["a start at another nonce", (r) => Object.assign(r, { deployerNonce: 1 }), /sent at nonce/],
+      [
+        "another deployer",
+        (r) => Object.assign(r, { deployer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" }),
+        /sent by/,
+      ],
+      [
+        "a contract the board's constructor didn't create first",
+        (r, b) => {
+          const elsewhere = "0x00000000000000000000000000000000000000f1";
+          r.contracts["BallotCheck"]!.address = elsewhere;
+          b.transactions.find((t) => t.contractName === "Board")!.additionalContracts[0]!.address =
+            elsewhere;
+        },
+        /^BallotCheck: not its creator's CREATE address/,
+      ],
+      [
+        "a hash that was never mined",
+        (_, b) => (b.transactions[0]!.hash = `0x${"11".repeat(32)}`),
+        /not mined/,
+      ],
+      [
+        "a transaction whose receipt created another address",
+        (_, b) => {
+          const [first, second] = b.transactions;
+          [first!.hash, second!.hash] = [second!.hash, first!.hash];
+        },
+        /sent at nonce|receipt created/,
+      ],
+    ])("refuses %s", async (_, tamper, reason) => {
+      const r = copy(l2Record) as DeploymentRecord & {
+        contracts: Record<string, { address: string; codehash: string }>;
+      };
+      const b = copy(broadcast(31338, "runL2"));
+      tamper(r, b);
+      expect(await refusal(confirm(r, b, httpRpc(l2.url), OUT))).toMatch(reason);
+    });
+
+    test("refuses code that isn't the build's beyond its immutables", async () => {
+      // Another build: the trustee registry's artifact with one byte changed
+      // outside its immutables, and nothing else.
+      const dir = mkdtempSync(`${tmpdir()}/confirm-`);
+      try {
+        for (const name of Object.keys(l2Record.contracts)) {
+          mkdirSync(`${dir}/${name}.sol`);
+          const artifact = JSON.parse(readFileSync(`${OUT}/${name}.sol/${name}.json`, "utf8")) as {
+            deployedBytecode: { object: string };
+          };
+          if (name === "TrusteeRegistry") {
+            const o = artifact.deployedBytecode.object;
+            const last = o.slice(-2) === "00" ? "01" : "00";
+            artifact.deployedBytecode.object = `${o.slice(0, -2)}${last}`;
+          }
+          writeFileSync(`${dir}/${name}.sol/${name}.json`, JSON.stringify(artifact));
+        }
+        expect(
+          await refusal(confirm(l2Record, broadcast(31338, "runL2"), httpRpc(l2.url), dir)),
+        ).toBe("TrusteeRegistry: code isn't the build's beyond its immutables");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test("refuses a broadcast against a chain whose code was replaced", async () => {
+      const board = l2Record.contracts["Board"]!.address;
+      const code = await rpc<string>(l2.url, "eth_getCode", [board, "latest"]);
+      await rpc(l2.url, "anvil_setCode", [board, "0x00"]);
+      try {
+        expect(
+          await refusal(confirm(l2Record, broadcast(31338, "runL2"), httpRpc(l2.url), OUT)),
+        ).toBe("Board: code doesn't hash to the record's codehash");
+      } finally {
+        await rpc(l2.url, "anvil_setCode", [board, code]);
+      }
+    });
   });
 
   test(

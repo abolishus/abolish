@@ -148,7 +148,7 @@ Each record gives the target, chain, deployer and starting nonce, commit, each c
 - on L1: the L2 chain, the board, the anchor's clock and authority (the Safe's address, owners and threshold), and the portal;
 - on L2: the L1 chain, anchor and relay, the epoch, the launch panel's identifier, threshold, size, quorum, kind and keys, the registrars and their threshold, and the registration contracts' EntryPoint, service key, admin (with its delay) and cap.
 
-The script deploys each contract's creation code from `out/` (`vm.getCode`) and holds none of its own. But `forge script` recompiles `out/` first, so what it deploys matches the release build (below) only because the compiler is deterministic. The workflow (part 3) must compare each deployed contract's code with the release build's, immutables masked, and add each transaction's hash from forge's broadcast files.
+The script deploys each contract's creation code from `out/` (`vm.getCode`) and holds none of its own. But `forge script` recompiles `out/` first, so what it deploys matches the release build (below) only because the compiler is deterministic. `script/confirm.ts` (below) compares each deployed contract's code with a build's, immutables masked, and adds each transaction's hash from forge's broadcast files.
 
 `test/deploy.test.ts` runs the script against two Anvil chains. It covers:
 
@@ -156,6 +156,24 @@ The script deploys each contract's creation code from `out/` (`vm.getCode`) and 
 - every pin, both in the records and read back from the contracts through `cast`;
 - each refusal, with nothing sent;
 - a dry run writing no record.
+
+## Confirming a deployment
+
+The script writes each record while simulating, before forge sends anything, so a record alone doesn't prove its contracts exist. `script/confirm.ts` ([[P2-32]] part 3a) confirms one against its chain:
+
+```sh
+RPC_URL=<url> vp node script/confirm.ts deployments/<chain-id>.json \
+  broadcast/Deploy.s.sol/<chain-id>/runL1-latest.json [<artifacts>]
+```
+
+It takes only the transaction hashes from forge's broadcast file and asks the chain for the rest:
+
+- the RPC's chain, the broadcast's and the record's are one;
+- every transaction in the broadcast is a CREATE of a recorded contract under its recorded name, and every recorded contract has one (the ballot check's is the board's, whose constructor creates it);
+- each transaction is the deployer's, to no one, at its starting nonce plus its place in the broadcast, mined, succeeded, and its receipt names the contract it created;
+- the code at each address hashes to the record's `codehash`, and equals the build's `deployedBytecode` in `<artifacts>` (default `out`) everywhere but its immutables.
+
+It prints the record, each contract with its creating `transaction` and `block` added, and exits 1 on the first refusal, naming the contract. The RPC URL is read from the environment, since a provider's URL can carry its key. The workflow ([[P2-32]] part 3b) runs it over both chains, with `<artifacts>` the release build's, and commits what it prints.
 
 ## Release build
 

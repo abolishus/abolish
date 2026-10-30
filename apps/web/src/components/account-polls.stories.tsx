@@ -421,6 +421,52 @@ export const RefusedAsRegistered: Story = {
   },
 };
 
+/**
+ * After an action focus goes back to the section's heading, so the words
+ * saying how it went are under that heading, above the list: below it, a
+ * phone showed the heading and a list with no word of the outcome, which
+ * was a screen or more further down (P2-29, the author's list's iteration 9).
+ */
+const outcomeUnderTheHeading = async (canvasElement: HTMLElement, outcome: HTMLElement) => {
+  const canvas = within(canvasElement);
+  const heading = canvas.getByRole("heading", { level: 2, name: "Polls you created" });
+  await expect(heading).toHaveFocus();
+  await expect(outcome.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+    canvas.getByRole("list").getBoundingClientRect().top,
+  );
+  // On the screen the heading is on: a phone's 640px.
+  await expect(
+    outcome.getBoundingClientRect().bottom - heading.getBoundingClientRect().top,
+  ).toBeLessThan(640);
+};
+
+export const OutcomeAboveALongList: Story = {
+  args: { client: fakeDrafts(EVERY) },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
+    await expect(await canvas.findByRole("status")).toHaveTextContent(
+      "Your poll is a draft again, as you wrote it.",
+    );
+    await outcomeUnderTheHeading(canvasElement, canvas.getByRole("status"));
+  },
+};
+
+export const RefusedInALongList: Story = {
+  args: { client: fakeDrafts(EVERY, { refuse: new DraftsError("registered") }) },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
+    const alert = await canvas.findByRole("alert");
+    await expect(alert).toHaveTextContent(
+      "That poll is registered on the public record, so it stays.",
+    );
+    await outcomeUnderTheHeading(canvasElement, alert);
+  },
+};
+
 /** A list that fails to load until the story lets it. */
 const flaky = (() => {
   const drafts = fakeDrafts([DRAFT]);

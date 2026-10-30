@@ -320,6 +320,23 @@ export function AccountPolls({
             {t("pollsCreate")}
           </a>
         </p>
+        {/* Under the heading that has focus after an action, above the list, so the outcome is on the screen the author lands on; a list that couldn't load says so where the list would be, with the way to load it again rather than the whole page. */}
+        {failure === undefined ? null : (
+          <div className="grid justify-items-start gap-1">
+            <p role="alert" className="m-0 text-destructive">
+              {t(`pollsFailure_${failure}`)}
+            </p>
+            {failure === "unlisted" ? (
+              <Button variant="link" className="px-0" disabled={busy} onClick={reload}>
+                {t("pollsReload")}
+              </Button>
+            ) : null}
+          </div>
+        )}
+        {/* Empty, it takes no room, so the list stays right under the button; it stays in the tree, so its words are announced when they come. */}
+        <div role="status" className="text-base empty:-mt-4">
+          {done === undefined ? null : t(done)}
+        </div>
         {polls === undefined ? null : polls.length === 0 ? (
           <p className="m-0 border-t-2 border-foreground pt-4 text-base">{t("pollsEmpty")}</p>
         ) : (
@@ -394,22 +411,6 @@ export function AccountPolls({
             })}
           </ul>
         )}
-        {/* Where the list would be, with the way to load it again rather than the whole page. */}
-        {failure === undefined ? null : (
-          <div className="grid justify-items-start gap-1">
-            <p role="alert" className="m-0 text-destructive">
-              {t(`pollsFailure_${failure}`)}
-            </p>
-            {failure === "unlisted" ? (
-              <Button variant="link" className="px-0" disabled={busy} onClick={reload}>
-                {t("pollsReload")}
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <div role="status" className="min-h-6 text-base">
-          {done === undefined ? null : t(done)}
-        </div>
       </div>
     </Section>
   );

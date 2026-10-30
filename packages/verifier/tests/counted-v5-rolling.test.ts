@@ -10,7 +10,7 @@ import { ceremonyChecks } from "../src/ceremony.ts";
 import { cellTiers, countedChecks } from "../src/counted.ts";
 import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
 import { splitEntries } from "../src/index.ts";
-import { partitionSize } from "../src/tallies.ts";
+import { partitionSize, tallyChecks } from "../src/tallies.ts";
 
 // Delivery (5.9) and the counted set (7.1 to 7.3, 8.5) under a rolling
 // definition (definition version 7, `electorate_mode` 2) without an author
@@ -189,4 +189,13 @@ test("beside an author panel a rolling poll's delivery isn't read: 5.9 and every
   for (const id of ["5.9", "6.3", "7.1", "7.2", "7.3", "8.5"])
     expect(r.rows.get(id), id).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
   expect(r.delivery).toBeUndefined();
+});
+
+test("7.4 doesn't sort or attribute a rolling poll's openings yet: not reached", () => {
+  const c = byId("delivered");
+  const d = decodeDefinition(hex(c.definition));
+  const { entries } = splitEntries(hex(c.board));
+  expect(tallyChecks(d, readDefinition(d).hash, [], undefined, entries, 5)).toEqual({
+    row: { status: "unverifiable", code: "not-reached", at: {} },
+  });
 });

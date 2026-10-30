@@ -46,7 +46,12 @@ import {
   tallyRules,
   ELECTORATE_MODES,
 } from "@abolishus/crypto";
-import { isPanelled, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
+import {
+  isPanelled,
+  isRolling,
+  type PanelledRecord,
+  type VerifiedDefinition,
+} from "./definition.ts";
 
 /** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
 export type TallyBreak =
@@ -164,6 +169,10 @@ export function tallyChecks(
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
+  // A rolling poll's openings aren't sorted or attributed yet (P2-17 part
+  // 4d-2b-2b-2b): never judged here, whatever a caller passes.
+  if (isRolling(definition))
+    return { row: { status: "unverifiable", code: "not-reached", at: {} } };
   // Under definition version 6 and a fixed version 7 tally-opening version 1
   // opens ballot version 4's default half, which without an author panel is
   // the whole sharing (tally.md, Context); beside one the profile pins

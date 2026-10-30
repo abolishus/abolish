@@ -13,7 +13,7 @@ import {
   type ProfilesFailure,
 } from "../account/profiles.ts";
 import { catalogs } from "../messages.ts";
-import { formatUtc } from "./format.ts";
+import { formatUtcWhole } from "./format.ts";
 import { Section } from "./page-parts.tsx";
 
 const FIELD = "min-h-12 px-3 text-base md:text-base";
@@ -163,7 +163,7 @@ export function AccountProfile({
     });
   };
 
-  const at = (iso: string) => formatUtc(locale, new Date(iso));
+  const at = (iso: string) => formatUtcWhole(locale, new Date(iso));
   const nameInvalid = failure === "invalidName";
 
   const nameForm = (make: boolean) => (

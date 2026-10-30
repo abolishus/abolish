@@ -10,7 +10,7 @@ import {
   type PollModerationView,
 } from "../account/drafts.ts";
 import { catalogs } from "../messages.ts";
-import { formatUtc } from "./format.ts";
+import { formatUtcWhole } from "./format.ts";
 
 const ACTION_ICON = {
   delist: ListX,
@@ -94,7 +94,7 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
     }
   };
 
-  const at = (iso: string) => formatUtc(locale, new Date(iso));
+  const at = (iso: string) => formatUtcWhole(locale, new Date(iso));
 
   const outcome = (a: ModerationAppeal) =>
     a.outcome === undefined || a.reviewedAt === undefined

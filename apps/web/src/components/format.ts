@@ -11,6 +11,15 @@ export function formatUtc(locale: string, date: Date): string {
   }).format(date);
 }
 
+/**
+ * `formatUtc` with its last space a no-break one. With a no-break space
+ * before "UTC" in the words, a narrow phone wraps "2:20 PM UTC" whole: never
+ * "2:20" over "PM UTC", nor "UTC" alone.
+ */
+export function formatUtcWhole(locale: string, date: Date): string {
+  return formatUtc(locale, date).replace(/\s(?=\S+$)/, "\u00a0");
+}
+
 /** A UTC day, `YYYY-MM-DD`, for `locale`. */
 export function formatUtcDay(locale: string, day: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(

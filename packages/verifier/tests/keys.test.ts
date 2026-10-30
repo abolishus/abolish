@@ -411,8 +411,9 @@ test("a large pool of records the registry doesn't hold costs one hash each", ()
   expect(performance.now() - started).toBeLessThan(10_000);
 });
 
-// Each run judges a whole keys vector, so CI's 1000 runs take several
-// seconds, longer beside the other packages' suites on a shared runner.
+// The first property judges a whole keys vector per run, so CI's 1000 runs
+// take several seconds, longer beside the other packages' suites on a
+// shared runner.
 describe("properties", { timeout: 120_000 }, () => {
   test("the order of the given records and deployments, and records added beside them, change nothing", () => {
     const pool = Object.values(vectors.records);

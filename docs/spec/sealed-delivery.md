@@ -4,7 +4,7 @@ How a ballot client delivers a ballot to a trustee node's own intake without the
 
 What this page doesn't cover yet ([[P2-8]] part 3c-1b-2b-2b-2d-2b-2e):
 
-- **Building it.** Sealing and opening in `packages/crypto` (2e-3), the node's route in `apps/trustee-node` (2e-4), a relay for staging (2e-5) and the client's route (2e-6).
+- **Building it.** The node's route in `apps/trustee-node` (2e-4), a relay for staging (2e-5) and the client's route (2e-6). Sealing and opening are built in `packages/crypto` (2e-3: `sealDelivery`, `openSealedDelivery`, `sealAnswer` and `openSealedAnswer`).
 - **Author seats.** An author panel's seats publish no endpoint a release lists, so they get no sealed delivery until [[P2-16]] part 7 says where an author panel publishes its relays.
 
 ## Sources

@@ -175,10 +175,14 @@ export function AccountPolls({
     }
   };
 
-  const at = (iso: string) => formatUtc(locale, new Date(iso));
+  // The time's last space is a no-break one, as is the one before "UTC" in
+  // the words, so a phone wraps "2:20 PM UTC" whole: never "2:20" over "PM
+  // UTC", nor "UTC" alone.
+  const formatted = (date: Date) => formatUtc(locale, date).replace(/\s(?=\S+$)/, "\u00a0");
+  const at = (iso: string) => formatted(new Date(iso));
 
   const when = (p: PollSummary, shown: Shown) => {
-    const closes = () => formatUtc(locale, new Date(Number(p.closesAt) * 1000));
+    const closes = () => formatted(new Date(Number(p.closesAt) * 1000));
     switch (shown) {
       case "drafted":
         return t("pollsEdited", { when: at(p.updatedAt) });

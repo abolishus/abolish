@@ -1192,7 +1192,7 @@ const enUS = {
   pollsMark: "Your polls",
   pollsTitle: "Polls you created",
   pollsLede:
-    "Your drafts, polls being set up and polls that have opened. Only you see this list: the public record never names who created a poll.",
+    "Your drafts and every poll you submitted, whether it opened or not. Only you see this list: the public record never names who created a poll.",
   pollsEmpty: "You haven't created a poll yet.",
   pollsUntitled: "Untitled draft",
   pollsState_drafted: "Draft",
@@ -1200,10 +1200,11 @@ const enUS = {
   pollsState_open: "Open",
   pollsState_failed: "Didn't open",
   pollsState_closed: "Closed",
-  pollsEdited: "Last edited {when} UTC",
-  pollsSubmitted: "Submitted {when} UTC",
-  pollsCloses: "Closes {when} UTC",
-  pollsClosed: "On {when} UTC",
+  // A no-break space keeps "UTC" with its time (account-polls.tsx).
+  pollsEdited: "Last edited {when}\u00a0UTC",
+  pollsSubmitted: "Submitted {when}\u00a0UTC",
+  pollsCloses: "Closes {when}\u00a0UTC",
+  pollsClosed: "On {when}\u00a0UTC",
   pollsSetupHelp:
     "Setting up takes a while, mostly waiting for the public record to settle. You can leave this page, or follow its setup step by step.",
   pollsFollowSetup: "Follow its setup",

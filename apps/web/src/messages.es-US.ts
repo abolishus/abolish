@@ -1221,7 +1221,7 @@ export const esUS: Messages = {
   pollsMark: "Tus encuestas",
   pollsTitle: "Encuestas que creaste",
   pollsLede:
-    "Tus borradores, las encuestas en preparación y las que ya se abrieron. Solo tú ves esta lista: el registro público nunca dice quién creó una encuesta.",
+    "Tus borradores y cada encuesta que enviaste, se haya abierto o no. Solo tú ves esta lista: el registro público nunca dice quién creó una encuesta.",
   pollsEmpty: "Aún no has creado ninguna encuesta.",
   pollsUntitled: "Borrador sin título",
   pollsState_drafted: "Borrador",
@@ -1229,10 +1229,10 @@ export const esUS: Messages = {
   pollsState_open: "Abierta",
   pollsState_failed: "No se abrió",
   pollsState_closed: "Cerrada",
-  pollsEdited: "Última edición: {when} UTC",
-  pollsSubmitted: "Enviada el {when} UTC",
-  pollsCloses: "Cierra el {when} UTC",
-  pollsClosed: "El {when} UTC",
+  pollsEdited: "Última edición: {when}\u00a0UTC",
+  pollsSubmitted: "Enviada el {when}\u00a0UTC",
+  pollsCloses: "Cierra el {when}\u00a0UTC",
+  pollsClosed: "El {when}\u00a0UTC",
   pollsSetupHelp:
     "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. Puedes salir de esta página, o seguir la preparación paso a paso.",
   pollsFollowSetup: "Seguir la preparación",

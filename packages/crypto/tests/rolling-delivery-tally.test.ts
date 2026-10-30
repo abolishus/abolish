@@ -7,6 +7,8 @@ import {
   decodeElectionDefinitionV7,
   deliveryBallotHashV2,
   type DeliveryBallotV4,
+  ELECTORATE_MODES,
+  panelTallyRules,
   POLL_CLASSES,
   tallyRules,
 } from "../src/index.ts";
@@ -25,8 +27,11 @@ interface Vectors {
       string,
       {
         readonly definition: string;
+        readonly definitionHash: string;
         readonly threshold: string;
         readonly panelSize: string;
+        readonly authorThreshold: string;
+        readonly authorPanelSize: string;
         readonly questions: readonly {
           readonly optionCount: number;
           readonly minSelections: number;
@@ -119,6 +124,35 @@ describe("deliveryBallotHashV2", () => {
       deliveryBallotHashV2(a.definitionHash, a.fields),
     );
   });
+
+  test("given a rolling definition every ballot must name its step, read as version 5's (T-38)", () => {
+    // Beside an author panel the definition is required, so it fixes the
+    // ballot version, never the caller's fields.
+    const b = decoded.find((x) => x.fields.vote.author_vss.length !== 0);
+    if (b === undefined) throw new Error("no ballot with an author half");
+    const { step: _, ...v4 } = b.fields;
+    const e = vectors.elections["rolling"];
+    if (e === undefined) throw new Error("no election");
+    const election = {
+      definitionHash: hex(e.definitionHash),
+      panelSize: Number(e.panelSize),
+      authorPanelSize: Number(e.authorPanelSize),
+      registered: { default: [], author: [] },
+      segments: { delivery: 10n, complaint: 11n },
+      deadlines: { delivery: 100n, complaint: 200n },
+    };
+    const d = definitionOf("rolling").value;
+    expect(() => checkDeliveryV2(election, [v4], [], d)).toThrow(/version-5 ballot names its step/);
+    // With its step it is read on, to the key sets this election's runs
+    // registered, which these empty ones aren't.
+    expect(() => checkDeliveryV2(election, [b.fields], [], d)).toThrow(/key set/);
+    // A fixed reading of the same fields is another definition, under its own
+    // hash, whose ballots name no step.
+    const fixed = { ...d, electorate_mode: ELECTORATE_MODES.fixed };
+    expect(() => checkDeliveryV2(election, [b.fields], [], fixed)).toThrow(
+      /version-4 ballot names no step/,
+    );
+  });
 });
 
 describe("tallyRules under a rolling definition", () => {
@@ -140,6 +174,35 @@ describe("tallyRules under a rolling definition", () => {
 
   test("beside an author panel it is refused: its halves are tallied per panel (T-37)", () => {
     expect(() => tallyRules(definitionOf("rolling"))).toThrow(/per panel/);
+  });
+
+  test("beside an author panel each panel's rules are its own, over the definition's questions (tally.md, Author panel)", () => {
+    const e = vectors.elections["rolling"];
+    if (e === undefined) throw new Error("no election");
+    const questions = e.questions.map(({ optionCount, minSelections, maxSelections }) => ({
+      optionCount,
+      minSelections,
+      maxSelections,
+    }));
+    const optionCount = questions.reduce((n, q) => n + q.optionCount, 0);
+    expect(panelTallyRules(definitionOf("rolling"), 1)).toEqual({
+      optionCount,
+      threshold: Number(e.threshold),
+      panelSize: Number(e.panelSize),
+      questions,
+      panel: 1,
+    });
+    expect(panelTallyRules(definitionOf("rolling"), 2)).toEqual({
+      optionCount,
+      threshold: Number(e.authorThreshold),
+      panelSize: Number(e.authorPanelSize),
+      questions,
+      panel: 2,
+    });
+    expect(() => panelTallyRules(definitionOf("default-only"), 1)).toThrow(/no author panel/);
+    const d = definitionOf("rolling");
+    const civic = { ...d, value: { ...d.value, poll_class: POLL_CLASSES.civicReferendum } };
+    expect(() => panelTallyRules(civic, 1)).toThrow(/well-formed/);
   });
 
   test("a rolling definition that isn't well-formed is refused (T-28)", () => {

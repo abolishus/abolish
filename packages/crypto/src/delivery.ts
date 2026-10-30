@@ -50,7 +50,7 @@ import {
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
 import { PARAMETERS } from "./parameters.ts";
-import { type PanelledDefinition, panelledFacts } from "./protocol.ts";
+import { halvedFacts, type PanelledDefinition } from "./protocol.ts";
 import { RECORD_TYPES, RecordSchema, recordType } from "./record.ts";
 import { checkL1Reference, type FinalizedL1, selectBallots } from "./revoting.ts";
 import { type BallotPath, ballotWindow } from "./close-statement.ts";
@@ -2842,8 +2842,8 @@ export interface DeliveryRootsV2 {
  * share hashes and registered key set, so a record for one panel's seat `i`
  * never delivers, excludes or contradicts the other's (T-37). Otherwise
  * `checkDelivery`'s. Given `definition`, a well-formed definition whose hash
- * is `definitionHash` (a version 6, or a version 7 under a fixed electorate,
- * hashed under its own version, `panelledFacts`), `registered.default` must be the key set
+ * is `definitionHash` (a version 6, or a version 7 under either electorate
+ * mode, hashed under its own version, `halvedFacts`), `registered.default` must be the key set
  * `checkCeremonyTranscript` returned for its default transcript, and
  * `registered.author` the one it returned for the author transcript and
  * `checkAuthorApprovals` then approved under it (empty without an author
@@ -2851,9 +2851,10 @@ export interface DeliveryRootsV2 {
  * on trust could drop a seat that withheld its share, or add one no seat
  * holds (T-37, T-17, T-25). Beside an author panel `definition` is required;
  * without one it may be omitted, the author key set must then be empty, and
- * the default set is the caller's, as it is for a rolling poll's version-5
- * ballots, each hashed with its step (`deliveryBallotHashV2`), which only
- * a poll without an author panel reaches here. A contract-path obligation root is read
+ * the default set is the caller's. Under a rolling version 7 the ballots are
+ * version 5, each hashed with its step (`deliveryBallotHashV2`), and given
+ * the definition every one must name a step, as under any other none may.
+ * A contract-path obligation root is read
  * against `roots`, as `checkDelivery`'s are, judged available only by its own
  * panel's threshold and attestations; given `definition`, the thresholds must
  * be its own, since a lower or higher one would let fewer seats withhold or
@@ -2884,13 +2885,18 @@ export function checkDeliveryV2(
   }
   // One decoded copy of its bytes, so every check below reads the same
   // definition, whatever the caller's object returns on a later read; any
-  // version but 6 and a fixed 7 is refused (T-36).
-  const facts = panelledFacts(definition);
+  // version but 6 and 7 is refused (T-36).
+  const facts = halvedFacts(definition);
   const d = facts.value;
-  // A version-6 or fixed version-7 definition's ballots are version 4,
-  // which names no step (T-38).
-  if (ballots.some((b) => b.step !== undefined))
-    throw new RangeError(`${name}: a version-4 ballot names no step`);
+  // A version-6 or fixed version-7 definition's ballots are version 4, which
+  // names no step, and a rolling one's are version 5, each naming its own:
+  // the ballot hash a record must name is the definition's version's (T-38).
+  if (ballots.some((b) => (b.step !== undefined) !== facts.rolling))
+    throw new RangeError(
+      facts.rolling
+        ? `${name}: a version-5 ballot names its step`
+        : `${name}: a version-4 ballot names no step`,
+    );
   const transcript = checkedTranscriptHash(e.registered.default);
   if (
     !(e.definitionHash instanceof Uint8Array) ||

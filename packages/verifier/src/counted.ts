@@ -72,6 +72,7 @@ import {
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { BallotTally } from "./ballots.ts";
 import {
+  hasAuthorPanel,
   isPanelled,
   isRolling,
   type PanelledRecord,
@@ -406,21 +407,12 @@ export function deliverSelected(
   // Beside an author panel delivery (5.9) reads the author seats' key set,
   // their own run's, approved on the board: without it nothing is decided,
   // never with a key set taken on trust or the default panel's alone (T-37).
-  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
-  if (author && inputs.authorRegistered === undefined)
+  if (hasAuthorPanel(definition) && inputs.authorRegistered === undefined)
     return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   // A rolling poll's ballots (version 5) are version 4's halves with a step,
-  // delivered by the same records (delivery.md, Versions). Beside an author
-  // panel its delivery and per-panel tally aren't read yet (P2-17 part
-  // 4d-2b-2b-2b-2): nothing is decided, never over the default panel alone
-  // (T-37).
+  // delivered by the same records over both panels' seats (delivery.md,
+  // Versions).
   const halved = isPanelled(definition) || isRolling(definition);
-  if (
-    definition.version === 7 &&
-    isRolling(definition) &&
-    definition.value.author_keys.length !== 0
-  )
-    return { stop: { status: "unverifiable", code: "not-reached", at: {} } };
   // Ordinary ballots can't be found under a contract-event version this
   // release doesn't read, so 5.5 is unsupported, admission never settles and
   // 6.1 never passes there, whatever the copy holds; a caller that gets here
@@ -562,7 +554,9 @@ export function deliverSelected(
 export function countedChecks(inputs: CountedInputs): CountedResult {
   const { definition, definitionHash, registered, clock } = inputs;
   const d = definition.value;
-  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
+  // Under a rolling definition too, whose rolling tiers are its cells, each
+  // tallied per panel as a fixed poll's cell is (tally.md, Rolling tiers).
+  const author = hasAuthorPanel(definition);
   const delivered = deliverSelected(inputs, undefined);
   if ("stop" in delivered) return countedRows(delivered.stop, inputs.destruction);
   const { eventVersion, own, floor, delivery } = delivered;
@@ -927,8 +921,8 @@ function deliveryV1(
  * T-37). Beside an author panel its seats are the key set its own run
  * registered and its approvals approved; without one that set is empty, so a
  * record naming an author seat is `delivery-seat` and delivers nothing.
- * A rolling poll reaches here only without one, each ballot hashed with its
- * step (`deliveryBallotHashV2`).
+ * A rolling poll's ballots are each hashed with its step
+ * (`deliveryBallotHashV2`).
  */
 function deliveryV2(
   inputs: DeliveryInputs,
@@ -936,8 +930,7 @@ function deliveryV2(
   records: readonly DeliveryEntry[],
   recordAt: readonly number[],
 ): { readonly ballots: DeliveryCheckV2["ballots"]; readonly delivery: DeliveryReportV2 } {
-  // A version-6 or fixed version-7 definition, or, past `deliverSelected`'s
-  // guard, a rolling one without an author panel.
+  // A version-6 or version-7 definition, under either electorate mode.
   const d = inputs.definition.value as PanelledRecord["value"];
   const delivered = checkDeliveryV2(
     {

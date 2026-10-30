@@ -30,6 +30,7 @@ import {
   decodeElectionDefinitionV7,
   encodeElectionDefinitionV7,
   type ElectionDefinitionV7Record,
+  halvedFacts,
   type PanelledDefinition,
   panelledFacts,
   type PanelledFacts,
@@ -248,9 +249,9 @@ function panelledOf(
 
 /**
  * The rules panel `panel` tallies its half of a cell under, for a version-6
- * definition, or a version-7 one under a fixed electorate, with an author
- * panel, which pins tally-opening version 3
- * (docs/spec/tally.md, Author panel, Panels and counted set): the default
+ * or version-7 definition with an author panel, which pins tally-opening
+ * version 3 (docs/spec/tally.md, Author panel, Panels and counted set), a
+ * rolling version 7's cells being its rolling tiers (Rolling tiers): the default
  * panel's `threshold` and `panel_size`, or the author panel's
  * `author_threshold` and number of `author_keys`, with the definition's
  * questions either way. A definition without an author panel tallies its one
@@ -268,7 +269,11 @@ export function panelTallyRules(
       RECORD_TYPES.electionDefinition,
       (definition as { readonly version: number }).version,
     );
-  const facts = panelledOf(definition);
+  // A rolling version 7's halves are a fixed one's, with the step bound in
+  // the ballot hash only, so its panels' rules are read the same way.
+  const facts = halvedFacts(definition.value);
+  if (facts.version !== definition.version)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
   if (!facts.wellFormed) throw new RangeError("panelTallyRules: the definition isn't well-formed");
   const d = facts.value;
   if (d.author_keys.length === 0)

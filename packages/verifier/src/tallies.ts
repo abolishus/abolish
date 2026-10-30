@@ -48,12 +48,7 @@ import {
   tallyRules,
   ELECTORATE_MODES,
 } from "@abolishus/crypto";
-import {
-  isPanelled,
-  isRolling,
-  type PanelledRecord,
-  type VerifiedDefinition,
-} from "./definition.ts";
+import { hasAuthorPanel, type PanelledRecord, type VerifiedDefinition } from "./definition.ts";
 
 /** A boarding rule an opening is known to break (docs/spec/tally.md, Opening record, Boarding), in that rule's order. */
 export type TallyBreak =
@@ -171,23 +166,13 @@ export function tallyChecks(
   counted?: CountedOpenings,
 ): { readonly row: TallyOutcome; readonly report?: readonly TallyReport[] } {
   const d = definition.value;
-  // A rolling poll's partition is one cell per rolling tier, its openings
-  // version 1's (or a live one's version 2) over ballot version 5's default
-  // half, the whole sharing (tally.md, Rolling tiers). Beside an author panel
-  // its partial openings aren't read yet (P2-17 part 4d-2b-2b-2b-2): never
-  // judged here, whatever a caller passes (T-37).
-  if (
-    definition.version === 7 &&
-    isRolling(definition) &&
-    definition.value.author_keys.length !== 0
-  )
-    return { row: { status: "unverifiable", code: "not-reached", at: {} } };
-  // Under definition version 6 and a fixed version 7 tally-opening version 1
-  // opens ballot version 4's default half, which without an author panel is
-  // the whole sharing (tally.md, Context); beside one the profile pins
+  // Under definition version 6 and version 7 tally-opening version 1 opens
+  // ballot version 4's or 5's default half, which without an author panel is
+  // the whole sharing (tally.md, Context), a rolling poll's partition being
+  // one cell per rolling tier (Rolling tiers); beside one the profile pins
   // version 3, whose partial openings are per panel, and a version-1 opening
   // there would be judged against the default panel's rules alone (T-37).
-  const author = isPanelled(definition) && definition.value.author_keys.length !== 0;
+  const author = hasAuthorPanel(definition);
   // A tally-opening version this verifier doesn't read here, or none pinned
   // (a later tally scheme's record), may be one a later release reads:
   // unverifiable, never failed, so releases agree (2.3; T-36). Version 2, a

@@ -83,6 +83,7 @@ import {
   decodeElectionDefinitionV7,
   encodeElectionDefinitionV7,
   type PanelledDefinition,
+  halvedFacts,
   panelledFacts,
   pinnedVersion,
   UnsupportedVersionError,
@@ -548,14 +549,16 @@ function panelElection(
  * Internal: without an author panel only the empty set; with one, the set
  * `checkAuthorApprovals` approved for this definition's author run, under
  * its chain, trustee registry, author panel identifier, author stub hash and
- * `author_transcript_hash`, a fixed version 7's under its own author stub
- * hash. The package entry point doesn't export it.
+ * `author_transcript_hash`, a version 7's under its own author stub hash,
+ * whatever its electorate mode, since a rolling poll runs its author panel
+ * as a fixed one does (election-definition.md, Author panel). The package
+ * entry point doesn't export it.
  */
 export function approvedFor(
   definition: PanelledDefinition,
   keys: readonly RegisteredKeys[],
 ): boolean {
-  const facts = panelledFacts(definition);
+  const facts = halvedFacts(definition);
   return approvedUnder(facts.value, () => facts.authorStubHash, keys);
 }
 

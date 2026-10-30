@@ -25,7 +25,8 @@ import { partitionSize, tallyChecks } from "../src/tallies.ts";
 // admitted under the chain from that file's group registry events and
 // registration time. Selection (6.1) needs L1 evidence these copies don't
 // carry, so the admitted ballots, each of its own nullifier, stand in for
-// the selected ones, as in delivery-v2-author.test.ts.
+// the selected ones, as in delivery-v2-author.test.ts. Beside an author
+// panel: counted-v5-rolling-author.test.ts.
 
 const VECTORS = new URL("../../../docs/spec/vectors/", import.meta.url);
 const read = (name: string) => JSON.parse(readFileSync(new URL(name, VECTORS), "utf8")) as unknown;
@@ -197,7 +198,9 @@ test("a receipt for the fields at another step, or as version 4, delivers nothin
   }
 });
 
-test("beside an author panel a rolling poll's delivery isn't read: 5.9 and everything after it are not reached (T-37)", () => {
+test("beside an author panel whose key set isn't registered 5.9 and everything after it are not reached (T-37)", () => {
+  // The author run isn't on this copy, so no author key set is given:
+  // delivery is never judged over the default panel's seats alone.
   const { r } = run(byId("delivered"), (d) => {
     if (d.version !== 7) throw new Error("not version 7");
     return { ...d, value: { ...d.value, author_keys: [new Uint8Array(33)] } };
@@ -240,19 +243,18 @@ test("before the counted set is known an honest opening of a rolling poll stays 
   });
 });
 
-test("beside an author panel 7.4 doesn't read a rolling poll's openings: not reached (T-37)", () => {
+test("beside an author panel 7.4 reads a rolling poll's openings only under tally-opening version 3 (T-37)", () => {
+  // This profile pins version 1, whose openings open one sharing, never two
+  // halves: a later release's, whatever key sets and counted set are given.
   const c = byId("delivered");
   const d = decodeDefinition(hex(c.definition));
   if (d.version !== 7) throw new Error("not version 7");
   const panelled = { ...d, value: { ...d.value, author_keys: [new Uint8Array(33)] } };
   const { entries } = splitEntries(hex(c.board));
-  // Even given a key set for each panel and a counted set.
   expect(
     tallyChecks(panelled, readDefinition(d).hash, [], [], entries, 5, {
       extent: entries.length,
       breaks: new Map(),
     }),
-  ).toEqual({ row: { status: "unverifiable", code: "not-reached", at: {} } });
-  const { opened } = run(c, () => panelled);
-  expect(opened.row).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
+  ).toEqual({ row: { status: "unverifiable", code: "unsupported-version", at: {} } });
 });

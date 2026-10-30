@@ -95,12 +95,17 @@ export function decodeDefinition(bytes: Uint8Array): VerifiedDefinition {
  * version 7's `author_threshold`, `author_keys` and `author_transcript_hash`,
  * with its `author_stub_hash` and the definition's hash, each recomputed here
  * under the definition's own version, so an approval of one version's stub
- * approves nothing under the other; undefined when it has no author panel,
- * as under every earlier version, which has none
- * (docs/spec/election-definition.md, Author panel; T-37).
+ * approves nothing under the other; version 7's under either electorate
+ * mode. Undefined when it has no author panel, as under every earlier
+ * version, which has none (docs/spec/election-definition.md, Author panel;
+ * T-37).
  */
 export function authorRunOf(record: VerifiedDefinition): AuthorRun | undefined {
-  if (!isPanelled(record) || record.value.author_keys.length === 0) return undefined;
+  // A rolling version 7 runs its author panel as a fixed one does, over
+  // version 7's author stub: without it here the default run alone would
+  // register a key set and 3.2 pass over an author run nobody read (T-37).
+  if (record.version !== 6 && record.version !== 7) return undefined;
+  if (record.value.author_keys.length === 0) return undefined;
   const d = record.value;
   return {
     panel: { threshold: d.author_threshold, keys: d.author_keys },

@@ -16,6 +16,7 @@ import {
   parseKeyring,
   REACTIONS,
   requestEmailCode,
+  setFollow,
   setReaction,
   showOnProfile,
   storeDefinition,
@@ -127,6 +128,7 @@ describe("exportAccount", () => {
       profile: null,
       profileNamedOn: null,
       reactions: [],
+      follows: [],
       tier0Tokens: [],
       moderator: null,
     });
@@ -161,6 +163,7 @@ describe("exportAccount", () => {
     const reacted = await openPoll(await newAccount());
     await setReaction(app, user, reacted.electionId, "clap", true, { now: NOW });
     await setReaction(app, user, reacted.electionId, "heart", true, { now: NOW });
+    await setFollow(app, user, reacted.electionId, true, { now: NOW });
     await app`INSERT INTO account_tokens VALUES (${user}, 84532, ${registry}, 7, ${randomBytes(32)},
       3, ${blinded})`;
     await addModerator(app, "moderator-one", user);
@@ -248,6 +251,7 @@ describe("exportAccount", () => {
         { electionId: hex(reacted.electionId), reaction: "clap" },
         { electionId: hex(reacted.electionId), reaction: "heart" },
       ],
+      follows: [hex(reacted.electionId)],
       tier0Tokens: [{ chainId: "84532", groupRegistry: hex(registry), region: 7, keyPeriod: 3 }],
       moderator: { handle: "moderator-one", addedAt: expect.any(String) },
     });
@@ -316,13 +320,17 @@ describe("exportAccount", () => {
       await expect(exportAccount(app, id, at)).rejects.toThrow(RangeError);
   });
 
-  test("one account's export holds its own drafts and reactions, never another's", async () => {
+  test("one account's export holds its own drafts, reactions and follows, never another's", async () => {
     const polls = [await openPoll(await newAccount()), await openPoll(await newAccount())];
     const reactionSet = fc.uniqueArray(
       fc.record({ poll: fc.nat({ max: 1 }), reaction: fc.constantFrom(...REACTIONS) }),
       { maxLength: 6, selector: (r) => `${r.poll} ${r.reaction}` },
     );
-    const side = fc.record({ drafts: fc.nat({ max: 3 }), reactions: reactionSet });
+    const side = fc.record({
+      drafts: fc.nat({ max: 3 }),
+      reactions: reactionSet,
+      follows: fc.subarray([0, 1]),
+    });
     await fc.assert(
       fc.asyncProperty(side, side, async (a, b) => {
         const made = [];
@@ -336,7 +344,9 @@ describe("exportAccount", () => {
             await setReaction(app, user, polls[r.poll]!.electionId, r.reaction, true, {
               now: NOW,
             });
-          made.push({ user, drafts, reactions: s.reactions });
+          for (const f of s.follows)
+            await setFollow(app, user, polls[f]!.electionId, true, { now: NOW });
+          made.push({ user, drafts, reactions: s.reactions, follows: s.follows });
         }
         for (const [i, m] of made.entries()) {
           const out = await exportAccount(app, m.user, at);
@@ -351,6 +361,7 @@ describe("exportAccount", () => {
           expect(out?.reactions.map((r) => `${r.electionId} ${r.reaction}`).sort()).toEqual(
             m.reactions.map((r) => `${hex(polls[r.poll]!.electionId)} ${r.reaction}`).sort(),
           );
+          expect(out?.follows).toEqual(m.follows.map((f) => hex(polls[f]!.electionId)).sort());
           const other = made[1 - i]!;
           const text = JSON.stringify(out);
           expect(text).not.toContain(other.user);

@@ -75,11 +75,13 @@ test("no board or identity column looks like an account or a person", async () =
 // The allowances, by table and column: the creator record of ADR 0032,
 // rule 15, names the election its author created (P2-22 part 3a), a
 // creator's appeal names that record (P2-10 part 3b), a reaction names
-// the poll it is on (P2-25 part 5), and a profile's choice names the record
-// of a poll it shows (P2-27 part 1b). They say whose poll an election is, who
-// reacted to it and whether its author shows it, never who answered it.
+// the poll it is on (P2-25 part 5), a follow the poll followed (P2-25 part
+// 4), and a profile's choice names the record of a poll it shows (P2-27 part
+// 1b). They say whose poll an election is, who reacted to or follows it and
+// whether its author shows it, never who answered it.
 const ACCOUNT_ALLOWED = [
   { table_name: "account_appeals", column_name: "poll_id" },
+  { table_name: "account_follows", column_name: "election_id" },
   { table_name: "account_polls", column_name: "election_id" },
   { table_name: "account_profile_polls", column_name: "poll_id" },
   { table_name: "account_reactions", column_name: "election_id" },

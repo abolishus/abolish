@@ -143,6 +143,16 @@ Reactions on a poll ([[P2-25]] part 5): `account_reactions` holds one row per ac
 - `readOwnReactions(sql, accountId, electionId)`: the account's own, for its own page only.
 - `pruneReactionHours(sql, now)` drops hours before the last one; the website's account prune runs it.
 
+### `account_follows` and `account_follow_hours` (T-10, T-11, T-52, T-68)
+
+Following a poll ([[P2-25]] part 4): `account_follows` holds one row per account and `election_id` the account follows, to be told when its results land or a live batch is published, with no time; `account_follow_hours` counts each account's changes per UTC hour, with no poll. Both are account-side; `abolish_app` may follow and stop, never change a follow in place. There is no public count. Operational: a wipe loses follows and changes no result.
+
+`src/follows.ts`:
+
+- `setFollow(sql, accountId, electionId, on, { now })` follows or stops and says whether anything changed. `FollowError` refuses, when following, an account not verified by e-mail (`account`), an unknown election (`unknown-election`) or a hidden poll (`hidden`); then a change past `MAX_FOLLOW_CHANGES_PER_HOUR` (`too-many-this-hour`). Stopping is refused only by the hour's limit.
+- `isFollowing(sql, accountId, electionId)`: whether the account follows the poll, for its own page only.
+- `pruneFollowHours(sql, now)` drops hours before the last one; the website's account prune runs it.
+
 ### `identity_backups` (T-20, T-10, T-11, T-52, T-66)
 
 Voting-identity recovery backups (ADR 0017, option A, step 5; `docs/spec/identity-backup.md`): `id` (`H(DS(id-tag, locator))`, 32 bytes), `envelope` (a version-1 envelope, 63 bytes, header checked by the table) and `written_month` (the UTC month of the last write, by the database clock). The locator is never stored, so a copy of the table can't read, replace or delete a row. No account column, address or request time; reads change nothing. `abolish_app` holds `SELECT`, `INSERT`, `UPDATE` and `DELETE`, never `TRUNCATE`. Operational: a wipe loses every backup and changes no result (T-66).

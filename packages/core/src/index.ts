@@ -176,6 +176,8 @@ export {
   accountCredentials,
   accountPasskeys,
   accountAppeals,
+  accountFollowHours,
+  accountFollows,
   accountModerators,
   accountNotices,
   accountPolls,
@@ -618,6 +620,14 @@ export {
   reportProfile,
   reviewProfileReports,
 } from "./profile-moderation.ts";
+export {
+  FollowError,
+  type FollowErrorCode,
+  isFollowing,
+  MAX_FOLLOW_CHANGES_PER_HOUR,
+  pruneFollowHours,
+  setFollow,
+} from "./follows.ts";
 export {
   MAX_REACTION_CHANGES_PER_HOUR,
   pruneReactionHours,

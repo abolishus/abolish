@@ -1,6 +1,6 @@
 // The account tables' timer (src/node/prune.ts) against Postgres as the app
 // role: an expired e-mail or phone code is gone after a run, a live one
-// stays, as do the last two hours' reaction counts and not earlier ones,
+// stays, as do the last two hours' reaction and follow counts and not earlier ones,
 // phone-hash chains are extended to the current key where the phone service
 // is configured, a Tier 0 token record whose key stopped redeeming is marked
 // dead, the moderation notices due are sent where the e-mail service is
@@ -92,6 +92,16 @@ async function reactedAt(at: Date): Promise<string> {
   return account;
 }
 
+/** An account with a follow change counted in the hour `at`. */
+async function followedAt(at: Date): Promise<string> {
+  const account = await newAccount();
+  await sql`INSERT INTO account_follow_hours VALUES (${account}, ${at.toISOString()}, 1)`;
+  return account;
+}
+
+const followHours = async () =>
+  (await sql`SELECT user_id FROM account_follow_hours`).map((r) => r["user_id"] as string);
+
 const reactionHours = async () =>
   (await sql`SELECT user_id FROM account_reaction_hours`).map((r) => r["user_id"] as string);
 
@@ -106,6 +116,8 @@ test("deletes expired codes and keeps live ones, every tick", async () => {
   const livePhone = await phoneCodeSentAt(new Date(now.getTime() - 60 * 1000));
   const pastHour = await reactedAt(new Date("2026-10-22T10:00:00Z"));
   const lastHour = await reactedAt(new Date("2026-10-22T11:00:00Z"));
+  const pastFollow = await followedAt(new Date("2026-10-22T10:00:00Z"));
+  const lastFollow = await followedAt(new Date("2026-10-22T11:00:00Z"));
   const lines: { error: string }[] = [];
   const prune = startAccountPrune({ sql, log: (l) => lines.push(l), everyMs: 20, now: () => now });
   await new Promise((r) => setTimeout(r, 60));
@@ -116,6 +128,8 @@ test("deletes expired codes and keeps live ones, every tick", async () => {
   expect(await phoneCodes()).not.toContain(expiredPhone);
   expect(await reactionHours()).toContain(lastHour);
   expect(await reactionHours()).not.toContain(pastHour);
+  expect(await followHours()).toContain(lastFollow);
+  expect(await followHours()).not.toContain(pastFollow);
   expect(lines).toEqual([]);
 });
 

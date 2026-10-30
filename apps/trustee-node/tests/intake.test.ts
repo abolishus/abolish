@@ -148,6 +148,150 @@ describe("intake", () => {
     ]);
   });
 
+  describe("a repeat of a receipted delivery (T-52)", () => {
+    // A store whose receipt record for the honest ballot holds `marker`, so
+    // an answer carrying it came from the stored receipt, never from intake
+    // run again, which returns the receipt it signs.
+    async function marked() {
+      const first = new MemoryStore();
+      const [seat] = seatsOf(s, { store: first }).intake;
+      const out = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(`refused: ${out.code}`);
+      const store = new MemoryStore();
+      const marker = new TextEncoder().encode("stored");
+      const stub = hex(s.e.stubHash);
+      for (const prefix of [`intake/${stub}`, `repeats/${stub}`])
+        for (const name of await first.list(prefix))
+          await store.putOnce(`${prefix}/${name}`, (await first.get(`${prefix}/${name}`))!);
+      await store.putOnce(`receipts/${stub}/${hex(out.ballotHash)}`, marker);
+      return { store, marker, receipt: out.receipt, ballotHash: out.ballotHash };
+    }
+
+    it("answers a byte-identical repeat from the stored receipt, before the proofs", async () => {
+      const m = await marked();
+      const [seat] = seatsOf(s, { store: m.store }).intake;
+      const again = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      expect(again).toEqual({ ok: true, ballotHash: m.ballotHash, receipt: m.marker });
+    });
+
+    it("runs intake in full on the same record with another ciphertext", async () => {
+      const m = await marked();
+      const [seat] = seatsOf(s, { store: m.store }).intake;
+      const wrong = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[1] as Uint8Array,
+      );
+      expect(wrong).toEqual({ ok: false, code: "share-hash" });
+    });
+
+    it("runs intake in full on a copy under another L1 reference, keeping it", async () => {
+      const m = await marked();
+      const [seat] = seatsOf(s, { store: m.store }).intake;
+      const recast = await castAgain(s, 0, honest, {
+        number: 101n,
+        hash: new Uint8Array(32).fill(8),
+      });
+      const out = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        recast.bytes,
+        recast.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(`refused: ${out.code}`);
+      expect(hex(out.receipt)).toBe(hex(m.receipt));
+      expect(await m.store.list(`copies/${hex(s.e.stubHash)}/${hex(m.ballotHash)}`)).toContain(
+        `101-${"08".repeat(32)}`,
+      );
+    });
+
+    it("keeps one repeat record per copy: another proof of the same copy runs in full and adds none", async () => {
+      const store = new MemoryStore();
+      const [seat] = seatsOf(s, { store }).intake;
+      // Proved again under the same L1 reference: other bytes, the same copy,
+      // as a re-randomised proof would be.
+      const reproved = await castAgain(s, 0, honest, {
+        number: honest.record.l1_ref_number,
+        hash: honest.record.l1_ref_hash,
+      });
+      expect(hex(reproved.bytes)).not.toBe(hex(honest.bytes));
+      const repeats = () => store.list(`repeats/${hex(s.e.stubHash)}`);
+      const first = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      expect(await repeats()).toHaveLength(1);
+      const again = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        reproved.bytes,
+        reproved.ciphertexts[0] as Uint8Array,
+      );
+      if (!first.ok || !again.ok) expect.fail("an honest delivery was refused");
+      expect(hex(again.receipt)).toBe(hex(first.receipt));
+      expect(await repeats()).toHaveLength(1);
+    });
+
+    it("runs intake in full when the receipt a repeat record names isn't held", async () => {
+      const m = await marked();
+      const store = new MemoryStore();
+      const stub = hex(s.e.stubHash);
+      for (const name of await m.store.list(`repeats/${stub}`))
+        await store.putOnce(
+          `repeats/${stub}/${name}`,
+          (await m.store.get(`repeats/${stub}/${name}`))!,
+        );
+      const [seat] = seatsOf(s, { store }).intake;
+      const out = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      if (!out.ok) expect.fail(`refused: ${out.code}`);
+      expect(hex(out.receipt)).toBe(hex(m.receipt));
+      expect(await store.list(`intake/${stub}`)).toEqual([hex(m.ballotHash)]);
+    });
+
+    it("answers no repeat from the intake cutoff on (T-54)", async () => {
+      const m = await marked();
+      const [seat] = seatsOf(s, { store: m.store, now: () => s.cutoff }).intake;
+      const again = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      expect(again).toEqual({ ok: false, code: "intake-closed" });
+    });
+
+    it("answers a repeat whose reads finish at the cutoff with nothing (T-54)", async () => {
+      const m = await marked();
+      const times = [s.cutoff - 1n, s.cutoff];
+      const [seat] = seatsOf(s, { store: m.store, now: () => times.shift() ?? s.cutoff }).intake;
+      const again = await seat!.intake(
+        s.e.stubBytes,
+        s.transcript,
+        honest.bytes,
+        honest.ciphertexts[0] as Uint8Array,
+      );
+      expect(again).toEqual({ ok: false, code: "intake-closed" });
+    });
+  });
+
   it("stores and signs nothing for a delivery that finishes at the cutoff (T-54)", async () => {
     const store = new MemoryStore();
     const times = [s.cutoff - 1n, s.cutoff];

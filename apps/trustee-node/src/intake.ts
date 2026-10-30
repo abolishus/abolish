@@ -8,6 +8,7 @@
 // names a share the seat doesn't hold (T-41, T-52, T-37, T-14). Intake closes
 // at the intake cutoff `c_I`, where the seat decides what it owes through the
 // contract path (docs/spec/delivery.md, What a node owes; T-54).
+import { createHash } from "node:crypto";
 import {
   ballotElection,
   type BallotElection,
@@ -31,6 +32,7 @@ import {
   type QuestionBallotElection,
   SHARES,
   type Share,
+  shareCiphertextHash,
   shareReceiptRecord,
   struct,
   u64,
@@ -117,6 +119,14 @@ const COPY = struct([
   ["l1_ref_number", u64],
   ["l1_ref_hash", HASH],
 ] as const);
+// A receipted delivery's record, by its bytes' digest (`recordName`): the
+// ballot hash its receipt is held under and the share hash it was given for,
+// so a byte-identical repeat is answered from the stored receipt (`#repeat`).
+// Both are public, so destruction leaves it in place.
+const REPEAT = struct([
+  ["ballot_hash", HASH],
+  ["share_hash", HASH],
+] as const);
 
 interface Opened {
   readonly election: BallotElection | QuestionBallotElection;
@@ -127,6 +137,9 @@ interface Opened {
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
+// A store name for a delivered record's bytes, not protocol bytes: nothing
+// outside the node computes or reads it.
+const recordName = (record: Uint8Array) => createHash("sha256").update(record).digest("hex");
 
 export class IntakeSeat {
   readonly #config: IntakeConfig;
@@ -186,6 +199,10 @@ export class IntakeSeat {
     ciphertext: Uint8Array,
   ): Promise<IntakeOutcome> {
     const { election, stubHash } = opened;
+    const repeat = await this.#repeat(stubHash, record, ciphertext);
+    // Its reads may finish past `c_I`, where intake answers nothing.
+    if (repeat !== undefined)
+      return this.#closed(opened) ? { ok: false, code: "intake-closed" } : repeat;
     const keys = {
       seat: this.#config.index,
       kemSecret: secrets.kemSecret,
@@ -215,7 +232,7 @@ export class IntakeSeat {
     // `ballot_hash` binds every share hash, so a held record names this one.
     if (!equal(decode(TAKEN, stored.value).share_hash, taken.shareHash))
       throw new Error("trustee node: a held ballot's share hash differs from its ballot hash's");
-    await this.#config.store.putOnce(
+    const copy = await this.#config.store.putOnce(
       `copies/${hex(stubHash)}/${ballot}/${taken.l1RefNumber}-${hex(taken.l1RefHash)}`,
       encode(COPY, { l1_ref_number: taken.l1RefNumber, l1_ref_hash: taken.l1RefHash }),
     );
@@ -233,7 +250,44 @@ export class IntakeSeat {
     // (T-25). The same ballot signs the same bytes (RFC 6979), so a second
     // delivery finds them held.
     await this.#config.store.putOnce(`receipts/${hex(stubHash)}/${ballot}`, receipt);
+    // After the receipt, so a repeat that finds this record finds the
+    // receipt; and only for the delivery that wrote the copy, so one copy
+    // has one: anyone can re-randomise a Groth16 proof into other bytes of
+    // the same copy, and each would otherwise leave a record (T-52). Those
+    // run intake in full, as a repeat did before.
+    if (copy.created)
+      await this.#config.store.putOnce(
+        `repeats/${hex(stubHash)}/${recordName(record)}`,
+        encode(REPEAT, { ballot_hash: taken.ballotHash, share_hash: taken.shareHash }),
+      );
     return { ok: true, ballotHash: taken.ballotHash, receipt };
+  }
+
+  /**
+   * The stored receipt, when `record` is byte for byte one the seat
+   * receipted and `ciphertext` hashes to the share hash it was receipted
+   * for; otherwise undefined, and intake runs in full. Anyone holding a
+   * member's delivery, a relay replaying a sealed request included, could
+   * otherwise make the seat run its membership and validity proofs again on
+   * every repeat (docs/spec/sealed-delivery.md, Known-weak; T-52). The same
+   * bytes passed every check intake runs, and the election's checks and
+   * cutoff ran again before this, so full intake would give this receipt
+   * (RFC 6979) and store nothing new: the copy's L1 reference is in the
+   * record, so a copy under another reference isn't a repeat.
+   */
+  async #repeat(
+    stubHash: Uint8Array,
+    record: Uint8Array,
+    ciphertext: Uint8Array,
+  ): Promise<IntakeOutcome | undefined> {
+    const store = this.#config.store;
+    const held = await store.get(`repeats/${hex(stubHash)}/${recordName(record)}`);
+    if (held === undefined) return undefined;
+    const repeat = decode(REPEAT, held);
+    if (!equal(repeat.share_hash, shareCiphertextHash(ciphertext))) return undefined;
+    const receipt = await store.get(`receipts/${hex(stubHash)}/${hex(repeat.ballot_hash)}`);
+    if (receipt === undefined) return undefined;
+    return { ok: true, ballotHash: repeat.ballot_hash, receipt };
   }
 
   /** The ballot hashes this seat receipted for the stub, sorted. */

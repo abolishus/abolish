@@ -344,6 +344,10 @@ export const EveryStateDesktop: Story = {
       ];
       for (const target of targets) await expect(box(target).height).toBe(48);
     }
+    // The empty status line takes no gap: the list's rule is one gap under the button (iteration 14).
+    const canvas = within(context.canvasElement);
+    const ask = box(canvas.getByRole("link", { name: "Ask a question" }));
+    await expect(box(canvas.getAllByRole("list")[0]!).top - ask.bottom).toBe(16);
   },
 };
 
@@ -665,6 +669,8 @@ export const ModerationHistoryDark: Story = {
  * characters a line, and the moderation log's link was a 14px line of text
  * where the row's own links are 48px (P2-29, the author's list's iteration
  * 13). An appeal now keeps the reason's measure, and the link the row's.
+ * Its rule ran 12px past the log's link, the gap before an empty status
+ * line (iteration 14); it now ends with the link.
  */
 export const ModerationHistoryDesktop: Story = {
   args: { client: MODERATED },
@@ -680,8 +686,13 @@ export const ModerationHistoryDesktop: Story = {
         reason.getBoundingClientRect().width,
       );
     const row = canvas.getByRole("link", { name: "Go to its page" }).getBoundingClientRect();
-    for (const log of canvas.getAllByRole("link", { name: "See the moderation log" }))
+    for (const log of canvas.getAllByRole("link", { name: "See the moderation log" })) {
       await expect(log.getBoundingClientRect().height).toBe(row.height);
+      const history = log.closest('[role="group"]');
+      await expect(history?.getBoundingClientRect().bottom).toBe(
+        log.getBoundingClientRect().bottom,
+      );
+    }
   },
 };
 

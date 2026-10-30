@@ -189,6 +189,41 @@ describe("the author panel's own run decides its seats", { timeout: 60_000 }, ()
     expect(r.report).toBeUndefined();
   });
 
+  test("an author seat holding a default seat's key fails 2.5 with default-seat, and nothing is registered", () => {
+    // T-14: no trustee holds shares of both halves. The definition's author
+    // keys are its own, so 2.5 fails before either transcript is read.
+    const c = byId("author-mixed");
+    const definition = decodeDefinition(hex(c.definition));
+    if (definition.version !== 7) throw new Error("not version 7");
+    const shared = {
+      ...definition,
+      value: {
+        ...definition.value,
+        author_keys: [
+          definition.value.author_keys[0] as Uint8Array,
+          panel.keys[2] as Uint8Array,
+          definition.value.author_keys[2] as Uint8Array,
+        ],
+      },
+    };
+    const { entries } = splitEntries(hex(c.board));
+    const ceremony = ceremonyChecks(
+      shared.value,
+      readDefinition(shared).stubHash,
+      panel,
+      authorRunOf(shared),
+      entries,
+      BOARD,
+    );
+    expect(ceremony.rows.get("2.5")).toEqual({
+      status: "fail",
+      code: "default-seat",
+      at: { seat: 2 },
+    });
+    expect(ceremony.registered).toBeUndefined();
+    expect(ceremony.authorRegistered).toBeUndefined();
+  });
+
   test("an author share hash at a seat the author run didn't register is rejected, at one it did admitted", () => {
     const mixed = byId("author-mixed").ballots;
     expect(mixed?.rejected.find((x) => x.entry === 6)).toEqual({

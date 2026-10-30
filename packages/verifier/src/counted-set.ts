@@ -43,7 +43,7 @@ import {
   type TierReport,
   tierResults,
 } from "./counted.ts";
-import { isPanelled, type VerifiedDefinition } from "./definition.ts";
+import type { VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
@@ -262,7 +262,8 @@ export function countedResults(
  * Tally-opening version 2, Author panel; T-36, T-37).
  */
 export function wholeOpeningPin(record: VerifiedDefinition): WholeOpeningVersion | undefined {
-  if (isPanelled(record) && record.value.author_keys.length !== 0) return undefined;
+  if ((record.version === 6 || record.version === 7) && record.value.author_keys.length !== 0)
+    return undefined;
   const v = pinnedVersion(record.value, RECORD_TYPES.tallyOpening);
   return v === 1 || v === 2 ? v : undefined;
 }

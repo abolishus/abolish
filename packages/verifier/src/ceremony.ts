@@ -83,7 +83,7 @@ export interface CeremonyReport extends RunReport {
 }
 
 /**
- * A version-6 definition's author panel and what its run binds
+ * A version-6 or version-7 definition's author panel and what its run binds
  * (docs/spec/ceremony.md, Author panel), all read from the definition,
  * never from a release's pins (definition.ts, `authorRunOf`).
  */

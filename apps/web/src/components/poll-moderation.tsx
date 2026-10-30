@@ -122,14 +122,15 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
       aria-busy={busy}
       className="grid gap-3 border-s-2 border-foreground ps-4 text-sm md:col-span-full"
     >
+      {/* The icon sits on the first line, as the account's checks do: centred on a heading that wraps, it fell between the lines. */}
       <p
         id={headingId}
         ref={heading}
         tabIndex={-1}
-        className="m-0 flex items-center gap-2 font-semibold"
+        className="m-0 flex items-start gap-2 font-semibold"
         suppressHydrationWarning
       >
-        {Icon === undefined ? null : <Icon aria-hidden="true" className="size-4 shrink-0" />}
+        {Icon === undefined ? null : <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
         {latest === undefined
           ? t("moderationOfPoll")
           : t("moderationDecision", {

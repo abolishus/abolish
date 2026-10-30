@@ -617,7 +617,11 @@ const RESTORED: PollModerationView = {
   ],
 };
 
-const HIDDEN_POLL = poll("hidden", { state: "open", title: "Rename the east pier?" });
+const HIDDEN_POLL = poll("hidden", {
+  state: "open",
+  title: "Rename the east pier?",
+  electionId: "2d".repeat(32),
+});
 
 const showsModeration: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
@@ -636,6 +640,10 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
     hidden.getByText(/decision No. 52 .*: rejected on October 17, 2026 at 11:00 AM UTC\./),
   ).toBeVisible();
   await expect(hidden.queryByRole("button")).toBeNull();
+  // Hidden text leaves the poll at its address, and its row still goes there.
+  await expect(
+    canvas.getByRole("link", { name: "Go to its page", description: "Rename the east pier?" }),
+  ).toHaveAttribute("href", `/polls/${"2d".repeat(32)}`);
   const restored = within(
     canvas.getByRole("group", {
       name: /^Restored: Appeal upheld, October 17, 2026 at 3:00\sPM\sUTC$/,
@@ -685,7 +693,7 @@ export const ModerationHistoryDesktop: Story = {
       await expect(appeal.getBoundingClientRect().width).toBeLessThanOrEqual(
         reason.getBoundingClientRect().width,
       );
-    const row = canvas.getByRole("link", { name: "Go to its page" }).getBoundingClientRect();
+    const row = canvas.getAllByRole("link", { name: "Go to its page" })[0]!.getBoundingClientRect();
     for (const log of canvas.getAllByRole("link", { name: "See the moderation log" })) {
       await expect(log.getBoundingClientRect().height).toBe(row.height);
       const history = log.closest('[role="group"]');
@@ -723,6 +731,20 @@ export const ModerationHistoryFolded: Story = {
     }
     // The two decisions and the three appeals, each filed and reviewed.
     await expect(times).toBe(8);
+    // Each decision wraps here, and its icon sits on the first line, not
+    // between the two (P2-29, the author's list's iteration 15).
+    for (const group of within(context.canvasElement).getAllByRole("group")) {
+      const heading = group.firstElementChild!;
+      const icon = heading.querySelector("svg")!.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(heading);
+      const lines = [...range.getClientRects()].filter((r) => r.width > 0 && r.left > icon.right);
+      await expect(new Set(lines.map((r) => r.top)).size).toBeGreaterThan(1);
+      const first = lines[0]!;
+      await expect(
+        Math.abs(icon.top + icon.height / 2 - (first.top + first.height / 2)),
+      ).toBeLessThan(2);
+    }
   },
 };
 

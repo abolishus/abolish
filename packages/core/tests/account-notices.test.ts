@@ -860,6 +860,74 @@ describe("notification choices (P2-27 part 3c-2a)", () => {
     ]);
   });
 
+  test("turning results off while a sender holds the notice sends it once, as claimed", async () => {
+    await clear();
+    const only = await following();
+    await landResults(app, only.electionId, { now: NOW });
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    await landResults(app, followed.electionId, { now: new Date() });
+    const messages: EmailMessage[] = [];
+    let second: { electionId: Uint8Array } | undefined;
+    const sender: EmailSender = {
+      send: async (m) => {
+        messages.push(m);
+        // Both accounts turn results off while the provider takes their notices.
+        await setNoticeChoices(app2, only.account, { results: false });
+        await setNoticeChoices(app2, author, { results: false });
+        if (second === undefined) {
+          // A new decision renews the author's notice meanwhile; it must survive the send.
+          second = await poll(author);
+          await moderate(app2, second.electionId, {
+            action: "hide",
+            reason: "illegal",
+            moderator: "mod-2",
+          });
+        }
+        return "sent";
+      },
+    };
+    const run = await sendNotices(app, { sender, keys: KEYS, now: later() });
+    expect(run).toMatchObject({ sent: 2, retrying: 0, dropped: 0 });
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: only.address,
+      locale: "en-US",
+      about: "results",
+    });
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: address,
+      locale: "en-US",
+      about: "both",
+    });
+    // The results-only notice is gone; the renewed one waits, saying only moderation.
+    expect(await noticeOf(only.account)).toBeUndefined();
+    expect(await noticeOf(author)).toMatchObject({ tries: 0 });
+    messages.length = 0;
+    const { messages: next, sender: recording } = recorder();
+    expect(await drain(recording, new Date(Date.now() + 4 * DAY))).toEqual({
+      sent: 1,
+      retrying: 0,
+      dropped: 0,
+    });
+    expect(next).toEqual([{ kind: "notice", to: address, locale: "en-US", about: "moderation" }]);
+  });
+
+  test("turning results off deletes a notice that carries only results, never leaving it bare", async () => {
+    await clear();
+    const account = await newAccount(app);
+    // A results-only notice, as a landing that judged the choice first leaves it.
+    await app`INSERT INTO account_notices (user_id, not_before, moderation, results)
+      VALUES (${account}, ${NOW.toISOString()}, false, true)`;
+    await setNoticeChoices(app, account, { results: false });
+    expect(await noticeOf(account)).toBeUndefined();
+  });
+
   test("turning results back on tells of the next landing, not the ones left out", async () => {
     await clear();
     const { account, address, electionId } = await following();

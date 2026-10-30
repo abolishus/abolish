@@ -174,9 +174,15 @@ export async function setNoticeChoices(
       .onConflictDoUpdate({ target: c.userId, set: { results } });
     if (results) return;
     // Neither touches the due time or the tries, so a sender holding the
-    // notice still deletes it as claimed once sent.
+    // notice still deletes it as claimed once sent. Each statement reads
+    // afresh, so a results-only notice a landing commits between them is
+    // left alone by the update, which would break the table's check, and
+    // goes once: the landing judged the choice before this one committed.
     await tx.delete(n).where(and(eq(n.userId, accountId), eq(n.moderation, false)));
-    await tx.update(n).set({ results: false }).where(eq(n.userId, accountId));
+    await tx
+      .update(n)
+      .set({ results: false })
+      .where(and(eq(n.userId, accountId), eq(n.moderation, true)));
   });
 }
 

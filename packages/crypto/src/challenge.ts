@@ -28,10 +28,12 @@ import {
   type CellBallotElection,
   cellContextOf,
   definitionHashOf,
+  halvesContextOf,
   type PanelBallotElection,
   panelContextOf,
   type QuestionBallotElection,
   registeredKeysOf,
+  type RollingBallotElection,
   SEAT_PANELS,
   type SeatPanel,
 } from "./ballot.ts";
@@ -318,12 +320,18 @@ export function openingV2CoreHash(
 }
 
 /**
- * The tracking code of a version-3 opening's core under ballot version 4:
- * its core hash, both halves. Ballot version 5's cores, which opening
- * version 3 opens too, hash under their own version input (P2-17).
+ * The tracking code of a version-3 opening's core under the ballot version
+ * its election's profile pins, 4 or 5: its core hash, both halves. The
+ * opening carries none of its own, so the same bytes under two elections are
+ * two cores (docs/spec/challenge.md, Opening version 3; T-42, T-47).
  */
-export function openingV3CoreHash(opening: SpoiledBallotOpeningV3): Uint8Array {
-  return coreHashV4({
+export function openingV3CoreHash(
+  opening: SpoiledBallotOpeningV3,
+  ballotVersion: 4 | 5 = 4,
+): Uint8Array {
+  if (ballotVersion !== 4 && ballotVersion !== 5)
+    throw new RangeError("openingV3CoreHash: ballotVersion must be 4 or 5");
+  return (ballotVersion === 4 ? coreHashV4 : coreHashV5)({
     definitionHash: opening.definition_hash,
     cell: opening.cell,
     vss: opening.vss,
@@ -946,7 +954,7 @@ function approvedAuthorKeys(
 // The author keys the internal paths take, in seat order: exactly the author
 // panel's registered seats the context was made with.
 function authorKeySet(
-  election: PanelBallotElection,
+  election: PanelBallotElection | RollingBallotElection,
   authorKeys: readonly RegisteredKeys[],
   name: string,
 ): readonly RegisteredKeys[] {
@@ -957,7 +965,7 @@ function authorKeySet(
   return keys;
 }
 
-const inPartition = (election: PanelBallotElection, cell: number) =>
+const inPartition = (election: PanelBallotElection | RollingBallotElection, cell: number) =>
   Number.isInteger(cell) && cell >= 0 && cell < election.cells.length;
 
 // The core of shares `encryptSharesV4` made for a cell of this election: each
@@ -1163,7 +1171,8 @@ export type ChallengeOpeningV3Check =
 
 /**
  * Checks a decoded version-3 opening against a registered election of
- * definition version 6 (docs/spec/challenge.md, Opening version 3): version
+ * definition version 6, or 7 under either electorate (docs/spec/challenge.md,
+ * Opening version 3): version
  * 2's checks in order over both halves, default half first, each half's
  * shape against its own panel's `k`, `n` and registered key set (an
  * author half's lists all empty without an author panel), and each
@@ -1175,13 +1184,20 @@ export type ChallengeOpeningV3Check =
  * approved key set `panelBallotElection` took, from the author transcript
  * and the approvals on the board, and a context without one is refused: an
  * author seat left out would have its ciphertext go unchecked (T-37, T-17).
+ * Under a rolling definition the context is `rollingBallotElection`'s, and
+ * the tracking code is ballot version 5's core hash, never version 4's
+ * (Core and tracking code; T-42, T-47).
  */
 export function checkChallengeOpeningV3(
-  election: PanelBallotElection,
+  election: PanelBallotElection | RollingBallotElection,
   opening: SpoiledBallotOpeningV3,
 ): ChallengeOpeningV3Check {
-  const authorKeys = approvedAuthorKeys(election, "checkChallengeOpeningV3");
-  return checkV3(election, authorKeys, opening, "checkChallengeOpeningV3");
+  const { authorKeys } = halvesContextOf(election);
+  if (election.authorPanelSize !== 0 && authorKeys === undefined)
+    throw new RangeError(
+      "checkChallengeOpeningV3: an author panel's key set must be the approved one the context took",
+    );
+  return checkV3(election, authorKeys ?? [], opening, "checkChallengeOpeningV3");
 }
 
 /**
@@ -1190,7 +1206,7 @@ export function checkChallengeOpeningV3(
  * carry no author run. The package entry point doesn't export it.
  */
 export function checkChallengeOpeningV3With(
-  election: PanelBallotElection,
+  election: PanelBallotElection | RollingBallotElection,
   authorKeys: readonly RegisteredKeys[],
   opening: SpoiledBallotOpeningV3,
 ): ChallengeOpeningV3Check {
@@ -1198,12 +1214,12 @@ export function checkChallengeOpeningV3With(
 }
 
 function checkV3(
-  election: PanelBallotElection,
+  election: PanelBallotElection | RollingBallotElection,
   authorKeys: readonly RegisteredKeys[],
   opening: SpoiledBallotOpeningV3,
   name: string,
 ): ChallengeOpeningV3Check {
-  const { definitionHash, keys } = panelContextOf(election);
+  const { definitionHash, ballotVersion, keys } = halvesContextOf(election);
   const author = authorKeySet(election, authorKeys, name);
   const {
     definition_hash: claimed,
@@ -1276,7 +1292,7 @@ function checkV3(
   const outside = firstQuestionOutside(election.questions, votes);
   return {
     ok: true,
-    coreHash: coreHashV4({
+    coreHash: (ballotVersion === 4 ? coreHashV4 : coreHashV5)({
       definitionHash,
       cell,
       vss,

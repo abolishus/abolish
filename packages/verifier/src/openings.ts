@@ -6,7 +6,9 @@
 // `checkChallengeOpeningV2` for version 2, which opens the cores of ballot
 // versions 2 and 3, under definition versions 3 to 5;
 // `checkChallengeOpeningV3` for version 3, which opens both halves of ballot
-// version 4's cores, under definition version 6), then judged against
+// version 4's cores, under definition version 6 and version 7 under a fixed
+// electorate, and of ballot version 5's under a rolling version 7), then
+// judged against
 // challenge.md's Publication rules. None of it ever counts, displaces or
 // fails anything: an opening is a report, attributed to the board operator
 // (T-42, T-47, T-53).
@@ -46,12 +48,16 @@ import {
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
+  type PanelBallotElection,
   type RegisteredKeys,
+  type RollingBallotChain,
+  type RollingBallotElection,
+  rollingBallotElection,
   type SeatPanel,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import type { AdmittedCore } from "./ballots.ts";
-import { isPanelled, type VerifiedDefinition } from "./definition.ts";
+import { isPanelled, isRolling, type VerifiedDefinition } from "./definition.ts";
 
 /** A publication rule an opening is known to break (docs/spec/challenge.md, Publication). */
 export type OpeningBreak =
@@ -148,10 +154,23 @@ const UNSUPPORTED: OpeningOutcome = { status: "unverifiable", code: "unsupported
 // The ballot and spoiled-ballot opening versions each definition version
 // pins (2.3): definition version 1's ballots (version 1) are opened by
 // opening version 1, ballot versions 2 (definition versions 3 and 4) and 3
-// (version 5) by opening version 2, which names a cell, and ballot version 4
-// (version 6, and version 7 under a fixed electorate) by opening version 3,
-// which opens both halves.
+// (version 5) by opening version 2, which names a cell, and ballot versions 4
+// (version 6, and version 7 under a fixed electorate) and 5 (version 7 under
+// a rolling electorate) by opening version 3, which opens both halves.
 const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
+
+// A version-3 opening's judge under its context, its repeat hash the core
+// hash of the ballot version that context checks.
+const halvesJudge =
+  (election: PanelBallotElection | RollingBallotElection, ballotVersion: 4 | 5): Judge =>
+  (payload) => {
+    const o = decodeOpening(payload, 3);
+    const checked = checkChallengeOpeningV3(election, o);
+    return {
+      hash: bytesToHex(openingV3CoreHash(o, ballotVersion)),
+      checked: checked.ok ? { ...checked, opened: () => openedCommitmentsV3(o) } : checked,
+    };
+  };
 
 /**
  * How this definition's openings are judged, or the outcome 6.2 takes when
@@ -162,13 +181,23 @@ function judgeFor(
   registered: readonly RegisteredKeys[] | undefined,
   authorRegistered: readonly RegisteredKeys[] | undefined,
   admitted: readonly AdmittedCore[] | undefined,
+  rolling: RollingBallotChain | undefined,
 ): OpeningOutcome | Judge {
   const d = definition.value;
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
   const ownBallot =
-    definition.version === 1 ? 1 : definition.version === 5 ? 3 : isPanelled(definition) ? 4 : 2;
-  const ownOpening = definition.version === 1 ? 1 : isPanelled(definition) ? 3 : 2;
+    definition.version === 1
+      ? 1
+      : definition.version === 5
+        ? 3
+        : isPanelled(definition)
+          ? 4
+          : isRolling(definition)
+            ? 5
+            : 2;
+  const ownOpening =
+    definition.version === 1 ? 1 : isPanelled(definition) || isRolling(definition) ? 3 : 2;
   // An opening version this verifier doesn't read may be one a later release
   // reads, and so may a ballot version, whose cores a later opening version
   // may open: unverifiable, never failed, so releases agree (2.3; T-36). As
@@ -188,27 +217,29 @@ function judgeFor(
     admitted === undefined
   )
     return NOT_REACHED;
+  // Opening version 3 rebuilds the author seats' ciphertexts under the
+  // author panel's own run's key set, approved on the board, as admission
+  // judges its share hashes: never under keys no transcript check gave, or
+  // the default panel's, since an unchecked ciphertext must never let an
+  // opening pass (T-37, T-17). A rolling poll's context is the one admission
+  // judged its ballots under, made from the same chain (P2-17); its cores'
+  // tracking codes are ballot version 5's core hashes (docs/spec/
+  // challenge.md, Opening version 3, Core and tracking code; T-42, T-47).
+  if (definition.version === 7 && isRolling(definition)) {
+    const author = definition.value.author_keys.length !== 0;
+    if (rolling === undefined || (author && authorRegistered === undefined)) return NOT_REACHED;
+    return halvesJudge(
+      rollingBallotElection(definition.value, registered, rolling, author ? authorRegistered : []),
+      5,
+    );
+  }
   if (isPanelled(definition)) {
-    // Opening version 3 rebuilds the author seats' ciphertexts under the
-    // author panel's own run's key set, approved on the board, as admission
-    // judges its share hashes: never under keys no transcript check gave, or
-    // the default panel's, since an unchecked ciphertext must never let an
-    // opening pass (T-37, T-17).
     const author = definition.value.author_keys.length !== 0;
     if (author && authorRegistered === undefined) return NOT_REACHED;
-    const election = panelBallotElection(
-      definition.value,
-      registered,
-      author ? authorRegistered : [],
+    return halvesJudge(
+      panelBallotElection(definition.value, registered, author ? authorRegistered : []),
+      4,
     );
-    return (payload) => {
-      const o = decodeOpening(payload, 3);
-      const checked = checkChallengeOpeningV3(election, o);
-      return {
-        hash: bytesToHex(openingV3CoreHash(o)),
-        checked: checked.ok ? { ...checked, opened: () => openedCommitmentsV3(o) } : checked,
-      };
-    };
   }
   if (definition.version === 1) {
     const election = ballotElection(definition.value, registered);
@@ -243,7 +274,8 @@ function judgeFor(
  * transcript check registered, `authorRegistered` the author panel's, beside
  * one, once its approvals approve it (3.1, 3.2), and `admitted` the ballots
  * admission admitted, or `undefined` when admission didn't run, which leaves
- * every opening unchecked.
+ * every opening unchecked. Under a rolling definition `rolling` is the chain
+ * admission judged against; without it no opening is judged.
  */
 export function openingChecks(
   definition: VerifiedDefinition,
@@ -253,8 +285,9 @@ export function openingChecks(
   entries: readonly Uint8Array[],
   boardEntryVersion: BoardEntryVersion,
   clock: AnchorClock,
+  rolling?: RollingBallotChain,
 ): { readonly row: OpeningOutcome; readonly report?: readonly OpeningReport[] } {
-  const judge = judgeFor(definition, registered, authorRegistered, admitted);
+  const judge = judgeFor(definition, registered, authorRegistered, admitted, rolling);
   if (typeof judge !== "function" || admitted === undefined)
     return { row: typeof judge === "function" ? NOT_REACHED : judge };
   const d = definition.value;
@@ -330,14 +363,17 @@ export function openingChecks(
   return { row: rowOf(report), report };
 }
 
-// A version-3 opening is compared with both halves of a version-4 core, and
-// only those: each comparison throws on the other version's (T-14, T-47).
-// Unreachable from a board: 6.2 runs only where the profile pins ballot
-// version 4 beside opening version 3, or another version beside both.
+// A version-3 opening is compared with both halves of a version-4 or
+// version-5 core, and only those: each comparison throws on the other
+// version's (T-14, T-47). Unreachable from a board: 6.2 runs only where the
+// profile pins ballot version 4 or 5 beside opening version 3, or another
+// version beside both.
 function opens(opened: OpenedCommitments | OpenedCommitmentsV3, core: AdmittedCore["core"]) {
   if (!("hasHalf" in opened)) return opensBallotCommitment(opened, core);
   if (!("authorVss" in core))
-    throw new TypeError("opens: a version-3 opening is compared with version-4 cores only");
+    throw new TypeError(
+      "opens: a version-3 opening is compared with version-4 or version-5 cores only",
+    );
   return opensBallotCommitmentV4(opened, core);
 }
 

@@ -70,9 +70,9 @@ outcome = vc.outcome
 
 
 def ballot_core(payload):
-    """A version-4 ballot record's definition hash and both halves' VSS commitments, read at the record's fixed offsets (ballot-validity.md, Ballot record (version 4)): the header, the definition hash, the cell, ν, the L1 reference and the 256-byte proof come first, then the default half's `vss` and share hashes and the author half's `vss`."""
-    assert payload[:2] == BALLOT_TYPE.to_bytes(2, "big") and payload[2] == 4
-    r = vo.Reader(payload, 3 + 32 + 1 + 32 + 8 + 32 + 256)
+    """A version-4 or version-5 ballot record's definition hash and both halves' VSS commitments, read at the record's fixed offsets (ballot-validity.md, Ballot record (version 4) and (version 5)): the header, the definition hash, the cell, ν, the L1 reference and the 256-byte proof come first, under version 5 then the 4-byte step, then the default half's `vss` and share hashes and the author half's `vss`."""
+    assert payload[:2] == BALLOT_TYPE.to_bytes(2, "big") and payload[2] in (4, 5)
+    r = vo.Reader(payload, 3 + 32 + 1 + 32 + 8 + 32 + 256 + (4 if payload[2] == 5 else 0))
     vss = r.list(lambda: r.list(r.element))
     r.list(lambda: r.take(32))
     author_vss = r.list(lambda: r.list(r.element))
@@ -105,8 +105,8 @@ def decode_opening(b):
     return o
 
 
-def expected(d, e, keys, entries, clock):
-    """6.2 and the report's openings, computed here from challenge.md and verifier.md."""
+def expected(d, e, keys, entries, clock, core_of=so3.core_hash):
+    """6.2 and the report's openings, computed here from challenge.md and verifier.md; `core_of` is the core hash of the ballot version the profile pins."""
     floor = vo.floor_of(d["closes_at"], clock)
     envelopes = []
     for at, raw in enumerate(entries):
@@ -126,10 +126,10 @@ def expected(d, e, keys, entries, clock):
         if isinstance(o, str):
             report.append({"entry": at, "code": "decode", "decodeError": o, "breaks": early})
             continue
-        code = so3.core_hash(o)
+        code = core_of(o)
         repeat = [{"code": "opening-repeat", "of": seen[code]}] if code in seen else []
         seen.setdefault(code, at)
-        r = so3.check_opening(e, o, keys)
+        r = so3.check_opening(e, o, keys, core_of)
         if r[0] != "ok":
             row = {"entry": at, "code": r[0]}
             if r[1] is not None:

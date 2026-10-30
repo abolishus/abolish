@@ -746,6 +746,31 @@ export function panelContextOf(election: PanelBallotElection): {
   };
 }
 
+/**
+ * Internal: `panelContextOf` for opening version 3, which opens the cores of
+ * ballot versions 4 and 5 (docs/spec/challenge.md, Opening version 3): a
+ * context `panelBallotElection` or `rollingBallotElection` (or their `With`
+ * forms) made, with the ballot version it checks, whose core hash a passing
+ * opening's tracking code is, so one code never names cores of two ballot
+ * versions (T-42, T-47).
+ */
+export function halvesContextOf(election: PanelBallotElection | RollingBallotElection): {
+  readonly definitionHash: Uint8Array;
+  readonly ballotVersion: 4 | 5;
+  readonly keys: readonly RegisteredKeys[];
+  readonly authorKeys: readonly RegisteredKeys[] | undefined;
+} {
+  const made = MADE.get(election);
+  if (made === undefined || (made.version !== 4 && made.version !== 5))
+    throw new TypeError("expected a context made by panelBallotElection or rollingBallotElection");
+  return {
+    definitionHash: made.definitionHash,
+    ballotVersion: made.version,
+    keys: KEYS.get(election) as readonly RegisteredKeys[],
+    authorKeys: AUTHOR_KEYS.get(election),
+  };
+}
+
 /** The root and scope a ballot proves against, and the tier its message and re-vote rule use. */
 interface Target {
   readonly tier: number;

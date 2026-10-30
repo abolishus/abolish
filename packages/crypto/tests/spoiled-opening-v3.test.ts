@@ -17,6 +17,7 @@ import {
   checkChallengeOpeningV2,
   checkChallengeOpeningV3,
   coreHashV4,
+  coreHashV5,
   DecodeError,
   decodeElectionDefinitionV6,
   decodeOpening,
@@ -564,6 +565,26 @@ describe("opening version 3", () => {
     expect(() =>
       checkChallengeOpeningV3With({ ...author.election }, author.authorKeys, record),
     ).toThrow(/panelBallotElection/);
+  });
+
+  test("its tracking code is the core hash of the ballot version the election pins, 4 or 5", () => {
+    // One code never names cores of two ballot versions (docs/spec/
+    // challenge.md, Opening version 3, Core and tracking code; T-42, T-47).
+    const record = decodeOpening(honest, 3);
+    const core = {
+      definitionHash: record.definition_hash,
+      cell: record.cell,
+      vss: record.vss,
+      shareHashes: record.share_hashes,
+      authorVss: record.author_vss,
+      authorShareHashes: record.author_share_hashes,
+    };
+    expect(openingV3CoreHash(record)).toEqual(coreHashV4(core));
+    expect(openingV3CoreHash(record, 4)).toEqual(coreHashV4(core));
+    expect(openingV3CoreHash(record, 5)).toEqual(coreHashV5(core));
+    expect(openingV3CoreHash(record, 5)).not.toEqual(openingV3CoreHash(record, 4));
+    for (const v of [2, 3, 6, 4.5])
+      expect(() => openingV3CoreHash(record, v as 4)).toThrow(/ballotVersion must be 4 or 5/);
   });
 
   test("a hand-built opening with a cell past the partition is opening-cell before its shape", () => {

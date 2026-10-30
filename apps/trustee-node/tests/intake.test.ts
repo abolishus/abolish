@@ -11,6 +11,8 @@ import {
   type FinalizedL1,
   L1_REF_MARGIN,
   membershipMessage,
+  openSealedAnswer,
+  sealDelivery,
   shareReceiptBatchStatement,
   verifyStatement,
   type ViewBallot,
@@ -28,6 +30,7 @@ import {
   ReceiptDuty,
   type ReceiptPath,
   type SeatStore,
+  seatKeys,
   serveIntake,
 } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
@@ -233,6 +236,50 @@ describe("the intake endpoint over a seat", () => {
       const refused = await deliver(honest.ciphertexts[1] as Uint8Array);
       expect(refused.status).toBe(422);
       expect(await refused.text()).toBe("share-hash");
+    } finally {
+      await endpoint.close();
+    }
+  });
+});
+
+describe("the sealed route over a seat", () => {
+  it("receipts a delivery sealed to the seat's registered key as the plain route does, and opens no other seat's", async () => {
+    const [seat] = seatsOf(s, { store: new MemoryStore() }).intake;
+    const endpoint = await serveIntake(seat!, {
+      host: "127.0.0.1",
+      port: 0,
+      queue: 4,
+      sealed: seatKeys(s.e.seats[0]!),
+    });
+    try {
+      const envelope = {
+        stub: s.e.stubBytes,
+        transcript: s.transcript,
+        record: honest.bytes,
+        ciphertext: honest.ciphertexts[0] as Uint8Array,
+      };
+      const kemKey = (i: number) => s.registered.find((k) => k.index === i)!.kemKey;
+      const send = (request: Uint8Array) =>
+        fetch(endpoint.sealedUrl!, {
+          method: "POST",
+          headers: { "content-type": "message/ohttp-req" },
+          body: Buffer.from(request),
+        });
+      const { request, sent } = sealDelivery(kemKey(1), envelope);
+      const res = await send(request);
+      expect(res.status).toBe(200);
+      const answer = openSealedAnswer(sent, new Uint8Array(await res.arrayBuffer()));
+      if (!answer.ok || answer.answer.outcome !== "receipt") expect.fail("no receipt");
+      const direct = await seat!.intake(
+        envelope.stub,
+        envelope.transcript,
+        envelope.record,
+        envelope.ciphertext,
+      );
+      if (!direct.ok) expect.fail(direct.code);
+      expect(hex(answer.answer.receipt)).toBe(hex(direct.receipt));
+      // Sealed to seat 2's key: seat 1's node holds no secret for it.
+      expect((await send(sealDelivery(kemKey(2), envelope).request)).status).toBe(400);
     } finally {
       await endpoint.close();
     }

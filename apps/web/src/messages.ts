@@ -1178,7 +1178,10 @@ const enUS = {
     "Your profile lists this poll, and its page says your profile asked it, while the poll is listed. Untick it at any time.",
   profileChoiceHelpUnsaved:
     "Saving the draft puts it on your profile. Your profile lists it, and its page says your profile asked it, once the poll is open and listed.",
+  profileChoiceHelpUnopened:
+    "Your profile lists this poll, and its page says your profile asked it, once the poll is open and listed. Untick it at any time.",
   profileChoiceShown: "Your profile shows this poll.",
+  profileChoiceShownOnceOpen: "Your profile will show this poll once it opens.",
   profileChoiceUnshown: "Your profile doesn't show this poll.",
   profileChoiceNone:
     "Your polls don't say who asked them. To put a name beside them, make a public profile.",

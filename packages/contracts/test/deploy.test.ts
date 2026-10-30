@@ -917,6 +917,30 @@ describe("the staging deployment on a local Anvil pair", () => {
       );
     });
 
+    test("refuses a build whose creation code isn't what the transaction ran", async () => {
+      // The group registry's creation code with its first byte changed, its
+      // runtime code untouched: storage a constructor wrote is in no view.
+      const dir = mkdtempSync(`${tmpdir()}/confirm-`);
+      try {
+        for (const name of Object.keys(l2Record.contracts)) {
+          mkdirSync(`${dir}/${name}.sol`);
+          const artifact = JSON.parse(readFileSync(`${OUT}/${name}.sol/${name}.json`, "utf8")) as {
+            bytecode: { object: string };
+          };
+          if (name === "GroupRegistry") {
+            const o = artifact.bytecode.object;
+            artifact.bytecode.object = `0x${o.slice(2, 4) === "00" ? "01" : "00"}${o.slice(4)}`;
+          }
+          writeFileSync(`${dir}/${name}.sol/${name}.json`, JSON.stringify(artifact));
+        }
+        expect(
+          await refusal(confirm(l2Record, broadcast(31338, "runL2"), httpRpc(l2.url), dir)),
+        ).toBe("GroupRegistry: creation code isn't the build's");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
     test("refuses a build with an immutable nothing reads back", async () => {
       // The board's artifact claiming a fifth immutable, at the first's place.
       const dir = mkdtempSync(`${tmpdir()}/confirm-`);

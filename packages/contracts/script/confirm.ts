@@ -91,6 +91,7 @@ const same = (a: string | null | undefined, b: string) =>
   typeof a === "string" && a.toLowerCase() === b.toLowerCase();
 
 interface Artifact {
+  readonly bytecode: { readonly object: string };
   readonly deployedBytecode: {
     readonly object: string;
     readonly immutableReferences?: { readonly [id: string]: { start: number; length: number }[] };
@@ -123,7 +124,9 @@ const selector = (signature: string) =>
  * A view the record says what it must return: `want` is the whole return
  * data, or a test of it. `immutables` is how many of the contract's
  * immutables the view reads back, so that every immutable the build has is
- * read by one (a storage pin, or another contract's, reads none).
+ * read by one (a storage pin, or another contract's, reads none). The count
+ * is declared by hand: an added immutable fails it, but a miscounted view
+ * isn't caught, since the artifacts carry no names for the references.
  */
 interface Read {
   readonly getter: string;
@@ -187,8 +190,8 @@ const safe = (pins: ReturnType<typeof pinsOf>, path: string): Read[] => [
  * What each contract's views must return, from the record's pins and the
  * other recorded addresses (T-64, T-34). The code comparison lets any
  * immutable through, and a constructor's storage writes aren't in the code
- * at all, so a contract built from other creation code with the release's
- * runtime code would otherwise pass. A contract not listed has no immutables.
+ * at all; with the creation code checked as the build's, these are the
+ * constructor's arguments read back. A contract not listed has no immutables.
  */
 function reads(record: DeploymentRecord, chainId: bigint): { [name: string]: Read[] } {
   const pins = pinsOf(record);
@@ -279,9 +282,10 @@ function reads(record: DeploymentRecord, chainId: bigint): { [name: string]: Rea
       { getter: "registrars()", want: addresses(pins.list("registrars.addresses")) },
       { getter: "trusteeRegistry()", want: address("TrusteeRegistry"), immutables: 1 },
       { getter: "initialPanelId()", want: pins.hex("launchPanel.id", 32), immutables: 1 },
-      // The cached separator and the chain it was cached for: on this chain
-      // the view returns the cached one, which must be this chain's and
-      // this address's.
+      // The cached separator and the chain it was cached for. On this chain
+      // the view returns the cached separator, which must be this chain's
+      // and this address's; a cached chain ID other than this chain's isn't
+      // seen, but then the view and every digest recompute the right one.
       { getter: "domainSeparator()", want: `0x${domain}`, immutables: 2 },
     ];
   }
@@ -390,10 +394,12 @@ export async function confirm(
   for (const [name, c] of Object.entries(record.contracts)) {
     const creator = creators.get(name);
     if (creator === undefined) throw new ConfirmError(name, "no transaction in the broadcast");
-    const tx = await rpc<{ from: string; to: string | null; nonce: string } | null>(
-      "eth_getTransactionByHash",
-      [creator.hash],
-    );
+    const tx = await rpc<{
+      from: string;
+      to: string | null;
+      nonce: string;
+      input: string;
+    } | null>("eth_getTransactionByHash", [creator.hash]);
     const receipt = await rpc<{
       status: string;
       blockNumber: string;
@@ -417,6 +423,18 @@ export async function confirm(
     if (`0x${bytesToHex(keccak_256(code))}` !== c.codehash.toLowerCase())
       throw new ConfirmError(name, "code doesn't hash to the record's codehash");
     const artifact = artifactOf(artifacts, name);
+    // The creating transaction runs the build's creation code, its constructor
+    // arguments after it. Runtime code alone can't show what a constructor
+    // wrote to storage (a panel no view lists, a group, a seeded entry); the
+    // build's constructor writes only what its arguments say, and the reads
+    // below check those. A contract another's constructor created is bound
+    // by its creator's creation code.
+    if (
+      creator.created !== null &&
+      same(c.address, creator.created) &&
+      !tx.input.toLowerCase().startsWith(artifact.bytecode.object.toLowerCase())
+    )
+      throw new ConfirmError(name, "creation code isn't the build's");
     if (!equal(code, expected(artifact, code)))
       throw new ConfirmError(name, "code isn't the build's beyond its immutables");
     const built = Object.keys(artifact.deployedBytecode.immutableReferences ?? {}).length;

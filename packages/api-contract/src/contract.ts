@@ -286,7 +286,14 @@ const getAnswered = oc
             answered: U64,
           }),
         )
-        .check(z.maxLength(MAX_TIERS)),
+        .check(
+          z.maxLength(MAX_TIERS),
+          // One entry a tier, ascending, so a caller never has two counts for one tier to choose from.
+          z.refine(
+            (tiers) => tiers.every((t, i) => i === 0 || t.tier > tiers[i - 1]!.tier),
+            "tiers must be strictly ascending",
+          ),
+        ),
     }),
   );
 

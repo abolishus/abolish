@@ -1761,7 +1761,7 @@ describe("stream", () => {
     // Each tier the definition names on its own line, one with none served
     // at 0; the API's count for a tier it doesn't name is left out (T-01).
     expect(text(v5)).toMatch(
-      /Answered so far\|+1,204 people\|+Tier 0 \(verified e-mail\)\|+0 people\|+Tier 2 \(document-verified\)\|/,
+      /Answered so far\|+1,204 people[|\s]+·[|\s]+Tier 0 \(verified e-mail\)\|+0 people[|\s]+·[|\s]+Tier 2 \(document-verified\)\|/,
     );
     expect(text(v5)).not.toContain("Tier 1");
     expect(text(v5)).not.toMatch(/\b7 people/);

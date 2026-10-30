@@ -232,12 +232,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
     within(counts[0]!)
       .getAllByRole("listitem")
       .map((li) => li.textContent),
-  ).toEqual(["1,204 peopleTier 0 (verified e-mail)"]);
+  ).toEqual(["1,204 people · Tier 0 (verified e-mail)"]);
   await expect(
     within(counts[1]!)
       .getAllByRole("listitem")
       .map((li) => li.textContent),
-  ).toEqual(["38 peopleTier 0 (verified e-mail)", "1 personTier 2 (document-verified)"]);
+  ).toEqual(["38 people · Tier 0 (verified e-mail)", "1 person · Tier 2 (document-verified)"]);
 };
 
 export const Default: Story = { play };

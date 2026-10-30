@@ -196,7 +196,8 @@ function Answered({
       <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
         {answered.map(({ tier, answered: count }) => (
           <li key={tier} className="flex flex-wrap gap-x-2">
-            <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>
+            <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>{" "}
+            <span aria-hidden="true">·</span>{" "}
             <span className="text-foreground/80">{t(tierMessage(tier, phoneVerification))}</span>
           </li>
         ))}

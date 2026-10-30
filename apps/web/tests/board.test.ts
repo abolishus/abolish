@@ -5,9 +5,17 @@ import { ORPCError } from "@orpc/client";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { activityBars, type AnchorRow, anchorRows, boardRows, oneHistory } from "../src/board.ts";
+import {
+  activityBars,
+  type AnchorRow,
+  anchorRows,
+  type BoardRow,
+  boardRows,
+  inTree,
+  oneHistory,
+} from "../src/board.ts";
 import type { Api } from "../src/server/api.ts";
-import { loadHistories } from "../src/server/load.ts";
+import { loadHistories, loadInclusion } from "../src/server/load.ts";
 import { fromHex, toHex } from "../src/values.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -41,9 +49,18 @@ interface ConsistencyVector {
   size2: string;
   path: string[];
 }
+interface InclusionVector {
+  index: string;
+  size: string;
+  path: string[];
+}
 interface RejectedVector {
   id: string;
   kind: string;
+  index?: string;
+  size?: string;
+  leaf?: string;
+  root?: string;
   size1?: string;
   size2?: string;
   root1?: string;
@@ -55,7 +72,13 @@ const file = JSON.parse(
 ) as {
   entries: EntryVector[];
   boards: BoardVector[];
-  tree: { roots: string[]; consistency: ConsistencyVector[]; rejected: RejectedVector[] };
+  tree: {
+    leaves: string[];
+    roots: string[];
+    inclusion: InclusionVector[];
+    consistency: ConsistencyVector[];
+    rejected: RejectedVector[];
+  };
 };
 const decodable = file.entries.filter((v) => v.value !== undefined);
 const undecodable = file.entries.filter((v) => v.value === undefined);
@@ -479,5 +502,141 @@ describe("loadHistories", () => {
     } as unknown as Api;
     const head = { treeSize: "13", chainHead: "00".repeat(32), root: tree(13).root };
     await expect(loadHistories(failing, ELECTION, head, anchors(10))).rejects.toThrow("down");
+  });
+});
+
+describe("inTree", () => {
+  const { leaves, roots, inclusion, rejected } = file.tree;
+  // `leaves` are entry hashes; only a row's position and hash matter here.
+  const row = (index: string, hash = leaves[Number(index)]!): BoardRow => ({
+    index,
+    segment: 0,
+    kind: "ballot",
+    hash,
+  });
+  const tree = (size: string) => ({ size, root: roots[Number(size) - 1]! });
+
+  test("holds for every published inclusion proof", () => {
+    expect(inclusion.length).toBeGreaterThan(50);
+    for (const v of inclusion) expect(inTree(row(v.index), tree(v.size), v.path)).toBe(true);
+  });
+
+  test("fails every published rejected inclusion proof", () => {
+    const refused = rejected.filter((v) => v.kind === "inclusion");
+    expect(refused.length).toBeGreaterThan(3);
+    for (const v of refused)
+      expect(inTree(row(v.index!, v.leaf!), { size: v.size!, root: v.root! }, v.path), v.id).toBe(
+        false,
+      );
+  });
+
+  test("fails another entry's hash, another tree, or a malformed claim", () => {
+    const v = inclusion.find((c) => c.index === "3" && c.size === "7")!;
+    expect(inTree(row("3", leaves[4]), tree("7"), v.path)).toBe(false);
+    expect(inTree(row("4"), tree("7"), v.path)).toBe(false);
+    expect(inTree(row("3"), tree("8"), v.path)).toBe(false);
+    expect(inTree(row("3"), { size: "7", root: "zz" }, v.path)).toBe(false);
+    expect(inTree(row("3"), tree("7"), [...v.path.slice(1), "0g".repeat(32)])).toBe(false);
+    expect(inTree(row("7"), tree("7"), v.path)).toBe(false);
+  });
+
+  test("fails a proof with any byte of the entry hash, the root or a hash changed", () => {
+    const proper = inclusion.filter((c) => c.path.length > 0);
+    fc.assert(
+      fc.property(
+        fc.constantFrom(...proper),
+        fc.nat(),
+        fc.integer({ min: 0, max: 255 }),
+        fc.integer({ min: 1, max: 255 }),
+        (v, which, at, flip) => {
+          const parts = [leaves[Number(v.index)]!, tree(v.size).root, ...v.path];
+          const i = which % parts.length;
+          const bytes = fromHex(parts[i]!);
+          bytes[at % 32]! ^= flip;
+          parts[i] = toHex(bytes);
+          const [hash, root, ...path] = parts;
+          expect(inTree(row(v.index, hash), { size: v.size, root: root! }, path)).toBe(false);
+        },
+      ),
+      runs,
+    );
+  });
+});
+
+describe("loadInclusion", () => {
+  const { leaves, roots, inclusion } = file.tree;
+  const ELECTION = "ab".repeat(32);
+  const rows = (from: number, to: number): BoardRow[] =>
+    leaves
+      .slice(from, to)
+      .map((hash, i) => ({ index: String(from + i), segment: 0, kind: "ballot", hash }));
+  const head = (size: number) => ({
+    treeSize: String(size),
+    chainHead: "00".repeat(32),
+    root: roots[size - 1]!,
+  });
+  // The vectors' tree as a server holding `held` entries serves its proofs,
+  // with the path for `forged` (if any) changed.
+  const api = (held: number, asked: [string, string][], forged?: string) =>
+    ({
+      board: {
+        getInclusionProof: ({ electionId, index, treeSize }: Record<string, string>) => {
+          expect(electionId).toBe(ELECTION);
+          asked.push([index!, treeSize!]);
+          if (Number(treeSize) > held)
+            return Promise.reject(new ORPCError("OUT_OF_RANGE", { defined: true }));
+          const found = inclusion.find((c) => c.index === index && c.size === treeSize)!;
+          return Promise.resolve({
+            path: index === forged ? [...found.path].reverse() : found.path,
+          });
+        },
+      },
+    }) as unknown as Api;
+
+  test("asks for one proof per row the head counts, and none for the rest", async () => {
+    const asked: [string, string][] = [];
+    expect(await loadInclusion(api(13, asked), ELECTION, head(9), rows(5, 13))).toEqual({
+      checked: 4,
+      outside: undefined,
+    });
+    expect(asked.toSorted(([a], [b]) => Number(a) - Number(b))).toEqual([
+      ["5", "9"],
+      ["6", "9"],
+      ["7", "9"],
+      ["8", "9"],
+    ]);
+  });
+
+  test("names the first row whose proof fails, or that the server refuses", async () => {
+    const asked: [string, string][] = [];
+    expect(await loadInclusion(api(13, asked, "6"), ELECTION, head(13), rows(4, 9))).toEqual({
+      checked: 5,
+      outside: "6",
+    });
+    // The server holds 12 entries but claims a head of 13: it can't prove any.
+    expect(await loadInclusion(api(12, asked), ELECTION, head(13), rows(10, 13))).toEqual({
+      checked: 3,
+      outside: "10",
+    });
+  });
+
+  test("asks for nothing with no row in the head's tree", async () => {
+    const asked: [string, string][] = [];
+    expect(await loadInclusion(api(13, asked), ELECTION, head(5), rows(5, 9))).toEqual({
+      checked: 0,
+      outside: undefined,
+    });
+    expect(await loadInclusion(api(13, asked), ELECTION, head(5), [])).toEqual({
+      checked: 0,
+      outside: undefined,
+    });
+    expect(asked).toEqual([]);
+  });
+
+  test("passes on a failure other than out of range", async () => {
+    const failing = {
+      board: { getInclusionProof: () => Promise.reject(new Error("down")) },
+    } as unknown as Api;
+    await expect(loadInclusion(failing, ELECTION, head(13), rows(0, 2))).rejects.toThrow("down");
   });
 });

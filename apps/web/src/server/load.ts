@@ -9,6 +9,7 @@ import {
   anchorRows,
   type BoardRow,
   boardRows,
+  inTree,
   oneHistory,
   type TreeClaim,
 } from "../board.ts";
@@ -369,6 +370,17 @@ export interface Histories {
   readonly anchors: readonly boolean[];
 }
 
+/**
+ * Whether the entries the board page shows are in the head's tree, each by
+ * our server's inclusion proof checked here (src/board.ts, `inTree`).
+ */
+export interface Inclusion {
+  /** How many of the page's entries the head's tree counts: each one was checked. */
+  readonly checked: number;
+  /** The first of them whose proof failed, as a canonical decimal `u64`; `undefined` if none did. */
+  readonly outside: string | undefined;
+}
+
 export type BoardPage =
   | {
       readonly kind: "board";
@@ -378,6 +390,7 @@ export type BoardPage =
       readonly from: string;
       /** The entries from `from`, checked; empty at the end of the board. */
       readonly rows: readonly BoardRow[];
+      readonly inclusion: Inclusion;
       readonly anchors: Anchors;
       /** `undefined` with `anchors`. */
       readonly histories: Histories | undefined;
@@ -461,6 +474,41 @@ export async function loadHistories(
 }
 
 /**
+ * Whether `rows`, a page of the board the page shows, are in `head`'s tree:
+ * one proof for each row the head counts, all asked for at once. Rows past
+ * its size were appended after the head was read, and aren't asked about.
+ * The proofs name every entry of the page, whichever one a visitor came
+ * for, so they tell our server only the page, as reading it did (T-10). A
+ * server that refuses one as out of range claims a tree larger than its
+ * board, so that entry fails.
+ */
+export async function loadInclusion(
+  api: Api,
+  electionId: string,
+  head: BoardHead,
+  rows: readonly BoardRow[],
+): Promise<Inclusion> {
+  const tree = { size: head.treeSize, root: head.root };
+  const counted = rows.filter((row) => BigInt(row.index) < BigInt(tree.size));
+  const proven = await Promise.all(
+    counted.map(async (row) => {
+      try {
+        const { path } = await api.board.getInclusionProof({
+          electionId,
+          index: row.index,
+          treeSize: tree.size,
+        });
+        return inTree(row, tree, path);
+      } catch (error) {
+        if (outOfRange(error)) return false;
+        throw error;
+      }
+    }),
+  );
+  return { checked: counted.length, outside: counted.find((_, i) => !proven[i])?.index };
+}
+
+/**
  * A page of the board of `electionId` from position `from` (a canonical
  * decimal `u64` and a multiple of `BOARD_PAGE`), which the caller has checked. The definition is decoded and
  * checked as on the poll page; the head is the server's claim, shown as one.
@@ -516,14 +564,19 @@ export async function loadBoardPage(
       ? undefined
       : boardRows(electionId, view.boardEntryVersion, BigInt(from), entries);
   if (rows === undefined) return { kind: "unavailable", problem: "undecodable-entries" };
+  const [inclusion, checked] = await Promise.all([
+    loadInclusion(api, electionId, head, rows),
+    histories(),
+  ]);
   return {
     kind: "board",
     poll: view.poll,
     head,
     from,
     rows,
+    inclusion,
     anchors,
-    histories: await histories(),
+    histories: checked,
   };
 }
 

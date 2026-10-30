@@ -61,6 +61,7 @@ export const Route = createFileRoute("/polls/$electionId_/board")({
           from={page.from}
           rows={page.kind === "board" ? page.rows : undefined}
           kind={kind}
+          inclusion={page.kind === "board" ? page.inclusion : undefined}
           pageSize={BOARD_PAGE}
           anchors={page.anchors}
           histories={page.histories}

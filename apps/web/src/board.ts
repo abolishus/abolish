@@ -17,6 +17,7 @@ import {
   decodeCheckpoint,
   RECORD_TYPES,
   verifyConsistency,
+  verifyInclusion,
 } from "@abolishus/crypto";
 
 import type { EntryKind } from "./entry-kinds.ts";
@@ -195,6 +196,31 @@ export function oneHistory(earlier: TreeClaim, later: TreeClaim, path: readonly 
       fromHex(earlier.root),
       fromHex(later.root),
       path.map(fromHex),
+    );
+  } catch (error) {
+    if (error instanceof RangeError || error instanceof SyntaxError) return false;
+    throw error;
+  }
+}
+
+/**
+ * Whether `row` (checked by `boardRows`, so its hash is this page's own) is
+ * in `tree`, by `path`, the server's inclusion proof of the row's position
+ * in it (docs/spec/board.md, Inclusion proofs), checked with
+ * @abolishus/crypto. An entry the page shows that fails this isn't on the
+ * board the server's root commits to, which no honest server can serve
+ * (T-23, T-24). A malformed claim or path fails too, as does a row at or past
+ * the tree's size.
+ */
+export function inTree(row: BoardRow, tree: TreeClaim, path: readonly string[]): boolean {
+  try {
+    return verifyInclusion(
+      BOARD_TREE,
+      BigInt(row.index),
+      BigInt(tree.size),
+      fromHex(row.hash),
+      path.map(fromHex),
+      fromHex(tree.root),
     );
   } catch (error) {
     if (error instanceof RangeError || error instanceof SyntaxError) return false;

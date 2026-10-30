@@ -27,7 +27,7 @@ import {
 import { ENTRY_KINDS } from "../entry-kinds.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
-import type { BoardHead, Histories } from "../server/load.ts";
+import type { BoardHead, Histories, Inclusion } from "../server/load.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { FilterGroup } from "./poll-register.tsx";
 
@@ -40,6 +40,8 @@ export interface PollBoardProps {
   rows: readonly BoardRow[] | undefined;
   /** The kind of entry the page shows, or every kind with `"all"` or `undefined`. */
   kind: EntryKind | "all" | undefined;
+  /** Whether `rows` are in the head's tree; `undefined` with `rows`. */
+  inclusion: Inclusion | undefined;
   /** Entries per page: every page starts at a multiple of it. */
   pageSize: number;
   /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
@@ -71,7 +73,9 @@ const KIND_TEXT = {
  * and a page of entries this page decoded and hashed itself (src/board.ts).
  * Every link is a plain one to another page of the same route, so reading the
  * board needs no script. It never looks up an entry by number: asking our
- * server for your own would tell it which entry is yours (T-10). The kind
+ * server for your own would tell it which entry is yours (T-10). Each entry
+ * the head counts is checked to be in its tree, every one of the page alike,
+ * so those proofs say no more than the page did (src/server/load.ts). The kind
  * filter works on the page in hand, as the register's filters do, so the
  * server is asked for the same 25 entries whatever a visitor filters by.
  */
@@ -81,6 +85,7 @@ export function PollBoard({
   from,
   rows,
   kind,
+  inclusion,
   pageSize,
   anchors,
   histories,
@@ -249,6 +254,13 @@ export function PollBoard({
                 />
               </div>
             )}
+            {inclusion === undefined || inclusion.checked === 0 ? null : (
+              <History ok={inclusion.outside === undefined}>
+                {inclusion.outside === undefined
+                  ? t("boardInTree", { count: BigInt(inclusion.checked) })
+                  : t("boardOutsideTree", { entry: BigInt(inclusion.outside) })}
+              </History>
+            )}
           </>
         )}
         {earlier === undefined && later === undefined && toLatest === undefined ? null : (
@@ -366,7 +378,7 @@ export function PollBoard({
 }
 
 /**
- * One consistency proof's verdict, in words with a mark beside them. A
+ * One verdict of the server's proofs, in words with a mark beside them. A
  * failed one is evidence and says so (T-24); the colour only repeats the words.
  */
 function History({ ok, children }: { ok: boolean; children: string }) {

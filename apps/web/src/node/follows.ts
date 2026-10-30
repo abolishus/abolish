@@ -1,7 +1,10 @@
 // Following a poll, under /follows on apps/web's origin ([[P2-25]] parts 4b
-// and 4c-2b): a signed-in account follows a poll or stops following it, and
+// and 4c-2b): a signed-in account follows a poll or stops following it,
 // reads and clears its own list of the polls it followed whose results are
-// in (packages/core's `followResults`, filled by src/node/landing.ts). The account
+// in (packages/core's `followResults`, filled by src/node/landing.ts), and
+// reads and sets whether that landing also reaches it by e-mail (P2-27 part
+// 3c-2b, core's `noticeChoices`): every optional notice is about a followed
+// poll, so its choice is here beside the follows it governs. The account
 // system lives here, so follows are here too, never on the API (T-10, ADR
 // 0017). This transport parses, asks core and serialises; the rules are
 // packages/core's (src/follows.ts).
@@ -26,7 +29,9 @@ import {
   FollowError,
   type FollowErrorCode,
   followResults,
+  noticeChoices,
   setFollow,
+  setNoticeChoices,
 } from "@abolishus/core";
 import type { Sql } from "postgres";
 import * as z from "zod";
@@ -38,6 +43,8 @@ export const FOLLOW_ROUTES = [
   "POST /follows/set",
   "POST /follows/results",
   "POST /follows/results/drop",
+  "POST /follows/notices",
+  "POST /follows/notices/set",
 ] as const;
 
 type Route = (typeof FOLLOW_ROUTES)[number];
@@ -61,6 +68,8 @@ const Inputs = {
   "POST /follows/set": z.strictObject({ electionId: ElectionId, on: z.boolean() }),
   "POST /follows/results": z.strictObject({}),
   "POST /follows/results/drop": z.strictObject({ electionId: ElectionId }),
+  "POST /follows/notices": z.strictObject({}),
+  "POST /follows/notices/set": z.strictObject({ results: z.boolean() }),
 } as const satisfies Record<Route, z.ZodType>;
 
 const answer = (status: number, body: object) =>
@@ -81,7 +90,9 @@ export const ERRORS: Record<FollowErrorCode, [number, string]> = {
  * whether it now follows it (`following`). `results` answers the account's
  * own polls with results (`polls`, election IDs in byte order), and
  * `results/drop` takes one off that list, answering whether it was on it
- * (`dropped`).
+ * (`dropped`). `notices` answers whether results reach the account by
+ * e-mail (`results`), and `notices/set` sets it, answering the choice now
+ * standing.
  */
 export function createFollowsHandler({
   sql,
@@ -138,6 +149,23 @@ export function createFollowsHandler({
         // Taking off one that isn't there leaves the list as asked, so it isn't refused.
         const dropped = await dropFollowResult(sql, account, fromHex(input.data.electionId));
         return answer(200, { dropped });
+      }
+      case "POST /follows/notices": {
+        if (!Inputs["POST /follows/notices"].safeParse(body).success)
+          return refuse(400, "BAD_REQUEST");
+        const account = await accountOf(request.headers);
+        if (account === undefined) return refuse(401, "SIGNED_OUT");
+        const { results } = await noticeChoices(sql, account);
+        return answer(200, { results });
+      }
+      case "POST /follows/notices/set": {
+        const input = Inputs["POST /follows/notices/set"].safeParse(body);
+        if (!input.success) return refuse(400, "BAD_REQUEST");
+        const account = await accountOf(request.headers);
+        if (account === undefined) return refuse(401, "SIGNED_OUT");
+        // T-52: no limit of its own beyond the session's; each change is one row's update.
+        await setNoticeChoices(sql, account, { results: input.data.results });
+        return answer(200, { results: input.data.results });
       }
     }
   };

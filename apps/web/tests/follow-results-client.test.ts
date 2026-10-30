@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 import {
   FollowResultsError,
   followResultsClient as client,
+  noticeChoicesClient,
 } from "../src/account/follow-results.ts";
 
 // The account page's list of polls with results (src/account/follow-results.ts),
@@ -138,5 +139,48 @@ describe("follow results client", () => {
     }
     fetchFollowedPolls.mockRejectedValueOnce(new Error("unavailable"));
     expect((await refused(followResultsClient.headings([A], "en"))).failure).toBe("failed");
+  });
+});
+
+describe("notice choices client", () => {
+  test("posts to our own origin with the session, and reads and sets the results choice", async () => {
+    const calls = serve(Response.json({ results: false }), Response.json({ results: true }));
+    expect(await noticeChoicesClient.results()).toBe(false);
+    await noticeChoicesClient.setResults(true);
+    expect(calls.map((c) => c.url)).toEqual(["/follows/notices", "/follows/notices/set"]);
+    for (const { init } of calls) {
+      expect(init.method).toBe("POST");
+      expect(init.credentials).toBe("same-origin");
+      expect(init.cache).toBe("no-store");
+      expect(init.redirect).toBe("error");
+      expect(init.headers).toEqual({ "content-type": "application/json" });
+    }
+    expect(JSON.parse(calls[0]!.init.body as string)).toEqual({});
+    expect(JSON.parse(calls[1]!.init.body as string)).toEqual({ results: true });
+  });
+
+  test("refuses an answer that isn't exactly the choice, or not the choice set", async () => {
+    for (const answer of [{ results: "true" }, { results: true, more: 1 }, {}, [true], null]) {
+      serve(Response.json(answer));
+      expect((await refused(noticeChoicesClient.results())).failure).toBe("failed");
+    }
+    await fc.assert(
+      fc.asyncProperty(fc.boolean(), async (on) => {
+        serve(Response.json({ results: !on }));
+        expect((await refused(noticeChoicesClient.setResults(on))).failure).toBe("failed");
+      }),
+      runs,
+    );
+  });
+
+  test("a signed-out refusal is signedOut, and any other refusal or failure is failed", async () => {
+    serve(refusal(401, "SIGNED_OUT"));
+    expect((await refused(noticeChoicesClient.results())).failure).toBe("signedOut");
+    serve(refusal(401, "SIGNED_OUT"));
+    expect((await refused(noticeChoicesClient.setResults(false))).failure).toBe("signedOut");
+    serve(refusal(400, "BAD_REQUEST"));
+    expect((await refused(noticeChoicesClient.setResults(false))).failure).toBe("failed");
+    serve();
+    expect((await refused(noticeChoicesClient.results())).failure).toBe("failed");
   });
 });

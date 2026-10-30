@@ -1070,7 +1070,12 @@ export const esUS: Messages = {
   noticesModerationHelp:
     "Siempre se envía, para que puedas apelar. No se puede desactivar. Llega en el idioma en que verificaste tu dirección.",
   noticesWhen:
-    "Llega el día después de la decisión y solo dice que hubo una. Qué se decidió, y por qué, está aquí, en esta página, y en el registro público de moderación: lo dejamos fuera del correo para que el servicio que lo entrega sepa lo menos posible.",
+    "Cada uno llega al día siguiente, como mucho un correo al día, y solo dice que hay una decisión o resultados que ver. Qué se decidió, y por qué, está aquí, en esta página, y en el registro público de moderación, y qué encuesta tiene sus resultados está en tu lista de abajo: dejamos ambas cosas fuera del correo para que el servicio que lo entrega sepa lo menos posible.",
+  noticesResults: "Resultados de una encuesta que sigues",
+  noticesResultsHelp:
+    "Activado a menos que lo desactives. Desactivado, la encuesta igual pasa a tu lista de abajo cuando tiene sus resultados; solo se deja fuera el correo. Es lo mismo en todos los dispositivos en que inicias sesión.",
+  noticesResultsOn: "Te enviaremos un correo cuando una encuesta que sigues tenga sus resultados.",
+  noticesResultsOff: "No te enviaremos correos sobre resultados.",
   pushLabel: "Avisar también a este navegador",
   pushHelp:
     "Una notificación en este dispositivo cuando sale el correo, que dice solo que hay algo que ver aquí. La entrega la empresa que hace tu navegador, así que sabe que usas Abolish y el día en que se envió.",
@@ -1093,7 +1098,7 @@ export const esUS: Messages = {
   followResultsMark: "Encuestas que sigues",
   followResultsTitle: "Resultados de encuestas que seguiste",
   followResultsLede:
-    "Cuando una encuesta que sigues tiene sus resultados, pasa aquí, y te avisamos por correo sin nombrarla. Solo tú puedes ver esta lista.",
+    "Cuando una encuesta que sigues tiene sus resultados, pasa aquí, y, a menos que lo hayas desactivado arriba, te avisamos por correo sin nombrarla. Solo tú puedes ver esta lista.",
   followResultsEmpty:
     "Todavía no hay nada aquí. Cuando una encuesta que sigues tenga sus resultados, la encontrarás aquí.",
   followResultsNoWords: "Una encuesta cuyas palabras no se pueden mostrar",

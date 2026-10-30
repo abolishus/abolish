@@ -152,6 +152,7 @@ const meta = {
     push: { state: async () => "off", enable: async () => {}, disable: async () => {} },
     // None yet: the list's own stories are in account-follow-results.stories.tsx.
     followResults: { list: async () => [], drop: async () => {}, headings: async () => [] },
+    noticeChoices: { results: async () => true, setResults: async () => {} },
     phone: true,
   },
 } satisfies Meta<typeof AccountPanel>;

@@ -8,7 +8,9 @@
 // (src/account/client.ts); the server functions never get it, so the
 // server that reads the polls' words never learns whose list they are on
 // (T-10). Following is not answering: nothing here knows whether this
-// browser answered any of them (T-10, T-11).
+// browser answered any of them (T-10, T-11). The same handler reads and
+// sets whether results also reach the account by e-mail (P2-27 part 3c-2b,
+// `noticeChoicesClient`).
 
 import { isElectionId } from "../values.ts";
 
@@ -126,3 +128,27 @@ export const followResultsClient = (read: ReadFollowedPolls): FollowResultsClien
     return polls;
   },
 });
+
+/** Whether results of followed polls reach the account by e-mail, read and set by the account page. */
+export interface NoticeChoicesClient {
+  /** Whether they do: on until the account turns them off. */
+  results(): Promise<boolean>;
+  /** Turns them on or off. */
+  setResults(on: boolean): Promise<void>;
+}
+
+const choice = (value: unknown): boolean => {
+  const results = exactly(value, "results");
+  if (typeof results !== "boolean") throw new FollowResultsError("failed");
+  return results;
+};
+
+/** The client for this origin's follows handler's notice choice. */
+export const noticeChoicesClient: NoticeChoicesClient = {
+  results: async () => choice(await call("/follows/notices", {})),
+  setResults: async (on) => {
+    // The handler answers the choice now standing: anything else isn't its answer.
+    if (choice(await call("/follows/notices/set", { results: on })) !== on)
+      throw new FollowResultsError("failed");
+  },
+};

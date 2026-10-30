@@ -2217,13 +2217,13 @@ const KB = 1024;
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 175, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 172, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 173, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 171, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 198, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 199, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 172, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },

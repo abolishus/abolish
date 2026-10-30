@@ -729,7 +729,7 @@ const PROFILE = {
 };
 
 const choice = (row: ReturnType<typeof within>) =>
-  row.getByRole("checkbox", { name: "Show on your profile, Harbor Street Neighbors" });
+  row.getByRole("checkbox", { name: "Show on your profile" });
 
 /** Each poll's own choice of whether the profile shows it (P2-27 part 1d-3). */
 export const ChooseWhatTheProfileShows: Story = {
@@ -762,7 +762,8 @@ export const ChooseWhatTheProfileShows: Story = {
 
 /**
  * What a box does is said once, above the list, not under each of seven
- * polls (P2-29, the author's list's iteration 11), and describes every box.
+ * polls (P2-29, the author's list's iteration 11), and describes every box;
+ * it names the profile once, so no box's label repeats it (iteration 12).
  * A poll that hasn't opened isn't on the public profile yet, so its tick
  * answers when it will be (iteration 10); one that failed for good answers
  * as an open poll does: its election is on the record.
@@ -775,10 +776,22 @@ export const ChoiceBeforeAPollOpens: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getAllByRole("checkbox")).toHaveLength(EVERY.length));
-    const help = canvas.getByText(/^Ticking “Show on your profile” under a poll/);
+    // The note's text runs through the name's own element.
+    const help = canvas.getByText(
+      (_, e) =>
+        e?.tagName === "P" &&
+        e.textContent.startsWith(
+          "Your profile is Harbor Street Neighbors. Ticking “Show on your profile” under a poll",
+        ),
+    );
     await expect(help).toHaveTextContent(
       /while the poll is listed\. A poll that hasn't opened yet is listed once it opens\./,
     );
+    // The profile's name is drawn once, in the note, isolated as any name is (T-75).
+    const names = canvas.getAllByText("Harbor Street Neighbors");
+    await expect(names).toHaveLength(1);
+    await expect(names[0]!.tagName).toBe("BDI");
+    await expect(help).toContainElement(names[0]!);
     await expect(canvas.queryAllByText(/^Your profile lists this poll/)).toHaveLength(0);
     // Said above the list, before the first box.
     const list = canvas.getByRole("list");

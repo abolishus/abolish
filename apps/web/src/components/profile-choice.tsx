@@ -22,7 +22,7 @@ export interface ProfileChoiceProps {
   readonly onWant?: (on: boolean) => void;
   /** A saved poll that hasn't opened yet, and may yet: the profile shows it only once it opens. */
   readonly unopened?: boolean;
-  /** Help said once for a list of boxes, which describes this one; none to draw the box's own. */
+  /** Help said once for a list of boxes, naming the profile, which describes this one; none to draw the box's own, and name the profile in its label. */
   readonly helpId?: string;
   /** The element naming the poll, so each row's box says which poll it is. */
   readonly describedBy?: string;
@@ -105,9 +105,14 @@ export function ProfileChoice({
           aria-describedby={describedBy === undefined ? help : `${describedBy} ${help}`}
           onCheckedChange={(on) => void choose(on)}
         />
-        <span>
-          {t("profileChoiceLabel")} <bdi className="font-semibold">{profile.name}</bdi>
-        </span>
+        {/* In a list, the help said once names the profile, so seven boxes don't repeat it. */}
+        {helpId === undefined ? (
+          <span>
+            {t("profileChoiceLabel")} <bdi className="font-semibold">{profile.name}</bdi>
+          </span>
+        ) : (
+          t("profileChoiceLabelInList")
+        )}
       </Label>
       {helpId === undefined ? (
         <p id={help} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">

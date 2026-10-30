@@ -1210,6 +1210,7 @@ export const esUS: Messages = {
   profileFailure_moderationUnloaded:
     "No se pudo cargar la moderación de este perfil. Inténtalo de nuevo en un momento.",
   profileChoiceLabel: "Mostrar en tu perfil,",
+  profileChoiceLabelInList: "Mostrar en tu perfil",
   profileChoiceHelp:
     "Tu perfil lista esta encuesta, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Desmárcala cuando quieras.",
   profileChoiceHelpUnsaved:
@@ -1286,6 +1287,7 @@ export const esUS: Messages = {
   pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
   pollsDeleteConfirm: "Eliminar el borrador para siempre",
   pollsReload: "Volver a cargar tus encuestas",
+  pollsProfileIs: "Tu perfil es",
   pollsProfileHelp:
     "Al marcar “Mostrar en tu perfil” bajo una encuesta, tu perfil la lista, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Una encuesta que aún no se ha abierto se lista cuando se abra. Desmarca una casilla cuando quieras.",
   pollsRetry: "Intentar de nuevo",

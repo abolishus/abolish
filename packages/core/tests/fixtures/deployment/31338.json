@@ -1,0 +1,77 @@
+{
+  "target": "staging",
+  "chainId": 31338,
+  "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "deployerNonce": 0,
+  "commit": "0123456789abcdef0123456789abcdef01234567",
+  "contracts": {
+    "TrusteeRegistry": {
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "codehash": "0x09cca9ac919f3e6f9fd4b875f15fa6e3e3eaacfb1585f7fb49bde68c056b8954"
+    },
+    "GroupRegistry": {
+      "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "codehash": "0x31cd8dd7c985e72755119b965c2915b1cecffecfa32a6cf418d48f9ac7545fa0"
+    },
+    "ElectionRegistry": {
+      "address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+      "codehash": "0x6518352f0d48eebccce88aa088e395d22b6190d76d58729b4be78cacfe720ce7"
+    },
+    "Board": {
+      "address": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+      "codehash": "0x71b2936a169e1cd4f6351f000853481943468b8eb5472ac23b15174bf91f6677"
+    },
+    "BallotCheck": {
+      "address": "0xd8058efe0198ae9dD7D563e1b4938Dcbc86A1F81",
+      "codehash": "0xe2cb60366d269233a8178aecf205922bd8358036771b6c406b70f40e5dbe5597"
+    },
+    "RegistrationAccount": {
+      "address": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+      "codehash": "0xa25d7752dfce995a4c50cd4fd095563f75a6dcba4a33004ac2a4254494cd898f"
+    },
+    "RegistrationPaymaster": {
+      "address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+      "codehash": "0xdcb453b95c2c0e6548e8f1af56b587125df4aecfdb0aaa731d5ef665ddfa215b"
+    }
+  },
+  "pins": {
+    "l1ChainId": 31337,
+    "l1Anchor": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    "l1Relay": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "epoch": 1767225600,
+    "launchPanel": {
+      "id": "0xf632fc3f4fc2c82255bc35b6597e0816c1cd8df96ba838aba81d89818ea2658d",
+      "threshold": 4,
+      "size": 7,
+      "quorum": 6,
+      "kind": 2,
+      "keys": "0x03ea0528c2dcb5d51505e9e8cf7c754dc4a880ecf5b72aa3a3d5eec3f45b75cc0102998e276e3554cbc36f0b2e02e25357bd967ec96d84ab541a0413632bf733a7d10381393b0ed12c0156632a1e8f991cbc4051251b19727d3a544e569b403236dd2f03c3e80b81eba71c38e3e96e3028aac43ceb146e6d74ca6a1450c597d328e9bd17024204e93e7cc4da442582b12c74d312bb3dd92e11f68120945a6447b3f22eacee0243042a40148078d46e46114c5b835f85e5cb746c70e81327fe763af97f58aeb902a02c237d0f95d7503512dcb1b1b45cebdadb934086020e9f95c2c3573bcec1f9"
+    },
+    "registrars": {
+      "threshold": 2,
+      "addresses": [
+        "0x0000000000000000000000000000000000000011",
+        "0x0000000000000000000000000000000000000022"
+      ]
+    },
+    "registration": {
+      "entryPoint": "0x0000000000000000000000000000000000000e01",
+      "serviceOwner": "0x0000000000000000000000000000000000000e04",
+      "entryPointCodehash": "0x29269906bfa2eb635f7b873bc31bfcd3db1a9a5739437b0cdd4767bdcf6268bc",
+      "admin": {
+        "address": "0x0000000000000000000000000000000000000e02",
+        "minDelay": 172800,
+        "safe": {
+          "address": "0x0000000000000000000000000000000000000e05",
+          "owners": [
+            "0x00000000000000000000000000000000000005A1",
+            "0x00000000000000000000000000000000000005A2",
+            "0x00000000000000000000000000000000000005A3"
+          ],
+          "threshold": 2
+        }
+      },
+      "maxCost": "1152921504606846976"
+    }
+  }
+}

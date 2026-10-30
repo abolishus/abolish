@@ -41,6 +41,27 @@ A malformed scenario is a usage error naming the field (exit 2). A run whose cel
 | `tier0-keys period [--at <ISO time>]`                                       | The key period now, or at that time (ISO 8601 with `Z` or an offset): its number, when it starts and ends, and when its key stops redeeming (`redeemsUntil`).                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `tier0-keys generate --from <period> --count <1..16> --dir <dir> [--first]` | A fresh key for each of `count` periods from `period` (`generateTier0IssuerKey`), each written as its `TIER0_ISSUER_KEYS` entry to a new owner-only file `tier0-key-<period>.txt` in `dir`; each synced before it prints that period's times, `publicKey` and `keyId`, never the key; a failed write is `key-unwritable` after the lines of the periods already written. Refused, with nothing written: `period-started` (a period that has begun; `--first` allows the current one, for the first release only), `key-exists` (a file for one of the periods), `no-directory`. |
 
+## Deployment record
+
+[[deployment]] (record `0x0020`; P2-32 part 2a; T-34, T-37, T-71, T-64). Offline: it reads three files and no chain.
+
+`deployment record --l1 <file> --l2 <file> --inputs <file>` builds the deployment record (`buildDeploymentRecord` in `@abolishus/core`) from the deploy script's two chain files (`packages/contracts/deployments/<chain-id>.json`) and the owner's inputs, and prints `version`, `record` (its encoding in hex) and `deploymentHash` (hex). The chain files give every address, the anchor's clock and authority, the portal, the commit, the registrars and the launch panel (its kind, threshold and keys, checked against the identifier the trustee registry computed). They must be one deployment: the same target, commit and deployer, each naming the other's chain, board, anchor, relay and epoch, and each contract at its deployer's CREATE address for its place in the script's order. The inputs file is a JSON object with exactly these keys:
+
+| Key                                            | What it is                                                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `l2FromBlock`                                  | A block at or before the four L2 contracts' creation, as a decimal string                              |
+| `l2MaxSequencerDrift`                          | The L2's `max_sequencer_drift` in seconds (1,800 on Base)                                              |
+| `disputeGameTypes`                             | The dispute-game types counted as permissionless, the verifier release's pin                           |
+| `ours`                                         | One boolean per launch-panel seat, in seat order: whether we hold it                                   |
+| `groups`                                       | The published groups: `{ groupId` (decimal string), `tier` (0 or 1), `selfPaid`, `region }`            |
+| `api`, `l2Rpc`, `l1Rpc`                        | Each a list of origins                                                                                 |
+| `backupRpId`, `backups`, `accountRpId`         | The backup passkey's RP ID, whether the client offers a backup, and `apps/web`'s RP ID                 |
+| `membershipZkeySha256`, `membershipWasmSha256` | The membership prover's hashes, `0x` and 64 hex digits                                                 |
+| `tier0TokenKeys`                               | `{ period, key, retired }` from `tier0-keys generate`'s `publicKey`; empty for a version-1 record      |
+| `seatRelays`                                   | `{ key, relays: [{ origin, path }] }` per seat with a relay; empty for a version-1 or version-2 record |
+
+The version is the lowest that carries the inputs. Lists the spec orders are put in order; anything repeated still breaks its rule. Refused (exit 1): `unreadable` or `malformed` with the file (`source`: `l1`, `l2` or `inputs`) and the JSON `path` of the first bad value; `mismatch` with `what` the two chain files disagree on; `address` with the `contract` not at its CREATE address; `panel-id` (the launch panel's keys and threshold aren't its identifier's); `seats` (`ours` isn't one per seat); `ill-formed` with crypto's first broken rule as `failure`.
+
 ## Running
 
 From `apps/admin-cli`: `vp node src/main.ts moderation queue` with `DATABASE_URL` (a user granted `abolish_app`, never the owner). Only the moderation commands read it; a missing or malformed one is refused as `{ "error": "database-url" }` (exit 1).

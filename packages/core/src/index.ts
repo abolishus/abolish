@@ -823,3 +823,10 @@ export {
   openingTargets,
   type PollResults,
 } from "./tally-boarding.ts";
+export {
+  buildDeploymentRecord,
+  type BuiltDeploymentRecord,
+  type DeploymentRecordError,
+  DeploymentRecordRefused,
+  type DeploymentRecordSource,
+} from "./deployment-record.ts";

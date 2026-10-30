@@ -1222,9 +1222,11 @@ export const esUS: Messages = {
   pollsState_setup: "En preparación",
   pollsState_open: "Abierta",
   pollsState_failed: "No se abrió",
+  pollsState_closed: "Cerrada",
   pollsEdited: "Última edición: {when} UTC",
   pollsSubmitted: "Enviada el {when} UTC",
   pollsCloses: "Cierra el {when} UTC",
+  pollsClosed: "Cerró el {when} UTC",
   pollsSetupHelp:
     "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. Puedes salir de esta página, o seguir la preparación paso a paso.",
   pollsFollowSetup: "Seguir la preparación",

@@ -75,6 +75,8 @@ export {
   type RegistrationRelease,
 } from "./registration.ts";
 export {
+  archivedChain,
+  PINNED_REGISTRIES,
   rollingChain,
   type RollingChainOutcome,
   type RollingChainRelease,

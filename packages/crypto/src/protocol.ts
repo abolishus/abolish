@@ -540,8 +540,9 @@ export type ProfileCombinationRule = "profile-combination" | "unsupported-versio
  * version 7 ballot version 4 under `electorate_mode` 1 (fixed) and ballot
  * version 5 under 2 (rolling), and each of those ballot versions pairs with
  * those definitions only (a rolling profile that fits is
- * `unsupported-version` until the verifier reads its step roots: P2-17 part
- * 4d-2); ballot version 5 also needs contract-event version 11 to 13, the
+ * `unsupported-version` unless `readsRolling` says the caller judges its
+ * ballots against step roots from the poll's chain, as the verifier's
+ * admission given one does: P2-17 part 4d-2b); ballot version 5 also needs contract-event version 11 to 13, the
  * only ones whose tables name the relayed rolling ballot, and fails beside
  * version 8, 9 or 10 (T-25, T-50, T-53), ballot version 4 needs version 9
  * to 13, which frame it, and fails beside version 8 (T-25, T-53), and
@@ -601,6 +602,7 @@ export function profileCombinationRule(
     | ElectionDefinitionV6
     | ElectionDefinitionV7,
   oursSeats = 0,
+  readsRolling = false,
 ): ProfileCombinationRule | undefined {
   const board = pinnedVersion(d, RECORD_TYPES.boardEntry);
   if (!isBoardEntryVersion(board)) return "unsupported-version";
@@ -716,10 +718,13 @@ export function profileCombinationRule(
   // 6.2 can't be checked, never a failure (T-36).
   if (spoiled !== undefined && !SPOILED_OPENING_VERSIONS.has(spoiled)) return "unsupported-version";
   if (!knownEvents) return "unsupported-version";
-  // A rolling profile that fits waits on the verifier's 5.1 and 5.2 against
-  // step roots (P2-17 part 4d-2): until then it is unverifiable, never passed
-  // (T-36). Only a rolling definition gets here with ballot version 5.
-  if (ballot === 5) return "unsupported-version";
+  // A rolling profile that fits waits on 5.1 and 5.2 against step roots,
+  // which only a caller holding the poll's chain reads (`readsRolling`, the
+  // verifier's admission given it, P2-17 part 4d-2b): to any other it is
+  // unverifiable, never passed (T-36). Only `true` lifts it, so a truthy
+  // value from an untyped caller never does. Only a rolling definition gets
+  // here with ballot version 5.
+  if (ballot === 5 && readsRolling !== true) return "unsupported-version";
   return undefined;
 }
 

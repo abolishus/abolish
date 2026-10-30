@@ -61,14 +61,24 @@ export {
   electorateCheck,
   type ElectorateFailure,
   type ElectorateOutcome,
+  type ElectorateStop,
   type GroupRegistryRelease,
+  rollingElectorate,
 } from "./electorate.ts";
 export {
+  type DefinitionRegistrationOutcome,
+  definitionRegistration,
+  type ElectionRegistryRelease,
   registrationCheck,
   type RegistrationFailure,
   type RegistrationOutcome,
   type RegistrationRelease,
 } from "./registration.ts";
+export {
+  rollingChain,
+  type RollingChainOutcome,
+  type RollingChainRelease,
+} from "./rolling-chain.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {

@@ -158,15 +158,17 @@ const base = (contract: Uint8Array, block: bigint) => ({
   l2_timestamp: 0n,
 });
 
-/** `DefinitionRegistered` for `d`'s election, logging `encoding` (by default `d`'s own) under `hash`. */
+/** `DefinitionRegistered` for `d`'s election, logging `encoding` (by default `d`'s own) under `hash`, at `block` and `timestamp`. */
 export function definitionRegistered(
   d: AnyDefinition,
   encoding = encodingOf(d),
   hash = hashOf(d),
   block = 20n,
+  timestamp = 0n,
 ): ContractEventRecord {
   return {
     ...base(d.value.election_registry, block),
+    l2_timestamp: timestamp,
     topics: [DEFINITION_REGISTERED, d.value.election_id, hash],
     data: concatBytes(
       word(5n),

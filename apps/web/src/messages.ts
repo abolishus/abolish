@@ -1292,6 +1292,8 @@ const enUS = {
     "The server found a problem with that draft, so it wasn't saved. Check it and try again.",
   moderationOfPoll: "Moderation",
   moderationDecision: "{action}: {reason}, {when}\u00a0UTC",
+  moderationDecisionWhat: "{action}: {reason}",
+  moderationDecidedOn: "On {when}\u00a0UTC",
   moderationMeans_visible: "Our pages list and show this poll again.",
   moderationMeans_delisted:
     "Our pages don't list this poll, but it stays open at its address. The board, the count and the result aren't affected.",

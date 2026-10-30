@@ -1324,6 +1324,8 @@ export const esUS: Messages = {
     "El servidor encontró un problema con ese borrador, así que no se guardó. Revísalo e inténtalo de nuevo.",
   moderationOfPoll: "Moderación",
   moderationDecision: "{action}: {reason}, {when}\u00a0UTC",
+  moderationDecisionWhat: "{action}: {reason}",
+  moderationDecidedOn: "El {when}\u00a0UTC",
   moderationMeans_visible: "Nuestras páginas vuelven a listar y mostrar esta encuesta.",
   moderationMeans_delisted:
     "Nuestras páginas no listan esta encuesta, pero sigue abierta en su dirección. El tablero, el conteo y el resultado no se ven afectados.",

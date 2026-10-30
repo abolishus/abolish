@@ -534,7 +534,7 @@ export const AppealADecision: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const block = await canvas.findByRole("group", {
-      name: /^Delisted: Spam, October 17, 2026 at 4:45\sPM\sUTC$/,
+      name: /^Delisted: Spam\sOn October 17, 2026 at 4:45\sPM\sUTC$/,
     });
     const moderation = within(block);
     await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
@@ -566,9 +566,7 @@ export const AppealADecision: Story = {
     ).toBeVisible();
     // Once filed, the decision can't be appealed again.
     await expect(moderation.queryByRole("button", { name: /Appeal/ })).toBeNull();
-    await expect(
-      moderation.getByText("Delisted: Spam, October 17, 2026 at 4:45 PM UTC"),
-    ).toHaveFocus();
+    await expect(moderation.getByText("Delisted: Spam").closest("p")).toHaveFocus();
     await expect(calls(args.client)).toEqual([`appeal ${OPEN.id}`]);
   },
 };
@@ -627,7 +625,7 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const hidden = within(
     await canvas.findByRole("group", {
-      name: /^Text hidden: Personal data, October 16, 2026 at 8:00\sAM\sUTC$/,
+      name: /^Text hidden: Personal data\sOn October 16, 2026 at 8:00\sAM\sUTC$/,
     }),
   );
   await expect(hidden.getByText(/don't show this poll's text/)).toBeVisible();
@@ -646,7 +644,7 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   ).toHaveAttribute("href", `/polls/${"2d".repeat(32)}`);
   const restored = within(
     canvas.getByRole("group", {
-      name: /^Restored: Appeal upheld, October 17, 2026 at 3:00\sPM\sUTC$/,
+      name: /^Restored: Appeal upheld\sOn October 17, 2026 at 3:00\sPM\sUTC$/,
     }),
   );
   await expect(restored.getByText("Our pages list and show this poll again.")).toBeVisible();
@@ -705,6 +703,39 @@ export const ModerationHistoryDesktop: Story = {
 };
 
 /**
+ * Each decision's date is on one line. Run on after its reason, the
+ * heading broke it at a phone's 360, "October" over "16, 2026" (P2-29, the
+ * author's list's iteration 16); the time now starts a line of its own.
+ */
+const decisionDatesWhole = async (canvasElement: HTMLElement) => {
+  let dates = 0;
+  for (const group of within(canvasElement).getAllByRole("group")) {
+    const heading = group.firstElementChild!;
+    const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+    for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+      for (const m of text.textContent!.matchAll(/[A-Z][a-z]+\s\d{1,2},\s\d{4}/g)) {
+        const range = document.createRange();
+        range.setStart(text, m.index);
+        range.setEnd(text, m.index + m[0].length);
+        await expect(range.getClientRects()).toHaveLength(1);
+        dates += 1;
+      }
+    }
+  }
+  await expect(dates).toBe(2);
+};
+
+export const ModerationHistoryPhone: Story = {
+  args: { client: MODERATED },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async (context) => {
+    await showsModeration(context);
+    await expect(context.canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    await decisionDatesWhole(context.canvasElement);
+  },
+};
+
+/**
  * Where the list is narrow, the moderation history's times broke as the
  * rows' did before iteration 6, "…at 8:00 AM" over "UTC" (P2-29, the
  * author's list's iteration 7). Every time in it now wraps whole.
@@ -731,14 +762,20 @@ export const ModerationHistoryFolded: Story = {
     }
     // The two decisions and the three appeals, each filed and reviewed.
     await expect(times).toBe(8);
+    await decisionDatesWhole(context.canvasElement);
     // Each decision wraps here, and its icon sits on the first line, not
     // between the two (P2-29, the author's list's iteration 15).
     for (const group of within(context.canvasElement).getAllByRole("group")) {
       const heading = group.firstElementChild!;
       const icon = heading.querySelector("svg")!.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(heading);
-      const lines = [...range.getClientRects()].filter((r) => r.width > 0 && r.left > icon.right);
+      // The text's own lines, not the boxes of the elements holding them.
+      const lines: DOMRect[] = [];
+      const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        lines.push(...[...range.getClientRects()].filter((r) => r.width > 0));
+      }
       await expect(new Set(lines.map((r) => r.top)).size).toBeGreaterThan(1);
       const first = lines[0]!;
       await expect(

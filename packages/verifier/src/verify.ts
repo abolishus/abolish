@@ -22,8 +22,9 @@
 // L1-origin checks over the board's contract-event records, which can fail
 // 4.4 but never pass it, and, for a run that read the archive
 // (`readArchive`), 4.3, which can pass but never fail, and, under a
-// rolling definition, admission and selection against the chain from the
-// archive's replay once the release pins the registries (rolling-chain.ts);
+// rolling definition, admission, selection and the spoiled-ballot openings
+// against the chain from the archive's replay once the release pins the
+// registries (rolling-chain.ts);
 // every other check is reported unverifiable, so no run can report an
 // election verified yet. A run on unauthenticated inputs reports
 // what the checks found against them, but its verdict stays unverifiable, so
@@ -1268,15 +1269,10 @@ export function verifyBundle(
       // versions 3 to 6 against their cells, beside an author panel per panel
       // with its own key set (docs/spec/verifier.md, Tally openings); the
       // counted set, once known, settles the rest, `tally-early` included.
-      // Under a rolling definition the tally openings' cells and the
-      // spoiled-ballot openings' version-5 cores aren't read yet (P2-17
-      // part 4d-2b-2b): neither row is reached.
+      // Under a rolling definition the tally openings' cells aren't read yet
+      // (P2-17 part 4d-2b-2b): 7.4 isn't reached.
       if (definition.rolling !== undefined)
-        implemented = new Map<string, Outcome>([
-          ...implemented,
-          ["7.4", NOT_REACHED],
-          ["6.2", NOT_REACHED],
-        ]);
+        implemented = new Map<string, Outcome>([...implemented, ["7.4", NOT_REACHED]]);
       else {
         const opened = tallyChecks(
           definition.definition,
@@ -1295,21 +1291,23 @@ export function verifyBundle(
         );
         implemented = new Map<string, Outcome>([...implemented, ["7.4", opened.row]]);
         tallies = opened.report;
-        // An opening is checked against the same registered election, and
-        // `opening-cast` against the ballots admission admitted, so 6.2 is
-        // reached exactly where admission is.
-        const spoiled = openingChecks(
-          definition.definition,
-          checked.registered,
-          checked.authorRegistered,
-          admission.admitted,
-          bundle.entries,
-          definition.inputs.boardEntryVersion,
-          bundle.clock,
-        );
-        implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
-        openings = spoiled.report;
       }
+      // An opening is checked against the same registered election, under a
+      // rolling definition the context made from the same chain, and
+      // `opening-cast` against the ballots admission admitted, so 6.2 is
+      // reached exactly where admission is.
+      const spoiled = openingChecks(
+        definition.definition,
+        checked.registered,
+        checked.authorRegistered,
+        admission.admitted,
+        bundle.entries,
+        definition.inputs.boardEntryVersion,
+        bundle.clock,
+        definition.rolling,
+      );
+      implemented = new Map<string, Outcome>([...implemented, ["6.2", spoiled.row]]);
+      openings = spoiled.report;
       // 4.6 reads L1's counted checkpoints and the board contract's events
       // alone, never the copy, so it runs whatever 4.1 and 4.2 found
       // (docs/spec/availability.md, Availability check, Precedence).

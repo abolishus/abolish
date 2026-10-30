@@ -176,8 +176,8 @@ def half(e, o, panel):
     return vss, hashes, polys, seats, k, n, m, sorted(e["registered"][panel])
 
 
-def check_opening(e, o, keys):
-    """The checks in order; ("ok", coreHash, votes, randomness, outside) or (code, option, seat, panel)."""
+def check_opening(e, o, keys, core=core_hash):
+    """The checks in order; ("ok", coreHash, votes, randomness, outside) or (code, option, seat, panel). `core` is the core hash of the ballot version the profile pins, version 4's unless given (challenge.md, Opening version 3, Core and tracking code)."""
     if o["definitionHash"] != e["definitionHash"]:
         return ("opening-stray", None, None, None)
     if o["cell"] >= e["cells"]:
@@ -214,7 +214,7 @@ def check_opening(e, o, keys):
             if se.share_hash(ct) != hashes[i - 1]:
                 return ("opening-ciphertext", None, i, panel)
     votes, rand = vote_and_randomness(o)
-    return ("ok", core_hash(o), votes, rand, b3.outside_question(e, votes))
+    return ("ok", core(o), votes, rand, b3.outside_question(e, votes))
 
 
 def vote_and_randomness(o):

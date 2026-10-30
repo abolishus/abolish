@@ -131,7 +131,7 @@ The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; n
 - `portal`: the L2's OptimismPortal on L1;
 - `panel`: `threshold`, `quorum` (which must be `max(k, n − 1)`), `kind`, the seats' `p256-key` encodings as `keys`, and their points as `points` (x then y per seat, decimal strings);
 - `registrars`: the Tier 0 registrars' `threshold` and ascending `addresses`;
-- `registration`: EntryPoint v0.8's address as `entryPoint`, the signing service's key as `serviceOwner`, the registration paymaster's admin as `admin` (a `TimelockController` behind our Safe, with a non-zero `getMinDelay()`), and the paymaster's per-operation cap in wei as `maxCost`.
+- `registration`: EntryPoint v0.8's address as `entryPoint` (on Base Sepolia, the canonical `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108`), the signing service's key as `serviceOwner`, the registration paymaster's admin as `admin`, the Safe behind it as `safe`, and the paymaster's per-operation cap in wei as `maxCost` (a decimal string). The admin is a `TimelockController` with a non-zero `getMinDelay()`. The Safe must hold its proposer and canceller roles and be a multisig, and the deployer must hold no role in it.
 
 The epoch is the one exception. The L2 run reads it from the deployed anchor, so the registry's clock is the anchor's. Each value is range-checked before it is narrowed to its type.
 

@@ -31,20 +31,29 @@ const SOLE_OWNER = "0x00000000000000000000000000000000000000cc";
 /** On L2: EntryPoint v0.8's stand-in (test/utils/MockEntryPoint.sol) and the paymaster's admin. */
 const ENTRY_POINT = "0x0000000000000000000000000000000000000e01";
 const TIMELOCK = "0x0000000000000000000000000000000000000e02";
-const NO_DELAY = "0x0000000000000000000000000000000000000E03";
+const NO_DELAY = "0x0000000000000000000000000000000000000e03";
 const SERVICE_OWNER = "0x0000000000000000000000000000000000000e04";
+/** The L2 Safe behind the timelock, MockTimelock's `SAFE`. */
+const L2_SAFE = "0x0000000000000000000000000000000000000e05";
+const OPEN_TIMELOCK = "0x0000000000000000000000000000000000000e06";
+const UNPROPOSED_TIMELOCK = "0x0000000000000000000000000000000000000e07";
+const BARE_CODE = "0x0000000000000000000000000000000000000e08";
+const DELEGATED = "0x0000000000000000000000000000000000000e09";
+/** Above 2^53, which a JSON number wouldn't carry intact. */
+const MAX_COST = (2n ** 60n).toString();
 const REGISTRATION = {
   entryPoint: ENTRY_POINT,
   serviceOwner: SERVICE_OWNER,
   admin: TIMELOCK,
-  maxCost: String(10 ** 15),
+  safe: L2_SAFE,
+  maxCost: MAX_COST,
 };
 const OVER_THRESHOLD = "0x00000000000000000000000000000000000000cd";
 const REPEATED_OWNER = "0x00000000000000000000000000000000000000ce";
 /** MockSafe's owners and threshold (test/utils/MockSafe.sol). */
 const SAFE_OWNERS = [
   "0x00000000000000000000000000000000000005A1",
-  "0x00000000000000000000000000000000000005a2",
+  "0x00000000000000000000000000000000000005A2",
   "0x00000000000000000000000000000000000005A3",
 ];
 
@@ -258,10 +267,16 @@ beforeAll(async () => {
     deployedCode("MockEntryPoint", "MockEntryPoint"),
   ]);
   await rpc(l2.url, "anvil_setCode", [TIMELOCK, deployedCode("MockTimelock", "MockTimelock")]);
-  await rpc(l2.url, "anvil_setCode", [
-    NO_DELAY,
-    deployedCode("MockTimelock", "MockNoDelayTimelock"),
-  ]);
+  for (const [at, name] of [
+    [NO_DELAY, "MockNoDelayTimelock"],
+    [OPEN_TIMELOCK, "MockOpenTimelock"],
+    [UNPROPOSED_TIMELOCK, "MockUnproposedTimelock"],
+  ])
+    await rpc(l2.url, "anvil_setCode", [at, deployedCode("MockTimelock", name!)]);
+  await rpc(l2.url, "anvil_setCode", [L2_SAFE, deployedCode("MockSafe", "MockSafe")]);
+  // Code with no timelock getters, and an EOA's EIP-7702 delegation to a timelock.
+  await rpc(l2.url, "anvil_setCode", [BARE_CODE, "0x00"]);
+  await rpc(l2.url, "anvil_setCode", [DELEGATED, `0xef0100${TIMELOCK.slice(2)}`]);
 }, 60_000);
 afterAll(() => {
   l1?.process.kill();
@@ -396,6 +411,9 @@ describe("the staging deployment on a local Anvil pair", () => {
       [{ maxCost: 0 }, "maxCost"],
       [{ admin: "0x00000000000000000000000000000000000000ef" }, "admin"],
       [{ admin: NO_DELAY }, "admin"],
+      [{ admin: DELEGATED }, "admin"],
+      [{ admin: OPEN_TIMELOCK }, "admin roles"],
+      [{ admin: UNPROPOSED_TIMELOCK }, "admin roles"],
     ] as const)
       await refused(
         "runL2()",
@@ -403,6 +421,14 @@ describe("the staging deployment on a local Anvil pair", () => {
         config({ registration: { ...REGISTRATION, ...change } }),
         `RegistrationRefused("${field}")`,
       );
+    // An admin whose getters don't answer fails before anything is sent.
+    const bare = forgeScript(
+      "runL2()",
+      l2.url,
+      config({ registration: { ...REGISTRATION, admin: BARE_CODE } }),
+    );
+    expect(bare.status, bare.output).not.toBe(0);
+    expect(await nonce(l2.url)).toBe(0);
     await refused(
       "runL2()",
       l2.url,
@@ -511,8 +537,13 @@ describe("the staging deployment on a local Anvil pair", () => {
       registration: {
         entryPoint: ENTRY_POINT,
         serviceOwner: SERVICE_OWNER,
-        admin: { address: TIMELOCK, minDelay: 2 * 24 * 60 * 60 },
-        maxCost: 10 ** 15,
+        entryPointCodehash: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+        admin: {
+          address: TIMELOCK,
+          minDelay: 2 * 24 * 60 * 60,
+          safe: { address: L2_SAFE, owners: SAFE_OWNERS, threshold: 2 },
+        },
+        maxCost: MAX_COST,
       },
     });
   });
@@ -562,7 +593,7 @@ describe("the staging deployment on a local Anvil pair", () => {
     expect(call(u, paymaster!.address, "registry()(address)")).toBe(g!.address);
     expect(call(u, paymaster!.address, "service()(address)")).toBe(account!.address);
     expect(call(u, paymaster!.address, "admin()(address)")).toBe(TIMELOCK);
-    expect(call(u, paymaster!.address, "maxCost()(uint256)")).toBe(String(10 ** 15));
+    expect(call(u, paymaster!.address, "maxCost()(uint256)")).toBe(MAX_COST);
   });
 
   test("the L1 contracts hold what their record pins", () => {

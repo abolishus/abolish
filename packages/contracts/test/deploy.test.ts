@@ -253,7 +253,10 @@ beforeAll(async () => {
   ];
   for (const [at, name] of safes)
     await rpc(l1.url, "anvil_setCode", [at, deployedCode("MockSafe", name!)]);
-  await rpc(l2.url, "anvil_setCode", [ENTRY_POINT, deployedCode("MockEntryPoint", "MockEntryPoint")]);
+  await rpc(l2.url, "anvil_setCode", [
+    ENTRY_POINT,
+    deployedCode("MockEntryPoint", "MockEntryPoint"),
+  ]);
   await rpc(l2.url, "anvil_setCode", [TIMELOCK, deployedCode("MockTimelock", "MockTimelock")]);
   await rpc(l2.url, "anvil_setCode", [
     NO_DELAY,

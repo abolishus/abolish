@@ -481,6 +481,31 @@ export const esUS: Messages = {
   resultsClaim:
     "Estos son los resultados que nuestro servidor lee del conteo publicado en el tablero público de la encuesta. Nada en esta página los comprueba por ti: cualquiera puede volver a contar el tablero y comparar.",
   resultsCheck: "Comprobar el conteo en el tablero",
+  resultsSeeAll: "Ver todos los resultados",
+  resultsPageTitle: "Resultados",
+  resultsPageEyebrow: "Encuesta {prefix}… · Resultados",
+  resultsPageLede:
+    "Cada grupo se cuenta y se informa por separado, y cada pregunta también. Ninguna cifra de esta página suma dos grupos ni dos preguntas.",
+  resultsByGroup: "Resultados por grupo",
+  resultsSideBySide: "Los grupos uno al lado del otro",
+  resultsSideBySideCaption: "Una fila por grupo. No hay fila de total: los grupos nunca se suman.",
+  resultsAnswer: "Respuesta",
+  resultsAnswers: "Respuestas",
+  resultsNotAllPublished: "Aún no se publica todo",
+  resultsCellsTitle: "Parte por parte",
+  resultsCellsLede: {
+    one: "Este grupo se cuenta en {count} parte.",
+    other:
+      "Este grupo se cuenta en {count} partes, cada una publicada por separado. Sus resultados de arriba son la suma de todas.",
+  },
+  resultsCell: "Parte",
+  resultsCellName: "Parte {number}",
+  resultsRegion: "región {number}",
+  resultsCellMissing: "Aún no se publica",
+  resultsCellFailed: "No pasó la comprobación del tablero",
+  resultsCellsUnavailable: "Las partes de este grupo no se pudieron mostrar en este momento.",
+  resultsCheckTitle: "Compruébalo tú",
+  resultsVerify: "Cómo contarlo tú",
   reactionsTitle: "Reacciones",
   reactionsLede:
     "Reacciona a la encuesta en sí, la respondas o no. Una reacción no es una respuesta y no dice nada sobre si respondiste.",

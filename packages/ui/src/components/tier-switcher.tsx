@@ -68,7 +68,12 @@ export function TierSwitcher({
         ))}
       </TabsList>
       {tiers.map((tier) => (
-        <TabsContent key={tier.value} value={tier.value} className="pt-4">
+        // The panel takes focus after its tab (WAI-ARIA tabs), so it shows it (2.4.7).
+        <TabsContent
+          key={tier.value}
+          value={tier.value}
+          className="pt-4 focus-visible:ring-3 focus-visible:ring-ring"
+        >
           {children(tier)}
         </TabsContent>
       ))}

@@ -469,6 +469,32 @@ const enUS = {
   resultsClaim:
     "These are the results our server reads from the count published on the poll's public board. Nothing on this page checks them for you: anyone can count the board again and compare.",
   resultsCheck: "Check the count on the board",
+  resultsSeeAll: "See the full results",
+  resultsPageTitle: "Results",
+  resultsPageEyebrow: "Poll {prefix}… · Results",
+  resultsPageLede:
+    "Each group is counted and reported on its own, and so is each question. No figure on this page adds two groups or two questions together.",
+  resultsByGroup: "Results by group",
+  resultsSideBySide: "The groups side by side",
+  resultsSideBySideCaption:
+    "One row per group. There is no total row: the groups are never added together.",
+  resultsAnswer: "Answer",
+  resultsAnswers: "Answers",
+  resultsNotAllPublished: "Not all published yet",
+  resultsCellsTitle: "Part by part",
+  resultsCellsLede: {
+    one: "This group is counted in {count} part.",
+    other:
+      "This group is counted in {count} parts, each published on its own. Its results above are their sum.",
+  },
+  resultsCell: "Part",
+  resultsCellName: "Part {number}",
+  resultsRegion: "region {number}",
+  resultsCellMissing: "Not published yet",
+  resultsCellFailed: "Didn't pass the board's check",
+  resultsCellsUnavailable: "This group's parts couldn't be shown just now.",
+  resultsCheckTitle: "Check it yourself",
+  resultsVerify: "How to count it yourself",
   reactionsTitle: "Reactions",
   reactionsLede:
     "React to the poll itself, whether or not you answer it. A reaction isn't an answer and says nothing about whether you answered.",

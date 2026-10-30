@@ -28,6 +28,7 @@ describe("pages", () => {
       fc.property(fc.oneof(electionId, fc.stringMatching(/^[^/?#]+$/)), (id) => {
         expect(pageOf(`/polls/${id}`)).toBe("/polls/:id");
         expect(pageOf(`/polls/${id}/board`)).toBe("/polls/:id/board");
+        expect(pageOf(`/polls/${id}/results`)).toBe("/polls/:id/results");
       }),
       runs,
     );
@@ -115,6 +116,8 @@ describe("pages", () => {
       "/polls/a/b",
       "/polls/a/board/",
       "/polls//board",
+      "/polls/a/results/",
+      "/polls//results",
       "/account/x",
       "/account/polls",
       "/account/polls/",

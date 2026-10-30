@@ -11,6 +11,7 @@ export const PAGES = [
   "/polls",
   "/polls/:id",
   "/polls/:id/board",
+  "/polls/:id/results",
   "/p/:code",
   "/p/:code/flyer",
   "/embed/p/:code",
@@ -40,6 +41,7 @@ export function pageOf(pathname: string): Page {
   if (/^\/polls\/[^/]+$/.test(pathname)) return "/polls/:id";
   // Its board's pages: the entry a page starts at is in the query, never kept.
   if (/^\/polls\/[^/]+\/board$/.test(pathname)) return "/polls/:id/board";
+  if (/^\/polls\/[^/]+\/results$/.test(pathname)) return "/polls/:id/results";
   // An author's draft (or `new`): its ID is the account's, never kept (T-10).
   if (/^\/account\/polls\/[^/]+$/.test(pathname)) return "/account/polls/:id";
   if (/^\/account\/polls\/[^/]+\/setup$/.test(pathname)) return "/account/polls/:id/setup";

@@ -13,7 +13,13 @@ import {
   type TreeClaim,
 } from "../board.ts";
 import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
-import { type PollResults, resultsView, type ServedResults } from "../results.ts";
+import {
+  type CellResults,
+  cellResultsView,
+  type PollResults,
+  resultsView,
+  type ServedResults,
+} from "../results.ts";
 import type { CardText, PollWords, StreamCard, StreamSort } from "../stream.ts";
 import { fromHex, PROFILE_HANDLE } from "../values.ts";
 import {
@@ -129,6 +135,65 @@ export async function loadPoll(
     // Moderation never withholds a result: a hidden poll's is shown by
     // option number (docs/moderation-policy.md).
     results: "state" in served ? resultsView(view.poll, served) : served,
+  };
+}
+
+export type ResultsPage =
+  | {
+      readonly kind: "results";
+      readonly poll: PollView;
+      /** When the page was loaded, for the poll's status. */
+      readonly asOf: Instant;
+      /** Whether moderation hides the poll, so its words are withheld. */
+      readonly hidden: boolean;
+      /** Its words in the page's locale, as on the poll page. */
+      readonly text: CardText | undefined;
+      readonly words: PollWords | undefined;
+      readonly results: PollResults;
+      /** Each cell's results, as `cellResultsView` reads them; `undefined` where they don't fit. */
+      readonly cells: readonly CellResults[] | undefined;
+    }
+  | { readonly kind: "not-found" }
+  | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
+
+/**
+ * The results page for `electionId`, which the caller has checked is
+ * canonical hex: the poll page's reads of its definition, words and results,
+ * with each cell's results beside its tiers'. Nothing else of the poll page
+ * is read, and the results are asked for by the poll's ID alone (T-10).
+ */
+export async function loadResultsPage(
+  api: Api,
+  electionId: string,
+  locale: string,
+): Promise<ResultsPage> {
+  let answers;
+  try {
+    answers = await Promise.all([
+      api.elections.getDefinition({ electionId }),
+      api.moderation.getStatus({ electionId }),
+      wordsOf(api, electionId),
+      resultsOf(api, electionId),
+    ]);
+  } catch (error) {
+    if (notFound(error)) return { kind: "not-found" };
+    throw error;
+  }
+  const [{ definition }, moderation, displayText, served] = answers;
+  const view = definitionView(electionId, definition);
+  if (!view.ok) return { kind: "unavailable", problem: view.problem };
+  // As on the poll page: a hidden poll's words are dropped, its results never are (T-68).
+  const hidden = moderation.state === "hidden";
+  const words = hidden ? undefined : checkedWords(view.poll, definition, displayText, locale);
+  return {
+    kind: "results",
+    poll: view.poll,
+    asOf: now(),
+    hidden,
+    text: words === undefined ? undefined : cardText(words),
+    words,
+    results: "state" in served ? resultsView(view.poll, served) : served,
+    cells: "state" in served ? cellResultsView(view.poll, view.cells, served) : [],
   };
 }
 

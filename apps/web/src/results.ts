@@ -3,7 +3,7 @@
 // poll's own definition. Nothing here imports a decoder, so the pages'
 // script doesn't carry one (P2-28 part 2b).
 
-import type { PollView, Tier } from "./poll.ts";
+import type { PartitionCell, PollView, Tier } from "./poll.ts";
 import type { Api } from "./server/api.ts";
 
 export type ServedResults = Awaited<ReturnType<Api["elections"]["getResults"]>>;
@@ -60,6 +60,75 @@ export function resultsView(
     tiers.push({ tier: t.tier as Tier, counted: t.counted, questions });
   }
   return { kind: "read", tiers };
+}
+
+/**
+ * One cell's results, in partition order: how many ballots it counted and,
+ * once a registered seat's opening of it passed, each question's count per
+ * option; else whether it is unopened (`missing`, the board's
+ * `tally-missing`) or its openings failed the board's check (`failed`).
+ */
+export interface CellResults {
+  readonly cell: PartitionCell;
+  readonly counted: number;
+  readonly state: "opened" | "missing" | "failed";
+  readonly questions: readonly (readonly string[])[] | undefined;
+}
+
+/**
+ * `served`'s cells for `poll`, as `resultsView` reads its tiers, or
+ * `undefined` unless they fit the poll's partition: one report per cell in
+ * partition order, each in its cell's tier, its counts the definition's
+ * questions and options, none above the ballots it counted, and every tier
+ * the sum of its cells, its counted ballots always and its counts exactly
+ * once every cell has them (docs/spec/election-definition.md, Notes, Tally partition). So
+ * the page can't print a cell's figures that disagree with its tier's, or
+ * under another cell (T-34); whether either is right is the verifier's to
+ * say.
+ */
+export function cellResultsView(
+  poll: Pick<PollView, "version" | "questions">,
+  partition: readonly PartitionCell[],
+  served: ServedResults,
+): readonly CellResults[] | undefined {
+  if (served.state === "unopened") return [];
+  if (served.cells.length !== partition.length) return undefined;
+  const cells: CellResults[] = [];
+  for (const [i, c] of served.cells.entries()) {
+    const cell = partition[i];
+    if (cell === undefined || c.cell !== i || c.tier !== cell.tier) return undefined;
+    const questions =
+      c.counts === undefined ? undefined : poll.version === 5 ? c.byQuestion : [c.counts];
+    if (c.counts !== undefined && !fits(poll.questions, c.counted, questions)) return undefined;
+    cells.push({
+      cell,
+      counted: c.counted,
+      state: questions !== undefined ? "opened" : c.code === "tally-missing" ? "missing" : "failed",
+      questions,
+    });
+  }
+  if (!cells.every((c) => served.tiers.some((t) => t.tier === c.cell.tier))) return undefined;
+  for (const t of served.tiers) {
+    const own = cells.filter((c) => c.cell.tier === t.tier);
+    if (own.reduce((n, c) => n + c.counted, 0) !== t.counted) return undefined;
+    const counts =
+      t.counts === undefined ? undefined : poll.version === 5 ? t.byQuestion : [t.counts];
+    // A tier has counts exactly once every one of its cells does.
+    if (counts === undefined) {
+      if (own.length > 0 && own.every((c) => c.questions !== undefined)) return undefined;
+      continue;
+    }
+    if (!fits(poll.questions, t.counted, counts)) return undefined;
+    if (own.some((c) => c.questions === undefined)) return undefined;
+    if (!counts.every((q, i) => q.every((n, j) => BigInt(n) === sumOf(own, i, j))))
+      return undefined;
+  }
+  return cells;
+}
+
+// The cells' count of option `j` of question `i`.
+function sumOf(cells: readonly CellResults[], i: number, j: number): bigint {
+  return cells.reduce((n, c) => n + BigInt(c.questions?.[i]?.[j] ?? "0"), 0n);
 }
 
 // No option is picked on more ballots than were counted.

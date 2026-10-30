@@ -22,11 +22,12 @@ import {
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
+  foldRegions,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
-import { type DefinitionProblem, instant, type PollView } from "../poll.ts";
+import { type DefinitionProblem, instant, type PartitionCell, type PollView } from "../poll.ts";
 import { fromHex, toHex } from "../values.ts";
 
 export type DefinitionResult =
@@ -39,6 +40,8 @@ export type DefinitionResult =
        * names a version this release reads.
        */
       readonly boardEntryVersion: BoardEntryVersion | undefined;
+      /** Its tally partition, which the results page reports cell by cell. */
+      readonly cells: readonly PartitionCell[];
     }
   | { readonly ok: false; readonly problem: DefinitionProblem };
 
@@ -89,6 +92,31 @@ function viewV5(d: ElectionDefinitionV5): PollView {
   };
 }
 
+function cellsV5(d: ElectionDefinitionV5): PartitionCell[] {
+  return d.electorate.flatMap((t) => {
+    // The regions a cell holds are the fold's; a definition stating other
+    // cells fails the rule `cells`, and its cells are then shown without them.
+    let folded: number[][] | undefined;
+    try {
+      folded = foldRegions(t.regions);
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error;
+    }
+    const regions =
+      folded?.length === t.cells.length &&
+      folded.every(
+        (r, i) => r.reduce((n, at) => n + (t.regions[at] ?? 0n), 0n) === t.cells[i]?.members,
+      )
+        ? folded
+        : undefined;
+    return t.cells.map((c, i) => ({
+      tier: t.tier,
+      members: c.members.toString(),
+      regions: regions?.[i],
+    }));
+  });
+}
+
 function viewV1(d: ElectionDefinition): PollView {
   const rule = electionDefinitionRule(d);
   return {
@@ -123,11 +151,19 @@ export function definitionView(electionId: string, definitionHex: string): Defin
     throw error;
   }
   const poll = definition.version === 5 ? viewV5(definition.value) : viewV1(definition.value);
+  const cells =
+    definition.version === 5
+      ? cellsV5(definition.value)
+      : definition.value.electorate.map((g) => ({
+          tier: g.tier,
+          members: g.group_size.toString(),
+          regions: undefined,
+        }));
   if (poll.electionId !== electionId) return { ok: false, problem: "another-election" };
   const pinned = pinnedVersion(definition.value, RECORD_TYPES.boardEntry);
   const boardEntryVersion =
     pinned !== undefined && Object.hasOwn(BOARD_ENTRY.versions, pinned)
       ? (pinned as BoardEntryVersion)
       : undefined;
-  return { ok: true, poll, boardEntryVersion };
+  return { ok: true, poll, boardEntryVersion, cells };
 }

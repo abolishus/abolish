@@ -43,12 +43,14 @@ export function Bar({ share, lead }: { share: number; lead: boolean }) {
   );
 }
 
-function Question({
+/** One question's results: its sentence, then each option's share, count and bar. */
+export function ResultsQuestion({
   number,
   heading,
   options,
   counts,
   counted,
+  level = 4,
 }: {
   /** From 1; `undefined` for a poll of one question. */
   number: number | undefined;
@@ -57,9 +59,12 @@ function Question({
   options: readonly string[] | undefined;
   counts: readonly string[];
   counted: number;
+  /** The question heading's level: under a tier's `h3` on the poll page, under an `h2` on the results page. */
+  level?: 3 | 4;
 }) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
+  const Heading = level === 3 ? "h3" : "h4";
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
   const list = new Intl.ListFormat(locale, { type: "conjunction" });
   // The author's words, in their own direction inside our sentence (T-75).
@@ -76,13 +81,13 @@ function Question({
   return (
     <div className="grid gap-3">
       {heading === undefined && number === undefined ? null : (
-        <h4 className="m-0 text-lg font-semibold text-pretty">
+        <Heading className="m-0 text-lg font-semibold text-pretty">
           {heading === undefined ? (
             t("questionNumber", { number: number ?? 1 })
           ) : (
             <bdi>{heading}</bdi>
           )}
-        </h4>
+        </Heading>
       )}
       <p className="m-0 font-heading text-xl leading-snug font-semibold text-pretty">{sentence}</p>
       <ol className="m-0 grid list-none border-t border-foreground p-0">
@@ -147,7 +152,7 @@ function Tier({
       ) : result.counted === 0 ? null : (
         // Each question on its own: no figure joins two (ADR 0026; T-16).
         result.questions.map((counts, i) => (
-          <Question
+          <ResultsQuestion
             key={i}
             number={several ? i + 1 : undefined}
             heading={words?.questions[i]?.question}
@@ -195,6 +200,13 @@ export function PollResults({ poll, results, status, words, phoneVerification }:
           <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
             {t("resultsClaim")}
           </p>
+          <a
+            className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+            href={`/polls/${poll.electionId}/results`}
+          >
+            {t("resultsSeeAll")}
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </a>
         </>
       ) : (
         <p role="status" className="m-0 max-w-prose text-lg text-pretty">

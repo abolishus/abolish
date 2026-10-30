@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 
-import { decodeElectionDefinition, encodeElectionDefinition } from "@abolishus/crypto";
+import {
+  decodeElectionDefinition,
+  decodeElectionDefinitionV5,
+  encodeElectionDefinition,
+  encodeElectionDefinitionV5,
+} from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
@@ -114,6 +119,15 @@ describe("definitionView", () => {
     }
   });
 
+  test("carries one cell per tier, of its group", () => {
+    const typical = decodable.find((v) => v.id === "definition-typical")!;
+    const result = definitionView(typical.value!.election_id, typical.encoding);
+    expect(result.ok && result.cells).toEqual([
+      { tier: 0, members: "5000", regions: undefined },
+      { tier: 2, members: "120", regions: undefined },
+    ]);
+  });
+
   test("never throws on arbitrary bytes", () => {
     fc.assert(
       fc.property(fc.uint8Array({ maxLength: 2048 }), (bytes) => {
@@ -182,6 +196,37 @@ describe("definitionView, version 5", () => {
     const typical = decodableV5.find((v) => v.id === "definition-v5-typical")!;
     const result = definitionView(typical.value!.election_id, typical.encoding);
     expect(result.ok && result.boardEntryVersion).toBe(4);
+  });
+
+  test("carries each tier's cells in partition order, with the regions the fold gives them", () => {
+    const typical = decodableV5.find((v) => v.id === "definition-v5-typical")!;
+    const result = definitionView(typical.value!.election_id, typical.encoding);
+    // Regions 5,000, 1,200, 40 and 980: the two large ones alone, the small two folded.
+    expect(result.ok && result.cells).toEqual([
+      { tier: 0, members: "5000", regions: [0] },
+      { tier: 0, members: "1200", regions: [1] },
+      { tier: 0, members: "1020", regions: [2, 3] },
+      { tier: 2, members: "120", regions: [0] },
+    ]);
+  });
+
+  test("names no regions for cells that aren't the fold's", () => {
+    const typical = decodableV5.find((v) => v.id === "definition-v5-typical")!;
+    const d = decodeElectionDefinitionV5(fromHex(typical.encoding));
+    const [first, ...rest] = d.electorate;
+    // Tier 0's cells stated as one: the rule `cells` fails, and the page says
+    // only what the definition states.
+    const merged = {
+      ...first!,
+      cells: [{ root: first!.cells[0]!.root, members: 7220n }],
+    };
+    const encoding = toHex(encodeElectionDefinitionV5({ ...d, electorate: [merged, ...rest] }));
+    const result = definitionView(typical.value!.election_id, encoding);
+    expect(result.ok && result.poll.illFormed?.rule).toBe("cells");
+    expect(result.ok && result.cells).toEqual([
+      { tier: 0, members: "7220", regions: undefined },
+      { tier: 2, members: "120", regions: [0] },
+    ]);
   });
 
   test("has vectors of every kind", () => {

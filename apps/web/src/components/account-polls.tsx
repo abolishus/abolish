@@ -9,7 +9,7 @@ import {
   PencilLine,
   Plus,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import {
   DraftsError,
@@ -116,6 +116,7 @@ export function AccountPolls({
   // An action removes or replaces the buttons that had focus: focus goes
   // back to the section's heading, so keyboard users keep their place.
   const heading = useRef<HTMLHeadingElement>(null);
+  const profileHelp = `${useId()}-profile-help`;
 
   const refresh = useCallback(async () => setPolls(await client.list()), [client]);
 
@@ -337,6 +338,12 @@ export function AccountPolls({
         <div role="status" className="text-base empty:-mt-4">
           {done === undefined ? null : t(done)}
         </div>
+        {/* What a profile's box does is said once, not under every poll, where seven rows repeated it seven times; each box is described by it. */}
+        {profiles === undefined || profile === undefined || !polls?.length ? null : (
+          <p id={profileHelp} className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("pollsProfileHelp")}
+          </p>
+        )}
         {polls === undefined ? null : polls.length === 0 ? (
           <p className="m-0 border-t-2 border-foreground pt-4 text-base">{t("pollsEmpty")}</p>
         ) : (
@@ -396,6 +403,7 @@ export function AccountPolls({
                           shown === "setup" ||
                           (shown === "failed" && p.retryable)
                         }
+                        helpId={profileHelp}
                         describedBy={`poll-${p.id}-title`}
                         onChanged={choiceChanged}
                         {...(onSignedOut === undefined ? {} : { onSignedOut })}

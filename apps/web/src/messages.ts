@@ -1256,6 +1256,8 @@ const enUS = {
   pollsDeleteQuestion: "Delete this draft? This can't be undone.",
   pollsDeleteConfirm: "Delete draft permanently",
   pollsReload: "Load your polls again",
+  pollsProfileHelp:
+    "Ticking “Show on your profile” under a poll lists it on your profile, and its page says your profile asked it, while the poll is listed. A poll that hasn't opened yet is listed once it opens. Untick a box at any time.",
   pollsRetry: "Try again",
   pollsDiscard: "Discard…",
   pollsDiscardQuestion: "Discard this poll and its draft? This can't be undone.",

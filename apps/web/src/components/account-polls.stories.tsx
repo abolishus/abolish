@@ -761,10 +761,11 @@ export const ChooseWhatTheProfileShows: Story = {
 };
 
 /**
- * A poll that hasn't opened isn't on the public profile yet, so its box says
- * when it will be, where an open poll's says while it is (P2-29, the
- * author's list's iteration 10). One that failed for good keeps the open
- * poll's words: its election is on the record.
+ * What a box does is said once, above the list, not under each of seven
+ * polls (P2-29, the author's list's iteration 11), and describes every box.
+ * A poll that hasn't opened isn't on the public profile yet, so its tick
+ * answers when it will be (iteration 10); one that failed for good answers
+ * as an open poll does: its election is on the record.
  */
 export const ChoiceBeforeAPollOpens: Story = {
   args: {
@@ -774,27 +775,30 @@ export const ChoiceBeforeAPollOpens: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await waitFor(() => expect(canvas.getAllByRole("checkbox")).toHaveLength(EVERY.length));
-    const rows = canvas.getAllByRole("listitem").map((i) => within(i));
-    const once = /once the poll is open and listed\. Untick it at any time\.$/;
-    const whilst = /while the poll is listed\. Untick it at any time\.$/;
-    const said = EVERY.map((p, i) => [
-      p.title,
-      once.test(rows[i]!.getByText(/^Your profile lists this poll/).textContent!),
-    ]);
-    await expect(said).toEqual([
-      [DRAFT.title, true],
-      [UNTITLED.title, true],
-      [SETTING_UP.title, true],
-      [OPEN.title, false],
-      [CLOSED.title, false],
-      [TIMED_OUT.title, true],
-      [REGISTERED.title, false],
-    ]);
-    await expect(rows[3]!.getByText(whilst)).toBeVisible();
-    // The words that describe each box are the ones drawn under it.
-    await expect(choice(rows[2]!)).toHaveAccessibleDescription(
-      /^Which crossing should get a signal first\? .*once the poll is open and listed/,
+    const help = canvas.getByText(/^Ticking “Show on your profile” under a poll/);
+    await expect(help).toHaveTextContent(
+      /while the poll is listed\. A poll that hasn't opened yet is listed once it opens\./,
     );
+    await expect(canvas.queryAllByText(/^Your profile lists this poll/)).toHaveLength(0);
+    // Said above the list, before the first box.
+    const list = canvas.getByRole("list");
+    await expect(
+      help.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    const rows = canvas.getAllByRole("listitem").map((i) => within(i));
+    for (const [i, p] of EVERY.entries())
+      await expect(choice(rows[i]!)).toHaveAccessibleDescription(
+        `${p.title === "" ? "Untitled draft" : p.title} ${help.textContent}`,
+      );
+    // Every poll but the open one, which the profile already shows.
+    const answers = [];
+    for (const row of rows.filter((_, i) => EVERY[i] !== OPEN)) {
+      await userEvent.click(choice(row));
+      answers.push((await row.findByText(/^Your profile (will show|shows) this poll/)).textContent);
+    }
+    const once = "Your profile will show this poll once it opens.";
+    const now = "Your profile shows this poll.";
+    await expect(answers).toEqual([once, once, once, now, once, now]);
   },
 };
 

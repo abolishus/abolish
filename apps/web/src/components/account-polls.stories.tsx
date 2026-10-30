@@ -148,6 +148,12 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   const items = await canvas.findAllByRole("listitem");
   await expect(items).toHaveLength(EVERY.length);
   const [draft, untitled, setup, open, closed, timedOut, registered] = items.map((i) => within(i));
+  // The lede names every kind of poll the list holds, those that never opened too.
+  await expect(
+    within(canvasElement).getByText(
+      /^Your drafts and every poll you submitted, whether it opened or not\./,
+    ),
+  ).toBeVisible();
   await expect(draft!.getByText("Draft")).toBeVisible();
   await expect(draft!.getByText("Last edited October 11, 2026 at 2:20 PM UTC")).toBeVisible();
   // A draft opens in the form; nothing past a draft does.
@@ -249,6 +255,37 @@ export const EveryStatePhone: Story = {
     ).toBeLessThanOrEqual(
       timedOut.getByRole("button", { name: "Try again" }).getBoundingClientRect().top,
     );
+  },
+};
+
+/**
+ * Where a time wraps, "UTC" stood alone on the next line ("…at 2:20 PM",
+ * then "UTC") wherever the time was about 300px wide or less: a folded
+ * phone's 280, a 360px phone zoomed to 125%, and the longer Spanish times
+ * (P2-29, the author's list's iteration 6). The time now wraps whole.
+ */
+export const EveryStateFolded: Story = {
+  args: { client: fakeDrafts(EVERY) },
+  globals: { viewport: { value: "folded", isRotated: false } },
+  play: async (context) => {
+    await showsEveryState(context);
+    await expect(context.canvasElement.ownerDocument.documentElement.clientWidth).toBe(280);
+    const times = within(context.canvasElement).getAllByText(
+      /^(Last edited|Submitted|Closes|On) .* UTC$/,
+    );
+    for (const time of times) {
+      const text = time.firstChild!; // The time is the paragraph's only child, its text.
+      const top = (from: number, to: number) => {
+        const range = document.createRange();
+        range.setStart(text, from);
+        range.setEnd(text, to);
+        return Math.round(range.getBoundingClientRect().top);
+      };
+      const end = text.textContent!.length;
+      // "UTC" is on the line of the time's hour, so "AM" and "PM" are too.
+      const hour = text.textContent!.lastIndexOf(":") - 1;
+      await expect(top(end - 3, end)).toBe(top(hour, hour + 1));
+    }
   },
 };
 

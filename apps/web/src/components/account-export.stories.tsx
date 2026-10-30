@@ -36,7 +36,7 @@ export const Download: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: "Download your data" })).toBeVisible();
-    await expect(canvas.getAllByRole("listitem")).toHaveLength(6);
+    await expect(canvas.getAllByRole("listitem")).toHaveLength(7);
     await expect(
       canvas.getByText(/never holds your answers, receipts or voting identity/),
     ).toBeVisible();

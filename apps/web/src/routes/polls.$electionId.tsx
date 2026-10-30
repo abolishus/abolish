@@ -1,6 +1,7 @@
 import { useTranslate } from "@abolishus/ui";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 
+import { followsClient } from "../account/follows.ts";
 import { reactionsClient } from "../account/reactions.ts";
 import { PollSummary } from "../components/poll-summary.tsx";
 import { Notice } from "../components/site-layout.tsx";
@@ -109,6 +110,7 @@ export const Route = createFileRoute("/polls/$electionId")({
           share={share}
           reactions={reactionsClient}
           report={reportPoll}
+          follows={followsClient}
           phoneVerification={phoneVerification}
         />
       );

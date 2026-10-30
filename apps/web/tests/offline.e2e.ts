@@ -58,6 +58,7 @@ async function up() {
     phone: nothing,
     token: nothing,
     reactions: nothing,
+    follows: nothing,
     profiles: nothing,
     accountExport: nothing,
     push: nothing,

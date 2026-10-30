@@ -335,6 +335,17 @@ describe("poll page", () => {
     expect(html).not.toContain("Why should a moderator look at it?");
   });
 
+  test("offers following to everyone alike, reading nothing until the visitor asks", async () => {
+    // The page's server never gets the account cookie (src/node/serve.ts),
+    // and the page doesn't ask whether this account follows the poll (T-11).
+    const html = await (
+      await get(`/polls/${ID}`, { cookie: "__Secure-abolish-account.session_token=secret" })
+    ).text();
+    expect(html).toContain('<h2 id="follow-title"');
+    expect(html).toContain("Following isn&#x27;t answering");
+    expect(html).toContain(">Follow this poll<");
+  });
+
   test("shows a version-5 poll question by question, with version 5's hash", async () => {
     const response = await get(`/polls/${QUESTIONS_ID}`);
     expect(response.status).toBe(200);
@@ -435,8 +446,9 @@ describe("poll page", () => {
     expect(html).toContain("Approve any number");
     // Moderation withheld its text: we don't offer to spread it.
     expect(html).not.toContain("Share this poll");
-    // And it takes no reactions and shows no counts (T-68).
+    // And it takes no reactions, shows no counts and takes no followers (T-68).
     expect(html).not.toContain("reactions-title");
+    expect(html).not.toContain("follow-title");
     // Nor a report: moderators have already removed its text.
     expect(html).not.toContain("Report this poll");
   });

@@ -12,6 +12,7 @@ import {
   emailKeys,
   type EmailMessage,
   exportAccount,
+  MAX_FOLLOW_CHANGES_PER_HOUR,
   MAX_REACTION_CHANGES_PER_HOUR,
   parseKeyring,
   type PhoneChannel,
@@ -65,6 +66,7 @@ import type { Analytics } from "../src/node/analytics.ts";
 import { createDraftsHandler } from "../src/node/drafts.ts";
 import { createEmailHandler } from "../src/node/email.ts";
 import { createExportHandler } from "../src/node/export.ts";
+import { createFollowsHandler } from "../src/node/follows.ts";
 import { createPhoneHandler } from "../src/node/phone.ts";
 import { createProfilesHandler } from "../src/node/profiles.ts";
 import { createPushHandler } from "../src/node/push.ts";
@@ -296,6 +298,12 @@ beforeAll(async () => {
       now: () => NOW,
     }),
     reactions: createReactionsHandler({
+      sql,
+      accountOf: (headers) => accounts.accountOf(headers),
+      origin: ORIGIN,
+      now: () => NOW,
+    }),
+    follows: createFollowsHandler({
       sql,
       accountOf: (headers) => accounts.accountOf(headers),
       origin: ORIGIN,
@@ -1131,6 +1139,7 @@ describe("failures", () => {
       phone: async () => new Response(),
       token: async () => new Response(),
       reactions: record,
+      follows: record,
       profiles: record,
       accountExport: record,
       push: record,
@@ -1145,6 +1154,7 @@ describe("failures", () => {
         "/reactions/counts",
         "/reactions/own",
         "/reactions/set",
+        "/follows/set",
         "/profiles/report",
         "/profiles/moderation",
         "/profiles/appeal",
@@ -1172,6 +1182,7 @@ describe("failures", () => {
         ["/reactions/counts", null],
         ["/reactions/own", `${SESSION}=tok`],
         ["/reactions/set", `${SESSION}=tok`],
+        ["/follows/set", `${SESSION}=tok`],
         ["/profiles/report", null],
         ["/profiles/moderation", `${SESSION}=tok`],
         ["/profiles/appeal", `${SESSION}=tok`],
@@ -1980,6 +1991,7 @@ describe("an account's Tier 0 token under /token", () => {
         now: () => NOW,
       }),
       reactions: async () => new Response(),
+      follows: async () => new Response(),
       profiles: async () => new Response(),
       accountExport: async () => new Response(),
       push: async () => new Response(),
@@ -2253,6 +2265,149 @@ describe("reactions on a poll under /reactions", () => {
     expect(asked).toEqual([]);
     expect((await post("/reactions/own")).status).toBe(200);
     expect(asked).toEqual(["accountOf"]);
+  });
+});
+
+describe("following a poll under /follows", () => {
+  const hex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+
+  /** A signed-in browser, its account verified by e-mail unless told otherwise. */
+  async function signedIn({ verified = true } = {}) {
+    const browser = new Browser();
+    await register(browser, new SoftAuthenticator(RP_ID), true);
+    const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+    const account = (await accounts.accountOf(new Headers({ cookie })))!;
+    if (verified)
+      await sql`
+        INSERT INTO account_emails VALUES (${account}, ${randomBytes(32)}, 'h1', ${randomBytes(40)}, 'b1', now())`;
+    return { browser, account };
+  }
+
+  const followers = async (electionId: string) =>
+    (await sql`SELECT user_id FROM account_follows WHERE election_id = ${fromHex(electionId)}`).map(
+      (r) => r["user_id"] as string,
+    );
+
+  let moderator: string;
+  beforeAll(async () => {
+    moderator = `${newAccountId().slice(0, 8)}-f`;
+    await addModerators(sql, moderator);
+  });
+
+  test("an account follows a poll and stops, each answered with its own state", async () => {
+    const electionId = hex(await newElection(sql));
+    const a = await signedIn();
+    const b = await signedIn();
+    const follow = await a.browser.call("POST", "/follows/set", { electionId, on: true });
+    expect(follow.status).toBe(200);
+    expect(follow.headers.get("cache-control")).toBe("no-store");
+    expect(await follow.json()).toEqual({ following: true });
+    // Following one already followed changes nothing, and says the same.
+    expect(
+      await (await a.browser.call("POST", "/follows/set", { electionId, on: true })).json(),
+    ).toEqual({ following: true });
+    // Stopping one not followed changes nothing either.
+    expect(
+      await (await b.browser.call("POST", "/follows/set", { electionId, on: false })).json(),
+    ).toEqual({ following: false });
+    expect(await followers(electionId)).toEqual([a.account]);
+    expect(
+      await (await a.browser.call("POST", "/follows/set", { electionId, on: false })).json(),
+    ).toEqual({ following: false });
+    expect(await followers(electionId)).toEqual([]);
+
+    // T-10, T-11, T-67: the log has the route class, never the poll or the account.
+    expect(logged.at(-1)).toMatchObject({ method: "POST", route: "follows", status: 200 });
+    const log = JSON.stringify(logged);
+    expect(log).not.toContain(electionId);
+    expect(log).not.toContain(a.account);
+  });
+
+  test("refuses what core refuses, with its code", async () => {
+    const electionId = hex(await newElection(sql));
+    const set = async (browser: Browser, body: object) =>
+      (await browser.call("POST", "/follows/set", { electionId, on: true, ...body })).json();
+    const unverified = await signedIn({ verified: false });
+    expect(await set(unverified.browser, {})).toEqual({ code: "ACCOUNT_UNVERIFIED", status: 403 });
+    // Stopping is always allowed.
+    expect(await set(unverified.browser, { on: false })).toEqual({ following: false });
+    const { browser, account } = await signedIn();
+    expect(await set(browser, { electionId: "00".repeat(32) })).toEqual({
+      code: "UNKNOWN_ELECTION",
+      status: 404,
+    });
+
+    expect(await set(browser, {})).toEqual({ following: true });
+    await moderate(sql, fromHex(electionId), { action: "hide", reason: "illegal", moderator });
+    // A hidden poll takes no new followers (T-68)…
+    const other = await signedIn();
+    expect(await set(other.browser, {})).toEqual({ code: "HIDDEN", status: 409 });
+    expect(await followers(electionId)).toEqual([account]);
+    // …but one following it can still stop.
+    expect(await set(browser, { on: false })).toEqual({ following: false });
+    expect(await followers(electionId)).toEqual([]);
+  });
+
+  test("refuses changes past the hour's limit", async () => {
+    const electionId = hex(await newElection(sql));
+    const { browser } = await signedIn();
+    for (let i = 0; i < MAX_FOLLOW_CHANGES_PER_HOUR; i++)
+      expect(
+        (await browser.call("POST", "/follows/set", { electionId, on: i % 2 === 0 })).status,
+      ).toBe(200);
+    expect(
+      await (await browser.call("POST", "/follows/set", { electionId, on: true })).json(),
+    ).toEqual({ code: "TOO_MANY_THIS_HOUR", status: 429 });
+  });
+
+  test("refuses a malformed request before core sees it", async () => {
+    const { browser } = await signedIn();
+    const electionId = hex(await newElection(sql));
+    const body = { electionId, on: true };
+    for (const bad of [
+      { ...body, electionId: electionId.toUpperCase() },
+      { ...body, electionId: electionId.slice(2) },
+      { ...body, on: "true" },
+      { ...body, extra: 1 },
+      { electionId },
+      {},
+    ])
+      expect(await (await browser.call("POST", "/follows/set", bad)).json()).toEqual({
+        code: "BAD_REQUEST",
+        status: 400,
+      });
+    const text = await fetch(`${base}/follows/set`, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "application/json" },
+      body: "{",
+    });
+    expect(await text.json()).toEqual({ code: "BAD_REQUEST", status: 400 });
+    expect(await followers(electionId)).toEqual([]);
+  });
+
+  test("refuses a change signed out, and any request from another origin, of another type or path", async () => {
+    const electionId = hex(await newElection(sql));
+    const body = { electionId, on: true };
+    const signedOut = await new Browser().call("POST", "/follows/set", body);
+    expect(await signedOut.json()).toEqual({ code: "SIGNED_OUT", status: 401 });
+    const { browser } = await signedIn();
+    const elsewhere = await browser.call("POST", "/follows/set", body, {
+      origin: "https://evil.test",
+    });
+    expect(await elsewhere.json()).toEqual({ code: "FORBIDDEN_ORIGIN", status: 403 });
+    const text = await fetch(`${base}/follows/set`, {
+      method: "POST",
+      headers: { origin: ORIGIN, "content-type": "text/plain" },
+      body: JSON.stringify(body),
+    });
+    expect(await text.json()).toEqual({ code: "UNSUPPORTED_MEDIA_TYPE", status: 415 });
+    expect((await browser.call("POST", "/follows/set?x=1", body)).status).toBe(404);
+    expect((await browser.call("GET", "/follows/set")).status).toBe(404);
+    expect((await browser.call("POST", "/follows", body)).status).toBe(404);
+    expect((await browser.call("POST", "/follows/own", body)).status).toBe(404);
+    expect((await browser.call("POST", `/follows/${electionId}`, body)).status).toBe(404);
+    // None of it was recorded.
+    expect(await followers(electionId)).toEqual([]);
   });
 });
 
@@ -2959,6 +3114,7 @@ describe("limits", () => {
       phone: async () => new Response(null, { status: 404 }),
       token: async () => new Response(null, { status: 404 }),
       reactions: async () => new Response(null, { status: 404 }),
+      follows: async () => new Response(null, { status: 404 }),
       profiles: async () => new Response(null, { status: 404 }),
       accountExport: async () => new Response(null, { status: 404 }),
       push: async () => new Response(null, { status: 404 }),
@@ -2989,6 +3145,7 @@ describe("limits", () => {
       phone: async () => new Response(),
       token: async () => new Response(),
       reactions: async () => new Response(),
+      follows: async () => new Response(),
       profiles: async () => new Response(),
       accountExport: async () => new Response(),
       push: async () => new Response(),

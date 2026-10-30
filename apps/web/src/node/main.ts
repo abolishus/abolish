@@ -37,6 +37,7 @@ import { createEmailHandler, type EmailService } from "./email.ts";
 import { createPhoneHandler, type PhoneService } from "./phone.ts";
 import { startAccountPrune } from "./prune.ts";
 import { createExportHandler } from "./export.ts";
+import { createFollowsHandler } from "./follows.ts";
 import { createProfilesHandler } from "./profiles.ts";
 import { createPushHandler } from "./push.ts";
 import { createReactionsHandler } from "./reactions.ts";
@@ -436,6 +437,11 @@ const reactions = createReactionsHandler({
   accountOf: (headers) => accounts.accountOf(headers),
   origin,
 });
+const follows = createFollowsHandler({
+  sql,
+  accountOf: (headers) => accounts.accountOf(headers),
+  origin,
+});
 const profiles = createProfilesHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
@@ -504,6 +510,7 @@ const server = createWebServer({
   phone,
   token,
   reactions,
+  follows,
   profiles,
   accountExport,
   push,

@@ -9,7 +9,9 @@
 // record's `codehash`; and that code is the build's `deployedBytecode` with
 // only the immutables differing (T-64, T-34). Every transaction in the
 // broadcast must create a recorded contract, and every recorded contract
-// must be created by one. It prints the record with each contract's
+// must be created by one. Since that comparison lets any immutable through,
+// every immutable, and every value the record's `pins` give, is then read
+// back from the chain and must be the record's. It prints the record with each contract's
 // creating transaction and block added, which the services' creation blocks
 // and `l2_from_block` need and the script can't know.
 //
@@ -22,6 +24,7 @@
 
 import { readFileSync, realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 
@@ -87,23 +90,248 @@ export function httpRpc(url: string): Rpc {
 const same = (a: string | null | undefined, b: string) =>
   typeof a === "string" && a.toLowerCase() === b.toLowerCase();
 
+interface Artifact {
+  readonly bytecode: { readonly object: string };
+  readonly deployedBytecode: {
+    readonly object: string;
+    readonly immutableReferences?: { readonly [id: string]: { start: number; length: number }[] };
+  };
+}
+
+const artifactOf = (artifacts: string, name: string) =>
+  JSON.parse(readFileSync(`${artifacts}/${name}.sol/${name}.json`, "utf8")) as Artifact;
+
 /**
  * The runtime code `name` must have once deployed: the build's
  * `deployedBytecode` with each immutable's bytes taken from `code`, so only
  * the immutables (constructor arguments and addresses) may differ.
  */
-function expected(artifacts: string, name: string, code: Uint8Array): Uint8Array {
-  const artifact = JSON.parse(readFileSync(`${artifacts}/${name}.sol/${name}.json`, "utf8")) as {
-    deployedBytecode: {
-      object: string;
-      immutableReferences?: { [id: string]: { start: number; length: number }[] };
-    };
-  };
+function expected(artifact: Artifact, code: Uint8Array): Uint8Array {
   const built = hexToBytes(artifact.deployedBytecode.object.slice(2));
   if (built.length !== code.length) return built;
   for (const refs of Object.values(artifact.deployedBytecode.immutableReferences ?? {}))
     for (const { start, length } of refs) built.set(code.subarray(start, start + length), start);
   return built;
+}
+
+/** One ABI word, as 64 lower-case hex digits. */
+const word = (hex: string) => hex.slice(2).toLowerCase().padStart(64, "0");
+const uint = (n: bigint) => n.toString(16).padStart(64, "0");
+const selector = (signature: string) =>
+  bytesToHex(keccak_256(new TextEncoder().encode(signature)).subarray(0, 4));
+
+/**
+ * A view the record says what it must return: `want` is the whole return
+ * data, or a test of it. `immutables` is how many of the contract's
+ * immutables the view reads back, so that every immutable the build has is
+ * read by one (a storage pin, or another contract's, reads none). The count
+ * is declared by hand: an added immutable fails it, but a miscounted view
+ * isn't caught, since the artifacts carry no names for the references.
+ */
+interface Read {
+  readonly getter: string;
+  readonly args?: readonly string[];
+  readonly to?: string;
+  readonly want: string | ((data: string) => boolean);
+  readonly immutables?: number;
+}
+
+/** The record's `pins`, each value checked for its form as it is taken. */
+function pinsOf(record: DeploymentRecord) {
+  const at = (path: string): unknown => {
+    let v: unknown = record["pins"];
+    for (const key of path.split(".")) {
+      if (typeof v !== "object" || v === null || !Object.hasOwn(v, key))
+        throw new ConfirmError("pins", `no ${path}`);
+      v = (v as Record<string, unknown>)[key];
+    }
+    return v;
+  };
+  const hex = (path: string, bytes: number) => {
+    const v = at(path);
+    if (typeof v !== "string" || !new RegExp(`^0x([0-9a-fA-F]{2}){${bytes}}$`).test(v))
+      throw new ConfirmError("pins", `${path} isn't ${bytes} bytes of hex`);
+    return v.toLowerCase();
+  };
+  const integer = (path: string) => {
+    const v = at(path);
+    // A safe JSON integer, or a decimal string for what a JSON number can't carry.
+    if (Number.isSafeInteger(v) && (v as number) >= 0) return BigInt(v as number);
+    if (typeof v === "string" && /^(0|[1-9][0-9]{0,77})$/.test(v)) return BigInt(v);
+    throw new ConfirmError("pins", `${path} isn't an unsigned integer`);
+  };
+  const list = (path: string) => {
+    const v = at(path);
+    if (!Array.isArray(v) || v.length === 0) throw new ConfirmError("pins", `${path} isn't a list`);
+    return v.map((_, i) => hex(`${path}.${i}`, 20));
+  };
+  return { at, address: (path: string) => hex(path, 20), hex, integer, list };
+}
+
+/** `address[]` as a function returns it alone. */
+const addresses = (list: readonly string[]) =>
+  `0x${uint(32n)}${uint(BigInt(list.length))}${list.map(word).join("")}`;
+
+/** A Safe's owners and threshold, as the record gives them (T-69). */
+const safe = (pins: ReturnType<typeof pinsOf>, path: string): Read[] => [
+  {
+    to: pins.address(`${path}.address`),
+    getter: "getOwners()",
+    want: addresses(pins.list(`${path}.owners`)),
+  },
+  {
+    to: pins.address(`${path}.address`),
+    getter: "getThreshold()",
+    want: `0x${uint(pins.integer(`${path}.threshold`))}`,
+  },
+];
+
+/**
+ * What each contract's views must return, from the record's pins and the
+ * other recorded addresses (T-64, T-34). The code comparison lets any
+ * immutable through, and a constructor's storage writes aren't in the code
+ * at all; with the creation code checked as the build's, these are the
+ * constructor's arguments read back. A contract not listed has no immutables.
+ */
+function reads(record: DeploymentRecord, chainId: bigint): { [name: string]: Read[] } {
+  const pins = pinsOf(record);
+  const address = (name: string) => {
+    const c = record.contracts[name];
+    if (c === undefined) throw new ConfirmError(name, "not in the record");
+    return `0x${word(c.address)}`;
+  };
+  const is = (value: string) => `0x${word(value)}`;
+  const n = (value: bigint) => `0x${uint(value)}`;
+  const has = (name: string) => Object.hasOwn(record.contracts, name);
+  const out: { [name: string]: Read[] } = {};
+
+  if (has("BoardAnchor"))
+    out["BoardAnchor"] = [
+      { getter: "epoch()", want: n(pins.integer("anchor.epoch")), immutables: 1 },
+      { getter: "period()", want: n(pins.integer("anchor.period")), immutables: 1 },
+      { getter: "deadline()", want: n(pins.integer("anchor.deadline")), immutables: 1 },
+      { getter: "authority()", want: is(pins.address("anchor.authority.address")), immutables: 1 },
+      ...safe(pins, "anchor.authority"),
+    ];
+  if (has("BallotRelay"))
+    out["BallotRelay"] = [
+      { getter: "portal()", want: is(pins.address("portal")), immutables: 1 },
+      { getter: "board()", want: is(pins.address("board")), immutables: 1 },
+    ];
+  if (has("TrusteeRegistry")) {
+    // The launch panel is the only panel the record lists, and its
+    // identifier is the hash of its threshold, size and keys (DS_PANEL).
+    const id = pins.hex("launchPanel.id", 32);
+    const threshold = pins.integer("launchPanel.threshold");
+    const size = pins.integer("launchPanel.size");
+    if (threshold > 255n || size > 255n)
+      throw new ConfirmError("pins", "launchPanel's threshold or size exceeds u8");
+    const keys = hexToBytes(pins.hex("launchPanel.keys", Number(size) * 33).slice(2));
+    const computed = sha256(
+      new Uint8Array([
+        16,
+        ...new TextEncoder().encode("abolish/v1/panel"),
+        Number(threshold),
+        Number(size),
+        ...keys,
+      ]),
+    );
+    if (`0x${bytesToHex(computed)}` !== id)
+      throw new ConfirmError("pins", "launchPanel.id isn't its threshold's, size's and keys' hash");
+    out["TrusteeRegistry"] = [
+      { getter: "panelCount()", want: n(1n) },
+      { getter: "panelIds(uint256)", args: [uint(0n)], want: id },
+      {
+        getter: "panelOf(bytes32)",
+        args: [word(id)],
+        want: `0x${uint(threshold)}${uint(size)}${uint(pins.integer("launchPanel.quorum"))}`,
+      },
+      { getter: "kindOf(bytes32)", args: [word(id)], want: n(pins.integer("launchPanel.kind")) },
+      // Each seat's key as the registry holds it, `(x, y)`: the record's
+      // compressed key is its prefix (2 + y's parity) and x.
+      ...Array.from({ length: Number(size) }, (_, i): Read => {
+        const key = keys.subarray(i * 33, (i + 1) * 33);
+        return {
+          getter: "keyOf(bytes32,uint256)",
+          args: [word(id), uint(BigInt(i + 1))],
+          want: (data) =>
+            data.length === 130 &&
+            data.slice(2, 66) === bytesToHex(key.subarray(1)) &&
+            key[0] === 2 + (parseInt(data.slice(-1), 16) & 1),
+        };
+      }),
+    ];
+  }
+  if (has("GroupRegistry")) {
+    const typehash = (s: string) => bytesToHex(keccak_256(new TextEncoder().encode(s)));
+    const domain = bytesToHex(
+      keccak_256(
+        hexToBytes(
+          typehash(
+            "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
+          ) +
+            typehash("Abolish group registry") +
+            typehash("1") +
+            uint(chainId) +
+            word(address("GroupRegistry")),
+        ),
+      ),
+    );
+    out["GroupRegistry"] = [
+      { getter: "threshold()", want: n(pins.integer("registrars.threshold")), immutables: 1 },
+      { getter: "registrars()", want: addresses(pins.list("registrars.addresses")) },
+      { getter: "trusteeRegistry()", want: address("TrusteeRegistry"), immutables: 1 },
+      { getter: "initialPanelId()", want: pins.hex("launchPanel.id", 32), immutables: 1 },
+      // The cached separator and the chain it was cached for. On this chain
+      // the view returns the cached separator, which must be this chain's
+      // and this address's; a cached chain ID other than this chain's isn't
+      // seen, but then the view and every digest recompute the right one.
+      { getter: "domainSeparator()", want: `0x${domain}`, immutables: 2 },
+    ];
+  }
+  if (has("ElectionRegistry"))
+    out["ElectionRegistry"] = [
+      { getter: "board()", want: address("Board"), immutables: 1 },
+      { getter: "trusteeRegistry()", want: address("TrusteeRegistry"), immutables: 1 },
+      { getter: "groupRegistry()", want: address("GroupRegistry"), immutables: 1 },
+      { getter: "l1ChainId()", want: n(pins.integer("l1ChainId")), immutables: 1 },
+      { getter: "l1Anchor()", want: is(pins.address("l1Anchor")), immutables: 1 },
+      { getter: "l1Relay()", want: is(pins.address("l1Relay")), immutables: 1 },
+      { getter: "epoch()", want: n(pins.integer("epoch")), immutables: 1 },
+    ];
+  if (has("Board"))
+    out["Board"] = [
+      { getter: "electionRegistry()", want: address("ElectionRegistry"), immutables: 1 },
+      { getter: "trusteeRegistry()", want: address("TrusteeRegistry"), immutables: 1 },
+      { getter: "relay()", want: is(pins.address("l1Relay")), immutables: 1 },
+      // A board from other creation code could name other code while a
+      // genuine ballot check sits at its first CREATE address.
+      { getter: "ballotCheck()", want: address("BallotCheck"), immutables: 1 },
+    ];
+  if (has("RegistrationAccount"))
+    out["RegistrationAccount"] = [
+      { getter: "entryPoint()", want: is(pins.address("registration.entryPoint")), immutables: 1 },
+      { getter: "owner()", want: is(pins.address("registration.serviceOwner")), immutables: 1 },
+    ];
+  if (has("RegistrationPaymaster"))
+    out["RegistrationPaymaster"] = [
+      { getter: "entryPoint()", want: is(pins.address("registration.entryPoint")), immutables: 1 },
+      { getter: "registry()", want: address("GroupRegistry"), immutables: 1 },
+      { getter: "service()", want: address("RegistrationAccount"), immutables: 1 },
+      {
+        getter: "admin()",
+        want: is(pins.address("registration.admin.address")),
+        immutables: 1,
+      },
+      { getter: "maxCost()", want: n(pins.integer("registration.maxCost")), immutables: 1 },
+      {
+        to: pins.address("registration.admin.address"),
+        getter: "getMinDelay()",
+        want: n(pins.integer("registration.admin.minDelay")),
+      },
+      ...safe(pins, "registration.admin.safe"),
+    ];
+  return out;
 }
 
 /** The address `creator` gives its CREATE at `nonce`, which here is below 0x80. */
@@ -161,14 +389,17 @@ export async function confirm(
     });
   });
 
+  const views = reads(record, BigInt(chainId));
   const contracts: { [name: string]: Contract & { transaction: string; block: number } } = {};
   for (const [name, c] of Object.entries(record.contracts)) {
     const creator = creators.get(name);
     if (creator === undefined) throw new ConfirmError(name, "no transaction in the broadcast");
-    const tx = await rpc<{ from: string; to: string | null; nonce: string } | null>(
-      "eth_getTransactionByHash",
-      [creator.hash],
-    );
+    const tx = await rpc<{
+      from: string;
+      to: string | null;
+      nonce: string;
+      input: string;
+    } | null>("eth_getTransactionByHash", [creator.hash]);
     const receipt = await rpc<{
       status: string;
       blockNumber: string;
@@ -191,25 +422,50 @@ export async function confirm(
     if (code.length === 0) throw new ConfirmError(name, "no code");
     if (`0x${bytesToHex(keccak_256(code))}` !== c.codehash.toLowerCase())
       throw new ConfirmError(name, "code doesn't hash to the record's codehash");
-    if (!equal(code, expected(artifacts, name, code)))
+    const artifact = artifactOf(artifacts, name);
+    // The creating transaction runs the build's creation code, its constructor
+    // arguments after it. Runtime code alone can't show what a constructor
+    // wrote to storage (a panel no view lists, a group, a seeded entry); the
+    // build's constructor writes only what its arguments say, and the reads
+    // below check those. A contract another's constructor created is bound
+    // by its creator's creation code.
+    if (
+      creator.created !== null &&
+      same(c.address, creator.created) &&
+      !tx.input.toLowerCase().startsWith(artifact.bytecode.object.toLowerCase())
+    )
+      throw new ConfirmError(name, "creation code isn't the build's");
+    if (!equal(code, expected(artifact, code)))
       throw new ConfirmError(name, "code isn't the build's beyond its immutables");
+    const built = Object.keys(artifact.deployedBytecode.immutableReferences ?? {}).length;
+    const read = (views[name] ?? []).reduce((sum, r) => sum + (r.immutables ?? 0), 0);
+    if (read !== built)
+      throw new ConfirmError(name, `the build has ${built} immutables, ${read} are read back`);
     contracts[name] = { ...c, transaction: creator.hash, block: Number(receipt.blockNumber) };
   }
-  // The comparison above lets any immutable through, so the board's pin of
-  // its ballot check is read back: a board built from other creation code
-  // could name other code while a genuine ballot check sits at its first
-  // CREATE address (T-64).
-  const { Board: board, BallotCheck: ballotCheck } = record.contracts;
-  if (board !== undefined && ballotCheck !== undefined) {
-    const selector = bytesToHex(
-      keccak_256(new TextEncoder().encode("ballotCheck()")).subarray(0, 4),
-    );
-    const word = await rpc<string>("eth_call", [
-      { to: board.address, data: `0x${selector}` },
-      "latest",
-    ]);
-    if (!same(`0x${word.slice(-40)}`, ballotCheck.address) || word.length !== 66)
-      throw new ConfirmError("Board", `pins ballot check ${word}`);
+  for (const [name, list] of Object.entries(views))
+    for (const { getter, args = [], to, want } of list) {
+      const target = to ?? record.contracts[name]!.address;
+      const data = await rpc<string>("eth_call", [
+        { to: target, data: `0x${selector(getter)}${args.join("")}` },
+        "latest",
+      ]);
+      if (typeof want === "string" ? data.toLowerCase() !== want : !want(data.toLowerCase()))
+        throw new ConfirmError(
+          name,
+          `${to === undefined ? "" : `${to}'s `}${getter} reads ${data}, not the record's`,
+        );
+    }
+  // The EntryPoint both registration contracts pin is the code the record names.
+  if (
+    Object.hasOwn(views, "RegistrationAccount") ||
+    Object.hasOwn(views, "RegistrationPaymaster")
+  ) {
+    const pins = pinsOf(record);
+    const entryPoint = pins.address("registration.entryPoint");
+    const code = hexToBytes((await rpc<string>("eth_getCode", [entryPoint, "latest"])).slice(2));
+    if (`0x${bytesToHex(keccak_256(code))}` !== pins.hex("registration.entryPointCodehash", 32))
+      throw new ConfirmError("EntryPoint", "code doesn't hash to the record's entryPointCodehash");
   }
   return { ...record, contracts };
 }

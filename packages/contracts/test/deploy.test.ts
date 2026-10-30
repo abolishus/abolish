@@ -748,15 +748,220 @@ describe("the staging deployment on a local Anvil pair", () => {
       );
     });
 
+    /** The chain, with every `getter` call to `to` answered `data` instead. */
+    const answering = (url: string, to: string, getter: string, data: string): Rpc => {
+      const selector = cast("sig", getter);
+      const real = httpRpc(url);
+      return async <T>(m: string, params: readonly unknown[]) => {
+        const [call] = params as [{ to: string; data: string }];
+        if (
+          m === "eth_call" &&
+          call.to.toLowerCase() === to.toLowerCase() &&
+          call.data.startsWith(selector)
+        )
+          return data as T;
+        return real<T>(m, params);
+      };
+    };
+    const ELSEWHERE = `0x${"00".repeat(12)}${"ab".repeat(20)}`;
+
     test("refuses a board whose immutable names another ballot check", async () => {
-      const rpc = altered(
-        httpRpc(l2.url),
-        "eth_call",
-        () => `0x${"00".repeat(12)}${"ab".repeat(20)}`,
+      const board = l2Record.contracts["Board"]!.address;
+      const rpc = answering(l2.url, board, "ballotCheck()", ELSEWHERE);
+      expect(await refusal(confirm(l2Record, broadcast(31338, "runL2"), rpc, OUT))).toBe(
+        `Board: ballotCheck() reads ${ELSEWHERE}, not the record's`,
       );
-      expect(await refusal(confirm(l2Record, broadcast(31338, "runL2"), rpc, OUT))).toMatch(
-        /^Board: pins ballot check/,
+    });
+
+    // Every immutable and pinned value, each answered otherwise than the
+    // record says (one word, or a whole return), must be refused naming its
+    // contract and view.
+    test.each<[string, string, string, string]>([
+      ["L1", "BoardAnchor", "epoch()", "0x" + "00".repeat(31) + "01"],
+      ["L1", "BoardAnchor", "period()", "0x" + "00".repeat(31) + "01"],
+      ["L1", "BoardAnchor", "deadline()", "0x" + "00".repeat(31) + "01"],
+      ["L1", "BoardAnchor", "authority()", ELSEWHERE],
+      ["L1", "BallotRelay", "portal()", ELSEWHERE],
+      ["L1", "BallotRelay", "board()", ELSEWHERE],
+      ["L2", "TrusteeRegistry", "panelCount()", "0x" + "00".repeat(31) + "02"],
+      ["L2", "TrusteeRegistry", "panelIds(uint256)", "0x" + "11".repeat(32)],
+      ["L2", "TrusteeRegistry", "panelOf(bytes32)", "0x" + "00".repeat(96)],
+      ["L2", "TrusteeRegistry", "kindOf(bytes32)", "0x" + "00".repeat(32)],
+      ["L2", "TrusteeRegistry", "keyOf(bytes32,uint256)", "0x" + "00".repeat(64)],
+      ["L2", "GroupRegistry", "threshold()", "0x" + "00".repeat(31) + "03"],
+      ["L2", "GroupRegistry", "registrars()", "0x" + "00".repeat(31) + "20" + "00".repeat(32)],
+      ["L2", "GroupRegistry", "trusteeRegistry()", ELSEWHERE],
+      ["L2", "GroupRegistry", "initialPanelId()", "0x" + "11".repeat(32)],
+      ["L2", "GroupRegistry", "domainSeparator()", "0x" + "11".repeat(32)],
+      ["L2", "ElectionRegistry", "board()", ELSEWHERE],
+      ["L2", "ElectionRegistry", "trusteeRegistry()", ELSEWHERE],
+      ["L2", "ElectionRegistry", "groupRegistry()", ELSEWHERE],
+      ["L2", "ElectionRegistry", "l1ChainId()", "0x" + "00".repeat(31) + "01"],
+      ["L2", "ElectionRegistry", "l1Anchor()", ELSEWHERE],
+      ["L2", "ElectionRegistry", "l1Relay()", ELSEWHERE],
+      ["L2", "ElectionRegistry", "epoch()", "0x" + "00".repeat(32)],
+      ["L2", "Board", "electionRegistry()", ELSEWHERE],
+      ["L2", "Board", "trusteeRegistry()", ELSEWHERE],
+      ["L2", "Board", "relay()", ELSEWHERE],
+      ["L2", "RegistrationAccount", "entryPoint()", ELSEWHERE],
+      ["L2", "RegistrationAccount", "owner()", ELSEWHERE],
+      ["L2", "RegistrationPaymaster", "entryPoint()", ELSEWHERE],
+      ["L2", "RegistrationPaymaster", "registry()", ELSEWHERE],
+      ["L2", "RegistrationPaymaster", "service()", ELSEWHERE],
+      ["L2", "RegistrationPaymaster", "admin()", ELSEWHERE],
+      ["L2", "RegistrationPaymaster", "maxCost()", "0x" + "00".repeat(31) + "01"],
+    ])("refuses the %s's %s whose %s reads otherwise", async (chain, name, getter, data) => {
+      const [r, url, sig] =
+        chain === "L1" ? [l1Record, l1.url, "runL1"] : [l2Record, l2.url, "runL2"];
+      const rpc = answering(url, r.contracts[name]!.address, getter, data);
+      expect(await refusal(confirm(r, broadcast(r.chainId, sig), rpc, OUT))).toBe(
+        `${name}: ${getter} reads ${data}, not the record's`,
       );
+    });
+
+    test("refuses a seat key of the other parity, a wider return, and a panel pinned twice", async () => {
+      const id = (l2Record["pins"] as { launchPanel: { id: string } }).launchPanel.id;
+      const registry = l2Record.contracts["TrusteeRegistry"]!.address;
+      const real = httpRpc(l2.url);
+      const key = await real<string>("eth_call", [
+        {
+          to: registry,
+          data: cast("calldata", "keyOf(bytes32,uint256)", id, "1"),
+        },
+        "latest",
+      ]);
+      // The same x with y's parity flipped, and the same answer with a word more.
+      const flipped = `${key.slice(0, -1)}${(parseInt(key.slice(-1), 16) ^ 1).toString(16)}`;
+      for (const data of [flipped, `${key}${"00".repeat(32)}`]) {
+        const rpc = answering(l2.url, registry, "keyOf(bytes32,uint256)", data);
+        expect(await refusal(confirm(l2Record, broadcast(31338, "runL2"), rpc, OUT))).toBe(
+          `TrusteeRegistry: keyOf(bytes32,uint256) reads ${data}, not the record's`,
+        );
+      }
+    });
+
+    test("refuses a Safe or timelock whose owners, threshold or delay aren't the record's", async () => {
+      const pins = l2Record["pins"] as {
+        registration: { admin: { address: string; safe: { address: string } } };
+      };
+      const authority = (l1Record["pins"] as { anchor: { authority: { address: string } } }).anchor
+        .authority.address;
+      for (const [r, url, sig, to, getter, data] of [
+        [l1Record, l1.url, "runL1", authority, "getThreshold()", "0x" + "00".repeat(31) + "03"],
+        [
+          l1Record,
+          l1.url,
+          "runL1",
+          authority,
+          "getOwners()",
+          "0x" + "00".repeat(31) + "20" + "00".repeat(32),
+        ],
+        [
+          l2Record,
+          l2.url,
+          "runL2",
+          pins.registration.admin.address,
+          "getMinDelay()",
+          "0x" + "00".repeat(32),
+        ],
+        [
+          l2Record,
+          l2.url,
+          "runL2",
+          pins.registration.admin.safe.address,
+          "getThreshold()",
+          "0x" + "00".repeat(31) + "01",
+        ],
+      ] as const) {
+        const rpc = answering(url, to, getter, data);
+        const name = r === l1Record ? "BoardAnchor" : "RegistrationPaymaster";
+        expect(await refusal(confirm(r, broadcast(r.chainId, sig), rpc, OUT))).toBe(
+          `${name}: ${to.toLowerCase()}'s ${getter} reads ${data}, not the record's`,
+        );
+      }
+    });
+
+    test.each<[string, (pins: Record<string, unknown>) => void, string]>([
+      [
+        "a panel id that isn't its keys' hash",
+        (p) => ((p["launchPanel"] as { id: string }).id = `0x${"11".repeat(32)}`),
+        "pins: launchPanel.id isn't its threshold's, size's and keys' hash",
+      ],
+      [
+        "keys of another length than the panel's size",
+        (p) => ((p["launchPanel"] as { size: number }).size = 6),
+        "pins: launchPanel.keys isn't 198 bytes of hex",
+      ],
+      [
+        "a missing pin",
+        (p) => delete (p["registration"] as Record<string, unknown>)["maxCost"],
+        "pins: no registration.maxCost",
+      ],
+      [
+        "a cap that isn't an integer",
+        (p) => ((p["registration"] as { maxCost: string }).maxCost = "1e18"),
+        "pins: registration.maxCost isn't an unsigned integer",
+      ],
+      [
+        "another EntryPoint code hash",
+        (p) =>
+          ((p["registration"] as { entryPointCodehash: string }).entryPointCodehash =
+            `0x${"00".repeat(32)}`),
+        "EntryPoint: code doesn't hash to the record's entryPointCodehash",
+      ],
+    ])("refuses a record with %s", async (_, tamper, reason) => {
+      const r = copy(l2Record);
+      tamper(r["pins"] as Record<string, unknown>);
+      expect(await refusal(confirm(r, broadcast(31338, "runL2"), httpRpc(l2.url), OUT))).toBe(
+        reason,
+      );
+    });
+
+    test("refuses a build whose creation code isn't what the transaction ran", async () => {
+      // The group registry's creation code with its first byte changed, its
+      // runtime code untouched: storage a constructor wrote is in no view.
+      const dir = mkdtempSync(`${tmpdir()}/confirm-`);
+      try {
+        for (const name of Object.keys(l2Record.contracts)) {
+          mkdirSync(`${dir}/${name}.sol`);
+          const artifact = JSON.parse(readFileSync(`${OUT}/${name}.sol/${name}.json`, "utf8")) as {
+            bytecode: { object: string };
+          };
+          if (name === "GroupRegistry") {
+            const o = artifact.bytecode.object;
+            artifact.bytecode.object = `0x${o.slice(2, 4) === "00" ? "01" : "00"}${o.slice(4)}`;
+          }
+          writeFileSync(`${dir}/${name}.sol/${name}.json`, JSON.stringify(artifact));
+        }
+        expect(
+          await refusal(confirm(l2Record, broadcast(31338, "runL2"), httpRpc(l2.url), dir)),
+        ).toBe("GroupRegistry: creation code isn't the build's");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    test("refuses a build with an immutable nothing reads back", async () => {
+      // The board's artifact claiming a fifth immutable, at the first's place.
+      const dir = mkdtempSync(`${tmpdir()}/confirm-`);
+      try {
+        for (const name of Object.keys(l2Record.contracts)) {
+          mkdirSync(`${dir}/${name}.sol`);
+          const artifact = JSON.parse(readFileSync(`${OUT}/${name}.sol/${name}.json`, "utf8")) as {
+            deployedBytecode: { immutableReferences: Record<string, unknown[]> };
+          };
+          if (name === "Board") {
+            const refs = artifact.deployedBytecode.immutableReferences;
+            refs["999999"] = Object.values(refs)[0]!;
+          }
+          writeFileSync(`${dir}/${name}.sol/${name}.json`, JSON.stringify(artifact));
+        }
+        expect(
+          await refusal(confirm(l2Record, broadcast(31338, "runL2"), httpRpc(l2.url), dir)),
+        ).toBe("Board: the build has 5 immutables, 4 are read back");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     test.each<

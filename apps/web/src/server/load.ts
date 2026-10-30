@@ -672,6 +672,8 @@ export type EmbedPage =
       readonly asOf: Instant;
       /** Its words in the page's locale, checked against the definition; `undefined` if none can be shown. */
       readonly text: CardText | undefined;
+      /** Its results, as its page reads them (`resultsOf`). */
+      readonly results: PollResults;
     }
   /** Moderation hid its text (docs/moderation-policy.md), so the embed shows none. */
   | { readonly kind: "hidden" }
@@ -682,7 +684,8 @@ export type EmbedPage =
  * (docs/design/sharing.md, Embed): resolved as `/p/<code>` resolves it, then
  * loaded and checked as the poll page is, which must print the same code
  * (T-34), with its display text checked as the stream checks a card's
- * (src/server/stream-card.ts). Nothing of the reader's is passed on (T-10, T-11).
+ * (src/server/stream-card.ts), and its results as the page reads them.
+ * Nothing of the reader's is passed on (T-10, T-11).
  */
 export async function loadEmbed(api: Api, code: string, locale: string): Promise<EmbedPage> {
   const link = await resolveShortLink(api, code);
@@ -690,7 +693,13 @@ export async function loadEmbed(api: Api, code: string, locale: string): Promise
   const page = await loadPoll(api, link.electionId, locale);
   if (page.kind !== "poll" || page.code !== code) return { kind: "not-found" };
   if (page.moderation.state === "hidden") return { kind: "hidden" };
-  return { kind: "poll", poll: page.poll, asOf: page.asOf, text: page.text };
+  return {
+    kind: "poll",
+    poll: page.poll,
+    asOf: page.asOf,
+    text: page.text,
+    results: page.results,
+  };
 }
 
 /**

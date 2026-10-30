@@ -1,11 +1,15 @@
-import { buttonVariants, cn, Fingerprint, useTranslate } from "@abolishus/ui";
+import { buttonVariants, cn, Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
 import { ExternalLink } from "lucide-react";
 import { useId } from "react";
 
 import { catalogs } from "../messages.ts";
+import type { FinalCount } from "../og/poll.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
+import { leadersOf, shareOf } from "../results.ts";
 import type { CardText } from "../stream.ts";
+import { isolated } from "../titles.ts";
 import { ballotLink } from "../values.ts";
+import { Bar } from "./poll-results.tsx";
 import { When } from "./when.tsx";
 
 export type EmbedTheme = "auto" | "light" | "dark";
@@ -24,6 +28,8 @@ export interface EmbedCardProps {
   text: CardText | undefined;
   /** The ballot client's address (`BALLOT_URL`), or `null` where none is set. */
   ballot: string | null;
+  /** Its results as a card may show them, `finalCount`; drawn only once it has closed. */
+  results: FinalCount;
 }
 
 /** Read out after every link that leaves the frame: each opens a new tab. */
@@ -38,10 +44,11 @@ function NewTab() {
  * answer is a link that opens the ballot client in a new tab with the poll
  * and the pick in the fragment, which no server sees ([[first-answer]];
  * T-10, T-11). The card has no form, input or button, so it can never take
- * an answer itself, and it says so. Nothing about answers yet: results come
- * with [[P2-25]].
+ * an answer itself, and it says so. Nothing about answers shows before the
+ * close, whatever the results say; once closed, the first question's final
+ * count where one tier's is published (P2-24 part 4b).
  */
-export function EmbedCard({ poll, asOf, url, title, text, ballot }: EmbedCardProps) {
+export function EmbedCard({ poll, asOf, url, title, text, ballot, results }: EmbedCardProps) {
   const t = useTranslate(catalogs);
   const titleId = useId();
   const answersId = useId();
@@ -110,6 +117,18 @@ export function EmbedCard({ poll, asOf, url, title, text, ballot }: EmbedCardPro
           </ul>
         </div>
       )}
+      {status !== "closed" ? null : results.state === "counted" ? (
+        <FinalResults
+          counted={results.counted}
+          counts={results.counts}
+          questions={questions}
+          text={text}
+        />
+      ) : (
+        <p className="m-0 text-base text-pretty" data-testid="embed-results">
+          {t(results.state === "by-tier" ? "ogTiers" : "ogCountingNote")}
+        </p>
+      )}
       <p className="m-0 text-sm text-muted-foreground" data-testid="embed-status">
         {status === "scheduled" ? (
           <>
@@ -148,6 +167,75 @@ export function EmbedCard({ poll, asOf, url, title, text, ballot }: EmbedCardPro
         </a>
       </footer>
     </article>
+  );
+}
+
+/**
+ * A closed poll's final count on its embed: the first question's lead in a
+ * sentence, as the poll page says it, then each answer's share with a bar.
+ * One tier's count only, never a figure across tiers or questions (ADR 0026;
+ * T-16). An answer goes by number where its words can't be shown.
+ */
+function FinalResults({
+  counted,
+  counts,
+  questions,
+  text,
+}: {
+  counted: number;
+  counts: readonly string[];
+  /** How many questions the poll has: the count is the first's. */
+  questions: number;
+  text: CardText | undefined;
+}) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const headingId = useId();
+  const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
+  const list = new Intl.ListFormat(locale, { type: "conjunction" });
+  const label = (i: number) => text?.options[i] ?? t("resultsOption", { number: i + 1 });
+  const leaders = leadersOf(counts);
+  const top = leaders[0];
+  return (
+    <section aria-labelledby={headingId} className="grid gap-2" data-testid="embed-results">
+      <h2 id={headingId} className="m-0 text-sm font-normal text-muted-foreground">
+        {t("ogFinalCount", { answers: t("ogAnswersCounted", { count: counted }) })}
+        {questions > 1 ? ` · ${t("ogQuestionOne", { count: questions })}` : null}
+      </h2>
+      <p className="m-0 text-base font-semibold text-pretty">
+        {top === undefined
+          ? t("resultsNothingPicked")
+          : t(leaders.length === 1 ? "resultsLeader" : "resultsTied", {
+              // The author's words, in their own direction inside our sentence (T-75).
+              option: list.format(leaders.map((i) => isolated(label(i)))),
+              share: percent.format(shareOf(counts[top] ?? "0", counted)),
+            })}
+      </p>
+      <ol className="m-0 grid list-none p-0">
+        {counts.map((count, i) => {
+          const share = shareOf(count, counted);
+          const lead = leaders.includes(i);
+          return (
+            <li
+              key={i}
+              className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-1 border-b border-border py-2"
+            >
+              <span
+                lang={text?.language}
+                dir={text === undefined ? undefined : "auto"}
+                className={cn("min-w-0 text-base break-words", lead && "font-semibold")}
+              >
+                {label(i)}
+              </span>
+              <span className="text-end font-mono text-base tabular-nums">
+                {percent.format(share)}
+              </span>
+              <Bar share={share} lead={lead} />
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
 

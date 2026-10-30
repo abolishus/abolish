@@ -82,29 +82,43 @@ export function leadOf(
 }
 
 /**
- * A closed poll's results on its preview, and the answers they counted:
- * the first question's lead where the poll's results are read in one tier
- * with every cell opened. Several tiers get no lead, since the card has room
- * for one and none may join two (ADR 0026; T-16); anything less than a
- * published count is still `counting`.
+ * What a closed poll's results allow a card to show (its link preview and
+ * its embed, P2-24 part 4): the first question's counts where the results
+ * are read in one tier with every cell opened. Several tiers show no figure,
+ * since a card has room for one tier and none may join two (ADR 0026; T-16);
+ * anything less than a published count is still `counting`.
  */
+export type FinalCount =
+  | {
+      readonly state: "counted";
+      readonly counted: number;
+      /** The first question's count per option, in option order. */
+      readonly counts: readonly string[];
+    }
+  | { readonly state: "by-tier" }
+  | { readonly state: "counting" };
+
+export function finalCount(results: PollResults | undefined): FinalCount {
+  if (results?.kind !== "read") return { state: "counting" };
+  const [only, ...others] = results.tiers;
+  if (others.length > 0)
+    return { state: results.tiers.some((t) => t.questions !== undefined) ? "by-tier" : "counting" };
+  const counts = only?.questions?.[0];
+  if (only === undefined || counts === undefined) return { state: "counting" };
+  return { state: "counted", counted: only.counted, counts };
+}
+
+/** A closed poll's results on its preview, and the answers they counted (`finalCount`). */
 function closedResults(
   results: PollResults | undefined,
   locale: Locale,
   options: readonly string[] | undefined,
 ): { results: EverydayResults; answers: number | undefined } {
-  const counting = { results: { state: "counting" } as const, answers: undefined };
-  if (results?.kind !== "read") return counting;
-  const [only, ...others] = results.tiers;
-  if (others.length > 0)
-    return results.tiers.some((t) => t.questions !== undefined)
-      ? { results: { state: "by-tier" }, answers: undefined }
-      : counting;
-  const counts = only?.questions?.[0];
-  if (only === undefined || counts === undefined) return counting;
+  const final = finalCount(results);
+  if (final.state !== "counted") return { results: { state: final.state }, answers: undefined };
   return {
-    results: { state: "closed", lead: leadOf(counts, only.counted, locale, options) },
-    answers: only.counted,
+    results: { state: "closed", lead: leadOf(final.counts, final.counted, locale, options) },
+    answers: final.counted,
   };
 }
 

@@ -534,10 +534,12 @@ export const AppealADecision: Story = {
     });
     const moderation = within(block);
     await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
-    await expect(moderation.getByRole("link", { name: "See the moderation log" })).toHaveAttribute(
-      "href",
-      "/moderation",
-    );
+    const log = moderation.getByRole("link", { name: "See the moderation log" });
+    await expect(log).toHaveAttribute("href", "/moderation");
+    // The history's actions are drawn as the row's, 48px targets (P2-29,
+    // the author's list's iteration 13).
+    for (const action of [moderation.getByRole("button", { name: "Appeal this decision…" }), log])
+      await expect(action.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
     // Asks once more, and can step back.
     await userEvent.click(
       moderation.getByRole("button", {
@@ -656,6 +658,31 @@ export const ModerationHistoryDark: Story = {
   args: { client: MODERATED },
   parameters: { theme: "dark" },
   play: showsModeration,
+};
+
+/**
+ * At desktop width each appeal ran the row's whole width, about 150
+ * characters a line, and the moderation log's link was a 14px line of text
+ * where the row's own links are 48px (P2-29, the author's list's iteration
+ * 13). An appeal now keeps the reason's measure, and the link the row's.
+ */
+export const ModerationHistoryDesktop: Story = {
+  args: { client: MODERATED },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async (context) => {
+    await showsModeration(context);
+    const canvas = within(context.canvasElement);
+    const reason = canvas.getByText(/don't show this poll's text/);
+    const appeals = canvas.getAllByText(/^You appealed decision No\./);
+    await expect(appeals).toHaveLength(3);
+    for (const appeal of appeals)
+      await expect(appeal.getBoundingClientRect().width).toBeLessThanOrEqual(
+        reason.getBoundingClientRect().width,
+      );
+    const row = canvas.getByRole("link", { name: "Go to its page" }).getBoundingClientRect();
+    for (const log of canvas.getAllByRole("link", { name: "See the moderation log" }))
+      await expect(log.getBoundingClientRect().height).toBe(row.height);
+  },
 };
 
 /**

@@ -1,4 +1,4 @@
-import { Button, useI18n, useTranslate } from "@abolishus/ui";
+import { Button, buttonVariants, useI18n, useTranslate } from "@abolishus/ui";
 import { EyeOff, ListX, type LucideIcon, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -17,6 +17,9 @@ const ACTION_ICON = {
   hide: EyeOff,
   restore: RotateCcw,
 } as const satisfies Record<NonNullable<PollModerationView["latest"]>["action"], LucideIcon>;
+
+/** The poll row's links: the buttons' 48px target and underline, so the history's actions match the row's. */
+const LINK = buttonVariants({ variant: "link", className: "px-0" });
 
 type Done = "moderationAppealFiled";
 // Only these reach the page (`failed` below); the submission's refusals never do.
@@ -143,7 +146,12 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
       {appeals.length === 0 ? null : (
         <ul className="m-0 grid list-none gap-1 p-0">
           {appeals.map((a) => (
-            <li key={a.decisionSeq.toString()} suppressHydrationWarning>
+            // The measure every other sentence in the list keeps, not the row's whole width.
+            <li
+              key={a.decisionSeq.toString()}
+              className="max-w-prose text-pretty"
+              suppressHydrationWarning
+            >
               {t("moderationAppealed", {
                 seq: a.decisionSeq.toString(),
                 when: at(a.filedAt),
@@ -153,19 +161,6 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           ))}
         </ul>
       )}
-      {view?.appealable === true && !confirming ? (
-        <p className="m-0">
-          <Button
-            variant="link"
-            className="h-auto px-0"
-            aria-describedby={titleId}
-            disabled={busy}
-            onClick={() => setConfirming(true)}
-          >
-            {t("moderationAppeal")}
-          </Button>
-        </p>
-      ) : null}
       {view?.appealable === true && confirming ? (
         <div
           role="group"
@@ -185,8 +180,19 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           </div>
         </div>
       ) : null}
-      <p className="m-0">
-        <a href="/moderation" className="underline underline-offset-4">
+      <p className="m-0 flex flex-wrap gap-x-4">
+        {view?.appealable === true && !confirming ? (
+          <Button
+            variant="link"
+            className="px-0"
+            aria-describedby={titleId}
+            disabled={busy}
+            onClick={() => setConfirming(true)}
+          >
+            {t("moderationAppeal")}
+          </Button>
+        ) : null}
+        <a href="/moderation" className={LINK}>
           {t("moderationLogLink")}
         </a>
       </p>

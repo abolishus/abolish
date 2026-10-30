@@ -191,6 +191,17 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   await expect(
     timedOut!.getByRole("button", { name: "Try again", description: "Repaint the bandstand?" }),
   ).toBeVisible();
+  // Why a poll waits or failed comes before what the author can do about it.
+  const before = (reason: Element, action: Element) =>
+    expect(reason.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await before(
+    setup!.getByText(/^Setting up takes a while/),
+    setup!.getByRole("link", { name: "Follow its setup" }),
+  );
+  await before(
+    timedOut!.getByText(/couldn't finish preparing its keys/),
+    timedOut!.getByRole("button", { name: "Try again" }),
+  );
   // A registered poll stays: nothing to retry or discard.
   await expect(registered!.getByText(/It will never take answers/)).toBeVisible();
   await expect(registered!.queryByRole("button")).toBeNull();
@@ -207,6 +218,21 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
 export const EveryState: Story = {
   args: { client: fakeDrafts(EVERY) },
   play: showsEveryState,
+};
+
+export const EveryStatePhone: Story = {
+  args: { client: fakeDrafts(EVERY) },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async (context) => {
+    await showsEveryState(context);
+    // On a phone the row stacks, so the reason is read above its actions.
+    const timedOut = within(within(context.canvasElement).getAllByRole("listitem")[5]!);
+    await expect(
+      timedOut.getByText(/couldn't finish preparing its keys/).getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(
+      timedOut.getByRole("button", { name: "Try again" }).getBoundingClientRect().top,
+    );
+  },
 };
 
 export const EveryStateDark: Story = {
@@ -245,6 +271,17 @@ export const EveryStateDesktop: Story = {
       ),
     );
     await expect(below.size).toBe(1);
+    // The actions stay on the state's line, above the reason under it.
+    for (const item of items) {
+      const state = box(within(item).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/));
+      for (const target of [
+        ...within(item).queryAllByRole("link"),
+        ...within(item).queryAllByRole("button"),
+      ])
+        await expect(
+          Math.abs(box(target).top + box(target).height / 2 - state.top - state.height / 2),
+        ).toBeLessThan(2);
+    }
     // A row's links and buttons are one height, so its actions sit on one line.
     for (const item of items) {
       const targets = [

@@ -25,3 +25,10 @@ export const LOG_PAGE = 50;
 
 /** Polls per page of the discovery list: each costs the page one definition fetch. */
 export const LIST_PAGE = 20;
+
+/**
+ * Polls per read of the account page's list of polls with results: each
+ * costs the read a definition and a display text, as a stream card does
+ * (T-52).
+ */
+export const FOLLOWED_PAGE = 10;

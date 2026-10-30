@@ -5,9 +5,10 @@ import { POLL_TOPICS, type PollTopic } from "@abolishus/core/poll-topics";
 import { createServerFn } from "@tanstack/react-start";
 
 import { api } from "./server/api.ts";
-import { BOARD_PAGE } from "./page-sizes.ts";
+import { BOARD_PAGE, FOLLOWED_PAGE } from "./page-sizes.ts";
 import {
   loadBoardPage,
+  loadFollowedPolls,
   loadModerationLog,
   loadPoll,
   loadPollList,
@@ -223,3 +224,28 @@ export const fetchProfile = createServerFn({ method: "GET" })
       };
     }),
   );
+
+/**
+ * Each poll's heading for the account page's list of polls with results
+ * (src/account/follow-results.ts), in `locale`'s translation: at most
+ * `FOLLOWED_PAGE` distinct polls a call, so one request fetches no more
+ * definitions and texts than a page of the stream (T-52). Like every server
+ * function it never gets the account cookie (src/node/serve.ts): the list
+ * comes from the follows handler, and the polls come here by their IDs
+ * alone (T-10).
+ */
+export const fetchFollowedPolls = createServerFn({ method: "GET" })
+  .inputValidator((input: unknown) => {
+    const { electionIds, locale } = (input ?? {}) as Record<string, unknown>;
+    if (
+      !Array.isArray(electionIds) ||
+      electionIds.length < 1 ||
+      electionIds.length > FOLLOWED_PAGE ||
+      !electionIds.every(isElectionId) ||
+      new Set(electionIds).size !== electionIds.length
+    )
+      throw new TypeError("expected 1 to 10 distinct election IDs");
+    if (!isLocale(locale)) throw new TypeError("expected a locale");
+    return { electionIds: electionIds as string[], locale };
+  })
+  .handler(({ data }) => opaque(() => loadFollowedPolls(api(), data.electionIds, data.locale)));

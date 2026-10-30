@@ -13,6 +13,7 @@ import {
   type TreeClaim,
 } from "../board.ts";
 import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import type { FollowedPoll } from "../account/follow-results.ts";
 import {
   type CellResults,
   cellResultsView,
@@ -862,4 +863,38 @@ export async function loadProfile(
     cards: cards.filter((card) => card !== undefined),
     next: start + STREAM_PAGE < profile.polls.length ? shown.at(-1) : undefined,
   };
+}
+
+/**
+ * The words the account page's list of polls with results shows for each of
+ * `electionIds` ([[P2-25]] part 4c-2b): its heading in `locale`'s
+ * translation, checked as a stream card's (src/server/stream-card.ts), so the
+ * list shows no words its polls don't commit to (T-34, T-41). A poll whose
+ * definition fails its checks, whose text is missing or withheld (a hidden
+ * poll's, T-68) or that the database lost has no heading, so the list still
+ * shows it to be taken off. Asked by the polls' IDs alone, as the poll page
+ * asks: the server function never gets the account cookie (T-10).
+ */
+export async function loadFollowedPolls(
+  api: Api,
+  electionIds: readonly string[],
+  locale: string,
+): Promise<readonly FollowedPoll[]> {
+  return Promise.all(
+    electionIds.map(async (electionId): Promise<FollowedPoll> => {
+      try {
+        const [{ definition }, displayText] = await Promise.all([
+          api.elections.getDefinition({ electionId }),
+          displayTextOf(api, electionId),
+        ]);
+        const card = streamCard(electionId, definition, displayText, locale, NO_TAGS);
+        return card.kind === "poll"
+          ? { electionId, heading: card.text.heading }
+          : { electionId, heading: undefined };
+      } catch (error) {
+        if (notFound(error)) return { electionId, heading: undefined };
+        throw error;
+      }
+    }),
+  );
 }

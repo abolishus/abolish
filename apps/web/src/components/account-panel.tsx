@@ -10,11 +10,13 @@ import {
 } from "../account/client.ts";
 import type { DraftsClient } from "../account/drafts.ts";
 import type { ExportClient } from "../account/export.ts";
+import type { FollowResultsClient } from "../account/follow-results.ts";
 import type { PushClient } from "../account/push.ts";
 import type { ProfilesClient } from "../account/profiles.ts";
 import type { VerifyClient } from "../account/verify.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import { AccountExport } from "./account-export.tsx";
+import { AccountFollowResults } from "./account-follow-results.tsx";
 import { AccountNotices } from "./account-notices.tsx";
 import { AccountPolls } from "./account-polls.tsx";
 import { AccountProfile } from "./account-profile.tsx";
@@ -117,6 +119,8 @@ export interface AccountPanelProps {
   readonly accountExport: ExportClient;
   /** This browser's web push subscription. */
   readonly push: PushClient;
+  /** The polls the account followed whose results are in. */
+  readonly followResults: FollowResultsClient;
   /** Whether this deployment verifies a phone before an account votes. */
   readonly phone: boolean;
   /**
@@ -140,6 +144,7 @@ export function AccountPanel({
   verify,
   accountExport,
   push,
+  followResults,
   phone,
   ask,
 }: AccountPanelProps) {
@@ -299,8 +304,10 @@ export function AccountPanel({
             onChanged={() => setPollsRevision((n) => n + 1)}
           />
           <AccountNotices push={push} index="04" onSignedOut={signedOut} />
+          {/* Beside the notices, since the results e-mail sends the account here to see which poll (T-73). */}
+          <AccountFollowResults client={followResults} index="05" onSignedOut={signedOut} />
           <Section
-            index="05"
+            index="06"
             mark={t("passkeysTitle")}
             title={t("passkeysHeading")}
             id="passkeys-title"
@@ -363,10 +370,10 @@ export function AccountPanel({
             </div>
           </Section>
 
-          <AccountExport client={accountExport} index="06" onSignedOut={signedOut} />
+          <AccountExport client={accountExport} index="07" onSignedOut={signedOut} />
 
           <Section
-            index="07"
+            index="08"
             mark={t("accountDeleteMark")}
             title={t("accountDeleteTitle")}
             id="delete-title"

@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { accountClient } from "../account/client.ts";
 import { draftsClient } from "../account/drafts.ts";
 import { exportClient } from "../account/export.ts";
+import { followResultsClient } from "../account/follow-results.ts";
 import { profilesClient } from "../account/profiles.ts";
 import { pushClient } from "../account/push.ts";
 import { verifyClient } from "../account/verify.ts";
@@ -41,6 +42,7 @@ export const Route = createFileRoute("/account")({
         verify={verifyClient}
         accountExport={exportClient}
         push={pushClient}
+        followResults={followResultsClient}
         phone={phone}
         ask={next === "new-poll" ? ask : undefined}
       />

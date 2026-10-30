@@ -151,12 +151,14 @@ def main(constants, out_dir):
     for b in ballots.values():
         assert len({b["hash"], relabelled(b), as_v4(b)}) == 3
 
-    def opening(cell, signer, counted):
-        """An honest tally opening of `cell` over the ballots `counted`, signed by seat `signer`."""
+    def opening(cell, signer, counted, tamper=None, signed_by=None):
+        """An honest tally opening of `cell` over the ballots `counted`, signed by seat `signer`; `tamper` rewrites its (V, R) list before signing, and `signed_by` signs it with another seat's secret."""
         agg = tv.aggregate(m, k, [ballots[w]["vote"]["vss"] for w in counted])
         values = [{"v": sum(constants_of[w][j][0] for w in counted) % L, "r": sum(constants_of[w][j][1] for w in counted) % L} for j in range(m)]
+        if tamper is not None:
+            values = tamper(values)
         ah = tov.aggregate_hash(agg)
-        sig = tov.sign(secrets[signer], tov.statement(defh, cell, ah, signer, values))
+        sig = tov.sign(secrets[signer if signed_by is None else signed_by], tov.statement(defh, cell, ah, signer, values))
         return tov.encode({"definitionHash": defh, "cell": cell, "aggregateHash": ah, "signer": signer, "opening": values, "signature": sig})
 
     clock = {"epoch": d["closes_at"] - 2 * PERIOD, "period": PERIOD, "deadline": 7200}
@@ -363,6 +365,23 @@ def main(constants, out_dir):
     assert breaks["expected"]["7.4"] == outcome("fail", "tally-stray", {"entry": first_opening + 2})
     assert [[b["code"] for b in o["breaks"]] for o in breaks["tallies"]] == [[], [], ["tally-stray"], ["tally-aggregate", "tally-second"], ["tally-repeat"], []]
     assert breaks["tallies"][3]["breaks"][1]["of"] == first_opening and breaks["tallies"][4]["breaks"][0]["of"] == first_opening + 1
+
+    def bump_v(j):
+        return lambda values: [dict(x, v=(x["v"] + 1) % L) if i == j else x for i, x in enumerate(values)]
+
+    checks = case(
+        "tally-checks",
+        "Every ballot delivered and each cell opened honestly (cell 0 by seat 1, cell 1 by seat 2), then: seat 2's opening of cell 0 with one entry too few (tally-missing); seat 3's opening of cell 1 whose V for option 3 is one more than the aggregate opens (tally-opening at option 3); and an opening of cell 0 naming seat 3 but signed with seat 1's secret (tally-unattributed, so no second of seat 1's). 7.2 passes; 7.4 fails at the first break, tally-missing.",
+        [
+            head,
+            (3, every_receipt),
+            (4, [opening(0, 1, ["dan", "eve"]), opening(1, 2, ["tess"]), opening(0, 2, ["dan", "eve"], tamper=lambda v: v[:-1]), opening(1, 3, ["tess"], tamper=bump_v(3)), opening(0, 3, ["dan", "eve"], signed_by=1)]),
+        ],
+    )
+    assert checks["expected"]["7.2"] == outcome("pass")
+    assert [[b["code"] for b in o["breaks"]] for o in checks["tallies"]] == [[], [], ["tally-missing"], ["tally-opening"], ["tally-unattributed"]]
+    assert checks["tallies"][3]["breaks"][0]["option"] == 3 and checks["tallies"][4]["signer"] is None
+    assert checks["expected"]["7.4"] == outcome("fail", "tally-missing", {"entry": checks["tallies"][2]["entry"]})
 
     doc = {
         "format": "abolish-verifier-counted-vectors/1",

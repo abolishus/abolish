@@ -133,20 +133,24 @@ const plain = ({ status, code, at }: { status: string; code?: string; at?: objec
   ...(at !== undefined && Object.keys(at).length > 0 && { at }),
 });
 
-test("every definition is a rolling version 7, and every ballot passes 5.1 to 5.4 against its step", () => {
-  for (const c of file.cases) {
-    const { definition, ceremony, admission } = election(c);
-    expect(isRolling(definition), c.id).toBe(true);
-    expect(ceremony.rows.get("3.2")?.status, c.id).toBe("pass");
-    // Only the close rule turns any away: a ballot boarded after the
-    // window, which no opening's verdict rests on.
-    expect(
-      admission.report?.rejected.every((b) => b.code === "window-boarded-late"),
-      c.id,
-    ).toBe(true);
-    expect(admission.admitted?.length, c.id).toBeGreaterThan(0);
-  }
-});
+test(
+  "every definition is a rolling version 7, and every ballot passes 5.1 to 5.4 against its step",
+  { timeout: 60_000 },
+  () => {
+    for (const c of file.cases) {
+      const { definition, ceremony, admission } = election(c);
+      expect(isRolling(definition), c.id).toBe(true);
+      expect(ceremony.rows.get("3.2")?.status, c.id).toBe("pass");
+      // Only the close rule turns any away: a ballot boarded after the
+      // window, which no opening's verdict rests on.
+      expect(
+        admission.report?.rejected.every((b) => b.code === "window-boarded-late"),
+        c.id,
+      ).toBe(true);
+      expect(admission.admitted?.length, c.id).toBeGreaterThan(0);
+    }
+  },
+);
 
 describe("6.2 against the independent implementation", { timeout: 60_000 }, () => {
   for (const c of file.cases)

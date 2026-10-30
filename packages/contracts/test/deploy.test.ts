@@ -25,7 +25,17 @@ const REGISTRARS = [
   "0x0000000000000000000000000000000000000011",
   "0x0000000000000000000000000000000000000022",
 ];
-const CLOCK = { epoch: 1767225600, period: 3600, deadline: 1800 };
+const CLOCK = { epoch: 1767225600, period: 3600, deadline: 43200 };
+/** A 1-of-1 Safe: code, but one key. */
+const SOLE_OWNER = "0x00000000000000000000000000000000000000cc";
+const OVER_THRESHOLD = "0x00000000000000000000000000000000000000cd";
+const REPEATED_OWNER = "0x00000000000000000000000000000000000000ce";
+/** MockSafe's owners and threshold (test/utils/MockSafe.sol). */
+const SAFE_OWNERS = [
+  "0x00000000000000000000000000000000000005A1",
+  "0x00000000000000000000000000000000000005a2",
+  "0x00000000000000000000000000000000000005A3",
+];
 
 interface Node {
   readonly url: string;
@@ -150,11 +160,28 @@ function forgeScript(sig: string, url: string, cfg: object, { broadcast = true }
     ],
     {
       cwd: PKG,
-      env: { ...process.env, DEPLOY_CONFIG: JSON.stringify(cfg), L1_RPC_URL: l1.url },
+      env: {
+        ...process.env,
+        DEPLOY_CONFIG: JSON.stringify(cfg),
+        L1_RPC_URL: l1.url,
+        // foundry.toml turns the compilation cache off, for the release
+        // build (README, Release build). Here each of the test's ~30 runs
+        // would otherwise recompile, competing with the other packages'
+        // tests on the same runner; the cache is gitignored.
+        FOUNDRY_CACHE: "true",
+      },
       encoding: "utf8",
     },
   );
   return { status: run.status, output: `${run.stdout}${run.stderr}` };
+}
+
+/** A contract's runtime code from the build's `out/`. */
+function deployedCode(name: string): string {
+  const artifact = JSON.parse(readFileSync(`${PKG}/out/MockSafe.sol/${name}.json`, "utf8")) as {
+    deployedBytecode: { object: string };
+  };
+  return artifact.deployedBytecode.object;
 }
 
 function cast(...args: string[]): string {
@@ -205,7 +232,11 @@ let l2: Node;
 beforeAll(async () => {
   cleanUp();
   [l1, l2] = await Promise.all([anvil(31337), anvil(31338)]);
-  for (const at of [AUTHORITY, PORTAL]) await rpc(l1.url, "anvil_setCode", [at, "0x00"]);
+  await rpc(l1.url, "anvil_setCode", [PORTAL, "0x00"]);
+  await rpc(l1.url, "anvil_setCode", [AUTHORITY, deployedCode("MockSafe")]);
+  await rpc(l1.url, "anvil_setCode", [SOLE_OWNER, deployedCode("MockSoleOwnerSafe")]);
+  await rpc(l1.url, "anvil_setCode", [OVER_THRESHOLD, deployedCode("MockOverThresholdSafe")]);
+  await rpc(l1.url, "anvil_setCode", [REPEATED_OWNER, deployedCode("MockRepeatedOwnerSafe")]);
 }, 60_000);
 afterAll(() => {
   l1?.process.kill();
@@ -234,10 +265,59 @@ describe("refusals, before anything is sent", () => {
       { anchor: { ...CLOCK, epoch: "18446744073709551616", authority: AUTHORITY } },
       "OutOfRange",
     ],
+    [
+      "an epoch that isn't a whole hour",
+      { anchor: { ...CLOCK, epoch: CLOCK.epoch + 1, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "another period",
+      { anchor: { ...CLOCK, period: 1800, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "a zero deadline",
+      { anchor: { ...CLOCK, deadline: 0, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "another deadline",
+      { anchor: { ...CLOCK, deadline: 1800, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "a threshold above the owner count",
+      { anchor: { ...CLOCK, authority: OVER_THRESHOLD } },
+      "AuthorityNotMultisig",
+    ],
+    [
+      "an owner listed twice",
+      { anchor: { ...CLOCK, authority: REPEATED_OWNER } },
+      "AuthorityNotMultisig",
+    ],
+    [
+      "a 1-of-1 Safe as the authority",
+      { anchor: { ...CLOCK, authority: SOLE_OWNER } },
+      "AuthorityNotMultisig",
+    ],
   ])(
     "the L1 run: %s",
     async (_, change, error) => {
       await refused("runL1()", l1.url, config(change), error);
+    },
+    MANY,
+  );
+
+  test.each([
+    ["code with no Safe getters", PORTAL],
+    ["an account with no code", "0x00000000000000000000000000000000000000dd"],
+  ])(
+    "the L1 run: an authority that is %s",
+    async (_, authority) => {
+      // The getters don't answer, so it fails before the anchor's own code check could.
+      const run = forgeScript("runL1()", l1.url, config({ anchor: { ...CLOCK, authority } }));
+      expect(run.status, run.output).not.toBe(0);
+      expect(await nonce(l1.url)).toBe(0);
     },
     MANY,
   );
@@ -295,6 +375,20 @@ describe("the staging deployment on a local Anvil pair", () => {
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x1"]);
     await refused("runL2()", l2.url, config({ l2Nonce: 1 }), "L1RelayBoard");
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x0"]);
+    // Another deployer than the L1 record's (Anvil's second account, at nonce 0).
+    await refused(
+      "runL2()",
+      l2.url,
+      config({ deployer: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8" }),
+      "L1RecordMismatch",
+    );
+    // An L2 run from another commit than the L1's.
+    await refused(
+      "runL2()",
+      l2.url,
+      config({ commit: "89abcdef0123456789abcdef0123456789abcdef" }),
+      "L1RecordMismatch",
+    );
     // An anchor and relay at other nonces than the L1 run used.
     await refused("runL2()", l2.url, config({ l1Nonce: 2 }), "L1NotDeployed");
 
@@ -350,7 +444,14 @@ describe("the staging deployment on a local Anvil pair", () => {
     expect(lower).toEqual({
       l2ChainId: 31338,
       board: l2Record.contracts["Board"]!.address,
-      anchor: { ...CLOCK, authority: AUTHORITY },
+      anchor: {
+        ...CLOCK,
+        authority: {
+          address: AUTHORITY,
+          owners: SAFE_OWNERS.map((o) => o.toLowerCase()),
+          threshold: 2,
+        },
+      },
       portal: PORTAL,
     });
     expect(l2Record.pins).toEqual({

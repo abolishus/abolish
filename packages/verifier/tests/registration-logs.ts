@@ -112,9 +112,24 @@ export const v5Definition = (version = 8) => ({
 });
 // Version 7's own registration reads only under contract-event version 13
 // (docs/spec/contracts.md, Event tables (version 13)).
-export const v7Definition = (version = 13) => ({
+/**
+ * The vectors' typical rolling definition at contract-event `version`,
+ * without its author panel unless `author`: beside one the registration
+ * check isn't read here.
+ */
+export const v7Definition = (version = 13, author = false) => ({
   version: 7 as const,
-  value: pinned(typicalV7, version),
+  value: pinned(
+    author
+      ? typicalV7
+      : {
+          ...typicalV7,
+          author_threshold: 0,
+          author_keys: [],
+          author_transcript_hash: new Uint8Array(32),
+        },
+    version,
+  ),
 });
 export type Definition = ReturnType<typeof v1Definition> | ReturnType<typeof v5Definition>;
 /** `Definition`, or a version 7, which only this package's registration check reads. */

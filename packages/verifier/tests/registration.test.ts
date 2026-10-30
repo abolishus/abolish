@@ -1,6 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
-import type { ContractEventRecord } from "@abolishus/crypto";
+import { type ContractEventRecord, ELECTORATE_MODES } from "@abolishus/crypto";
 import { decodeDefinition } from "../src/definition.ts";
 import { definitionRegistration, registrationCheck } from "../src/index.ts";
 import { hex, numRuns, read } from "./registry-logs.ts";
@@ -60,6 +60,18 @@ describe("registrationCheck", () => {
     // (T-53).
     const v12 = v7Definition(12);
     expect(check(honest(v12, 12), v12)).toEqual(fail("registry-records"));
+  });
+
+  test("leaves a rolling definition with an author panel unverifiable, as a fixed one", () => {
+    // Its author run is read as a fixed poll's is (Key ceremony, step 5), so
+    // its registration is no more read here than theirs (T-37).
+    const authored = v7Definition(13, true);
+    expect(authored.value.electorate_mode).toBe(ELECTORATE_MODES.rolling);
+    expect(authored.value.author_keys.length).not.toBe(0);
+    expect(check(honest(authored, 13), authored)).toEqual({
+      status: "unverifiable",
+      code: "author-panel",
+    });
   });
 
   test("passes version 1's record, which logs no key set, on its transcript alone", () => {

@@ -1,6 +1,14 @@
 import { Button, buttonVariants, useI18n, useTranslate } from "@abolishus/ui";
 import type { PollState } from "@abolishus/core";
-import { CircleAlert, CircleDot, Hourglass, type LucideIcon, PencilLine, Plus } from "lucide-react";
+import {
+  CircleAlert,
+  CircleCheckBig,
+  CircleDot,
+  Hourglass,
+  type LucideIcon,
+  PencilLine,
+  Plus,
+} from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
@@ -16,10 +24,13 @@ import { Section } from "./page-parts.tsx";
 import { PollModeration } from "./poll-moderation.tsx";
 import { ProfileChoice } from "./profile-choice.tsx";
 
-type Shown = "drafted" | "setup" | "open" | "failed";
+type Shown = "drafted" | "setup" | "open" | "closed" | "failed";
 
-/** Setup's steps are one state to the author: they wait, and can leave (T-34: no hashes). */
-const SHOWN: Readonly<Record<PollState, Shown>> = {
+/**
+ * Setup's steps are one state to the author: they wait, and can leave (T-34:
+ * no hashes). An open poll past its close is shown closed (`shownAt`).
+ */
+const SHOWN: Readonly<Record<PollState, Exclude<Shown, "closed">>> = {
   drafted: "drafted",
   submitted: "setup",
   created: "setup",
@@ -35,8 +46,22 @@ const MARK = {
   drafted: { icon: PencilLine, tone: "text-muted-foreground" },
   setup: { icon: Hourglass, tone: "text-pending" },
   open: { icon: CircleDot, tone: "text-recorded" },
+  closed: { icon: CircleCheckBig, tone: "text-muted-foreground" },
   failed: { icon: CircleAlert, tone: "text-destructive" },
 } as const satisfies Record<Shown, { icon: LucideIcon; tone: string }>;
+
+/**
+ * A poll's state as its author reads it at `now`. The list's state stays
+ * `open` after the close, so the close time decides, as on the poll's page:
+ * a ballot counts through `closes_at`'s second (docs/spec/revoting.md).
+ */
+const shownAt = (p: PollSummary, now: Date): Shown =>
+  p.state === "open" && BigInt(Math.floor(now.getTime() / 1000)) > p.closesAt
+    ? "closed"
+    : SHOWN[p.state];
+
+/** The list's links share the buttons' 48px target and underline, so a row's actions line up. */
+const LINK = buttonVariants({ variant: "link", className: "px-0" });
 
 type Done = "pollsRemoved" | "pollsRetried" | "pollsDiscarded";
 
@@ -55,6 +80,8 @@ export interface AccountPollsProps {
   readonly profileRevision?: number;
   /** Called after each poll's choice is sent, so the rest of the page reads the profile again. */
   readonly onProfileChanged?: () => void;
+  /** The clock that says whether an open poll has closed. */
+  readonly now?: () => Date;
 }
 
 /**
@@ -74,6 +101,7 @@ export function AccountPolls({
   profiles,
   profileRevision = 0,
   onProfileChanged,
+  now = () => new Date(),
 }: AccountPollsProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
@@ -149,12 +177,15 @@ export function AccountPolls({
 
   const at = (iso: string) => formatUtc(locale, new Date(iso));
 
-  const when = (p: PollSummary) => {
-    switch (SHOWN[p.state]) {
+  const when = (p: PollSummary, shown: Shown) => {
+    const closes = () => formatUtc(locale, new Date(Number(p.closesAt) * 1000));
+    switch (shown) {
       case "drafted":
         return t("pollsEdited", { when: at(p.updatedAt) });
       case "open":
-        return t("pollsCloses", { when: formatUtc(locale, new Date(Number(p.closesAt) * 1000)) });
+        return t("pollsCloses", { when: closes() });
+      case "closed":
+        return t("pollsClosed", { when: closes() });
       default:
         return t("pollsSubmitted", { when: at(p.submittedAt ?? p.updatedAt) });
     }
@@ -192,17 +223,13 @@ export function AccountPolls({
     );
   };
 
-  const actions = (p: PollSummary) => {
+  const actions = (p: PollSummary, shown: Shown) => {
     // Every row has the same buttons: each is described by its poll's title.
     const which = `poll-${p.id}-title`;
     if (p.state === "drafted")
       return (
         <span className="flex flex-wrap gap-x-4 md:justify-end">
-          <a
-            href={`/account/polls/${p.id}`}
-            aria-describedby={which}
-            className="inline-flex h-9 items-center underline underline-offset-4"
-          >
+          <a href={`/account/polls/${p.id}`} aria-describedby={which} className={LINK}>
             {t("pollsEdit")}
           </a>
           <Button
@@ -217,20 +244,16 @@ export function AccountPolls({
         </span>
       );
     const link = (href: string, words: "pollsFollowSetup" | "pollsPage") => (
-      <a
-        href={href}
-        aria-describedby={which}
-        className="inline-flex h-9 items-center underline underline-offset-4"
-      >
+      <a href={href} aria-describedby={which} className={LINK}>
         {t(words)}
       </a>
     );
-    if (SHOWN[p.state] === "setup") return link(`/account/polls/${p.id}/setup`, "pollsFollowSetup");
-    if (p.state === "open")
+    if (shown === "setup") return link(`/account/polls/${p.id}/setup`, "pollsFollowSetup");
+    if (shown === "open" || shown === "closed")
       return p.electionId === undefined ? null : link(`/polls/${p.electionId}`, "pollsPage");
     if (p.state !== "failed" || !p.retryable) return null;
     return (
-      <span className="flex flex-wrap gap-x-4">
+      <span className="flex flex-wrap gap-x-4 md:justify-end">
         <Button
           variant="link"
           className="px-0"
@@ -274,7 +297,7 @@ export function AccountPolls({
         ) : (
           <ul className="m-0 grid list-none border-t-2 border-foreground p-0">
             {polls.map((p) => {
-              const shown = SHOWN[p.state];
+              const shown = shownAt(p, now());
               const { icon: Icon, tone } = MARK[shown];
               const title = p.title === "" ? t("pollsUntitled") : p.title;
               const help: keyof Messages | undefined =
@@ -286,11 +309,12 @@ export function AccountPolls({
               return (
                 <li
                   key={p.id}
-                  className="grid gap-x-6 gap-y-2 border-b border-border py-5 md:grid-cols-[minmax(0,1fr)_9rem_minmax(0,16rem)_auto] md:items-start"
+                  className="grid gap-x-6 gap-y-2 border-b border-border py-5 md:grid-cols-[10rem_minmax(0,1fr)_auto] md:items-center"
                 >
+                  {/* The title has the row's whole width, so it never narrows to a word a line. */}
                   <h3
                     id={`poll-${p.id}-title`}
-                    className="m-0 text-lg leading-snug font-semibold break-words"
+                    className="m-0 text-lg leading-snug font-semibold break-words md:col-span-full"
                   >
                     {title}
                   </h3>
@@ -299,9 +323,9 @@ export function AccountPolls({
                     {t(`pollsState_${shown}`)}
                   </p>
                   <p className="m-0 font-mono text-xs tracking-wide" suppressHydrationWarning>
-                    {when(p)}
+                    {when(p, shown)}
                   </p>
-                  <div className="text-sm md:text-end">{actions(p)}</div>
+                  <div className="text-sm md:text-end">{actions(p, shown)}</div>
                   {help === undefined ? null : (
                     <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground md:col-span-full">
                       {t(help)}

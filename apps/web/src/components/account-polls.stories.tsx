@@ -109,6 +109,12 @@ const OPEN = poll("open", {
   title: "Name the new ferry",
   electionId: "0f".repeat(32),
 });
+const CLOSED = poll("closed", {
+  state: "open",
+  title: "Light the pier at night?",
+  closesAt: 1792195200n, // 2026-10-17T00:00:00Z, before the stories' clock
+  electionId: "1e".repeat(32),
+});
 const TIMED_OUT = poll("timeout", {
   state: "failed",
   title: "Repaint the bandstand?",
@@ -124,11 +130,12 @@ const REGISTERED = poll("registered", {
   retryable: false,
 });
 
-const EVERY = [DRAFT, UNTITLED, SETTING_UP, OPEN, TIMED_OUT, REGISTERED];
+const EVERY = [DRAFT, UNTITLED, SETTING_UP, OPEN, CLOSED, TIMED_OUT, REGISTERED];
 
 const meta = {
   component: AccountPolls,
-  args: { index: "01" },
+  // Every story reads the list on one day: after CLOSED's close, before OPEN's.
+  args: { index: "01", now: () => new Date("2026-10-18T12:00:00.000Z") },
 } satisfies Meta<typeof AccountPolls>;
 
 export default meta;
@@ -140,7 +147,7 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const items = await canvas.findAllByRole("listitem");
   await expect(items).toHaveLength(EVERY.length);
-  const [draft, untitled, setup, open, timedOut, registered] = items.map((i) => within(i));
+  const [draft, untitled, setup, open, closed, timedOut, registered] = items.map((i) => within(i));
   await expect(draft!.getByText("Draft")).toBeVisible();
   await expect(draft!.getByText("Last edited October 11, 2026 at 2:20 PM UTC")).toBeVisible();
   // A draft opens in the form; nothing past a draft does.
@@ -169,6 +176,13 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   await expect(setup!.queryByRole("button")).toBeNull();
   await expect(open!.getByText("Closes November 4, 2026 at 12:00 AM UTC")).toBeVisible();
   await expect(open!.queryByRole("button")).toBeNull();
+  // The list still says `open` once the close has passed: the clock decides.
+  await expect(closed!.getByText("Closed", { exact: true })).toBeVisible();
+  await expect(closed!.queryByText("Open", { exact: true })).toBeNull();
+  await expect(closed!.getByText("Closed October 17, 2026 at 12:00 AM UTC")).toBeVisible();
+  await expect(
+    closed!.getByRole("link", { name: "Go to its page", description: "Light the pier at night?" }),
+  ).toHaveAttribute("href", `/polls/${"1e".repeat(32)}`);
   // A failure in its own words, with what the author can do.
   await expect(timedOut!.getByText("Didn't open")).toBeVisible();
   await expect(
@@ -191,6 +205,37 @@ export const EveryStateDark: Story = {
   args: { client: fakeDrafts(EVERY) },
   parameters: { theme: "dark" },
   play: showsEveryState,
+};
+
+export const EveryStateDesktop: Story = {
+  args: { client: fakeDrafts(EVERY) },
+  globals: { viewport: { value: "desktop", isRotated: false } },
+  play: async (context) => {
+    await showsEveryState(context);
+    const items = within(context.canvasElement).getAllByRole("listitem");
+    const box = (e: Element) => e.getBoundingClientRect();
+    const width = box(items[0]!).width;
+    // Each title has its row's width, never a column beside the state.
+    for (const item of items)
+      await expect(box(within(item).getByRole("heading")).width).toBeGreaterThan(width - 1);
+    // The states start at one edge and the times at another, row after row.
+    const lefts = (find: (i: HTMLElement) => Element) =>
+      new Set(items.map((i) => Math.round(box(find(i)).left)));
+    await expect(
+      lefts((i) => within(i).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/)).size,
+    ).toBe(1);
+    await expect(
+      lefts((i) => within(i).getByText(/^(Last edited|Submitted|Closes|Closed) .* UTC$/)).size,
+    ).toBe(1);
+    // A row's links and buttons are one height, so its actions sit on one line.
+    for (const item of items) {
+      const targets = [
+        ...within(item).queryAllByRole("link"),
+        ...within(item).queryAllByRole("button"),
+      ];
+      for (const target of targets) await expect(box(target).height).toBe(48);
+    }
+  },
 };
 
 export const Empty: Story = {

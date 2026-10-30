@@ -1193,9 +1193,11 @@ const enUS = {
   pollsState_setup: "Setting up",
   pollsState_open: "Open",
   pollsState_failed: "Didn't open",
+  pollsState_closed: "Closed",
   pollsEdited: "Last edited {when} UTC",
   pollsSubmitted: "Submitted {when} UTC",
   pollsCloses: "Closes {when} UTC",
+  pollsClosed: "Closed {when} UTC",
   pollsSetupHelp:
     "Setting up takes a while, mostly waiting for the public record to settle. You can leave this page, or follow its setup step by step.",
   pollsFollowSetup: "Follow its setup",

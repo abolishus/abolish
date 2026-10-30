@@ -255,7 +255,9 @@ describe("the run builds a rolling poll's chain from the archive", () => {
     expect(row(r, "7.5")).toMatchObject({ status: "pass" });
   });
 
-  test("a live rolling poll's releases can't pass while its running copies aren't read", () => {
+  // Releases, step 1: a live rolling poll's releases are read as a fixed
+  // one's are, once 7.1 passed, which needs the board this run has no copy of.
+  test("a live rolling poll's releases wait on 7.1's pass", () => {
     const p = poll(TREE, RESULTS_MODES.live);
     const pins = [
       {
@@ -270,7 +272,12 @@ describe("the run builds a rolling poll's chain from the archive", () => {
     const r = verifyBundle(bundleOf(p, replayOf(p)), pins, p.registries);
     expect(row(r, "2.3").status).not.toBe("fail");
     expect(row(r, "4.1").code).not.toBe("not-reached");
-    for (const id of ["7.5", "7.6"]) expect(row(r, id)).toMatchObject(NOT_REACHED);
+    expect(row(r, "7.1").status).toBe("unverifiable");
+    for (const id of ["7.5", "7.6"]) {
+      expect(row(r, id)).toMatchObject(NOT_REACHED);
+      expect(row(r, id).at).toEqual({});
+    }
+    expect(r).not.toHaveProperty("releases");
   });
 
   test("without the archive, or with no chain from it, the run stops at 2.3 as before", () => {

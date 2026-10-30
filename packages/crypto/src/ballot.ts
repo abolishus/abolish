@@ -2027,6 +2027,76 @@ export function stepBallotV5(
   return stepOf(mapStep(result, (r) => (r.ok ? { ...r, cell, step } : r)));
 }
 
+/** A version-5 ballot's membership check alone, with the step it names. */
+export interface BallotMembershipV5 extends BallotMembership {
+  /** The root-clock step it names, whose root its membership proof is checked against. */
+  readonly step: number;
+}
+
+/**
+ * `stepMembershipV4` for a version-5 ballot: its membership check (verifier
+ * 5.1 to 5.3) alone, whatever its shape, share hashes and validity proofs
+ * find, so a running set counts it towards the one-ballot rule
+ * (docs/spec/tally.md, Running set, condition 1; T-45). The check is
+ * admission's: a step the poll doesn't accept (`root-step-range`) or a
+ * `suppliedRoot` other than the step's root (`root-step-mismatch`) fails it
+ * as a proof that doesn't verify against the step's root does, each without
+ * a proof check, since there is no root to check against. `M` is over the
+ * record's own committed vote and step, so it never depends on the root.
+ * `undefined` if the ballot names another definition or a cell the
+ * partition doesn't have: it isn't the tier's. The caller reads the step's
+ * finality from its own L1 headers: until the step is final, the verdict
+ * isn't a running set's to use (tally.md, Running set).
+ */
+export function stepMembershipV5(
+  election: RollingBallotElection,
+  ballot: BallotRecordV5,
+  suppliedRoot?: bigint,
+): BallotStep<BallotMembershipV5> | undefined {
+  const definitionHash = madeHashOf(election, 5);
+  const state = ROLLING.get(election) as RollingState;
+  if (suppliedRoot !== undefined && typeof suppliedRoot !== "bigint")
+    throw new TypeError("stepMembershipV5: suppliedRoot: expected a bigint or undefined");
+  const fields = fieldsOf(ballot);
+  const { cell, step } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash)) return undefined;
+  const c = rollingCellOf(election, cell);
+  if (c === undefined) return undefined;
+  if (!isU32(step)) throw new RangeError("stepMembershipV5: the ballot's step must be a u32");
+  const hash = ballotHashV5(
+    { definitionHash, cell, nullifier: fields.nullifier, step },
+    fields.vote,
+  );
+  const message = membershipMessage({
+    definitionHash,
+    tier: c.tier,
+    ballotHash: hash,
+    l1RefNumber: fields.l1RefNumber,
+    l1RefHash: fields.l1RefHash,
+  });
+  const read = {
+    message,
+    tier: c.tier,
+    cell,
+    nullifier: fields.nullifier,
+    l1RefNumber: fields.l1RefNumber,
+    step,
+  };
+  const at = acceptedStep(state, cell, step);
+  if (at === undefined || (suppliedRoot !== undefined && suppliedRoot !== at.root))
+    return stepOf({ done: { member: false, ...read } });
+  const { signals } = signalsOf(
+    definitionHash,
+    { tier: c.tier, root: at.root, scope: c.scope },
+    fields,
+    hash,
+  );
+  return stepOf({
+    check: { proof: ballot.membership_proof, signals },
+    finish: (member) => ({ member, ...read }),
+  });
+}
+
 // Public data, so a constant-time comparison isn't needed.
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);

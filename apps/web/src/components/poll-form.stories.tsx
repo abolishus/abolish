@@ -652,6 +652,40 @@ export const PreviewMarksTheChoice: Story = {
 };
 
 /**
+ * The preview named each question's range in the form's own words ("Choose
+ * any number." whether or not it could be left blank, "Choose 2 to 3.") and
+ * said "You can leave this question blank." where the ballot client says
+ * nothing, while saying nothing where the ballot client says the question
+ * can't be skipped. It now gives the ballot client's instruction and skip
+ * note, word for word (P2-29, creating a poll's iteration 20).
+ */
+export const PreviewSaysWhatTheBallotSays: Story = {
+  args: { client: savedDraft(), id: ID },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const preview = await canvas.findByRole("complementary", { name: "What people will see" });
+    const line = (n: number) =>
+      [...preview.querySelectorAll("ol > li")][n]?.querySelector("p.text-sm")?.textContent;
+    await expect(line(0)).toBe("Choose one. This question can't be skipped.");
+    await expect(line(1)).toBe("Choose up to 2.");
+    const first = within(canvas.getByRole("region", { name: "Question 1" }));
+    await userEvent.click(first.getByRole("radio", { name: "Any number" }));
+    await waitFor(() =>
+      expect(line(0)).toBe("Choose at least one. This question can't be skipped."),
+    );
+    await userEvent.click(
+      first.getByRole("checkbox", { name: "People can leave this question blank" }),
+    );
+    await waitFor(() => expect(line(0)).toBe("Choose as many as you like."));
+    const second = within(canvas.getByRole("region", { name: "Question 2" }));
+    await userEvent.click(second.getByRole("radio", { name: "Between two numbers" }));
+    await waitFor(() =>
+      expect(line(1)).toMatch(/^Choose from \d to \d\. This question can't be skipped\.$/),
+    );
+  },
+};
+
+/**
  * The review's `text-pretty` ended the who row's first line at "e-", with
  * "mail address" under it, wherever the row was 212px to 270px wide: on the
  * site, any screen under 303px, a folded phone's 280 or a 360px phone zoomed
@@ -1000,9 +1034,7 @@ const editsADraft: Story["play"] = async ({ canvasElement, args }) => {
   await expect(canvas.getByLabelText("Closing date")).toHaveValue("2026-11-04");
   await expect(canvas.getByLabelText("Closing time")).toHaveValue("10:00");
   const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
-  await expect(
-    preview.getByText("Choose up to 2. You can leave this question blank."),
-  ).toBeVisible();
+  await expect(preview.getByText("Choose up to 2.")).toBeVisible();
   await expect(preview.getByText("Busiest at the ferry")).toBeVisible();
   // Saved unchanged, it is the draft it was.
   await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));

@@ -578,13 +578,14 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
               {q.description === "" ? null : (
                 <p className="m-0 text-base whitespace-pre-line wrap-anywhere">{q.description}</p>
               )}
+              {/* The ballot client's own words for the range, read from it as
+                  the ballot client reads them, and its note on a question
+                  that can't be skipped: the form's rule names (a "One" left
+                  blank, "Any number" that can't be) aren't what people read
+                  (P2-29, creating a poll's iteration 20). */}
               <p className="m-0 text-sm text-muted-foreground">
-                {q.rule === "between"
-                  ? t("pollFormPreviewRule_between", { min, max })
-                  : q.rule === "upTo" || q.rule === "exactly"
-                    ? t(`pollFormPreviewRule_${q.rule}`, { count: max })
-                    : t(`pollFormPreviewRule_${q.rule}`)}
-                {min === 0 ? ` ${t("pollFormPreviewOptional")}` : null}
+                <span>{instructionText(t, min, max, q.options.length)}</span>
+                {min === 0 ? null : <span> {t("pollFormPreviewCantSkip")}</span>}
               </p>
               <ul className="m-0 grid list-none gap-2 p-0">
                 {q.options.map((o) => (
@@ -622,6 +623,24 @@ function PollPreview({ t, form }: { t: Translate; form: PollForm }) {
       </ol>
     </div>
   );
+}
+
+/**
+ * The instruction the ballot client gives over a question answering from
+ * `min` to `max` of `all` options (apps/ballot/src/answers.ts,
+ * `instructionOf`), in its words.
+ */
+function instructionText(t: Translate, min: number, max: number, all: number): string {
+  if (min === 0) {
+    if (max === 1) return t("pollFormPreviewChooseOne");
+    return max === all
+      ? t("pollFormPreviewChooseAny")
+      : t("pollFormPreviewChooseUpTo", { count: max });
+  }
+  if (min === max) return t("pollFormPreviewChooseExactly", { count: min });
+  return max === all
+    ? t("pollFormPreviewChooseAtLeast", { count: min })
+    : t("pollFormPreviewChooseBetween", { min, max });
 }
 
 /**

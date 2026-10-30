@@ -179,7 +179,9 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   // The list still says `open` once the close has passed: the clock decides.
   await expect(closed!.getByText("Closed", { exact: true })).toBeVisible();
   await expect(closed!.queryByText("Open", { exact: true })).toBeNull();
-  await expect(closed!.getByText("Closed October 17, 2026 at 12:00 AM UTC")).toBeVisible();
+  // The state, then when it closed, without saying "Closed" twice (as the poll register does).
+  await expect(closed!.getByText("On October 17, 2026 at 12:00 AM UTC")).toBeVisible();
+  await expect(closed!.getAllByText(/closed/i)).toHaveLength(1);
   // Once closed, its results come first, then its page.
   const closedLinks = closed!.getAllByRole("link", { description: "Light the pier at night?" });
   await expect(closedLinks.map((l) => [l.textContent, l.getAttribute("href")])).toEqual([
@@ -224,7 +226,7 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   for (const item of items) {
     const style = (e: Element) => getComputedStyle(e);
     const state = style(within(item).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/));
-    const time = style(within(item).getByText(/^(Last edited|Submitted|Closes|Closed) .* UTC$/));
+    const time = style(within(item).getByText(/^(Last edited|Submitted|Closes|On) .* UTC$/));
     await expect(time.fontFamily).toBe(state.fontFamily);
     await expect(time.fontSize).toBe(state.fontSize);
   }
@@ -274,7 +276,7 @@ export const EveryStateDesktop: Story = {
       lefts((i) => within(i).getByText(/^(Draft|Setting up|Open|Closed|Didn't open)$/)).size,
     ).toBe(1);
     await expect(
-      lefts((i) => within(i).getByText(/^(Last edited|Submitted|Closes|Closed) .* UTC$/)).size,
+      lefts((i) => within(i).getByText(/^(Last edited|Submitted|Closes|On) .* UTC$/)).size,
     ).toBe(1);
     // The state's line is one height in every row, with or without an action.
     const below = new Set(

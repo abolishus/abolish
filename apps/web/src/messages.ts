@@ -1203,7 +1203,7 @@ const enUS = {
   pollsEdited: "Last edited {when} UTC",
   pollsSubmitted: "Submitted {when} UTC",
   pollsCloses: "Closes {when} UTC",
-  pollsClosed: "Closed {when} UTC",
+  pollsClosed: "On {when} UTC",
   pollsSetupHelp:
     "Setting up takes a while, mostly waiting for the public record to settle. You can leave this page, or follow its setup step by step.",
   pollsFollowSetup: "Follow its setup",

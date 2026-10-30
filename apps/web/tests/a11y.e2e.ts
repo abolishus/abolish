@@ -876,7 +876,11 @@ describe("each page's title", () => {
     for (const [path, title] of titles)
       if (!path.startsWith("/discover?q=") && !path.startsWith("/discover?place="))
         alike.set(title, [...(alike.get(title) ?? []), path]);
+    // A poll whose words can be shown is named by them, isolated (T-75).
+    expect(titles.get(`/polls/${STREAM_V5}`)).toBe("\u2068Park and library\u2069 · Abolish");
     expect([...alike.values()].filter((p) => p.length > 1)).toEqual([
+      // Two polls asking in the same words are named alike, as their headings are.
+      [`/polls/${STREAM_V5}`, `/embed/p/${OPEN_MANY_CODE}`],
       // A poll that isn't there is the site's 404.
       ["/nowhere", `/polls/${UNKNOWN_ID}`],
     ]);

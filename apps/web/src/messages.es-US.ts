@@ -808,6 +808,13 @@ export const esUS: Messages = {
   boardEarlier: "Entradas anteriores",
   boardLater: "Entradas posteriores",
   boardLatest: "Entradas más recientes",
+  boardInTree: {
+    one: "La {count} entrada de esta página que cubre la raíz del árbol de arriba está en ese árbol: esta página comprobó la prueba de inclusión de nuestro servidor para ella contra la raíz.",
+    other:
+      "Las {count} entradas de esta página que cubre la raíz del árbol de arriba están cada una en ese árbol: esta página comprobó la prueba de inclusión de nuestro servidor para cada una contra la raíz.",
+  },
+  boardOutsideTree:
+    "La entrada {entry} no está en el árbol cuya raíz aparece arriba: nuestro servidor no pudo probar que lo está. Guarda esta página. Una entrada mostrada fuera del tablero con el que se compromete su raíz es evidencia de manipulación.",
   boardOwnEntry:
     "Esta página no busca la entrada de un comprobante: pedirle a nuestro servidor tu propia entrada le diría cuál es la tuya, y cada página aquí abarca 25 entradas para que navegar le revele menos. Para revisar tu comprobante, descarga el tablero completo y busca tu entrada ahí, donde nadie se entera de cuál buscaste.",
   boardEntriesUndecodable:

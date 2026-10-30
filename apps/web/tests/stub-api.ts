@@ -21,6 +21,7 @@ import {
   encodeCheckpoint,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  inclusionProof,
   merkleRoot,
 } from "@abolishus/crypto";
 
@@ -112,6 +113,11 @@ export const HEAD = {
  * as a server showing two histories of one board would (T-24).
  */
 export const brokenProofs = { on: false };
+/**
+ * While set, the inclusion proof the stub serves for entry `at` has one hash
+ * changed, as a server showing an entry outside its tree would (T-23, T-24).
+ */
+export const brokenInclusion: { at: number | undefined } = { at: undefined };
 export const CHECKPOINTS = Array.from({ length: BOARD.length / 5 }, (_, s) => {
   const size = 5 * (s + 1);
   return toHex(
@@ -629,6 +635,21 @@ export function stubApi(): Server {
           });
         const path = consistencyProof(BOARD_TREE, hashes.slice(0, secondSize), firstSize);
         if (brokenProofs.on && path[0] !== undefined) path[0] = path[0].map((b) => b ^ 1);
+        return json(200, { path: path.map(toHex) });
+      }
+      case "/board/proofs/inclusion": {
+        const index = Number(url.searchParams.get("index"));
+        const treeSize = Number(url.searchParams.get("treeSize"));
+        if (index >= treeSize || treeSize > BOARD.length)
+          return json(416, {
+            defined: true,
+            code: "OUT_OF_RANGE",
+            status: 416,
+            message: "The requested positions are beyond the board this server holds.",
+          });
+        const path = inclusionProof(BOARD_TREE, hashes.slice(0, treeSize), index);
+        if (brokenInclusion.at === index && path[0] !== undefined)
+          path[0] = path[0].map((b) => b ^ 1);
         return json(200, { path: path.map(toHex) });
       }
       case "/board/checkpoints": {

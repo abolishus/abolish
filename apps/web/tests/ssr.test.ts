@@ -30,6 +30,7 @@ import { fromHex, toHex } from "../src/values.ts";
 import {
   BALLOT,
   BOARD,
+  brokenInclusion,
   brokenProofs,
   CELLS_ID,
   CELLS_MISFIT_ID,
@@ -888,6 +889,38 @@ describe("board page", () => {
       expect(page).toContain("Entries 25 to 29 of 30");
     } finally {
       brokenProofs.on = false;
+    }
+  });
+
+  test("checks that each entry on the page is in the head's tree, asking for every one alike (T-10, T-24)", async () => {
+    seen.length = 0;
+    const page = (await text(`/polls/${ID}/board?from=25`)).replaceAll("&#x27;", "'");
+    expect(page).toContain(
+      "The 5 entries on this page that the tree root above covers are each in that tree",
+    );
+    expect(page).not.toContain("isn't in the tree whose root is above");
+    // One proof per entry of the page, in the head's tree, asked for by
+    // position alone: the same requests whichever entry a visitor came for.
+    const proofs = seen.filter((r) => r.path.endsWith("/board/proofs/inclusion"));
+    expect(
+      proofs
+        .map((r) => [Number(r.query.get("index")), Number(r.query.get("treeSize"))])
+        .toSorted((x, y) => x[0]! - y[0]!),
+    ).toEqual([25, 26, 27, 28, 29].map((i) => [i, 30]));
+    for (const r of proofs)
+      expect([...r.query.keys()].toSorted()).toEqual(["electionId", "index", "treeSize"]);
+  });
+
+  test("says so when an entry's inclusion proof fails, and still shows the board (T-23, T-24)", async () => {
+    brokenInclusion.at = 27;
+    try {
+      const page = (await text(`/polls/${ID}/board?from=25`)).replaceAll("&#x27;", "'");
+      expect(page).toContain("Entry 27 isn't in the tree whose root is above");
+      expect(page).toContain("evidence of tampering");
+      expect(page).not.toContain("that the tree root above covers");
+      expect(page).toContain("Entries 25 to 29 of 30");
+    } finally {
+      brokenInclusion.at = undefined;
     }
   });
 
@@ -2299,9 +2332,9 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/discover": { html: 8, js: 173, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 171, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 171, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 168, css: 40, fonts: 58 },
   "/account": { html: 6, js: 199, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 255, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 172, css: 40, fonts: 58 },

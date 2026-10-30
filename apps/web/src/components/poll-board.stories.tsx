@@ -56,6 +56,7 @@ const meta = {
     from: "25",
     rows,
     kind: undefined,
+    inclusion: { checked: 25, outside: undefined },
     pageSize: 25,
     anchors,
     histories: { head: true, anchors: [true, true, true, true, true] },
@@ -78,6 +79,9 @@ export const Default: Story = {
     await expect(within(table).getAllByRole("row")).toHaveLength(26);
     await expect(canvas.getByRole("img", { name: "Fingerprint of entry 25" })).toBeVisible();
     await expect(within(table).getAllByText("Trustee receipt")).toHaveLength(5);
+    await expect(
+      canvas.getByText(/^The 25 entries on this page that the tree root above covers are each/),
+    ).toBeVisible();
     // The kind filter offers only the kinds on this page, each with its count, All chosen.
     const kinds = canvas.getByRole("radiogroup", { name: "Kind" });
     const options = within(kinds).getAllByRole("radio");
@@ -305,9 +309,29 @@ export const AnchorsRefused: Story = {
   },
 };
 
+/**
+ * An entry whose inclusion proof fails: the page shows it outside the tree
+ * the head's root commits to, and says so as evidence, beside the ledger it
+ * still shows (T-23, T-24).
+ */
+export const OutsideTree: Story = {
+  args: { inclusion: { checked: 25, outside: "31" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(
+        /^Entry 31 isn't in the tree whose root is above:.*evidence of tampering\.$/,
+      ),
+    ).toBeVisible();
+    await expect(canvas.queryByText(/that the tree root above covers/)).toBeNull();
+    await expect(canvas.getByRole("table", { name: "Entries 25 to 49 of 100" })).toBeVisible();
+    await expect(canvasElement.querySelectorAll('[data-history="broken"]')).toHaveLength(1);
+  },
+};
+
 /** Past the end of the board: no rows, and the way back. */
 export const Beyond: Story = {
-  args: { from: "125", rows: undefined },
+  args: { from: "125", rows: undefined, inclusion: undefined },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("status")).toHaveTextContent(
@@ -329,6 +353,7 @@ export const Empty: Story = {
     head: { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) },
     from: "0",
     rows: [],
+    inclusion: { checked: 0, outside: undefined },
     anchors: [],
     histories: { head: undefined, anchors: [] },
   },

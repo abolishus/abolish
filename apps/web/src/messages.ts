@@ -792,6 +792,13 @@ const enUS = {
   boardEarlier: "Earlier entries",
   boardLater: "Later entries",
   boardLatest: "Latest entries",
+  boardInTree: {
+    one: "The {count} entry on this page that the tree root above covers is in that tree: this page checked our server's inclusion proof for it against the root.",
+    other:
+      "The {count} entries on this page that the tree root above covers are each in that tree: this page checked our server's inclusion proof for each one against the root.",
+  },
+  boardOutsideTree:
+    "Entry {entry} isn't in the tree whose root is above: our server couldn't prove that it is. Keep this page. An entry shown outside the board its root commits to is evidence of tampering.",
   boardOwnEntry:
     "This page doesn't look up a receipt's entry: asking our server for your own entry would tell it which one is yours, and each page here covers 25 entries so that browsing tells it less. To check your receipt, download the whole board and look for your entry there, where no one learns which one you looked for.",
   boardEntriesUndecodable:

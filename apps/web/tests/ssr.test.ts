@@ -61,7 +61,9 @@ import {
   STREAM_BAD_TEXT,
   STREAM_NO_TEXT,
   STREAM_V1,
+  STREAM_V1_CODE,
   STREAM_V5,
+  STREAM_V5_CODE,
   stub,
   stubApi,
   SWAPPED_CODE,
@@ -1077,6 +1079,49 @@ describe("embed", () => {
     expect(html).toContain("See the poll on localhost");
     expect(html).toContain("Closed");
     expect(html).toContain("January 8, 2026");
+  });
+
+  // P2-24 part 4b: a closed poll's final count, from the results its page reads.
+  test("a closed poll counted in one tier shows its first question's final count", async () => {
+    const html = (await (await get(`/embed/p/${STREAM_V5_CODE}`)).text()).replaceAll("&#x27;", "'");
+    scriptFree(html);
+    const results =
+      /<section aria-labelledby="[^"]+" class="[^"]*" data-testid="embed-results">(.*?)<\/section>/.exec(
+        html,
+      )?.[1];
+    if (results === undefined) throw new Error("no results");
+    // The first question's count, labelled, never a figure across questions (T-16).
+    expect(results).toContain("Final count · 8 answers counted · Question 1 of 2");
+    expect(results).toContain(
+      "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
+    );
+    expect(results.match(/<li\b/g)).toHaveLength(3);
+    for (const share of [">50%<", ">50%<", ">0%<"]) expect(results).toContain(share);
+    // The second question's counts (5 and 1 of 8) appear nowhere.
+    expect(html).not.toMatch(/62\.5%|12\.5%/);
+    // Still no answers taken here.
+    expect(html).not.toContain(BALLOT);
+  });
+
+  test("a closed poll counted in several tiers shows no figure across them", async () => {
+    const html = (await (await get(`/embed/p/${STREAM_V1_CODE}`)).text()).replaceAll("&#x27;", "'");
+    scriptFree(html);
+    expect(html).toContain("Each tier is counted on its own.");
+    expect(html).not.toContain("%");
+    expect(html).not.toContain("Final count");
+  });
+
+  test("a closed poll not yet counted says so, with no figure", async () => {
+    const html = (await (await get(`/embed/p/${CODE}`)).text()).replaceAll("&#x27;", "'");
+    expect(html).toContain("The count isn't published yet.");
+    expect(html).not.toContain("%");
+  });
+
+  test("an open poll's embed shows nothing of its results, whatever the API answers", async () => {
+    // The stub serves counts for this open poll, as a faulty or hostile API could.
+    const html = await (await get(`/embed/p/${OPEN_MANY_CODE}`)).text();
+    expect(html).not.toContain('data-testid="embed-results"');
+    expect(html).not.toContain("%");
   });
 
   test("comes light or dark by its link, and otherwise follows the reader", async () => {

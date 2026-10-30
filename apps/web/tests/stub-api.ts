@@ -293,8 +293,16 @@ export const OPEN_MANY_CODE = shortCode(
   electionDefinitionV5Hash(decodeElectionDefinitionV5(fromHex(definitions.get(OPEN_MANY)!))),
   7,
 );
+/** The counted polls' codes, for their embeds' results. */
+export const STREAM_V5_CODE = shortCode(
+  electionDefinitionV5Hash(decodeElectionDefinitionV5(fromHex(definitions.get(STREAM_V5)!))),
+  7,
+);
+export const STREAM_V1_CODE = codeOf(STREAM_V1);
 export const owners = new Map([
   [CODE, ID],
+  [STREAM_V5_CODE, STREAM_V5],
+  [STREAM_V1_CODE, STREAM_V1],
   [OPEN_ONE_CODE, OPEN_ONE],
   [OPEN_MANY_CODE, OPEN_MANY],
   [HIDDEN_CODE, HIDDEN_ID],
@@ -311,6 +319,8 @@ export const CODE_FAILS_ID = FILLER[2]!;
 /** Each poll's canonical code as the stub claims it; the other polls have no registration. */
 export const codes = new Map([
   [ID, CODE],
+  [STREAM_V5, STREAM_V5_CODE],
+  [STREAM_V1, STREAM_V1_CODE],
   [OPEN_ONE, OPEN_ONE_CODE],
   [OPEN_MANY, OPEN_MANY_CODE],
   [HIDDEN_ID, HIDDEN_CODE],
@@ -320,8 +330,9 @@ export const codes = new Map([
 /**
  * Each poll's results, as `GET /elections/results` answers them: the
  * version-1 stream poll counted in Tier 0 with Tier 2 still partly unopened,
- * the version-5 one question by question, the hidden poll counted, and the
- * typical poll and the open one unopened. One poll answers counts that don't
+ * the version-5 one question by question, the hidden poll counted, the
+ * typical poll and one open poll unopened, and the other open one counted
+ * already, as no API should answer before the close. One poll answers counts that don't
  * fit its definition, one isn't ready and one fails; the rest are polls this
  * server counts no results of.
  */
@@ -360,6 +371,20 @@ const RESULTS = new Map<string, unknown>([
     ]),
   ],
   [HIDDEN_ID, counted([{ tier: 0, counted: 3, counts: ["3", "1", "0", "0", "2"] }])],
+  [
+    OPEN_MANY,
+    counted([
+      {
+        tier: 0,
+        counted: 2,
+        counts: ["2", "0", "0", "1", "1"],
+        byQuestion: [
+          ["2", "0", "0"],
+          ["1", "1"],
+        ],
+      },
+    ]),
+  ],
   [RESULTS_MISFIT_ID, counted([{ tier: 0, counted: 3, counts: ["1", "1"] }])],
 ]);
 

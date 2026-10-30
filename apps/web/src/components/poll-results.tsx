@@ -23,7 +23,7 @@ export interface PollResultsProps {
  * width, since the CSP's style-src 'self' blocks `style` attributes. The bar
  * is decoration: its figures are in the text beside it.
  */
-function Bar({ share, lead }: { share: number; lead: boolean }) {
+export function Bar({ share, lead }: { share: number; lead: boolean }) {
   return (
     <svg
       aria-hidden="true"

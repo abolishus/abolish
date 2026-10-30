@@ -8,7 +8,7 @@ import { EmbedCard, EmbedNotice, type EmbedTheme } from "../components/poll-embe
 import { type Locale, negotiateLocale } from "../locales.ts";
 import { loadCatalog } from "../messages.ts";
 import { siteOrigin } from "../og/origin.ts";
-import { pollPreview } from "../og/poll.ts";
+import { finalCount, pollPreview } from "../og/poll.ts";
 import { headline } from "../og/text.ts";
 import { api } from "../server/api.ts";
 import { loadEmbed } from "../server/load.ts";
@@ -121,6 +121,7 @@ export const Route = createFileRoute("/embed/p/$code")({
             title={title}
             text={embed.text}
             ballot={ballotBase(process.env["BALLOT_URL"]) ?? null}
+            results={finalCount(embed.results)}
           />,
         );
       },

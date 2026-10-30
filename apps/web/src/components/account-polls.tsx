@@ -318,21 +318,27 @@ export function AccountPolls({
                   >
                     {title}
                   </h3>
-                  <p className="m-0 flex items-center gap-2 text-sm">
+                  <p className="m-0 flex items-center gap-2 text-sm md:col-start-1 md:row-start-2">
                     <Icon aria-hidden="true" className={`size-4 shrink-0 ${tone}`} />
                     {t(`pollsState_${shown}`)}
                   </p>
                   {/* A time is a fact in the body's face, as on the poll's page; the mono mark is for evidence. */}
-                  <p className="m-0 text-sm text-muted-foreground" suppressHydrationWarning>
+                  <p
+                    className="m-0 text-sm text-muted-foreground md:col-start-2 md:row-start-2"
+                    suppressHydrationWarning
+                  >
                     {when(p, shown)}
                   </p>
-                  {/* An action's 48px even where there is none, so every row's line is one height. */}
-                  <div className="text-sm md:min-h-12 md:text-end">{actions(p, shown)}</div>
+                  {/* The reason comes before its actions, as a phone and a screen reader read them; from 768px the actions stay on the state's line. */}
                   {help === undefined ? null : (
-                    <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground md:col-span-full">
+                    <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground md:col-span-full md:row-start-3">
                       {t(help)}
                     </p>
                   )}
+                  {/* An action's 48px even where there is none, so every row's line is one height. */}
+                  <div className="text-sm md:col-start-3 md:row-start-2 md:min-h-12 md:text-end">
+                    {actions(p, shown)}
+                  </div>
                   {confirming?.id === p.id ? confirm(p, title, confirming.action) : null}
                   {profiles === undefined || profile === undefined ? null : (
                     <div className="md:col-span-full">

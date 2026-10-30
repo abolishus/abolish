@@ -333,6 +333,13 @@ describe("the hour's limit (T-52)", () => {
 test("follows.ts reads no board table but the definitions, and writes none", () => {
   const src = readFileSync(new URL("../src/follows.ts", import.meta.url), "utf8");
   expect(src).not.toMatch(
-    /boardEntries|board_entries|boardBallot|boardShareReceipts|appendEntry|identityBackups|accountTokens/,
+    /board[A-Z_]\w*|election_?[Rr]egistrations|election_?[Ss]chedules|appendEntry|identity_?[Bb]ackups|account_?[Tt]okens/,
   );
+  // Its only reads beyond the account tables: the definitions and moderation.
+  expect([...src.matchAll(/from "(\.[^"]+)"/g)].map((m) => m[1])).toEqual([
+    "./bytes.ts",
+    "./db/schema/index.ts",
+    "./definitions.ts",
+    "./moderation.ts",
+  ]);
 });

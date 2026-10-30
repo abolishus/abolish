@@ -382,13 +382,45 @@ export const selfPaidTiers = selfPaidVectors.tiers.map((t) => {
 // every opening state, step root and acceptance is the vectors' (2.4 and
 // 5.1 under a rolling electorate; P2-17 parts 4c and 4d-2b).
 
-interface RollingVectorEvent {
+export interface RollingVectorEvent {
   readonly block: string;
   readonly timestamp: string;
   readonly group: string;
   readonly add?: readonly string[];
   readonly remove?: readonly string[];
 }
+/**
+ * The registry's events for a rolling vector's log: every group it names,
+ * created at block 1, then each event signed at its group's running count,
+ * at the vector's block and timestamp.
+ */
+export function rollingEvents(
+  log: readonly RollingVectorEvent[],
+): (Event & { block: bigint; timestamp: bigint })[] {
+  const ids = [...new Set(log.map((e) => decimal(e.group)))].sort((a, b) => (a < b ? -1 : 1));
+  const created = decimal(log[0]?.timestamp) - 1_000n;
+  const events: (Event & { block: bigint; timestamp: bigint })[] = ids.map((groupId) => ({
+    kind: "created",
+    groupId,
+    tier: 0,
+    block: 1n,
+    timestamp: created,
+  }));
+  const count = new Map<bigint, bigint>();
+  for (const e of log) {
+    const id = decimal(e.group);
+    const at = { block: decimal(e.block), timestamp: decimal(e.timestamp) };
+    const c = count.get(id) ?? 0n;
+    if (e.remove !== undefined) events.push({ ...removed(id, c, e.remove.map(decimal)), ...at });
+    else {
+      const commitments = (e.add ?? []).map(decimal);
+      events.push({ ...added(id, c, commitments), ...at });
+      count.set(id, c + BigInt(commitments.length));
+    }
+  }
+  return events;
+}
+
 export const rollingTrees = read<{
   readonly trees: readonly {
     readonly id: string;
@@ -407,29 +439,7 @@ export const rollingTrees = read<{
     }[];
   }[];
 }>("rolling-tier-tree.json").trees.map((t) => {
-  // Every group the tree names, created at block 1, then each event signed
-  // at its group's running count, at the vector's block and timestamp.
-  const ids = [...new Set(t.events.map((e) => decimal(e.group)))].sort((a, b) => (a < b ? -1 : 1));
-  const created = decimal(t.events[0]?.timestamp) - 1_000n;
-  const events: (Event & { block: bigint; timestamp: bigint })[] = ids.map((groupId) => ({
-    kind: "created",
-    groupId,
-    tier: 0,
-    block: 1n,
-    timestamp: created,
-  }));
-  const count = new Map<bigint, bigint>();
-  for (const e of t.events) {
-    const id = decimal(e.group);
-    const at = { block: decimal(e.block), timestamp: decimal(e.timestamp) };
-    const c = count.get(id) ?? 0n;
-    if (e.remove !== undefined) events.push({ ...removed(id, c, e.remove.map(decimal)), ...at });
-    else {
-      const commitments = (e.add ?? []).map(decimal);
-      events.push({ ...added(id, c, commitments), ...at });
-      count.set(id, c + BigInt(commitments.length));
-    }
-  }
+  const events = rollingEvents(t.events);
   const tier = {
     tier: 0 as const,
     root_l2_block: decimal(t.rootL2Block),

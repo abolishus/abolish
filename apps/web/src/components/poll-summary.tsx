@@ -1,4 +1,4 @@
-import { cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
+import { buttonVariants, cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
 import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -17,7 +17,8 @@ import {
 } from "../poll.ts";
 import type { PollResults as Results } from "../results.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
-import type { PollWords } from "../stream.ts";
+import type { CardText, PollWords } from "../stream.ts";
+import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PollFollow } from "./poll-follow.tsx";
@@ -50,8 +51,12 @@ export interface PollSummaryProps {
   askedBy?: Asker | undefined;
   /** Its results so far; without them, none are shown. */
   results?: Results | undefined;
-  /** Every question's words, which name the results' questions and options. */
+  /** Its words in the page's language, checked against its definition; without them, it goes by its ID. */
+  text?: CardText | undefined;
+  /** Every question's words, which name its questions, their options and the results'. */
   words?: PollWords | undefined;
+  /** The ballot client's address (`BALLOT_URL`); without one, answering isn't linked. */
+  ballot?: string | null | undefined;
   /** Where a report of the poll goes; without one, it offers none. */
   report?: ReportPoll | undefined;
 }
@@ -117,6 +122,78 @@ const STATUS_TEXT = {
 } as const satisfies Record<PollStatus, keyof Messages>;
 
 /**
+ * What the poll asks, in its own words (`everyday-poll-page.tsx`'s Hero):
+ * each question with how many answers it takes and its answers, numbered
+ * as the ballot is. A poll with no title is headed by its one question, so
+ * that question isn't said again, only its answers. The limits are the
+ * definition's, as the proof enforces them (T-29, T-34); the words are
+ * those the definition commits to (T-41).
+ */
+function PollQuestions({ poll, words }: { poll: PollView; words: PollWords }) {
+  const t = useTranslate(catalogs);
+  const headed = words.title === "" && words.questions.length === 1;
+  return (
+    <section aria-labelledby="questions-title" className="grid max-w-3xl gap-6">
+      <h2 id="questions-title" className="m-0 font-heading text-2xl font-semibold">
+        {t("pollQuestionsTitle")}
+      </h2>
+      <ol className="m-0 grid list-none gap-4 p-0">
+        {words.questions.map((q, i) => {
+          const limits = poll.questions[i];
+          const instruction =
+            limits === undefined ? undefined : instructionMessage(instructionOf(limits));
+          return (
+            <li
+              key={i}
+              className="grid grid-cols-[2.5rem_1fr] gap-x-4 border border-border p-5 sm:p-6"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-10 place-items-center bg-muted font-heading text-lg font-semibold"
+              >
+                {i + 1}
+              </span>
+              <div className="grid min-w-0 gap-3">
+                {headed ? (
+                  <h3 className="sr-only">{t("questionNumber", { number: i + 1 })}</h3>
+                ) : (
+                  <h3 className="m-0 font-heading text-xl leading-snug font-semibold text-pretty break-words sm:text-2xl">
+                    <span className="sr-only">{t("questionNumber", { number: i + 1 })}: </span>
+                    <span lang={words.language} dir="auto">
+                      {q.question}
+                    </span>
+                  </h3>
+                )}
+                {instruction === undefined ? null : (
+                  <p className="m-0 text-sm text-muted-foreground">
+                    {t("pollPickFrom", {
+                      instruction: t(instruction.key, instruction.values),
+                      options: t("optionCount", { count: q.options.length }),
+                    })}
+                  </p>
+                )}
+                <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+                  {q.options.map((label, j) => (
+                    <li
+                      key={j}
+                      lang={words.language}
+                      dir="auto"
+                      className="min-w-0 border border-border px-3 py-1 text-sm break-words"
+                    >
+                      {label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}
+
+/**
  * One poll's page, in the everyday register ([[language]]): what it is and
  * where it stands on the surface, and what our server says about it one step
  * down, behind "How do we know this is real?". That part says plainly that
@@ -137,7 +214,9 @@ export function PollSummary({
   phoneVerification,
   askedBy,
   results,
+  text,
   words,
+  ballot,
   report,
 }: PollSummaryProps) {
   const t = useTranslate(catalogs);
@@ -146,6 +225,12 @@ export function PollSummary({
   const counting = t(COUNTING_LABEL[poll.counting]);
   const options = poll.questions.reduce((sum, q) => sum + q.optionCount, 0);
   const illFormed = poll.illFormed;
+  const prefix = poll.electionId.slice(0, 16);
+  // Answering is linked only where the client can take it: an open poll
+  // whose words we can show (none for a hidden one, T-68), on a deployment
+  // that names its ballot client, as the embed's is. The link carries the
+  // poll in its fragment alone, which no server sees (T-10, T-11).
+  const answering = status === "open" && text !== undefined && ballot != null ? ballot : null;
 
   const tiers = (
     <ul className="m-0 grid list-none gap-1 p-0">
@@ -159,11 +244,24 @@ export function PollSummary({
     <article className="grid gap-16">
       <header className="grid gap-6 pt-2 md:pt-10">
         <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase">
-          {t("pollTitle")} · {counting}
+          {text === undefined ? t("pollTitle") : t("pollHeading", { prefix })} · {counting}
         </p>
-        <h1 className="m-0 max-w-4xl font-heading text-4xl leading-[1.05] font-semibold tracking-tight text-balance break-all sm:text-6xl">
-          {t("pollHeading", { prefix: poll.electionId.slice(0, 16) })}
-        </h1>
+        {/* In the poll's own words where the definition commits to them,
+            in their own language and direction (T-34, T-41); by its ID
+            otherwise, which wraps anywhere rather than push the page sideways. */}
+        {text === undefined ? (
+          <h1 className="m-0 max-w-4xl font-heading text-4xl leading-[1.05] font-semibold tracking-tight text-balance break-all sm:text-6xl">
+            {t("pollHeading", { prefix })}
+          </h1>
+        ) : (
+          <h1
+            lang={text.language}
+            dir="auto"
+            className="m-0 max-w-4xl font-heading text-4xl leading-[1.05] font-semibold tracking-tight text-balance break-words sm:text-6xl"
+          >
+            {text.heading}
+          </h1>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <StatusMark icon={STATUS_MARK[status].icon} tone={STATUS_MARK[status].tone}>
             {t(STATUS_TEXT[status])}
@@ -241,6 +339,8 @@ export function PollSummary({
         )}
       </header>
 
+      {words === undefined ? null : <PollQuestions poll={poll} words={words} />}
+
       {/* Shown on a hidden poll too, by number: moderation never withholds a
           result (docs/moderation-policy.md). Nothing is counted before it opens. */}
       {results === undefined || status === "scheduled" ? null : (
@@ -263,6 +363,28 @@ export function PollSummary({
         <p className="m-0 text-base text-pretty">
           {t(status === "closed" ? "pollAnswerClosed" : "pollAnswer")}
         </p>
+        {status === "scheduled" ? (
+          <p className="m-0 text-base text-pretty">{t("pollAnswerScheduled")}</p>
+        ) : status === "open" && ballot === null ? (
+          <p className="m-0 text-base text-pretty text-muted-foreground">{t("streamNoBallot")}</p>
+        ) : null}
+        {answering === null ? null : (
+          <div className="grid justify-items-start gap-2 pt-2">
+            <a
+              href={ballotLink(answering, poll.electionId)}
+              className={cn(
+                buttonVariants({ size: "lg" }),
+                "h-auto min-h-12 justify-between gap-3 py-3 text-start whitespace-normal",
+              )}
+            >
+              {t("pollAnswerOpen", { count: poll.questions.length })}
+              <ArrowRight aria-hidden="true" />
+            </a>
+            <p className="m-0 text-sm text-pretty text-muted-foreground">
+              {t("pollAnswerOpenNote")}
+            </p>
+          </div>
+        )}
         {share === undefined ? null : (
           <div className="pt-2">
             <PollShare {...share} />

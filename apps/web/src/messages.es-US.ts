@@ -456,7 +456,13 @@ export const esUS: Messages = {
   pollStatus_closed: "Cerrada",
   pollAnswerTitle: "Cómo responder",
   pollAnswer:
-    "Las respuestas se emiten solo en la app de votación, nunca en este sitio web, y cada una se sella en el propio dispositivo de quien vota antes de enviar nada. La app de votación todavía no puede abrir una encuesta desde esta página.",
+    "Las respuestas se emiten solo en la app de votación, nunca en este sitio web, y cada una se sella en el propio dispositivo de quien vota antes de enviar nada.",
+  pollAnswerOpen: { one: "Responder la pregunta", other: "Responder {count} preguntas" },
+  pollAnswerOpenNote:
+    "Abre la app de votación. No se envía nada hasta que emitas tus respuestas ahí.",
+  pollAnswerScheduled: "Podrás responder aquí en cuanto abra la encuesta.",
+  pollQuestionsTitle: "Lo que pregunta",
+  pollPickFrom: "{instruction} entre {options}",
   pollAnswerClosed:
     "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",
   resultsTitle: "Resultados",

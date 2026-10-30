@@ -48,8 +48,10 @@ import {
   pinnedVersion,
   questionBallotElection,
   RECORD_TYPES,
+  type PanelBallotElection,
   type RegisteredKeys,
   type RollingBallotChain,
+  type RollingBallotElection,
   rollingBallotElection,
   type SeatPanel,
 } from "@abolishus/crypto";
@@ -157,6 +159,19 @@ const UNSUPPORTED: OpeningOutcome = { status: "unverifiable", code: "unsupported
 // a rolling electorate) by opening version 3, which opens both halves.
 const OPENING_VERSIONS: ReadonlySet<number | undefined> = new Set([1, 2, 3]);
 
+// A version-3 opening's judge under its context, its repeat hash the core
+// hash of the ballot version that context checks.
+const halvesJudge =
+  (election: PanelBallotElection | RollingBallotElection, ballotVersion: 4 | 5): Judge =>
+  (payload) => {
+    const o = decodeOpening(payload, 3);
+    const checked = checkChallengeOpeningV3(election, o);
+    return {
+      hash: bytesToHex(openingV3CoreHash(o, ballotVersion)),
+      checked: checked.ok ? { ...checked, opened: () => openedCommitmentsV3(o) } : checked,
+    };
+  };
+
 /**
  * How this definition's openings are judged, or the outcome 6.2 takes when
  * none can be (docs/spec/verifier.md, Spoiled-ballot openings, step 1).
@@ -171,7 +186,6 @@ function judgeFor(
   const d = definition.value;
   const ballot = pinnedVersion(d, RECORD_TYPES.ballot);
   const opening = pinnedVersion(d, RECORD_TYPES.spoiledBallotOpening);
-  const halves = isPanelled(definition) || isRolling(definition);
   const ownBallot =
     definition.version === 1
       ? 1
@@ -182,7 +196,8 @@ function judgeFor(
           : isRolling(definition)
             ? 5
             : 2;
-  const ownOpening = definition.version === 1 ? 1 : halves ? 3 : 2;
+  const ownOpening =
+    definition.version === 1 ? 1 : isPanelled(definition) || isRolling(definition) ? 3 : 2;
   // An opening version this verifier doesn't read may be one a later release
   // reads, and so may a ballot version, whose cores a later opening version
   // may open: unverifiable, never failed, so releases agree (2.3; T-36). As
@@ -202,38 +217,29 @@ function judgeFor(
     admitted === undefined
   )
     return NOT_REACHED;
-  if (halves) {
-    // Opening version 3 rebuilds the author seats' ciphertexts under the
-    // author panel's own run's key set, approved on the board, as admission
-    // judges its share hashes: never under keys no transcript check gave, or
-    // the default panel's, since an unchecked ciphertext must never let an
-    // opening pass (T-37, T-17).
+  // Opening version 3 rebuilds the author seats' ciphertexts under the
+  // author panel's own run's key set, approved on the board, as admission
+  // judges its share hashes: never under keys no transcript check gave, or
+  // the default panel's, since an unchecked ciphertext must never let an
+  // opening pass (T-37, T-17). A rolling poll's context is the one admission
+  // judged its ballots under, made from the same chain (P2-17); its cores'
+  // tracking codes are ballot version 5's core hashes (docs/spec/
+  // challenge.md, Opening version 3, Core and tracking code; T-42, T-47).
+  if (definition.version === 7 && isRolling(definition)) {
+    const author = definition.value.author_keys.length !== 0;
+    if (rolling === undefined || (author && authorRegistered === undefined)) return NOT_REACHED;
+    return halvesJudge(
+      rollingBallotElection(definition.value, registered, rolling, author ? authorRegistered : []),
+      5,
+    );
+  }
+  if (isPanelled(definition)) {
     const author = definition.value.author_keys.length !== 0;
     if (author && authorRegistered === undefined) return NOT_REACHED;
-    // A rolling poll's context is the one admission judged its ballots
-    // under, made from the same chain (P2-17); its cores' tracking codes are
-    // ballot version 5's core hashes (docs/spec/challenge.md, Opening
-    // version 3, Core and tracking code; T-42, T-47).
-    let election;
-    if (isPanelled(definition))
-      election = panelBallotElection(definition.value, registered, author ? authorRegistered : []);
-    else if (definition.version === 7 && rolling !== undefined)
-      election = rollingBallotElection(
-        definition.value,
-        registered,
-        rolling,
-        author ? authorRegistered : [],
-      );
-    else return NOT_REACHED;
-    const coreVersion = ballot === 5 ? 5 : 4;
-    return (payload) => {
-      const o = decodeOpening(payload, 3);
-      const checked = checkChallengeOpeningV3(election, o);
-      return {
-        hash: bytesToHex(openingV3CoreHash(o, coreVersion)),
-        checked: checked.ok ? { ...checked, opened: () => openedCommitmentsV3(o) } : checked,
-      };
-    };
+    return halvesJudge(
+      panelBallotElection(definition.value, registered, author ? authorRegistered : []),
+      4,
+    );
   }
   if (definition.version === 1) {
     const election = ballotElection(definition.value, registered);

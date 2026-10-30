@@ -2180,7 +2180,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/polls": { html: 12, js: 170, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 170, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 167, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 196, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 198, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 171, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },

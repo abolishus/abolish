@@ -23,9 +23,11 @@ board.md, Allowed payloads). Every ballot proves membership of its step's
 tree under the definition's hash and Tier 0's rolling scope.
 
 A second expectation, `shortEvents`, is the same board judged against the
-events less the last addition (eve's, after step N0's boundary), as an
-archive whose replay stopped short of it but still reached past the close
-would give them: eve's ballot and the re-vote at N0 + 1 fail their
+events less the last addition (eve's, after step N0's boundary, before the
+close), as an archive whose evidence record falsely claims completeness past
+the close would give them, which only an archive forging its output root can
+do until P1-19 checks them on L1 (T-71, T-53): eve's ballot and the re-vote
+at N0 + 1 fail their
 membership checks there, since each proves membership of a step tree with
 eve in it, which the chain doesn't have. snarkjs gives the verdict on each
 signal set.
@@ -369,7 +371,7 @@ def assemble(constants, proofs_path, out_dir):
             "ballots": ballots,
         },
         "shortEvents": {
-            "description": "The same board judged against the events less the last one (eve's addition), as an archive whose replay ends before it but past the close would give them.",
+            "description": "The same board judged against the events less the last one (eve's addition, before the close), as an archive whose evidence record falsely claims completeness past the close would give them: an archive forging its output root, possible only while no reader checks it on L1 (P1-19).",
             "events": len(r5.EVENTS) - 1,
             "expected": {"3.2": ceremony_rows["3.2"], **short_rows},
             "archived": {"3.2": ceremony_rows["3.2"], **archived(short_rows, short["rejected"])},

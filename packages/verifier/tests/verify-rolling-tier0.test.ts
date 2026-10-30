@@ -199,6 +199,8 @@ describe("a live Tier-0-only rolling poll through verifyBundle", { timeout: 60_0
     for (const id of ["7.5", "7.6"])
       expect(row(r, id)).toEqual({ status: "unverifiable", code: "not-reached", at: {} });
     expect(r).not.toHaveProperty("releases");
+    // The chain is the archive's word, so no verdict rests on it (T-71).
+    expect(r.verdictAgainstInputs).toBe("unverifiable");
   });
 
   // Until P1-19 checks the archive's output roots the run reports a
@@ -248,12 +250,18 @@ describe("a live Tier-0-only rolling poll through verifyBundle", { timeout: 60_0
     }
   });
 
+  // An archive claiming completeness past the close while omitting an
+  // addition before it: possible only by forging its output root, until
+  // P1-19 checks them on L1.
   test("the step roots are the archive's events': without the last addition, its steps' ballots fail", () => {
     const short = file.shortEvents;
     expect(short.events).toBe(file.events.length - 1);
     const r = verifyBundle(bundleOf(file.events.slice(0, short.events)), pins, registries);
     for (const id of ADMISSION) expect(row(r, id), id).toEqual(short.archived[id]);
     expect(r.ballots).toEqual(short.ballots);
+    // A forged archive suppresses those ballots, but never fails or passes
+    // the election on its word (T-71, T-53).
+    expect(r.verdictAgainstInputs).toBe("unverifiable");
   });
 
   test("a live poll with fewer than k seats pinned as ours fails 2.3, whatever the archive holds", () => {

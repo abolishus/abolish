@@ -183,7 +183,7 @@
     }
   },
   "shortEvents": {
-    "description": "The same board judged against the events less the last one (eve's addition), as an archive whose replay ends before it but past the close would give them.",
+    "description": "The same board judged against the events less the last one (eve's addition, before the close), as an archive whose evidence record falsely claims completeness past the close would give them: an archive forging its output root, possible only while no reader checks it on L1 (P1-19).",
     "events": 7,
     "expected": {
       "3.2": {

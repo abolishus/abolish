@@ -5,6 +5,7 @@
 
 import type { Sql } from "postgres";
 import { parseArgs } from "node:util";
+import { deploymentCommands } from "./deployment.ts";
 import { CliError, UsageError } from "./errors.ts";
 import { moderationCommands } from "./moderation.ts";
 import { simulationCommands } from "./simulation.ts";
@@ -37,6 +38,7 @@ export interface OfflineCommand extends CommandShape {
 }
 
 const GROUPS: Readonly<Record<string, Readonly<Record<string, Command | OfflineCommand>>>> = {
+  deployment: deploymentCommands,
   moderation: moderationCommands,
   simulation: simulationCommands,
   "tier0-keys": tier0KeyCommands,
@@ -94,7 +96,7 @@ export async function run(argv: readonly string[], connect: () => Sql, io: CliIo
       return 2;
     }
     if (e instanceof CliError) {
-      io.err({ error: e.code });
+      io.err({ ...e.detail, error: e.code });
       return 1;
     }
     // Not the operator's to fix (an unreachable database, a missing grant).

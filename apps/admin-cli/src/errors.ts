@@ -1,10 +1,15 @@
-/** A refusal the operator can fix: printed as `{ "error": code }`, exit 1. */
+/**
+ * A refusal the operator can fix: printed as `{ "error": code }`, with
+ * `detail`'s fields beside it where the code alone doesn't say where, exit 1.
+ */
 export class CliError extends Error {
   override readonly name = "CliError";
   readonly code: string;
-  constructor(code: string) {
+  readonly detail: Readonly<Record<string, unknown>>;
+  constructor(code: string, detail: Readonly<Record<string, unknown>> = {}) {
     super(code);
     this.code = code;
+    this.detail = detail;
   }
 }
 

@@ -5,7 +5,8 @@
 // what the script writes. The record must decode, hash as crypto hashes it and
 // carry each file's value where the spec puts it; the two files must agree
 // on one deployment; anything malformed is named by its file and path; and
-// an ill-formed record is refused with crypto's rule.
+// an ill-formed record is refused with crypto's rule. Each service's Railway
+// variables (part 2b) are the record's values in the form its parser takes.
 
 import {
   decodeDeploymentRecord,
@@ -20,6 +21,7 @@ import {
   buildDeploymentRecord,
   type DeploymentRecordError,
   DeploymentRecordRefused,
+  deploymentVariables,
 } from "../src/deployment-record.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
@@ -438,5 +440,173 @@ describe("buildDeploymentRecord", () => {
     expect(v.backups).toBe(true);
     expect(v.membership_zkey_sha256).toEqual(bytes("11".repeat(32)));
     expect(v.l2_max_sequencer_drift).toBe(1800n);
+  });
+});
+
+const COORDINATOR = "https://api.staging.example";
+
+function variablesRefusal(l1: unknown, l2: unknown, off: unknown): DeploymentRecordError {
+  try {
+    deploymentVariables(l1, l2, off, COORDINATOR);
+  } catch (e) {
+    if (e instanceof DeploymentRecordRefused) return e.error;
+    throw e;
+  }
+  throw new Error("printed variables");
+}
+
+describe("deploymentVariables", () => {
+  const l2Contracts = L2["contracts"] as Record<string, { address: string }>;
+  const at = (name: string) => l2Contracts[name]!.address.toLowerCase();
+  const plainKeys = seatKeys.map((k) => k.slice(2)).join(",");
+
+  test("gives each service the record's values in the form its parser takes", () => {
+    const { built, services } = deploymentVariables(L1, L2, inputs(), COORDINATOR);
+    expect(built.encoding).toEqual(buildDeploymentRecord(L1, L2, inputs()).encoding);
+    expect(Object.keys(services)).toEqual([
+      "api",
+      "setup-worker",
+      "creation-worker",
+      "posting-worker",
+      "seat-1",
+    ]);
+    const pinned = JSON.stringify([{ threshold: 4, keys: seatKeys.map((k) => k.slice(2)) }]);
+    expect(services["creation-worker"]).toEqual({
+      CREATE_CHAIN_ID: "31338",
+      CREATE_REGISTRY: at("ElectionRegistry"),
+      CREATE_L1_CHAIN_ID: "31337",
+      CREATE_ANCHOR: "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      CREATE_PANEL_THRESHOLD: "4",
+      CREATE_PANEL_KEYS: plainKeys,
+    });
+    const setup = services["setup-worker"]!;
+    expect(setup).toMatchObject({
+      BALLOT_PINNED_PANELS: pinned,
+      BALLOT_ANCHOR_EPOCH: "1767225600",
+      BALLOT_ANCHOR_PERIOD: "3600",
+      BALLOT_ANCHOR_DEADLINE: "43200",
+      BALLOT_L1_CHAIN_ID: "31337",
+      TIER0_GROUP: "1",
+      TIER0_REGISTRY: at("GroupRegistry"),
+      TIER0_REGISTRARS: l2Pins.registrars.addresses.map((a) => a.toLowerCase()).join(","),
+      TIER0_THRESHOLD: "2",
+      TIER0_ENTRY_POINT: "0x0000000000000000000000000000000000000e01",
+      TIER0_ACCOUNT: at("RegistrationAccount"),
+      TIER0_PAYMASTER: at("RegistrationPaymaster"),
+      REGISTRY_SYNC_PORTAL: "0x00000000000000000000000000000000000000bb",
+      REGISTRY_SYNC_ELECTION_REGISTRY: at("ElectionRegistry"),
+      REGISTRY_SYNC_TRUSTEE_REGISTRY: at("TrusteeRegistry"),
+      REGISTRY_SYNC_GROUP_REGISTRY: at("GroupRegistry"),
+      REGISTRY_SYNC_BOARD: at("Board"),
+      REGISTRY_SYNC_EVENT_VERSION: "12",
+      POLL_ROOT_GROUPS: "0:1,0:2",
+      POLL_ROOT_THRESHOLD: "2",
+      POLL_STUB_PANEL_THRESHOLD: "4",
+      POLL_STUB_PANEL_KEYS: plainKeys,
+      POLL_STUB_MAX_SEQUENCER_DRIFT: "1800",
+    });
+    expect(services["api"]).toEqual({
+      API_CEREMONY_PANEL_THRESHOLD: "4",
+      API_CEREMONY_PANEL_KEYS: plainKeys,
+      API_CEREMONY_L2_CHAIN_ID: "31338",
+      API_CEREMONY_TRUSTEE_REGISTRY: at("TrusteeRegistry"),
+      API_TIER0_GROUP: "1",
+      BALLOT_PINNED_PANELS: pinned,
+      BALLOT_ANCHOR_EPOCH: "1767225600",
+      BALLOT_ANCHOR_PERIOD: "3600",
+    });
+    expect(services["posting-worker"]).toEqual({
+      POSTING_CHAIN_ID: "31338",
+      POSTING_BOARD: at("Board"),
+      BALLOT_PINNED_PANELS: pinned,
+      BALLOT_ANCHOR_EPOCH: "1767225600",
+      BALLOT_ANCHOR_PERIOD: "3600",
+    });
+    // Every value a string: Railway's variables are text.
+    for (const vars of Object.values(services))
+      for (const value of Object.values(vars)) expect(typeof value).toBe("string");
+  });
+
+  test("gives each seat we hold, and only those, a configuration naming its panel", () => {
+    fc.assert(
+      fc.property(fc.array(fc.boolean(), { minLength: 7, maxLength: 7 }), (ours) => {
+        const { services } = deploymentVariables(L1, L2, inputs({ ours }), COORDINATOR);
+        const seats = Object.keys(services).filter((name) => name.startsWith("seat-"));
+        expect(seats).toEqual(ours.flatMap((o, i) => (o ? [`seat-${i + 1}`] : [])));
+        for (const name of seats) {
+          const config = JSON.parse(services[name]!["TRUSTEE_CONFIG"]!) as {
+            panel: { threshold: number; keys: string[] };
+            panelId: string;
+            l2ChainId: string;
+            trusteeRegistry: string;
+            seat: number;
+            coordinator: string;
+          };
+          expect(config.seat).toBe(Number(name.slice(5)));
+          expect(config.panel).toEqual({ threshold: 4, keys: seatKeys });
+          expect(config.panelId).toBe(l2Pins.launchPanel.id);
+          expect(config.panelId).toBe(
+            hex(panelId({ threshold: 4, keys: config.panel.keys.map(bytes) })),
+          );
+          expect(config.l2ChainId).toBe("31338");
+          expect(config.trusteeRegistry).toBe(at("TrusteeRegistry"));
+          expect(config.coordinator).toBe(COORDINATOR);
+          expect(Object.keys(config)).not.toContain("identityKeyFile");
+          expect(Object.keys(config)).not.toContain("store");
+        }
+      }),
+      { numRuns },
+    );
+  }, 120_000);
+
+  test("gives the website the record only once it lists token keys", () => {
+    const keys = tokenKeys.map((key, i) => ({ period: 700 + i, key, retired: false }));
+    const { built, services } = deploymentVariables(
+      L1,
+      L2,
+      inputs({ tier0TokenKeys: keys }),
+      COORDINATOR,
+    );
+    expect(built.record.version).toBe(2);
+    expect(services["web"]).toEqual({
+      TIER0_CHAIN_ID: "31338",
+      TIER0_GROUP_REGISTRY: at("GroupRegistry"),
+      TIER0_GROUP: "1",
+      TIER0_DEPLOYMENT_RECORD: Buffer.from(built.encoding).toString("hex"),
+    });
+    expect(decodeDeploymentRecord(bytes(services["web"]!["TIER0_DEPLOYMENT_RECORD"]!))).toEqual(
+      built.record,
+    );
+  });
+
+  test("refuses what the record builder refuses", () => {
+    const l2 = clone(L2);
+    (l2["pins"] as Json)["epoch"] = 1767229200;
+    expect(variablesRefusal(L1, l2, inputs())).toEqual({ code: "mismatch", what: "epoch" });
+  });
+
+  test("refuses a registration contract that isn't where its deployer's nonce put it", () => {
+    for (const [moved, other] of [
+      ["RegistrationAccount", "RegistrationPaymaster"],
+      ["RegistrationPaymaster", "RegistrationAccount"],
+    ] as const) {
+      const l2 = clone(L2);
+      const contracts = l2["contracts"] as Record<string, { address: string }>;
+      contracts[moved]!.address = contracts[other]!.address;
+      expect(variablesRefusal(L1, l2, inputs())).toEqual({ code: "address", contract: moved });
+    }
+  });
+
+  test("refuses a published group outside region 0, which the services don't serve", () => {
+    const group = (groupId: string, selfPaid: boolean, region: number) => ({
+      groupId,
+      tier: 0,
+      selfPaid,
+      region,
+    });
+    const groups = [group("1", false, 0), group("2", true, 0), group("3", false, 7)];
+    expect(variablesRefusal(L1, L2, inputs({ groups: [...groups, group("4", true, 7)] }))).toEqual({
+      code: "region",
+    });
   });
 });

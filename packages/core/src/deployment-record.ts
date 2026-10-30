@@ -24,7 +24,9 @@ import {
   encodeDeploymentRecord,
   PANEL_KINDS,
   panelId,
+  RECORD_TYPES,
 } from "@abolishus/crypto";
+import { POLL_DEFINITION_PROFILE } from "./poll-stubs.ts";
 
 const U32_MAX = 2 ** 32 - 1;
 const U64_MAX = 2n ** 64n - 1n;
@@ -38,7 +40,9 @@ export type DeploymentRecordSource = "l1" | "l2" | "inputs";
  * the first value that isn't what it must be; a mismatch names what the two
  * chain files disagree on; `address` a contract that isn't at the address
  * its deployer's nonce puts it; `ill-formed` is the first well-formedness rule
- * the record breaks, as crypto names it.
+ * the record breaks, as crypto names it. `region` is `deploymentVariables`'
+ * alone: a published group outside region 0, which the services don't serve
+ * yet.
  */
 export type DeploymentRecordError =
   | { readonly code: "malformed"; readonly source: DeploymentRecordSource; readonly path: string }
@@ -58,7 +62,8 @@ export type DeploymentRecordError =
   | { readonly code: "address"; readonly contract: string }
   | { readonly code: "panel-id" }
   | { readonly code: "seats" }
-  | { readonly code: "ill-formed"; readonly failure: DeploymentFailure };
+  | { readonly code: "ill-formed"; readonly failure: DeploymentFailure }
+  | { readonly code: "region" };
 
 export class DeploymentRecordRefused extends Error {
   override readonly name = "DeploymentRecordRefused";
@@ -197,6 +202,168 @@ export function buildDeploymentRecord(
   decodeDeploymentRecord(encoding);
   return { record, encoding, hash: deploymentHash(encoding) };
 }
+
+/** One service's Railway variables, by name. Every value is public. */
+export type ServiceVariables = Readonly<Record<string, string>>;
+
+export interface DeploymentVariables {
+  readonly built: BuiltDeploymentRecord;
+  /**
+   * By Railway service ([[railway]], Services): `api`, `web` (only with
+   * token keys, which its issuer checks against the record), `setup-worker`,
+   * `creation-worker`, `posting-worker`, and `seat-<n>` for each seat `ours`
+   * marks.
+   */
+  readonly services: Readonly<Record<string, ServiceVariables>>;
+}
+
+/**
+ * Every Railway variable the services take from the deployment, for the
+ * record `buildDeploymentRecord(l1, l2, inputs)` builds, so no address, key
+ * or pin is copied by hand into one service and mistyped (T-34, T-37, T-71).
+ * Each value comes from that record, except the registration account, the
+ * paymaster and the EntryPoint, which the record doesn't carry: they come
+ * from the L2 file, the account and paymaster at their CREATE addresses
+ * after the board. `coordinator` is the staging `api`'s HTTPS address, which
+ * each seat's `TRUSTEE_CONFIG` names; the seat judges it at start. What
+ * isn't the deployment's (node and bundler URLs, keys, receipt keys, each
+ * contract's creation block) is the owner's to add (the [[staging-testnet]]
+ * runbook). The services serve region 0 only, so a group in any other
+ * region is refused (`region`). Throws `DeploymentRecordRefused`.
+ */
+export function deploymentVariables(
+  l1: unknown,
+  l2: unknown,
+  inputs: unknown,
+  coordinator: string,
+): DeploymentVariables {
+  const built = buildDeploymentRecord(l1, l2, inputs);
+  const v = built.record.value;
+  const l2File = new Reader("l2", l2);
+  const deployer = l2File.at("deployer").address();
+  const nonce = l2File.at("deployerNonce").u64();
+  const contracts = l2File.at("contracts");
+  // After the four the record carries, in the script's order (T-34).
+  const [account, paymaster] = (["RegistrationAccount", "RegistrationPaymaster"] as const).map(
+    (name, i) => {
+      const at = contracts.at(name).at("address").address();
+      if (!same(at, createAddress(deployer, nonce + 4n + BigInt(i))))
+        throw new DeploymentRecordRefused({ code: "address", contract: name });
+      return at;
+    },
+  ) as [Uint8Array, Uint8Array];
+  const entryPoint = l2File.at("pins").at("registration").at("entryPoint").address();
+
+  if (v.groups.some((g) => g.region !== 0)) throw new DeploymentRecordRefused({ code: "region" });
+  // The rules give each region exactly one signed Tier 0 group.
+  const signed = v.groups.find((g) => g.tier === 0 && !g.self_paid);
+  if (signed === undefined) throw new Error("a well-formed record publishes a signed Tier 0 group");
+  const tier0Group = signed.group_id.toString();
+
+  // The default panel stubs, the creation step and the coordinator name is
+  // the launch panel, the record's only one.
+  const panel = v.panels[0];
+  if (panel === undefined) throw new Error("a built record lists its launch panel");
+  const keys = panel.seats.map((s) => s.key);
+  const panelKeys = keys.map(plain).join(",");
+  const threshold = panel.threshold.toString();
+  const pinnedPanels = JSON.stringify(
+    v.panels.map((p) => ({ threshold: p.threshold, keys: p.seats.map((s) => plain(s.key)) })),
+  );
+  const anchorClock = {
+    BALLOT_ANCHOR_EPOCH: v.anchor_epoch.toString(),
+    BALLOT_ANCHOR_PERIOD: v.anchor_period.toString(),
+  };
+  const l2ChainId = v.l2_chain_id.toString();
+  const l1ChainId = v.l1_chain_id.toString();
+  const eventVersion = POLL_DEFINITION_PROFILE.pins.find(
+    (p) => p.record_type === RECORD_TYPES.contractEvent,
+  )?.version;
+  if (eventVersion === undefined) throw new Error("the stubs' profile pins a contract event");
+
+  const services: Record<string, ServiceVariables> = {
+    api: {
+      API_CEREMONY_PANEL_THRESHOLD: threshold,
+      API_CEREMONY_PANEL_KEYS: panelKeys,
+      API_CEREMONY_L2_CHAIN_ID: l2ChainId,
+      API_CEREMONY_TRUSTEE_REGISTRY: prefixed(v.trustee_registry),
+      API_TIER0_GROUP: tier0Group,
+      BALLOT_PINNED_PANELS: pinnedPanels,
+      ...anchorClock,
+    },
+  };
+  if (built.record.version >= 2)
+    services["web"] = {
+      TIER0_CHAIN_ID: l2ChainId,
+      TIER0_GROUP_REGISTRY: prefixed(v.group_registry),
+      TIER0_GROUP: tier0Group,
+      TIER0_DEPLOYMENT_RECORD: plain(built.encoding),
+    };
+  services["setup-worker"] = {
+    BALLOT_PINNED_PANELS: pinnedPanels,
+    ...anchorClock,
+    BALLOT_L1_CHAIN_ID: l1ChainId,
+    BALLOT_ANCHOR_ADDRESS: prefixed(v.l1_anchor),
+    BALLOT_ANCHOR_DEADLINE: v.anchor_deadline.toString(),
+    TIER0_CHAIN_ID: l2ChainId,
+    TIER0_GROUP: tier0Group,
+    TIER0_REGISTRY: prefixed(v.group_registry),
+    TIER0_REGISTRARS: v.registrars.map(prefixed).join(","),
+    TIER0_THRESHOLD: v.registrar_threshold.toString(),
+    TIER0_ENTRY_POINT: prefixed(entryPoint),
+    TIER0_ACCOUNT: prefixed(account),
+    TIER0_PAYMASTER: prefixed(paymaster),
+    REGISTRY_SYNC_CHAIN_ID: l2ChainId,
+    REGISTRY_SYNC_L1_CHAIN_ID: l1ChainId,
+    REGISTRY_SYNC_PORTAL: prefixed(v.l1_portal),
+    REGISTRY_SYNC_ELECTION_REGISTRY: prefixed(v.election_registry),
+    REGISTRY_SYNC_TRUSTEE_REGISTRY: prefixed(v.trustee_registry),
+    REGISTRY_SYNC_GROUP_REGISTRY: prefixed(v.group_registry),
+    REGISTRY_SYNC_BOARD: prefixed(v.board),
+    // The version the stubs pin, so the sync reads the events they name.
+    REGISTRY_SYNC_EVENT_VERSION: eventVersion.toString(),
+    POLL_ROOT_GROUPS: v.groups.map((g) => `${g.tier}:${g.group_id}`).join(","),
+    POLL_ROOT_REGISTRARS: v.registrars.map(prefixed).join(","),
+    POLL_ROOT_THRESHOLD: v.registrar_threshold.toString(),
+    POLL_STUB_PANEL_THRESHOLD: threshold,
+    POLL_STUB_PANEL_KEYS: panelKeys,
+    POLL_STUB_MAX_SEQUENCER_DRIFT: v.l2_max_sequencer_drift.toString(),
+  };
+  services["creation-worker"] = {
+    CREATE_CHAIN_ID: l2ChainId,
+    CREATE_REGISTRY: prefixed(v.election_registry),
+    CREATE_L1_CHAIN_ID: l1ChainId,
+    CREATE_ANCHOR: prefixed(v.l1_anchor),
+    CREATE_PANEL_THRESHOLD: threshold,
+    CREATE_PANEL_KEYS: panelKeys,
+  };
+  services["posting-worker"] = {
+    POSTING_CHAIN_ID: l2ChainId,
+    POSTING_BOARD: prefixed(v.board),
+    BALLOT_PINNED_PANELS: pinnedPanels,
+    ...anchorClock,
+  };
+  for (const [i, seat] of panel.seats.entries())
+    if (seat.ours)
+      services[`seat-${i + 1}`] = {
+        // `run`'s configuration without `identityKeyFile` or `store`, which
+        // the seat's volume gives; `pollSeconds` takes its default.
+        TRUSTEE_CONFIG: JSON.stringify({
+          panel: { threshold: panel.threshold, keys: keys.map(prefixed) },
+          panelId: prefixed(v.initial_panel),
+          l2ChainId,
+          trusteeRegistry: prefixed(v.trustee_registry),
+          seat: i + 1,
+          coordinator,
+        }),
+      };
+  return { built, services };
+}
+
+// Lower-case hex, which every service's parser takes: the trustee node's
+// only in lower case.
+const plain = (b: Uint8Array) => Buffer.from(b).toString("hex");
+const prefixed = (b: Uint8Array) => `0x${plain(b)}`;
 
 interface ChainFile {
   readonly target: string;

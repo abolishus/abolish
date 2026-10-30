@@ -147,3 +147,87 @@ describe("deployment record", () => {
     expect(r.err[0]?.["error"]).toBe("usage");
   });
 });
+
+describe("deployment variables", () => {
+  const COORDINATOR = "https://api.staging.example";
+
+  test("prints each service's variables beside the deployment hash the record command prints", async () => {
+    const inputs = inputsFile(INPUTS);
+    const record = await cli("deployment", "record", "--l1", L1, "--l2", L2, "--inputs", inputs);
+    const r = await cli(
+      "deployment",
+      "variables",
+      "--l1",
+      L1,
+      "--l2",
+      L2,
+      "--inputs",
+      inputs,
+      "--coordinator",
+      COORDINATOR,
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toHaveLength(1);
+    const { deploymentHash: hash, services } = r.out[0] as {
+      deploymentHash: string;
+      services: Record<string, Record<string, string>>;
+    };
+    expect(hash).toBe(record.out[0]?.["deploymentHash"]);
+    expect(Object.keys(services)).toEqual([
+      "api",
+      "setup-worker",
+      "creation-worker",
+      "posting-worker",
+      "seat-1",
+    ]);
+    expect(JSON.parse(services["seat-1"]?.["TRUSTEE_CONFIG"] ?? "{}")).toMatchObject({
+      seat: 1,
+      coordinator: COORDINATOR,
+    });
+  });
+
+  test("refuses as the record command does, and a group outside region 0", async () => {
+    const args = (inputs: unknown) => [
+      "deployment",
+      "variables",
+      "--l1",
+      L1,
+      "--l2",
+      L2,
+      "--inputs",
+      inputsFile(inputs),
+      "--coordinator",
+      COORDINATOR,
+    ];
+    const malformed = await cli(...args({ ...INPUTS, l2FromBlock: 0 }));
+    expect(malformed.code).toBe(1);
+    expect(malformed.err).toEqual([{ error: "malformed", source: "inputs", path: ".l2FromBlock" }]);
+    const region = await cli(
+      ...args({
+        ...INPUTS,
+        groups: [
+          ...INPUTS.groups,
+          { groupId: "3", tier: 0, selfPaid: false, region: 7 },
+          { groupId: "4", tier: 0, selfPaid: true, region: 7 },
+        ],
+      }),
+    );
+    expect(region.code).toBe(1);
+    expect(region.err).toEqual([{ error: "region" }]);
+  });
+
+  test("requires the coordinator", async () => {
+    const r = await cli(
+      "deployment",
+      "variables",
+      "--l1",
+      L1,
+      "--l2",
+      L2,
+      "--inputs",
+      inputsFile(INPUTS),
+    );
+    expect(r.code).toBe(2);
+    expect(r.err[0]?.["detail"]).toBe("--coordinator is required");
+  });
+});

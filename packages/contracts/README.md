@@ -122,7 +122,7 @@ The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; n
 
 ## Deploy script
 
-`script/Deploy.s.sol` makes the staging deployment ([[P2-32]] part 1b; docs/spec/contracts.md, Testnet deployments). `runL1()` deploys the board anchor and the L1 relay. Then `runL2()` deploys the trustee registry (pinning the launch panel), the group registry, the election registry and the board. Each run writes `deployments/<chain-id>.json` (`deployments/README.md`), but only when broadcasting, never on a dry run. Every pin comes from the `DEPLOY_CONFIG` environment variable, a JSON object, never a literal:
+`script/Deploy.s.sol` makes the staging deployment ([[P2-32]] part 1b; docs/spec/contracts.md, Testnet deployments). `runL1()` deploys the board anchor and the L1 relay. Then `runL2()` deploys the trustee registry (pinning the launch panel), the group registry, the election registry, the board, the signing service's registration account and the registration paymaster. Each run writes `deployments/<chain-id>.json` (`deployments/README.md`), but only when broadcasting, never on a dry run. Every pin comes from the `DEPLOY_CONFIG` environment variable, a JSON object, never a literal:
 
 - `target`, which must be `staging`;
 - `commit`: 40 lower-case hex digits;
@@ -130,7 +130,8 @@ The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; n
 - `anchor`: the clock's `epoch` (a whole hour), `period` (3,600) and `deadline` (43,200), as contracts.md (Board anchor, Deployment) sets them, and the anchoring Safe's address as `authority`, a Safe of threshold 2 or more whose owners and threshold the L1 run reads and records;
 - `portal`: the L2's OptimismPortal on L1;
 - `panel`: `threshold`, `quorum` (which must be `max(k, n − 1)`), `kind`, the seats' `p256-key` encodings as `keys`, and their points as `points` (x then y per seat, decimal strings);
-- `registrars`: the Tier 0 registrars' `threshold` and ascending `addresses`.
+- `registrars`: the Tier 0 registrars' `threshold` and ascending `addresses`;
+- `registration`: EntryPoint v0.8's address as `entryPoint` (on Base Sepolia, the canonical `0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108`), the signing service's key as `serviceOwner`, the registration paymaster's admin as `admin`, the Safe behind it as `safe`, and the paymaster's per-operation cap in wei as `maxCost` (a decimal string). The admin is a `TimelockController` with a non-zero `getMinDelay()`. The Safe must hold its proposer and canceller roles and be a multisig, and the deployer must hold no role in it.
 
 The epoch is the one exception. The L2 run reads it from the deployed anchor, so the registry's clock is the anchor's. Each value is range-checked before it is narrowed to its type.
 
@@ -145,7 +146,7 @@ While any of [[0044-testnet-deployments]]'s conditions is open, the script refus
 Each record gives the target, chain, deployer and starting nonce, commit, each contract's address and runtime code hash, and `pins`, everything each contract took:
 
 - on L1: the L2 chain, the board, the anchor's clock and authority (the Safe's address, owners and threshold), and the portal;
-- on L2: the L1 chain, anchor and relay, the epoch, the launch panel's identifier, threshold, size, quorum, kind and keys, and the registrars and their threshold.
+- on L2: the L1 chain, anchor and relay, the epoch, the launch panel's identifier, threshold, size, quorum, kind and keys, the registrars and their threshold, and the registration contracts' EntryPoint, service key, admin (with its delay) and cap.
 
 The script deploys each contract's creation code from `out/` (`vm.getCode`) and holds none of its own. But `forge script` recompiles `out/` first, so what it deploys matches the release build (below) only because the compiler is deterministic. The workflow (part 3) must compare each deployed contract's code with the release build's, immutables masked, and add each transaction's hash from forge's broadcast files.
 
@@ -155,8 +156,6 @@ The script deploys each contract's creation code from `out/` (`vm.getCode`) and 
 - every pin, both in the records and read back from the contracts through `cast`;
 - each refusal, with nothing sent;
 - a dry run writing no record.
-
-The registration paymaster, the registration account and the timelock admin aren't deployed yet ([[P2-32]] part 1b-2).
 
 ## Release build
 

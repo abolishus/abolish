@@ -712,7 +712,10 @@ describe("version 6's per-election checks read a fixed version 7 under its own h
     const d7 = fixedV7(withoutAuthor(e.d));
     const rolling: ElectionDefinitionV7 = { ...d7, electorate_mode: ELECTORATE_MODES.rolling };
     expect(() => panelBallotElection(rolling, e.registered)).toThrow(UnsupportedVersionError);
-    expect(() => tallyRules({ version: 7, value: rolling })).toThrow(UnsupportedVersionError);
+    // tallyRules reads a rolling version 7 (tally.md, Rolling tiers), and
+    // refuses this one, a fixed one's fields with no rolling tier, as
+    // ill-formed.
+    expect(() => tallyRules({ version: 7, value: rolling })).toThrow(/isn't well-formed/);
     expect(() =>
       panelTallyRules(
         { version: 7, value: { ...fixedV7(e.d), electorate_mode: ELECTORATE_MODES.rolling } },

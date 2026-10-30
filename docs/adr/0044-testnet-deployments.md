@@ -78,10 +78,10 @@ B. The conditions protect elections that can't be redone. The staging deployment
   Each one closed comes off the list. Once the list is empty, the staging-only check goes.
 
 - Known-weak:
-  - A testnet registry admits versions 1 and 3, and has the decoder's gas limits.
-  - A quorum of our own launch seats could record a nullifier key and stop sealing on the testnet. Only procedure prevents it.
+  - The staging registry admits versions 1 and 3, and has the decoder's gas limits.
+  - A quorum of our own launch seats could record a nullifier key and stop sealing on the staging deployment. Only procedure prevents it.
   - Staging's operator could withhold openings unattributed.
-  - A testnet group's region is only the release's word, so staging can't show regional results.
+  - A staging group's region is only the release's word, so staging can't show regional results.
   - A root sent for a staging poll leaves it unverifiable.
 - Nothing but release procedure checks the rule that no release for real polls binds the staging deployment, or any deployment on chain 84532, 11155111 or 31337 while one of the nine is open. A release offered for real polls is defined now, as any release not built for the staging environment, so a reviewer can apply the rule. A verifier or release-builder check is owed before the first such release ([[P4-4]]'s release checks, or [[P1-19]] 2.3). It needs the distinction recorded where the check can read it, for example a field of the release or deployment record, or the registry it is published in. Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on the staging deployment from verifying.
 

@@ -32,18 +32,31 @@
 // the account was moderated that day (T-73, T-76). Later tries are the
 // e-mail's alone, so a refused e-mail never wakes a browser twice.
 //
+// Results (P2-25 part 4c): once a followed poll's results are in, each of its
+// followers' notices says so too (src/follows.ts, `landResults`), queued the
+// same way, so an account still gets one notice a day at most, in the words
+// for what it carries. It names no poll, so the provider learns that the
+// account followed some poll whose results came in that day (T-73); which one
+// is on the account page.
+//
 // A notice is written in the language its account verified its address in
 // (P2-28 part 4c-3): a timer sends it, with no request to take one from.
 //
 // T-10: account-side only; nothing here reads the board or a ballot, and a
 // notice keeps nothing to join the log on but its day. T-52: only a
-// moderator's decision queues one, so no one else can make us mail an
-// address, and an address gets one a day at most however many decisions.
+// moderator's decision, or a followed poll's results landing for an account
+// verified and following, queues one, so no one else can make us mail an
+// address, and an address gets one a day at most however many events.
 
 import { and, asc, eq, lt, lte, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
-import { type EmailKeys, type EmailSender, unsealEmailAddress } from "./account-emails.ts";
+import {
+  type EmailKeys,
+  type EmailSender,
+  type NoticeAbout,
+  unsealEmailAddress,
+} from "./account-emails.ts";
 import { accountEmails, accountNotices, accountPushSubscriptions } from "./db/schema/index.ts";
 import type { ModerationTx } from "./moderation.ts";
 import type { PushOutcome, PushSender } from "./web-push.ts";
@@ -90,7 +103,11 @@ export async function queueNotice(
     .values({ userId, notBefore: noticeDue(at) })
     .onConflictDoUpdate({
       target: n.userId,
-      set: { tries: 0, notBefore: q`greatest(${n.notBefore}, excluded.not_before)` },
+      set: {
+        tries: 0,
+        notBefore: q`greatest(${n.notBefore}, excluded.not_before)`,
+        moderation: true,
+      },
     });
 }
 
@@ -147,6 +164,8 @@ export async function sendNotices(
         box: accountEmails.addressBox,
         key: accountEmails.boxKey,
         locale: accountEmails.locale,
+        moderation: n.moderation,
+        results: n.results,
       })
       .from(n)
       .leftJoin(accountEmails, eq(accountEmails.userId, n.userId))
@@ -187,7 +206,7 @@ export async function sendNotices(
       outcome =
         to === undefined
           ? "unavailable"
-          : await sender.send({ kind: "notice", to, locale: c.locale });
+          : await sender.send({ kind: "notice", to, locale: c.locale, about: aboutOf(c) });
     }
     if (outcome === "unavailable" && c.tries < NOTICE_TRIES) {
       retrying++;
@@ -202,6 +221,15 @@ export async function sendNotices(
   }
   return { sent, retrying, dropped, pushed, pushFailed };
 }
+
+// The table's check holds that a notice is about one or the other at least.
+const aboutOf = ({
+  moderation,
+  results,
+}: {
+  moderation: boolean;
+  results: boolean;
+}): NoticeAbout => (moderation && results ? "both" : results ? "results" : "moderation");
 
 /**
  * Pushes to every browser `userId` subscribed, side by side, deleting each

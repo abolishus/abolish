@@ -21,12 +21,27 @@
 // counted per hour with no poll. A hidden poll takes no new followers (T-68).
 // Stopping is always allowed, by any account, so one whose address is later
 // unlinked, or whose poll is hidden, can still stop.
+//
+// Results (part 4c): once a followed poll's results are in, `landResults`
+// turns each of its follows into a row of `account_follow_results`, the list
+// of polls with results the account's page shows, and queues each follower's
+// notice (src/account-notices.ts), all in one statement. The follows are
+// gone then: a poll's results land once, so a follow has nothing more to
+// tell, and the index of a poll's followers no longer holds them (T-11). The
+// account takes a poll off its list with `dropFollowResult`; until then the
+// row says only that it followed the poll, as the follow did.
 
-import { and, eq, lt, sql as q } from "drizzle-orm";
+import { and, asc, eq, gt, lt, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
+import { noticeDue } from "./account-notices.ts";
 import { isBytes } from "./bytes.ts";
-import { accountEmails, accountFollowHours, accountFollows } from "./db/schema/index.ts";
+import {
+  accountEmails,
+  accountFollowHours,
+  accountFollowResults,
+  accountFollows,
+} from "./db/schema/index.ts";
 import { hasDefinition } from "./definitions.ts";
 import { statusOf } from "./moderation.ts";
 
@@ -164,4 +179,102 @@ export async function pruneFollowHours(client: Sql, now: Date): Promise<number> 
     .where(lt(accountFollowHours.hour, hour))
     .returning({ one: q<number>`1` });
   return rows.length;
+}
+
+/** The most polls one `followedPolls` call returns. */
+export const MAX_FOLLOWED_POLLS = 1000;
+
+/**
+ * The polls some account follows, by election ID in byte order after
+ * `after`, at most `limit` of them: for the sender that asks whether their
+ * results are in. Never who follows them, nor how many (T-68).
+ */
+export async function followedPolls(
+  client: Sql,
+  { after, limit = MAX_FOLLOWED_POLLS }: { readonly after?: Uint8Array; readonly limit?: number },
+): Promise<Uint8Array[]> {
+  if (after !== undefined) checkElectionId(after);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_FOLLOWED_POLLS)
+    throw new RangeError(`limit must be 1 to ${MAX_FOLLOWED_POLLS}`);
+  const f = accountFollows;
+  const rows = await drizzle({ client })
+    .selectDistinct({ electionId: f.electionId })
+    .from(f)
+    .where(after === undefined ? undefined : gt(f.electionId, new Uint8Array(after)))
+    .orderBy(asc(f.electionId))
+    .limit(limit);
+  return rows.map((r) => new Uint8Array(r.electionId));
+}
+
+/**
+ * Results are in for `electionId`'s poll, as of `now`: each of its follows
+ * becomes a row of its account's list of polls with results, and that
+ * account's notice says results are in, due after the UTC midnight that
+ * follows `now` (T-73). One statement, so a follow set or stopped meanwhile
+ * is either told or still following. Returns how many accounts were told;
+ * a poll no one follows tells no one, so calling it again changes nothing.
+ * The caller judges that the results are in: core holds no results.
+ */
+export async function landResults(
+  client: Sql,
+  electionId: Uint8Array,
+  { now }: { readonly now: Date },
+): Promise<number> {
+  checkElectionId(electionId);
+  if (!(now instanceof Date) || Number.isNaN(now.getTime()))
+    throw new TypeError("now must be a valid Date");
+  const id = new Uint8Array(electionId);
+  // A notice already waiting carries the results too, with its tries reset,
+  // as `queueNotice` renews one for a decision. In account order, so two
+  // landings with followers in common take the notices' locks in one order.
+  const told = await client`
+    WITH gone AS (
+      DELETE FROM account_follows WHERE election_id = ${id} RETURNING user_id
+    ), listed AS (
+      INSERT INTO account_follow_results (user_id, election_id)
+      SELECT user_id, ${id} FROM gone
+      ON CONFLICT DO NOTHING
+    )
+    INSERT INTO account_notices (user_id, not_before, moderation, results)
+    SELECT user_id, ${noticeDue(now).toISOString()}, false, true FROM gone ORDER BY user_id
+    ON CONFLICT (user_id) DO UPDATE SET
+      tries = 0,
+      not_before = greatest(account_notices.not_before, excluded.not_before),
+      results = true
+    RETURNING 1`;
+  return told.length;
+}
+
+/**
+ * The polls the signed-in `accountId` followed whose results are in, by
+ * election ID in byte order: for that account's own page only.
+ */
+export async function followResults(client: Sql, accountId: string): Promise<Uint8Array[]> {
+  checkAccountId(accountId);
+  const r = accountFollowResults;
+  const rows = await drizzle({ client })
+    .select({ electionId: r.electionId })
+    .from(r)
+    .where(eq(r.userId, accountId))
+    .orderBy(asc(r.electionId));
+  return rows.map((row) => new Uint8Array(row.electionId));
+}
+
+/**
+ * Takes `electionId`'s poll off the signed-in `accountId`'s list of polls
+ * with results, and returns whether it was there.
+ */
+export async function dropFollowResult(
+  client: Sql,
+  accountId: string,
+  electionId: Uint8Array,
+): Promise<boolean> {
+  checkAccountId(accountId);
+  checkElectionId(electionId);
+  const r = accountFollowResults;
+  const rows = await drizzle({ client })
+    .delete(r)
+    .where(and(eq(r.userId, accountId), eq(r.electionId, new Uint8Array(electionId))))
+    .returning({ one: q<number>`1` });
+  return rows.length > 0;
 }

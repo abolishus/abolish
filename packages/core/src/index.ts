@@ -177,6 +177,7 @@ export {
   accountPasskeys,
   accountAppeals,
   accountFollowHours,
+  accountFollowResults,
   accountFollows,
   accountModerators,
   accountNotices,
@@ -273,6 +274,7 @@ export {
   emailKeys,
   type EmailLocale,
   type EmailMessage,
+  type NoticeAbout,
   type EmailSender,
   EmailVerificationError,
   type EmailVerificationErrorCode,
@@ -621,10 +623,15 @@ export {
   reviewProfileReports,
 } from "./profile-moderation.ts";
 export {
+  dropFollowResult,
   FollowError,
   type FollowErrorCode,
+  followedPolls,
+  followResults,
   isFollowing,
+  landResults,
   MAX_FOLLOW_CHANGES_PER_HOUR,
+  MAX_FOLLOWED_POLLS,
   pruneFollowHours,
   setFollow,
 } from "./follows.ts";

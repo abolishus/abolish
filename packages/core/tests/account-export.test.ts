@@ -11,6 +11,7 @@ import {
   emailKeys,
   type EmailMessage,
   exportAccount,
+  landResults,
   makeProfile,
   newAccountId,
   parseKeyring,
@@ -129,6 +130,7 @@ describe("exportAccount", () => {
       profileNamedOn: null,
       reactions: [],
       follows: [],
+      followResults: [],
       tier0Tokens: [],
       moderator: null,
     });
@@ -164,6 +166,9 @@ describe("exportAccount", () => {
     await setReaction(app, user, reacted.electionId, "clap", true, { now: NOW });
     await setReaction(app, user, reacted.electionId, "heart", true, { now: NOW });
     await setFollow(app, user, reacted.electionId, true, { now: NOW });
+    const counted = await openPoll(await newAccount());
+    await setFollow(app, user, counted.electionId, true, { now: NOW });
+    await landResults(app, counted.electionId, { now: NOW });
     await app`INSERT INTO account_tokens VALUES (${user}, 84532, ${registry}, 7, ${randomBytes(32)},
       3, ${blinded})`;
     await addModerator(app, "moderator-one", user);
@@ -252,6 +257,7 @@ describe("exportAccount", () => {
         { electionId: hex(reacted.electionId), reaction: "heart" },
       ],
       follows: [hex(reacted.electionId)],
+      followResults: [hex(counted.electionId)],
       tier0Tokens: [{ chainId: "84532", groupRegistry: hex(registry), region: 7, keyPeriod: 3 }],
       moderator: { handle: "moderator-one", addedAt: expect.any(String) },
     });

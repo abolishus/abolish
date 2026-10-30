@@ -10,12 +10,15 @@ import {
   decideAppeal,
   decideProfileAppeal,
   type EmailKeys,
+  EMAIL_LOCALES,
   emailKeys,
   type EmailLocale,
   type EmailMessage,
   type EmailSender,
   fileAppeal,
   fileProfileAppeal,
+  followResults,
+  landResults,
   makeProfile,
   MAX_NOTICE_BATCH,
   moderate,
@@ -33,6 +36,7 @@ import {
   requestEmailCode,
   RESTORE_REASONS,
   sendNotices,
+  setFollow,
   storeDefinition,
   subscribePush,
   verifyEmailCode,
@@ -45,7 +49,9 @@ import { addModerators, newAccount, type TestDb, testDb, typical } from "./db.ts
 // in its own transaction, due after the next UTC midnight; each is sent to
 // the verified address, deleted once sent unless a decision renewed it,
 // retried on a refusal and dropped after `NOTICE_TRIES`; and none says what
-// was decided or about which poll or profile (T-10, T-52, T-73).
+// was decided or about which poll or profile (T-10, T-52, T-73). Results of
+// a followed poll ride the same notice (P2-25 part 4c), which then says so,
+// still naming no poll.
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -174,24 +180,38 @@ describe("schema", () => {
     const cols = await db.admin`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = ${db.schema} AND table_name = 'account_notices' ORDER BY column_name`;
-    expect(cols.map((c) => c["column_name"])).toEqual(["not_before", "tries", "user_id"]);
+    // The flags say which words a notice goes in, never which poll or decision.
+    expect(cols.map((c) => c["column_name"])).toEqual([
+      "moderation",
+      "not_before",
+      "results",
+      "tries",
+      "user_id",
+    ]);
     const keys = await db.admin`
       SELECT confrelid::regclass::text AS target FROM pg_constraint
       WHERE conrelid = ${`"${db.schema}".account_notices`}::regclass AND contype = 'f'`;
     expect(keys.map((k) => k["target"])).toEqual(["account_users"]);
   });
 
-  test("the app role updates only a notice's tries and due time, and never truncates", async () => {
+  test("the app role updates only a notice's tries, due time and flags, and never truncates", async () => {
     const cols = await db.admin`
       SELECT column_name FROM information_schema.column_privileges
       WHERE table_schema = ${db.schema} AND grantee = 'abolish_app' AND privilege_type = 'UPDATE'
         AND table_name = 'account_notices'
       ORDER BY column_name`;
-    expect(cols.map((c) => c["column_name"])).toEqual(["not_before", "tries"]);
+    expect(cols.map((c) => c["column_name"])).toEqual([
+      "moderation",
+      "not_before",
+      "results",
+      "tries",
+    ]);
     const account = await newAccount(app);
     await insertNotice(account, NOW);
     expect(await failsWith(app`UPDATE account_notices SET user_id = ${account}`)).toBe("42501");
     expect(await failsWith(app`UPDATE account_notices SET tries = 6`)).toBe("23514");
+    // A notice is about something.
+    expect(await failsWith(app`UPDATE account_notices SET moderation = false`)).toBe("23514");
     expect(await failsWith(app`TRUNCATE account_notices`)).toBe("42501");
     await clear();
   });
@@ -352,7 +372,9 @@ describe("sending", () => {
     // Not before the next UTC midnight.
     expect(await drain(sender, new Date())).toEqual({ sent: 0, retrying: 0, dropped: 0 });
     expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
-    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US" }]);
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "en-US", about: "moderation" },
+    ]);
     expect(await noticeOf(author)).toBeUndefined();
     expect(await drain(sender)).toEqual({ sent: 0, retrying: 0, dropped: 0 });
   });
@@ -365,7 +387,9 @@ describe("sending", () => {
     await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
     const { messages, sender } = recorder();
     expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
-    expect(messages).toEqual([{ kind: "notice", to: address, locale: "es-US" }]);
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "es-US", about: "moderation" },
+    ]);
   });
 
   test("a notice waits until it is due", async () => {
@@ -576,7 +600,12 @@ describe("sending", () => {
 
 describe("rendering", () => {
   test("a notice says neither what was decided nor about what, and holds no link", () => {
-    const { subject, text } = renderEmail({ kind: "notice", to: "a@example.org", locale: "en-US" });
+    const { subject, text } = renderEmail({
+      kind: "notice",
+      to: "a@example.org",
+      locale: "en-US",
+      about: "moderation",
+    });
     const words = `${subject}\n${text}`.toLowerCase();
     expect(subject).not.toMatch(/\n/);
     expect(words).not.toMatch(/https?:|www\.|@|\/p\/|\/by\//);
@@ -597,6 +626,113 @@ describe("rendering", () => {
       expect(words).not.toContain(word);
     expect(text).toContain("Sign in to Abolish");
     expect(text).toContain("whatever your notification settings");
+  });
+
+  test("each kind of notice says what it carries, and names no poll (T-73)", () => {
+    for (const locale of EMAIL_LOCALES) {
+      const [moderation, results, both] = (["moderation", "results", "both"] as const).map(
+        (about) => renderEmail({ kind: "notice", to: "a@example.org", locale, about }),
+      );
+      // Three distinct subjects and bodies, the joint one holding both.
+      expect(new Set([moderation, results, both].map((r) => r!.subject)).size).toBe(3);
+      expect(new Set([moderation, results, both].map((r) => r!.text)).size).toBe(3);
+      for (const r of [results, both]) expect(r!.text).not.toMatch(/https?:|\/p\/|\/polls\//);
+    }
+    const en = (about: "results" | "both") =>
+      renderEmail({ kind: "notice", to: "a@example.org", locale: "en-US", about }).text;
+    expect(en("results")).toContain("Results are in for a poll you follow");
+    expect(en("results")).not.toContain("moderator");
+    expect(en("both")).toContain("A moderator made a decision");
+    expect(en("both")).toContain("results are in for a poll you follow");
+  });
+});
+
+describe("results notices (P2-25 part 4c)", () => {
+  /** A fresh verified account following a fresh poll whose results then land. */
+  async function told(locale: EmailLocale = "en-US") {
+    const account = await newAccount(app);
+    const address = await verified(account, locale);
+    const { electionId } = await poll();
+    await setFollow(app, account, electionId, true, { now: NOW });
+    expect(await landResults(app, electionId, { now: NOW })).toBe(1);
+    return { account, address, electionId };
+  }
+
+  test("a follower is told once, in its language, after the next UTC midnight", async () => {
+    await clear();
+    const en = await told();
+    const es = await told("es-US");
+    const { messages, sender } = recorder();
+    expect(await drain(sender, new Date(noticeDue(NOW).getTime() - SECOND))).toEqual({
+      sent: 0,
+      retrying: 0,
+      dropped: 0,
+    });
+    expect(await drain(sender, noticeDue(NOW))).toEqual({ sent: 2, retrying: 0, dropped: 0 });
+    expect(messages).toHaveLength(2);
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: en.address,
+      locale: "en-US",
+      about: "results",
+    });
+    expect(messages).toContainEqual({
+      kind: "notice",
+      to: es.address,
+      locale: "es-US",
+      about: "results",
+    });
+    expect(await noticeOf(en.account)).toBeUndefined();
+    expect(await followResults(app, en.account)).toEqual([en.electionId]);
+  });
+
+  test("an author moderated the day a followed poll's results land gets one notice of both", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    await landResults(app, followed.electionId, { now: new Date() });
+    const { messages, sender } = recorder();
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US", about: "both" }]);
+  });
+
+  test("results landing while a moderation notice is sent are sent after it, not lost", async () => {
+    await clear();
+    const author = await newAccount(app);
+    const address = await verified(author);
+    const { electionId } = await poll(author);
+    const followed = await poll();
+    await setFollow(app, author, followed.electionId, true, { now: NOW });
+    await moderate(app, electionId, { action: "hide", reason: "illegal", moderator: "mod-1" });
+    const messages: EmailMessage[] = [];
+    let landed = false;
+    const sender: EmailSender = {
+      send: async (m) => {
+        messages.push(m);
+        // The results land while the provider takes the moderation notice.
+        if (!landed) {
+          landed = true;
+          await landResults(app2, followed.electionId, { now: new Date() });
+        }
+        return "sent";
+      },
+    };
+    expect(await drain(sender)).toEqual({ sent: 1, retrying: 0, dropped: 0 });
+    // Kept, and due once the send's lease ends.
+    expect(await noticeOf(author)).toMatchObject({ tries: 0 });
+    expect(await drain(sender, new Date(Date.now() + 4 * DAY))).toEqual({
+      sent: 1,
+      retrying: 0,
+      dropped: 0,
+    });
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "en-US", about: "moderation" },
+      { kind: "notice", to: address, locale: "en-US", about: "both" },
+    ]);
   });
 });
 
@@ -647,7 +783,9 @@ describe("web push", () => {
       pushed: 2,
       pushFailed: 0,
     });
-    expect(messages).toEqual([{ kind: "notice", to: address, locale: "en-US" }]);
+    expect(messages).toEqual([
+      { kind: "notice", to: address, locale: "en-US", about: "moderation" },
+    ]);
     expect(pushed.map((p) => p.endpoint).sort(byCode)).toEqual([e1, e2].sort(byCode));
     expect(pushed.every((p) => p.now === NOW)).toBe(true);
   });

@@ -34,6 +34,7 @@ import {
   accountAppeals,
   accountCredentials,
   accountEmails,
+  accountFollowResults,
   accountFollows,
   accountModerators,
   accountPasskeys,
@@ -50,7 +51,7 @@ import {
 } from "./db/schema/index.ts";
 
 /** The export's layout; a change to it is a new version. */
-export const ACCOUNT_EXPORT_VERSION = 3;
+export const ACCOUNT_EXPORT_VERSION = 4;
 
 /**
  * What the export takes from each account table: `"exported"`, or why it
@@ -67,10 +68,11 @@ export const ACCOUNT_EXPORT = {
   account_email_sends: "rate-limit counts, gone in a day",
   account_emails: "exported",
   account_follow_hours: "rate-limit counts, gone in two hours",
+  account_follow_results: "exported",
   account_follows: "exported",
   account_moderators: "exported",
   account_notices:
-    "a moderation notice waiting to be e-mailed, gone once sent: a due time and a try count",
+    "a moderation or results notice waiting to be e-mailed, gone once sent: a due time, a try count and which words it goes in",
   account_passkeys: "exported",
   account_phone_codes: "a pending code: the number's hash, gone in 10 minutes",
   account_phone_holds: "names no account: a freed number's hash",
@@ -149,6 +151,8 @@ export interface AccountExport {
   readonly reactions: readonly { readonly electionId: string; readonly reaction: string }[];
   /** The polls the account follows, by election ID (version 3). */
   readonly follows: readonly string[];
+  /** The polls it followed whose results are in, by election ID (version 4). */
+  readonly followResults: readonly string[];
   readonly tier0Tokens: readonly {
     readonly chainId: string;
     readonly groupRegistry: string;
@@ -309,6 +313,11 @@ export async function exportAccount(
         .from(accountFollows)
         .where(eq(accountFollows.userId, accountId))
         .orderBy(asc(accountFollows.electionId));
+      const followResults = await tx
+        .select({ electionId: accountFollowResults.electionId })
+        .from(accountFollowResults)
+        .where(eq(accountFollowResults.userId, accountId))
+        .orderBy(asc(accountFollowResults.electionId));
       const tokens = await tx
         .select({
           chainId: accountTokens.chainId,
@@ -365,6 +374,7 @@ export async function exportAccount(
         profileNamedOn: naming === undefined ? null : iso(naming.namedOn),
         reactions: reactions.map((r) => ({ electionId: hex(r.electionId), reaction: r.reaction })),
         follows: follows.map((f) => hex(f.electionId)),
+        followResults: followResults.map((f) => hex(f.electionId)),
         tier0Tokens: tokens.map((t) => ({
           chainId: t.chainId.toString(),
           groupRegistry: hex(t.groupRegistry),

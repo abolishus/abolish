@@ -326,7 +326,9 @@ test("sends the notices due to verified addresses, only where configured", async
       },
     }),
   ).toEqual([]);
-  expect(sent).toEqual([{ kind: "notice", to: "due@example.org", locale: "en-US" }]);
+  expect(sent).toEqual([
+    { kind: "notice", to: "due@example.org", locale: "en-US", about: "moderation" },
+  ]);
   expect((await notices()).has(due)).toBe(false);
   expect((await notices()).get(later)).toBe(0);
   await sql`DELETE FROM account_notices`;

@@ -1,0 +1,32 @@
+{
+  "name": "@abolishus/intake-relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "An RFC 9458 relay carrying sealed deliveries to trustee nodes' sealed intake (docs/spec/sealed-delivery.md, The relay). Source-only.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "vp exec tsc -p tsconfig.json && vp pack",
+    "check": "vp check",
+    "start": "vp node src/main.ts",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "@abolishus/crypto": "workspace:*",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "fast-check": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "abolish": {
+    "buildOutputs": [
+      "dist"
+    ]
+  }
+}

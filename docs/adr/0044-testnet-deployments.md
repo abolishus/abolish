@@ -36,7 +36,7 @@ Close all nine (and the three residuals) before any deployment. Pros: one rule e
 The waiver is scoped to staging's deployment, not to chain IDs: every deployment before mainnet runs on Base Sepolia and Sepolia, a public or production one included (the brief allows testnets only until mainnet). The staging deployment is the one made for the `staging` environment: the deploy workflow's input names it, its deployment files record it, and only staging releases bind it. It may go ahead with the nine open, on these terms:
 
 - **Any other deployment meets all nine and the owner's three residuals,** whatever chain it is on. That includes a public or production deployment on a testnet before mainnet.
-- **The deploy script requires the explicit staging target** while any of the nine is open, refuses any other target, and refuses every chain but 84532, 11155111 and 31337.
+- **The deploy script requires the explicit staging target** while any of the nine is open, refuses any other target, and refuses every chain pair but Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338).
 - **A release offered for real polls is any release not built for the staging environment.** None binds the staging deployment. This is a release-procedure rule ([[release]]), since anyone can deploy the same bytecode on any chain without the script.
 - **Staging's own path never depends on what is open.**
   - Poll creation registers definition version 5 only ([[0032-poll-creation-operations]]; `packages/core/src/poll-registration.ts`), which binds receipt keys. Moving it to version 6 ([[P2-16]] part 5) doesn't reopen condition 1, which concerns versions 1 and 3 only.
@@ -62,7 +62,7 @@ B. The conditions protect elections that can't be redone. The staging deployment
 ## Consequences
 
 - [[contracts]] gains a Testnet deployments section that lists the nine and the owner's three. Each condition's own statement names that section.
-- [[P2-32]] part 1b's deploy script takes an explicit target, and while any of the nine is open it deploys only the staging target, and only on 84532, 11155111 or 31337. Its deployment files record the target.
+- [[P2-32]] part 1b's deploy script takes an explicit target, and while any of the nine is open it deploys only the staging target, and only on Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338). Its deployment files record the target.
 - The owner is asked to accept, for the staging deployment only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
 - Closing the nine is still owed before production:
   - versions 1 and 3 and the decoder budget, with [[P1-18]]'s remaining deployment needs;
@@ -83,7 +83,7 @@ B. The conditions protect elections that can't be redone. The staging deployment
   - Staging's operator could withhold openings unattributed.
   - A staging group's region is only the release's word, so staging can't show regional results.
   - A root sent for a staging poll leaves it unverifiable.
-- Nothing but release procedure checks the rule that no release for real polls binds the staging deployment, or any deployment on chain 84532, 11155111 or 31337 while one of the nine is open. A release offered for real polls is defined now, as any release not built for the staging environment, so a reviewer can apply the rule. A verifier or release-builder check is owed before the first such release ([[P4-4]]'s release checks, or [[P1-19]] 2.3). It needs the distinction recorded where the check can read it, for example a field of the release or deployment record, or the registry it is published in. Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on the staging deployment from verifying.
+- Nothing but release procedure checks the rule that no release for real polls binds the staging deployment, or any deployment on chain 84532, 11155111, 31337 or 31338 while one of the nine is open. A release offered for real polls is defined now, as any release not built for the staging environment, so a reviewer can apply the rule. A verifier or release-builder check is owed before the first such release ([[P4-4]]'s release checks, or [[P1-19]] 2.3). It needs the distinction recorded where the check can read it, for example a field of the release or deployment record, or the registry it is published in. Until then only a reviewer reading the deployment record tells the two apart, and verifier 1.2, which stays `not-implemented`, keeps any election on the staging deployment from verifying.
 
 ## Decision
 

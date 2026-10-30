@@ -120,6 +120,44 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; nothing it pulls in (viem, esbuild) reaches the generated file.
 
+## Deploy script
+
+`script/Deploy.s.sol` makes the staging deployment ([[P2-32]] part 1b; docs/spec/contracts.md, Testnet deployments). `runL1()` deploys the board anchor and the L1 relay. Then `runL2()` deploys the trustee registry (pinning the launch panel), the group registry, the election registry and the board. Each run writes `deployments/<chain-id>.json` (`deployments/README.md`), but only when broadcasting, never on a dry run. Every pin comes from the `DEPLOY_CONFIG` environment variable, a JSON object, never a literal:
+
+- `target`, which must be `staging`;
+- `commit`: 40 lower-case hex digits;
+- `deployer`, `l1ChainId`, `l2ChainId`, and the deployer's starting nonce on each chain (`l1Nonce`, `l2Nonce`);
+- `anchor`: the clock's `epoch`, `period` and `deadline`, and the anchoring Safe's address as `authority`;
+- `portal`: the L2's OptimismPortal on L1;
+- `panel`: `threshold`, `quorum` (which must be `max(k, n − 1)`), `kind`, the seats' `p256-key` encodings as `keys`, and their points as `points` (x then y per seat, decimal strings);
+- `registrars`: the Tier 0 registrars' `threshold` and ascending `addresses`.
+
+The epoch is the one exception. The L2 run reads it from the deployed anchor, so the registry's clock is the anchor's. Each value is range-checked before it is narrowed to its type.
+
+The script reads no key: forge broadcasts as `deployer`, with the key the workflow supplies (or Anvil's unlocked account). The chains name each other, so every address is the deployer's CREATE address at a configured nonce. Each run refuses to start unless the deployer's nonce is the configured one. The L2 run comes second, and also refuses to start unless, on the L1 at `L1_RPC_URL`, three things hold:
+
+- the anchor and relay are at their predicted addresses;
+- they have the code hashes the L1 record names, which is this deployer's record;
+- the relay pins the board this run will deploy.
+
+While any of [[0044-testnet-deployments]]'s conditions is open, the script refuses every target but `staging`, and every chain pair but Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338).
+
+Each record gives the target, chain, deployer and starting nonce, commit, each contract's address and runtime code hash, and `pins`, everything each contract took:
+
+- on L1: the L2 chain, the board, the anchor's clock and authority, and the portal;
+- on L2: the L1 chain, anchor and relay, the epoch, the launch panel's identifier, threshold, size, quorum, kind and keys, and the registrars and their threshold.
+
+The script deploys each contract's creation code from `out/` (`vm.getCode`) and holds none of its own. But `forge script` recompiles `out/` first, so what it deploys matches the release build (below) only because the compiler is deterministic. The workflow (part 3) must compare each deployed contract's code with the release build's, immutables masked, and add each transaction's hash from forge's broadcast files.
+
+`test/deploy.test.ts` runs the script against two Anvil chains. It covers:
+
+- every recorded address's code against its hash;
+- every pin, both in the records and read back from the contracts through `cast`;
+- each refusal, with nothing sent;
+- a dry run writing no record.
+
+The registration paymaster, the registration account and the timelock admin aren't deployed yet ([[P2-32]] part 1b-2).
+
 ## Release build
 
 The release build, whose bytecode and immutable ranges verifier 1.2 pins and from which every deployment must be made, is `forge build` alone of the contracts commit the verifier's release pins (a commit on `main`, verifier 1.2), with the default profile, run on a fresh runner (no restored cache) in a job that runs no npm code: the pinned forge 1.8.3 from `install-toolchain.sh`, working directory `packages/contracts`, failing if any `.env` exists in `packages/contracts`, `packages/` or the repository root (forge reads one at its project root as well as in its working directory), no `FOUNDRY_*` or `DAPP_*` variable set and no global `~/.foundry/foundry.toml`, with `forge config --json` checked before building against the settings in this package's `foundry.toml`; then `out/build-info` removed and the remaining artifacts hashed before anything else runs; the hashes are the job's output, and later jobs check against them. It is never the `out/` of `vp run build`: that build runs under `vp` and runs `@wagmi/cli` and Prettier after forge, and either could rewrite forge's artifacts without changing an ABI, in both of `repro-build`'s builds alike (T-55, T-64). Verifier 1.2 compares runtime code only, so nothing yet proves a deployment came from this build's creation code; until that binding exists, 1.2 is unverifiable for every deployment (P1-18 status, Known-weak).

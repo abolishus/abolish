@@ -4,7 +4,7 @@ The checklist for putting staging's contracts on Base Sepolia (L2) and Sepolia (
 
 ## Not yet possible
 
-There is no deploy script or deployment record yet ([[P2-32]]). The staging deployment, and no other, may go ahead before nine of the spec's pre-deployment conditions are met: definition versions 1 and 3 still admitted, the decoder's gas at the record's limits, Tier 2's addition path, the nullifier-key events' contract-event version, a contract path for tally openings, verifier 1.2's creation-code binding, regions at group creation, the verifier's reading of obligation roots, and `tally-late` ([[0044-testnet-deployments]]; [[contracts]], Testnet deployments). It waits on your decision on [[delivery]]'s three residuals (in [[STATUS]], Waiting on the owner). On the testnet:
+The deploy script for the registries, the board, the anchor and the relay exists (`packages/contracts/script/Deploy.s.sol`, [[P2-32]] part 1b), but not yet the paymaster's, the deployment record or the workflow that runs them, so nothing is deployed yet. The staging deployment, and no other, may go ahead before nine of the spec's pre-deployment conditions are met: definition versions 1 and 3 still admitted, the decoder's gas at the record's limits, Tier 2's addition path, the nullifier-key events' contract-event version, a contract path for tally openings, verifier 1.2's creation-code binding, regions at group creation, the verifier's reading of obligation roots, and `tally-late` ([[0044-testnet-deployments]]; [[contracts]], Testnet deployments). It waits on your decision on [[delivery]]'s three residuals (in [[STATUS]], Waiting on the owner). On the testnet:
 
 - Create polls only through staging's poll creation, which registers version 5.
 - Never have the launch seats record a nullifier key.
@@ -13,7 +13,7 @@ There is no deploy script or deployment record yet ([[P2-32]]). The staging depl
 - Never serve public polls from it: a public or production deployment, even on a testnet before mainnet, needs every condition met.
 - Treat the deployment as disposable: a later one replaces it, and staging's polls stay on the old one.
 
-Also check that Base Sepolia's rollup config still has a sequencing window of at most 3,600 L1 blocks (`MAX_SEQUENCING_WINDOW`), as Base's does. The nullifier-key margins assume it ([[nullifier-key]], Recording). Until the script lands, prepare everything below.
+Also check that Base Sepolia's rollup config still has a sequencing window of at most 3,600 L1 blocks (`MAX_SEQUENCING_WINDOW`), as Base's does. The nullifier-key margins assume it ([[nullifier-key]], Recording). Until the workflow lands and you've decided, prepare everything below.
 
 ## Accounts with providers
 

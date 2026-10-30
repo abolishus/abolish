@@ -100,6 +100,9 @@ export function archivedChain(
   },
   release: RollingChainRelease,
 ): RollingBallotChain | undefined {
+  // The walk's own findings only: a contract's evidence and run findings
+  // needn't be read, since a reproduced record past the close and every
+  // `root_l2_block` already makes the held prefix the contract's events.
   if (replay.findings.length > 0) return undefined;
   const { closes_at: closesAt, rolling_electorate: tiers } = definition.value;
   const rootBlock = tiers.reduce((b, t) => (t.root_l2_block > b ? t.root_l2_block : b), 0n);

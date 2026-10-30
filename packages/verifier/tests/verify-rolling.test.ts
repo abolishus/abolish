@@ -22,7 +22,7 @@ import {
   type RollingChainRelease,
   verifyBundle,
 } from "../src/index.ts";
-import { ALL_ROWS, type BallotOutcome, unprovenRoots } from "../src/ballots.ts";
+import { ALL_ROWS, type BallotOutcome, restsOnChain, unprovenRoots } from "../src/ballots.ts";
 import { admissionSettled } from "../src/selection.ts";
 import type { ContractSequence } from "../src/replay.ts";
 import { definitionRegistered } from "./registration-logs.ts";
@@ -466,6 +466,28 @@ describe("5.1 to 5.3 under a chain from the archive's word", () => {
     expect(admissionSettled(settled)).toBe(true);
     expect(
       admissionSettled(unprovenRoots(settled, [{ entry: 2, code: "root-step-mismatch" }])),
+    ).toBe(false);
+  });
+
+  test("beside a rejection that fails the row, one resting on the chain still leaves selection unsettled", () => {
+    // A junk ballot failing 5.1 can't settle selection over a ballot the
+    // archive's chain rejected (T-53, T-71).
+    const mixed = [
+      { entry: 2, code: "root-step-mismatch" },
+      { entry: 5, code: "ballot-cell" },
+    ] as const;
+    expect(unprovenRoots(new Map(), mixed).get("5.1")).toMatchObject({
+      status: "fail",
+      code: "ballot-cell",
+    });
+    expect(restsOnChain(mixed)).toBe(true);
+    for (const code of ["root-step-range", "membership-proof"] as const)
+      expect(restsOnChain([{ entry: 0, code }])).toBe(true);
+    expect(
+      restsOnChain([
+        { entry: 5, code: "ballot-cell" },
+        { entry: 6, code: "repeat" },
+      ]),
     ).toBe(false);
   });
 

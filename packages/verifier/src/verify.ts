@@ -66,6 +66,7 @@ import {
   isLive,
   judgeFor,
   readsEvents,
+  restsOnChain,
   unprovenRoots,
   type WindowCode,
 } from "./ballots.ts";
@@ -1142,7 +1143,8 @@ export function verifyBundle(
         definition.rolling,
       );
       // Under the archive's chain a rejection resting on it leaves its rows
-      // unverifiable, and so selection unsettled (6.1, condition 1).
+      // unverifiable and selection unsettled, even beside another rejection
+      // that fails the same row (6.1, condition 1).
       const admissionRows =
         definition.rolling === undefined
           ? admission.rows
@@ -1153,7 +1155,9 @@ export function verifyBundle(
       // admission doesn't: the anchored extent, the seal and 4.4
       // (docs/spec/verifier.md, Selection).
       const chosen = selectionCheck({
-        admissionSettled: admissionSettled(admissionRows),
+        admissionSettled:
+          admissionSettled(admissionRows) &&
+          !(definition.rolling !== undefined && restsOnChain(admission.report?.rejected ?? [])),
         candidates: admission.candidates,
         ordinary: admission.ordinary ?? [],
         // Set only when 4.1 and 4.2 pass.

@@ -643,6 +643,15 @@ export function unprovenRoots(
   return out;
 }
 
+/**
+ * Whether any rejection rests on a rolling chain's step roots or
+ * registration time. Under the archive's chain such a rejection leaves
+ * selection (6.1) unsettled even where another rejection fails its row, so
+ * no selection is decided over a set the archive alone chose (T-53, T-71).
+ */
+export const restsOnChain = (rejected: readonly RejectedBallot[]): boolean =>
+  rejected.some((r) => ROOT_CODES.has(r.code));
+
 /** Whether a definition is live: version 6, or a fixed version 7, with `results_mode` 2. */
 export function isLive(definition: VerifiedDefinition): definition is PanelledRecord {
   return isPanelled(definition) && definition.value.results_mode === RESULTS_MODES.live;

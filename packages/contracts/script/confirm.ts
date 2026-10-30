@@ -13,10 +13,12 @@
 // creating transaction and block added, which the services' creation blocks
 // and `l2_from_block` need and the script can't know.
 //
-//   RPC_URL=<url> vp node script/confirm.ts <record> <broadcast> [<out dir>]
+//   RPC_URL=<url> vp node script/confirm.ts <record> <broadcast> <artifacts>
 //
 // The URL is read from the environment: an RPC URL can carry a provider's
-// key, and arguments end up in logs.
+// key, and arguments end up in logs. The artifacts directory is required:
+// the default `out/` is what `forge script` itself rebuilt, so comparing
+// against it couldn't catch a build that differs from the release build.
 
 import { readFileSync } from "node:fs";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -105,7 +107,9 @@ function expected(artifacts: string, name: string, code: Uint8Array): Uint8Array
 
 /** The address `creator` gives its CREATE at `nonce`, which here is below 0x80. */
 function createAddress(creator: string, nonce: number): string {
-  // RLP of [creator, nonce]: a 21-byte string and a one-byte integer.
+  // RLP of [creator, nonce]: a 21-byte string and a one-byte integer, which
+  // a larger nonce wouldn't be.
+  if (nonce < 1 || nonce >= 0x80) throw new RangeError(`nonce ${nonce}`);
   const rlp = new Uint8Array([0xd6, 0x94, ...hexToBytes(creator.slice(2)), nonce]);
   return `0x${bytesToHex(keccak_256(rlp).subarray(12))}`;
 }
@@ -194,10 +198,17 @@ export async function confirm(
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const [recordFile, broadcastFile, artifacts = "out"] = process.argv.slice(2);
+  const [recordFile, broadcastFile, artifacts] = process.argv.slice(2);
   const url = process.env["RPC_URL"];
-  if (recordFile === undefined || broadcastFile === undefined || url === undefined) {
-    console.error("usage: RPC_URL=<url> vp node script/confirm.ts <record> <broadcast> [<out>]");
+  if (
+    recordFile === undefined ||
+    broadcastFile === undefined ||
+    artifacts === undefined ||
+    url === undefined
+  ) {
+    console.error(
+      "usage: RPC_URL=<url> vp node script/confirm.ts <record> <broadcast> <artifacts>",
+    );
     process.exit(2);
   }
   const read = <T>(file: string) => JSON.parse(readFileSync(file, "utf8")) as T;

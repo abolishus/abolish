@@ -678,17 +678,28 @@ describe("the staging deployment on a local Anvil pair", () => {
           "script/confirm.ts",
           "deployments/31337.json",
           "broadcast/Deploy.s.sol/31337/runL1-latest.json",
+          "out",
         ],
         { cwd: PKG, env: { ...process.env, RPC_URL: l1.url }, encoding: "utf8" },
       );
       expect(run.status, run.stderr).toBe(0);
       const printed = JSON.parse(run.stdout) as { contracts: { BoardAnchor: { block: number } } };
       expect(printed.contracts.BoardAnchor.block).toBeGreaterThan(0);
-      const bare = spawnSync("vp", ["node", "script/confirm.ts", "deployments/31337.json"], {
-        cwd: PKG,
-        env: { ...process.env, RPC_URL: l1.url },
-        encoding: "utf8",
-      });
+      // No artifacts directory: the build compared against is always named.
+      const bare = spawnSync(
+        "vp",
+        [
+          "node",
+          "script/confirm.ts",
+          "deployments/31337.json",
+          "broadcast/Deploy.s.sol/31337/runL1-latest.json",
+        ],
+        {
+          cwd: PKG,
+          env: { ...process.env, RPC_URL: l1.url },
+          encoding: "utf8",
+        },
+      );
       expect(bare.status).toBe(2);
     });
 
@@ -762,7 +773,16 @@ describe("the staging deployment on a local Anvil pair", () => {
           const [first, second] = b.transactions;
           [first!.hash, second!.hash] = [second!.hash, first!.hash];
         },
-        /sent at nonce|receipt created/,
+        /sent at nonce/,
+      ],
+      [
+        "a receipt that created another address than the record's",
+        (r, b) => {
+          const elsewhere = "0x00000000000000000000000000000000000000f2";
+          r.contracts["RegistrationPaymaster"]!.address = elsewhere;
+          b.transactions.at(-1)!.contractAddress = elsewhere;
+        },
+        /^RegistrationPaymaster: receipt created/,
       ],
     ])("refuses %s", async (_, tamper, reason) => {
       const r = copy(l2Record) as DeploymentRecord & {

@@ -162,8 +162,10 @@ The script deploys each contract's creation code from `out/` (`vm.getCode`) and 
 The script writes each record while simulating, before forge sends anything, so a record alone doesn't prove its contracts exist. `script/confirm.ts` ([[P2-32]] part 3a) confirms one against its chain:
 
 ```sh
-RPC_URL=<url> vp node script/confirm.ts deployments/<chain-id>.json \
-  broadcast/Deploy.s.sol/<chain-id>/runL1-latest.json [<artifacts>]
+RPC_URL=<l1 url> vp node script/confirm.ts deployments/<l1-id>.json \
+  broadcast/Deploy.s.sol/<l1-id>/runL1-latest.json <artifacts>
+RPC_URL=<l2 url> vp node script/confirm.ts deployments/<l2-id>.json \
+  broadcast/Deploy.s.sol/<l2-id>/runL2-latest.json <artifacts>
 ```
 
 It takes only the transaction hashes from forge's broadcast file and asks the chain for the rest:
@@ -171,7 +173,7 @@ It takes only the transaction hashes from forge's broadcast file and asks the ch
 - the RPC's chain, the broadcast's and the record's are one;
 - every transaction in the broadcast is a CREATE of a recorded contract under its recorded name, and every recorded contract has one (the ballot check's is the board's, whose constructor creates it);
 - each transaction is the deployer's, to no one, at its starting nonce plus its place in the broadcast, mined, succeeded, and its receipt names the contract it created;
-- the code at each address hashes to the record's `codehash`, and equals the build's `deployedBytecode` in `<artifacts>` (default `out`) everywhere but its immutables.
+- the code at each address hashes to the record's `codehash`, and equals the build's `deployedBytecode` in `<artifacts>` everywhere but its immutables. `<artifacts>` is required: `out/` is what `forge script` itself rebuilt, so comparing against it couldn't catch a build other than the release build.
 
 It prints the record, each contract with its creating `transaction` and `block` added, and exits 1 on the first refusal, naming the contract. The RPC URL is read from the environment, since a provider's URL can carry its key. The workflow ([[P2-32]] part 3b) runs it over both chains, with `<artifacts>` the release build's, and commits what it prints.
 

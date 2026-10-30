@@ -127,7 +127,7 @@ The file is plain data with no imports. `@wagmi/cli` is a dev dependency only; n
 - `target`, which must be `staging`;
 - `commit`: 40 lower-case hex digits;
 - `deployer`, `l1ChainId`, `l2ChainId`, and the deployer's starting nonce on each chain (`l1Nonce`, `l2Nonce`);
-- `anchor`: the clock's `epoch`, `period` and `deadline`, and the anchoring Safe's address as `authority`;
+- `anchor`: the clock's `epoch` (a whole hour), `period` (3,600) and `deadline` (43,200), as contracts.md (Board anchor, Deployment) sets them, and the anchoring Safe's address as `authority`, a Safe of threshold 2 or more whose owners and threshold the L1 run reads and records;
 - `portal`: the L2's OptimismPortal on L1;
 - `panel`: `threshold`, `quorum` (which must be `max(k, n − 1)`), `kind`, the seats' `p256-key` encodings as `keys`, and their points as `points` (x then y per seat, decimal strings);
 - `registrars`: the Tier 0 registrars' `threshold` and ascending `addresses`.
@@ -137,14 +137,14 @@ The epoch is the one exception. The L2 run reads it from the deployed anchor, so
 The script reads no key: forge broadcasts as `deployer`, with the key the workflow supplies (or Anvil's unlocked account). The chains name each other, so every address is the deployer's CREATE address at a configured nonce. Each run refuses to start unless the deployer's nonce is the configured one. The L2 run comes second, and also refuses to start unless, on the L1 at `L1_RPC_URL`, three things hold:
 
 - the anchor and relay are at their predicted addresses;
-- they have the code hashes the L1 record names, which is this deployer's record;
+- they have the code hashes the L1 record names, which is this configuration's record (the same deployer, target and commit, so both chains carry one commit's contracts);
 - the relay pins the board this run will deploy.
 
 While any of [[0044-testnet-deployments]]'s conditions is open, the script refuses every target but `staging`, and every chain pair but Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338).
 
 Each record gives the target, chain, deployer and starting nonce, commit, each contract's address and runtime code hash, and `pins`, everything each contract took:
 
-- on L1: the L2 chain, the board, the anchor's clock and authority, and the portal;
+- on L1: the L2 chain, the board, the anchor's clock and authority (the Safe's address, owners and threshold), and the portal;
 - on L2: the L1 chain, anchor and relay, the epoch, the launch panel's identifier, threshold, size, quorum, kind and keys, and the registrars and their threshold.
 
 The script deploys each contract's creation code from `out/` (`vm.getCode`) and holds none of its own. But `forge script` recompiles `out/` first, so what it deploys matches the release build (below) only because the compiler is deterministic. The workflow (part 3) must compare each deployed contract's code with the release build's, immutables masked, and add each transaction's hash from forge's broadcast files.

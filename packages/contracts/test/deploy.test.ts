@@ -25,7 +25,15 @@ const REGISTRARS = [
   "0x0000000000000000000000000000000000000011",
   "0x0000000000000000000000000000000000000022",
 ];
-const CLOCK = { epoch: 1767225600, period: 3600, deadline: 1800 };
+const CLOCK = { epoch: 1767225600, period: 3600, deadline: 43200 };
+/** A 1-of-1 Safe: code, but one key. */
+const SOLE_OWNER = "0x00000000000000000000000000000000000000cc";
+/** MockSafe's owners and threshold (test/utils/MockSafe.sol). */
+const SAFE_OWNERS = [
+  "0x00000000000000000000000000000000000005A1",
+  "0x00000000000000000000000000000000000005a2",
+  "0x00000000000000000000000000000000000005A3",
+];
 
 interface Node {
   readonly url: string;
@@ -157,6 +165,14 @@ function forgeScript(sig: string, url: string, cfg: object, { broadcast = true }
   return { status: run.status, output: `${run.stdout}${run.stderr}` };
 }
 
+/** A contract's runtime code from the build's `out/`. */
+function deployedCode(name: string): string {
+  const artifact = JSON.parse(readFileSync(`${PKG}/out/MockSafe.sol/${name}.json`, "utf8")) as {
+    deployedBytecode: { object: string };
+  };
+  return artifact.deployedBytecode.object;
+}
+
 function cast(...args: string[]): string {
   const run = spawnSync("cast", args, { encoding: "utf8" });
   if (run.status !== 0) throw new Error(run.stderr);
@@ -205,7 +221,9 @@ let l2: Node;
 beforeAll(async () => {
   cleanUp();
   [l1, l2] = await Promise.all([anvil(31337), anvil(31338)]);
-  for (const at of [AUTHORITY, PORTAL]) await rpc(l1.url, "anvil_setCode", [at, "0x00"]);
+  await rpc(l1.url, "anvil_setCode", [PORTAL, "0x00"]);
+  await rpc(l1.url, "anvil_setCode", [AUTHORITY, deployedCode("MockSafe")]);
+  await rpc(l1.url, "anvil_setCode", [SOLE_OWNER, deployedCode("MockSoleOwnerSafe")]);
 }, 60_000);
 afterAll(() => {
   l1?.process.kill();
@@ -233,6 +251,26 @@ describe("refusals, before anything is sent", () => {
       "an epoch past u64",
       { anchor: { ...CLOCK, epoch: "18446744073709551616", authority: AUTHORITY } },
       "OutOfRange",
+    ],
+    [
+      "an epoch that isn't a whole hour",
+      { anchor: { ...CLOCK, epoch: CLOCK.epoch + 1, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "another period",
+      { anchor: { ...CLOCK, period: 1800, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "a zero deadline",
+      { anchor: { ...CLOCK, deadline: 0, authority: AUTHORITY } },
+      "ClockRefused",
+    ],
+    [
+      "a 1-of-1 Safe as the authority",
+      { anchor: { ...CLOCK, authority: SOLE_OWNER } },
+      "AuthorityNotMultisig",
     ],
   ])(
     "the L1 run: %s",
@@ -295,6 +333,13 @@ describe("the staging deployment on a local Anvil pair", () => {
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x1"]);
     await refused("runL2()", l2.url, config({ l2Nonce: 1 }), "L1RelayBoard");
     await rpc(l2.url, "anvil_setNonce", [DEPLOYER, "0x0"]);
+    // An L2 run from another commit than the L1's.
+    await refused(
+      "runL2()",
+      l2.url,
+      config({ commit: "89abcdef0123456789abcdef0123456789abcdef" }),
+      "L1RecordMismatch",
+    );
     // An anchor and relay at other nonces than the L1 run used.
     await refused("runL2()", l2.url, config({ l1Nonce: 2 }), "L1NotDeployed");
 
@@ -350,7 +395,14 @@ describe("the staging deployment on a local Anvil pair", () => {
     expect(lower).toEqual({
       l2ChainId: 31338,
       board: l2Record.contracts["Board"]!.address,
-      anchor: { ...CLOCK, authority: AUTHORITY },
+      anchor: {
+        ...CLOCK,
+        authority: {
+          address: AUTHORITY,
+          owners: SAFE_OWNERS.map((o) => o.toLowerCase()),
+          threshold: 2,
+        },
+      },
       portal: PORTAL,
     });
     expect(l2Record.pins).toEqual({

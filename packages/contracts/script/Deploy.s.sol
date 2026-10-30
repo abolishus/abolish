@@ -8,6 +8,12 @@ import {ElectionRegistry} from "../src/ElectionRegistry.sol";
 import {TrusteeRegistry} from "../src/TrusteeRegistry.sol";
 import {ScriptVm} from "./ScriptVm.sol";
 
+/// The two getters of a Safe the script reads.
+interface ISafeOwners {
+    function getOwners() external view returns (address[] memory);
+    function getThreshold() external view returns (uint256);
+}
+
 /// The staging deployment ([[P2-32]] part 1b; docs/spec/contracts.md,
 /// Testnet deployments): `runL1()` deploys the board anchor and the L1 relay
 /// on the L1, then `runL2()` deploys the trustee registry (pinning the launch
@@ -49,6 +55,9 @@ contract Deploy {
     error L1NotDeployed(string name, address at);
     error L1RelayBoard(address expected, address actual);
     error CreateFailed(string artifact);
+    error ClockRefused(uint64 epoch, uint64 period, uint64 deadline);
+    error AuthorityNotMultisig(uint256 threshold, uint256 owners);
+    error L1RecordMismatch(string field);
 
     struct Config {
         string target;
@@ -73,7 +82,13 @@ contract Deploy {
             period: _u64(json, ".anchor.period"),
             deadline: _u64(json, ".anchor.deadline")
         });
+        // The clock is [[contracts]]'s (Board anchor, Deployment): a whole hour,
+        // hourly, and a 12-hour deadline.
+        if (clock.epoch % 3600 != 0 || clock.period != 3600 || clock.deadline != 43_200) {
+            revert ClockRefused(clock.epoch, clock.period, clock.deadline);
+        }
         address authority = VM.parseJsonAddress(json, ".anchor.authority");
+        (address[] memory owners, uint256 threshold) = _multisig(authority);
         address portal = VM.parseJsonAddress(json, ".portal");
 
         VM.startBroadcast(c.deployer);
@@ -86,14 +101,38 @@ contract Deploy {
             c.l1ChainId,
             c.l1Nonce,
             string.concat(_entry("BoardAnchor", anchor), ",", _entry("BallotRelay", relay)),
-            _l1Pins(c, clock, authority, portal)
+            _l1Pins(c, clock, Safe(authority, owners, threshold), portal)
         );
+    }
+
+    /// The anchoring authority as the record names it: a Safe, with its
+    /// owners and threshold at deployment.
+    struct Safe {
+        address at;
+        address[] owners;
+        uint256 threshold;
+    }
+
+    /// The anchoring authority's owners and threshold, read from the Safe
+    /// on this chain. Code alone doesn't prove a multisig (a 1-of-1 Safe
+    /// passes the anchor's check), so a threshold below 2 is refused: it is
+    /// one key (T-69).
+    function _multisig(address authority)
+        private
+        view
+        returns (address[] memory owners, uint256 threshold)
+    {
+        owners = ISafeOwners(authority).getOwners();
+        threshold = ISafeOwners(authority).getThreshold();
+        if (threshold < 2 || threshold > owners.length) {
+            revert AuthorityNotMultisig(threshold, owners.length);
+        }
     }
 
     function _l1Pins(
         Config memory c,
         BoardAnchor.Clock memory clock,
-        address authority,
+        Safe memory authority,
         address portal
     ) private pure returns (string memory) {
         return string.concat(
@@ -107,9 +146,13 @@ contract Deploy {
             VM.toString(uint256(clock.period)),
             ',"deadline":',
             VM.toString(uint256(clock.deadline)),
-            ',"authority":"',
-            VM.toString(authority),
-            '"},"portal":"',
+            ',"authority":{"address":"',
+            VM.toString(authority.at),
+            '","owners":',
+            _addresses(authority.owners),
+            ',"threshold":',
+            VM.toString(authority.threshold),
+            '}},"portal":"',
             VM.toString(portal),
             '"'
         );
@@ -244,8 +287,16 @@ contract Deploy {
         string memory record = VM.readFile(
             string.concat(VM.projectRoot(), "/deployments/", VM.toString(c.l1ChainId), ".json")
         );
+        // The L1 record is this configuration's: the same deployer, target
+        // and commit, so both chains carry one commit's contracts.
         if (VM.parseJsonAddress(record, ".deployer") != c.deployer) {
-            revert L1NotDeployed("deployer", c.deployer);
+            revert L1RecordMismatch("deployer");
+        }
+        if (keccak256(bytes(VM.parseJsonString(record, ".target"))) != keccak256(bytes(c.target))) {
+            revert L1RecordMismatch("target");
+        }
+        if (keccak256(bytes(VM.parseJsonString(record, ".commit"))) != keccak256(bytes(c.commit))) {
+            revert L1RecordMismatch("commit");
         }
         uint256 l2 = VM.activeFork();
         VM.selectFork(VM.createFork(VM.envString("L1_RPC_URL")));

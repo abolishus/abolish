@@ -1,19 +1,28 @@
 import { encodeElectionDefinition } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { drizzle } from "drizzle-orm/postgres-js";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   accountFollowHours,
+  accountFollowResults,
   accountFollows,
+  dropFollowResult,
   FollowError,
   type FollowErrorCode,
+  followedPolls,
+  followResults,
   isFollowing,
+  landResults,
   MAX_FOLLOW_CHANGES_PER_HOUR,
+  MAX_FOLLOWED_POLLS,
   newAccountId,
+  noticeDue,
   pruneFollowHours,
+  queueNotice,
   setFollow,
   storeDefinition,
 } from "../src/index.ts";
@@ -23,7 +32,9 @@ import { type TestDb, testDb, typical } from "./db.ts";
 // part 4): one row per account and poll, set only by an account verified by
 // e-mail, read only by that account, with no time kept, limited per account
 // and hour, and closed to new followers on a hidden poll (T-10, T-11, T-52,
-// T-68).
+// T-68). Once a poll's results are in (0051_follow_results.sql, part 4c),
+// its follows become its followers' list of polls with results, each with a
+// notice naming no poll (T-73).
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -88,7 +99,7 @@ const rowsOf = async (account: string) =>
 
 describe("schema", () => {
   test("the Drizzle tables match the migrated ones", async () => {
-    for (const table of [accountFollows, accountFollowHours]) {
+    for (const table of [accountFollows, accountFollowHours, accountFollowResults]) {
       const config = getTableConfig(table);
       const cols = await db.admin`
         SELECT column_name, data_type, is_nullable FROM information_schema.columns
@@ -107,13 +118,15 @@ describe("schema", () => {
     const cols = await db.admin`
       SELECT table_name, column_name, data_type FROM information_schema.columns
       WHERE table_schema = ${db.schema}
-        AND table_name IN ('account_follows', 'account_follow_hours')
+        AND table_name IN ('account_follows', 'account_follow_hours', 'account_follow_results')
       ORDER BY table_name, ordinal_position`;
     // T-11: the hour is the only time, and it names no poll.
     expect(cols.map((c) => [c["table_name"], c["column_name"], c["data_type"]])).toEqual([
       ["account_follow_hours", "user_id", "text"],
       ["account_follow_hours", "hour", "timestamp with time zone"],
       ["account_follow_hours", "changes", "integer"],
+      ["account_follow_results", "user_id", "text"],
+      ["account_follow_results", "election_id", "bytea"],
       ["account_follows", "user_id", "text"],
       ["account_follows", "election_id", "bytea"],
     ]);
@@ -136,6 +149,11 @@ describe("schema", () => {
     );
     expect(await failsWith(app`TRUNCATE account_follows`)).toBe("42501");
     expect(await failsWith(app`TRUNCATE account_follow_hours`)).toBe("42501");
+    await landResults(app, id, at);
+    expect(
+      await failsWith(app`UPDATE account_follow_results SET election_id = ${randomBytes(32)}`),
+    ).toBe("42501");
+    expect(await failsWith(app`TRUNCATE account_follow_results`)).toBe("42501");
   });
 
   test("the table refuses a malformed election ID", async () => {
@@ -143,14 +161,25 @@ describe("schema", () => {
     expect(
       await failsWith(app`INSERT INTO account_follows VALUES (${account}, ${randomBytes(31)})`),
     ).toBe("23514");
+    expect(
+      await failsWith(
+        app`INSERT INTO account_follow_results VALUES (${account}, ${randomBytes(33)})`,
+      ),
+    ).toBe("23514");
   });
 
   test("deleting an account deletes its follows and its hours, and no one else's", async () => {
     const [account, other, id] = [await newAccount(), await newAccount(), await election()];
     await setFollow(app, account, id, true, at);
     await setFollow(app, other, id, true, at);
+    const landed = await election();
+    await setFollow(app, account, landed, true, at);
+    await landResults(app, landed, at);
     await app`DELETE FROM account_users WHERE id = ${account}`;
     expect(await rowsOf(account)).toHaveLength(0);
+    expect(
+      await db.admin`SELECT 1 FROM account_follow_results WHERE user_id = ${account}`,
+    ).toHaveLength(0);
     expect(
       await db.admin`SELECT 1 FROM account_follow_hours WHERE user_id = ${account}`,
     ).toHaveLength(0);
@@ -330,13 +359,153 @@ describe("the hour's limit (T-52)", () => {
   });
 });
 
+const noticeOf = async (account: string) => {
+  const [row] = await db.admin`
+    SELECT not_before, tries, moderation, results FROM account_notices WHERE user_id = ${account}`;
+  return row === undefined
+    ? undefined
+    : {
+        notBefore: row["not_before"] as Date,
+        tries: row["tries"],
+        moderation: row["moderation"],
+        results: row["results"],
+      };
+};
+
+describe("results (part 4c)", () => {
+  test("each follow becomes its account's listed poll with results, and its notice", async () => {
+    const [a, b, c] = [await newAccount(), await newAccount(), await newAccount()];
+    const [poll, other] = [await election(), await election()];
+    for (const account of [a, b]) await setFollow(app, account, poll, true, at);
+    await setFollow(app, c, other, true, at);
+    expect(await landResults(app, poll, at)).toBe(2);
+    for (const account of [a, b]) {
+      expect(await isFollowing(app, account, poll)).toBe(false);
+      expect(await followResults(app, account)).toEqual([poll]);
+      // T-73: due after the next UTC midnight, never at the results' time.
+      expect(await noticeOf(account)).toEqual({
+        notBefore: noticeDue(NOW),
+        tries: 0,
+        moderation: false,
+        results: true,
+      });
+    }
+    // Another poll's follower is neither told nor moved.
+    expect(await isFollowing(app, c, other)).toBe(true);
+    expect(await followResults(app, c)).toEqual([]);
+    expect(await noticeOf(c)).toBeUndefined();
+    // Again, nothing changes: no one follows the poll now.
+    expect(await landResults(app, poll, { now: new Date(NOW.getTime() + 86_400_000) })).toBe(0);
+    expect((await noticeOf(a))?.notBefore).toEqual(noticeDue(NOW));
+  });
+
+  test("results join a moderation notice waiting, and a decision joins results", async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const poll = await election();
+    for (const account of [a, b]) await setFollow(app, account, poll, true, at);
+    // A notice for a decision tomorrow, already tried once.
+    const tomorrow = new Date(NOW.getTime() + 86_400_000);
+    await queueNotice(drizzle({ client: app }), a, tomorrow);
+    await app`UPDATE account_notices SET tries = 1 WHERE user_id = ${a}`;
+    await landResults(app, poll, at);
+    // The later due time is kept, and the tries reset so a send in flight keeps it.
+    expect(await noticeOf(a)).toEqual({
+      notBefore: noticeDue(tomorrow),
+      tries: 0,
+      moderation: true,
+      results: true,
+    });
+    await queueNotice(drizzle({ client: app }), b, NOW);
+    expect(await noticeOf(b)).toEqual({
+      notBefore: noticeDue(NOW),
+      tries: 0,
+      moderation: true,
+      results: true,
+    });
+  });
+
+  test("a follow set as results land is either told or still following", async () => {
+    const poll = await election();
+    const early = await newAccount();
+    await setFollow(app, early, poll, true, at);
+    const late = await newAccount();
+    const [told] = await Promise.all([
+      landResults(app, poll, at),
+      setFollow(app2, late, poll, true, at),
+    ]);
+    const lateTold = (await followResults(app, late)).length === 1;
+    expect(told).toBe(lateTold ? 2 : 1);
+    expect(await isFollowing(app, late, poll)).toBe(!lateTold);
+    expect((await noticeOf(late)) !== undefined).toBe(lateTold);
+    expect(await followResults(app, early)).toEqual([poll]);
+  });
+
+  test("an account takes a poll off its list, and only its own", async () => {
+    const [a, b] = [await newAccount(), await newAccount()];
+    const [p, q] = [await election(), await election()];
+    for (const account of [a, b])
+      for (const poll of [p, q]) await setFollow(app, account, poll, true, at);
+    await landResults(app, p, at);
+    await landResults(app, q, at);
+    const both = [p, q].sort((x, y) => Buffer.compare(x, y));
+    expect(await followResults(app, a)).toEqual(both);
+    expect(await dropFollowResult(app, a, p)).toBe(true);
+    expect(await dropFollowResult(app, a, p)).toBe(false);
+    expect(await followResults(app, a)).toEqual([q]);
+    expect(await followResults(app, b)).toEqual(both);
+    // Following again after results starts a new follow; the listed poll stays.
+    await setFollow(app, b, p, true, at);
+    expect(await isFollowing(app, b, p)).toBe(true);
+    expect(await landResults(app, p, at)).toBe(1);
+    expect(await followResults(app, b)).toEqual(both);
+  });
+
+  test("followed polls page through every poll followed, once each, in byte order", async () => {
+    // A clean slate, so the pages hold only this test's polls.
+    await db.admin`DELETE FROM account_follows`;
+    const accounts = [await newAccount(), await newAccount()];
+    const polls = [];
+    for (let i = 0; i < 5; i++) polls.push(await election());
+    for (const [i, poll] of polls.entries()) {
+      await setFollow(app, accounts[0]!, poll, true, at);
+      if (i % 2 === 0) await setFollow(app, accounts[1]!, poll, true, at);
+    }
+    const seen: Uint8Array[] = [];
+    let after: Uint8Array | undefined;
+    for (;;) {
+      const page = await followedPolls(app, { limit: 2, ...(after && { after }) });
+      if (page.length === 0) break;
+      seen.push(...page);
+      after = page.at(-1);
+    }
+    expect(seen).toEqual([...polls].sort((x, y) => Buffer.compare(x, y)));
+    await landResults(app, polls[0]!, at);
+    expect(await followedPolls(app, {})).not.toContainEqual(polls[0]);
+  });
+
+  test("malformed arguments are type and range errors", async () => {
+    const account = await newAccount();
+    await expect(landResults(app, new Uint8Array(31), at)).rejects.toThrow(TypeError);
+    await expect(landResults(app, new Uint8Array(32), { now: new Date(NaN) })).rejects.toThrow(
+      TypeError,
+    );
+    await expect(followResults(app, "Not-an-ID")).rejects.toThrow(RangeError);
+    await expect(dropFollowResult(app, account, new Uint8Array(33))).rejects.toThrow(TypeError);
+    await expect(followedPolls(app, { limit: 0 })).rejects.toThrow(RangeError);
+    await expect(followedPolls(app, { limit: MAX_FOLLOWED_POLLS + 1 })).rejects.toThrow(RangeError);
+    await expect(followedPolls(app, { after: new Uint8Array(3) })).rejects.toThrow(TypeError);
+  });
+});
+
 test("follows.ts reads no board table but the definitions, and writes none", () => {
   const src = readFileSync(new URL("../src/follows.ts", import.meta.url), "utf8");
   expect(src).not.toMatch(
     /board[A-Z_]\w*|election_?[Rr]egistrations|election_?[Ss]chedules|appendEntry|identity_?[Bb]ackups|account_?[Tt]okens/,
   );
-  // Its only reads beyond the account tables: the definitions and moderation.
+  // Its only reads beyond the account tables: the definitions and moderation;
+  // it writes the notices of results (part 4c), an account table.
   expect([...src.matchAll(/from "(\.[^"]+)"/g)].map((m) => m[1])).toEqual([
+    "./account-notices.ts",
     "./bytes.ts",
     "./db/schema/index.ts",
     "./definitions.ts",

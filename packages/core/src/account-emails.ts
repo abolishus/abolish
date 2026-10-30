@@ -112,6 +112,9 @@ export type EmailLocale = (typeof EMAIL_LOCALES)[number];
 export const isEmailLocale = (value: unknown): value is EmailLocale =>
   EMAIL_LOCALES.some((locale) => locale === value);
 
+/** What a notice tells of: a moderation decision, a followed poll's results, or both. */
+export type NoticeAbout = "moderation" | "results" | "both";
+
 /** What the sending service is asked to send; it renders each with `renderEmail`. */
 export type EmailMessage = { readonly locale: EmailLocale } &
   /** A code for `to`, which an account asked to verify. */
@@ -121,8 +124,12 @@ export type EmailMessage = { readonly locale: EmailLocale } &
     | { readonly kind: "email-held"; readonly to: string }
     /** `to` was let go by an account less than `EMAIL_HOLD_DAYS` ago: no code either. */
     | { readonly kind: "email-on-hold"; readonly to: string }
-    /** Moderation touched a poll or the profile of the account `to` is verified for (src/account-notices.ts). */
-    | { readonly kind: "notice"; readonly to: string }
+    /**
+     * Moderation touched a poll or the profile of the account `to` is
+     * verified for, or results are in for a poll it followed, or both
+     * (src/account-notices.ts).
+     */
+    | { readonly kind: "notice"; readonly to: string; readonly about: NoticeAbout }
   );
 
 /**
@@ -149,7 +156,7 @@ const WORDS: Record<
     readonly code: (code: string) => Rendered;
     readonly held: Rendered;
     readonly onHold: Rendered;
-    readonly notice: Rendered;
+    readonly notice: Record<NoticeAbout, Rendered>;
   }
 > = {
   "en-US": {
@@ -180,14 +187,36 @@ const WORDS: Record<
       ].join("\n"),
     },
     notice: {
-      subject: "A moderation decision on Abolish",
-      text: [
-        "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made.",
-        "",
-        "Sign in to Abolish to see what was decided. You can appeal a removal once, from your account page.",
-        "",
-        "We send moderation notices whatever your notification settings. They never say which poll or profile, or what was decided, so the service that delivers them can't tell.",
-      ].join("\n"),
+      moderation: {
+        subject: "A moderation decision on Abolish",
+        text: [
+          "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made.",
+          "",
+          "Sign in to Abolish to see what was decided. You can appeal a removal once, from your account page.",
+          "",
+          "We send moderation notices whatever your notification settings. They never say which poll or profile, or what was decided, so the service that delivers them can't tell.",
+        ].join("\n"),
+      },
+      results: {
+        subject: "Results are in on Abolish",
+        text: [
+          "Results are in for a poll you follow on Abolish.",
+          "",
+          "Sign in to Abolish to see which: your account page lists it. You won't hear about that poll again.",
+          "",
+          "These notices never say which poll, so the service that delivers them can't tell.",
+        ].join("\n"),
+      },
+      both: {
+        subject: "A moderation decision and results on Abolish",
+        text: [
+          "A moderator made a decision about one of your polls or your public profile on Abolish, or reviewed an appeal you made. And results are in for a poll you follow.",
+          "",
+          "Sign in to Abolish to see what was decided, and which poll has results: your account page lists both. You can appeal a removal once, from your account page.",
+          "",
+          "We send moderation notices whatever your notification settings. Neither kind of notice ever says which poll or profile, or what was decided, so the service that delivers them can't tell.",
+        ].join("\n"),
+      },
     },
   },
   "es-US": {
@@ -218,14 +247,36 @@ const WORDS: Record<
       ].join("\n"),
     },
     notice: {
-      subject: "Una decisión de moderación en Abolish",
-      text: [
-        "Un moderador tomó una decisión sobre una de tus encuestas o tu perfil público en Abolish, o revisó una apelación que hiciste.",
-        "",
-        "Inicia sesión en Abolish para ver qué se decidió. Puedes apelar una eliminación una vez, desde la página de tu cuenta.",
-        "",
-        "Enviamos los avisos de moderación sin importar tu configuración de notificaciones. Nunca dicen qué encuesta o perfil ni qué se decidió, así que el servicio que los entrega no puede saberlo.",
-      ].join("\n"),
+      moderation: {
+        subject: "Una decisión de moderación en Abolish",
+        text: [
+          "Un moderador tomó una decisión sobre una de tus encuestas o tu perfil público en Abolish, o revisó una apelación que hiciste.",
+          "",
+          "Inicia sesión en Abolish para ver qué se decidió. Puedes apelar una eliminación una vez, desde la página de tu cuenta.",
+          "",
+          "Enviamos los avisos de moderación sin importar tu configuración de notificaciones. Nunca dicen qué encuesta o perfil ni qué se decidió, así que el servicio que los entrega no puede saberlo.",
+        ].join("\n"),
+      },
+      results: {
+        subject: "Ya hay resultados en Abolish",
+        text: [
+          "Ya hay resultados de una encuesta que sigues en Abolish.",
+          "",
+          "Inicia sesión en Abolish para ver cuál: aparece en la página de tu cuenta. No volverás a recibir avisos de esa encuesta.",
+          "",
+          "Estos avisos nunca dicen qué encuesta, así que el servicio que los entrega no puede saberlo.",
+        ].join("\n"),
+      },
+      both: {
+        subject: "Una decisión de moderación y resultados en Abolish",
+        text: [
+          "Un moderador tomó una decisión sobre una de tus encuestas o tu perfil público en Abolish, o revisó una apelación que hiciste. Y ya hay resultados de una encuesta que sigues.",
+          "",
+          "Inicia sesión en Abolish para ver qué se decidió y qué encuesta tiene resultados: la página de tu cuenta muestra ambos. Puedes apelar una eliminación una vez, desde la página de tu cuenta.",
+          "",
+          "Enviamos los avisos de moderación sin importar tu configuración de notificaciones. Ningún aviso dice nunca qué encuesta o perfil ni qué se decidió, así que el servicio que los entrega no puede saberlo.",
+        ].join("\n"),
+      },
     },
   },
 };
@@ -244,7 +295,7 @@ export function renderEmail(message: EmailMessage): Rendered {
     case "email-on-hold":
       return words.onHold;
     case "notice":
-      return words.notice;
+      return words.notice[message.about];
   }
 }
 

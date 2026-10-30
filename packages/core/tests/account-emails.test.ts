@@ -275,7 +275,9 @@ describe("renderEmail", () => {
       { kind: "email-code", to: "a@example.org", code: "01234567", locale },
       { kind: "email-held", to: "a@example.org", locale },
       { kind: "email-on-hold", to: "a@example.org", locale },
-      { kind: "notice", to: "a@example.org", locale },
+      { kind: "notice", to: "a@example.org", locale, about: "moderation" },
+      { kind: "notice", to: "a@example.org", locale, about: "results" },
+      { kind: "notice", to: "a@example.org", locale, about: "both" },
     ] as const;
 
   test("is plain text with no link or image to track, in every language (T-67)", () => {

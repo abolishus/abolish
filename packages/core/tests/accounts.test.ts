@@ -184,10 +184,12 @@ describe("schema", () => {
       ["account_email_sends", "DELETE,INSERT,SELECT"],
       ["account_emails", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_follow_hours", "DELETE,INSERT,SELECT,UPDATE"],
+      // Listed when results land, taken off by its account (follows.test.ts).
+      ["account_follow_results", "DELETE,INSERT,SELECT"],
       // Set or stopped, never changed in place (follows.test.ts).
       ["account_follows", "DELETE,INSERT,SELECT"],
       ["account_moderators", "INSERT,SELECT"],
-      // Plus UPDATE of the tries and the due time (account-notices.test.ts).
+      // Plus UPDATE of the tries, the due time and the flags (account-notices.test.ts).
       ["account_notices", "DELETE,INSERT,SELECT"],
       ["account_passkeys", "DELETE,INSERT,SELECT,UPDATE"],
       ["account_phone_codes", "DELETE,INSERT,SELECT,UPDATE"],

@@ -1078,7 +1078,7 @@ const enUS = {
   exportHolds_profile:
     "Your public profile, the polls it shows, its appeals and the day you last named it",
   exportHolds_reactions: "Your reactions to polls",
-  exportHolds_follows: "The polls you follow",
+  exportHolds_follows: "The polls you follow, and those you followed whose results are in",
   exportHolds_token:
     "The group, region and key period of your Tier 0 token, never the voting identity it went to",
   exportNever:

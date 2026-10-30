@@ -1103,7 +1103,7 @@ export const esUS: Messages = {
   exportHolds_profile:
     "Tu perfil público, las encuestas que muestra, sus apelaciones y el día en que le pusiste nombre por última vez",
   exportHolds_reactions: "Tus reacciones a encuestas",
-  exportHolds_follows: "Las encuestas que sigues",
+  exportHolds_follows: "Las encuestas que sigues, y las que seguías que ya tienen resultados",
   exportHolds_token:
     "El grupo, la región y el periodo de clave de tu token de Nivel 0, nunca la identidad de votación a la que se entregó",
   exportNever:

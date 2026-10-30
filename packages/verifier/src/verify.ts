@@ -1268,9 +1268,8 @@ export function verifyBundle(
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
       // versions 3 to 7 against their cells, a rolling one's one per rolling
       // tier, beside an author panel per panel with its own key set (docs/
-      // spec/verifier.md, Tally openings), except a rolling one's beside an
-      // author panel, which `tallyChecks` leaves not reached; the counted
-      // set, once known, settles the rest, `tally-early` included.
+      // spec/verifier.md, Tally openings); the counted set, once known,
+      // settles the rest, `tally-early` included.
       const opened = tallyChecks(
         definition.definition,
         definition.hash,

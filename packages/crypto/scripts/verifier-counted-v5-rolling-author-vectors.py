@@ -475,6 +475,23 @@ def main(constants, out_dir):
     assert got == [["tally-early"], [], [], ["tally-repeat"], ["tally-aggregate", "tally-second"], ["tally-stray"], [], []], got
     assert boarding["tallies"][6]["code"] == "decode" and boarding["tallies"][5]["panel"] == AUTHOR
 
+    crossed = case(
+        "cross-panel-signer",
+        "Every ballot counted and each cell opened honestly by both panels, then two partial openings of cell 0 over its counted set: one naming the author panel and author seat 2 but signed with default seat 2's key, and one naming the default panel and default seat 1 but signed with author seat 1's key. A partial opening is attributed only by the key set of the panel it names, so each is tally-unattributed, opens nothing and is no second of any seat's. Every cell passes; 7.4 fails at the first, tally-unattributed.",
+        segments(
+            every_receipt,
+            authors(),
+            defaults(),
+            [
+                (timely + 1, opening(0, AUTHOR, by_cell[0], 2, signed_by=(DEFAULT, 2))),
+                (timely + 1, opening(0, DEFAULT, by_cell[0], 1, signed_by=(AUTHOR, 1))),
+            ],
+        ),
+    )
+    assert crossed["expected"]["7.2"] == outcome("pass")
+    assert [[b["code"] for b in o["breaks"]] for o in crossed["tallies"]][-2:] == [["tally-unattributed"], ["tally-unattributed"]]
+    assert crossed["expected"]["7.4"] == outcome("fail", "tally-unattributed", {"entry": crossed["tallies"][-2]["entry"]})
+
     doc = {
         "format": "abolish-verifier-tally-vectors/1",
         "title": "The verifier's delivery check, counted set and tally beside an author panel under a rolling definition (definition version 7, electorate_mode 2; ballot version 5, delivery records version 2, tally-opening version 3, destruction statement version 2): definitions, clocks, boards carrying both panels' transcripts, the author approvals, ballots, share receipts, partial openings and destruction statements, and the pinned default panel, with the rows 5.9, 6.3, 7.1 to 7.4 and 8.5, the report's delivery, cells, tiers, tallies and destruction and the counted ballots' entries, beside verifier-ballots-v5-author.json's group registry events and registration time",

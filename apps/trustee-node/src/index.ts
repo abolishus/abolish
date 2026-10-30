@@ -121,6 +121,7 @@ export {
   MAX_DELIVERY,
   serveIntake,
 } from "./endpoint.ts";
+export { type SealedKeys, seatKeys } from "./sealed-intake.ts";
 export {
   decideObligation,
   type Obligation,

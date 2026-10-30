@@ -4,7 +4,7 @@ How a ballot client delivers a ballot to a trustee node's own intake without the
 
 What this page doesn't cover yet ([[P2-8]] part 3c-1b-2b-2b-2d-2b-2e):
 
-- **Building it.** The node's route in `apps/trustee-node` (2e-4), a relay for staging (2e-5) and the client's route (2e-6). Sealing and opening are built in `packages/crypto` (2e-3: `sealDelivery`, `openSealedDelivery`, `sealAnswer` and `openSealedAnswer`).
+- **Building it.** A relay for staging (2e-5) and the client's route (2e-6), and the node's answer to a replay from its stored receipt (2e-4b; Known-weak). Sealing and opening are built in `packages/crypto` (2e-3: `sealDelivery`, `openSealedDelivery`, `sealAnswer` and `openSealedAnswer`), and the node's route in `apps/trustee-node` (2e-4a: `POST /v1/sealed-intake` and `seatKeys`, its README's Sealed route).
 - **Author seats.** An author panel's seats publish no endpoint a release lists, so they get no sealed delivery until [[P2-16]] part 7 says where an author panel publishes its relays.
 
 ## Sources
@@ -189,7 +189,7 @@ The ballot client, for each qualified seat `i` of a cast that isn't receipted ([
 - **A relay that colludes with the operator** recovers the voter's address beside the ballot, and can drop that ballot's request: the operator sees the address try its own route and stop, the relay sees it deliver moments later. Rule 5's delay widens the window an observer must match, no more (T-13, T-25; [[0043-intake-anonymiser]], Consequences).
 - **The relay learns which election and seat**, from `kem_key_hash`, and when an address delivered (T-13). Hiding them would have each node try every open election's key on every request, a cost any sender could multiply (T-52).
 - **The relay sees how long intake took.** A refusal before the membership proof comes back sooner than a receipt, so the relay can guess the outcome from the answer's timing, though not read it (T-13). Holding every answer to a fixed time would hold every voter's delivery to the slowest case.
-- **Replays cost the node a full intake.** Anyone who holds a member's sealed request, a relay included, can replay it, and each replay runs intake's membership and validity proofs again: an amplification only a member, or the operator holding `ct_i`, had before. A node that answered a repeat of a ballot hash and share hash it already receipted from its stored receipt, before the costly checks, would remove it; that is part 2e-4's to build (T-52).
+- **Replays cost the node a full intake.** Anyone who holds a member's sealed request, a relay included, can replay it, and each replay runs intake's membership and validity proofs again: an amplification only a member, or the operator holding `ct_i`, had before. A node that answered a repeat of a ballot hash and share hash it already receipted from its stored receipt, before the costly checks, would remove it; that is part 2e-4b's to build (T-52).
 - **Decapsulation is open to anyone.** See Security notes, Anyone can send requests; a timing leak in ML-KEM or the ristretto255 ladder would now be measurable by any sender through a relay (T-39).
 - **Under the transitional panel the node is the operator**, so the route hides the voter's address from a node that already sees the operator's route; it starts to matter as independent trustees take seats ([[0043-intake-anonymiser]], Consequences).
 

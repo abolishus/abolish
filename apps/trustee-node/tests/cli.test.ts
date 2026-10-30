@@ -14,6 +14,7 @@ import {
   objectCid,
   panelId,
   replayEventAccumulator,
+  sealDelivery,
 } from "@abolishus/crypto";
 import { contractSequence, MESSAGE_PASSER } from "@abolishus/node";
 import { ACCUMULATOR_SLOT } from "@abolishus/verifier";
@@ -170,15 +171,17 @@ describe("run with the intake endpoint", () => {
     const stop = new AbortController();
     const t = io(stop.signal);
     let url: string | undefined;
+    let sealedUrl: string | undefined;
     let stopped: Promise<number> | undefined;
     const started = new Promise<void>((resolve) => {
       const running = cli(["run", "--config", configFile], {
         ...t.io,
         out: (v) => {
           t.out.push(v);
-          const e = v as { event?: string; intake?: string };
+          const e = v as { event?: string; intake?: string; sealedIntake?: string };
           if (e.event === "started") {
             url = e.intake;
+            sealedUrl = e.sealedIntake;
             resolve();
           }
         },
@@ -203,6 +206,21 @@ describe("run with the intake endpoint", () => {
       });
       expect(res.status).toBe(422);
       expect(await res.text()).toBe("intake-unapproved");
+      // The sealed route beside it: a key of no election the seat approved.
+      expect(sealedUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/v1\/sealed-intake$/);
+      const sealed = await fetch(sealedUrl as string, {
+        method: "POST",
+        headers: { "content-type": "message/ohttp-req" },
+        body: Buffer.from(
+          sealDelivery(kemKeygen().publicKey, {
+            stub: new Uint8Array(0),
+            transcript: new Uint8Array(0),
+            record: new Uint8Array(0),
+            ciphertext: new Uint8Array(0),
+          }).request,
+        ),
+      });
+      expect(sealed.status).toBe(400);
     } finally {
       stop.abort();
     }

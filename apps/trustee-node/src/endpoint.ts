@@ -6,7 +6,9 @@
 // trusted; the endpoint only bounds what one costs: the body, the deliveries
 // held at once, and the time a peer may take to send one (T-39, T-52). The
 // body is this transport's envelope, not protocol bytes, around the spec's
-// own records.
+// own records. With `sealed`, it also serves the sealed route a relay
+// carries clients' deliveries to (docs/spec/sealed-delivery.md, The node's
+// route): the same intake behind the seat's KEM key, under the same bounds.
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -14,8 +16,21 @@ import {
 } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
 import type { AddressInfo, Server } from "node:net";
-import { bytesVar, decode, DecodeError, encode, struct } from "@abolishus/crypto";
+import {
+  bytesVar,
+  decode,
+  DecodeError,
+  decodeSealedDelivery,
+  type DeliveryAnswer,
+  encode,
+  MAX_SEALED_REQUEST,
+  openSealedDelivery,
+  sealAnswer,
+  type SealedDelivery,
+  struct,
+} from "@abolishus/crypto";
 import type { IntakeOutcome } from "./intake.ts";
+import type { SealedKeys } from "./sealed-intake.ts";
 import { MAX_RECORD } from "./wire.ts";
 
 const DELIVERY = struct([
@@ -62,12 +77,16 @@ export interface EndpointOptions {
   readonly tls?: { readonly cert: string; readonly key: string };
   /** Deliveries held at once, being read, waiting or checked; past it the endpoint answers 503. */
   readonly queue: number;
+  /** The seat's KEM keys: with them the endpoint serves `POST /v1/sealed-intake` too. */
+  readonly sealed?: SealedKeys;
   /** One line per failure, never a body, a ballot or an address. */
   readonly log?: (event: { readonly event: "intake-error"; readonly error: string }) => void;
 }
 
 export interface Endpoint {
   readonly url: string;
+  /** The sealed route's URL, when the endpoint serves it. */
+  readonly sealedUrl?: string;
   readonly server: Server;
   close(): Promise<void>;
 }
@@ -83,6 +102,7 @@ const REQUEST_MS = 30_000;
 
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const ROUTE = "/v1/intake";
+const SEALED_ROUTE = "/v1/sealed-intake";
 
 // The delivery carries no credential and the receipt is public, so any
 // origin may post; nothing is sent with cookies or read back but the answer.
@@ -90,11 +110,18 @@ const CORS = {
   "access-control-allow-origin": "*",
   "cache-control": "no-store",
 } as const;
+// The sealed route's only peers are relays: no browser origin (T-43).
+const NO_STORE = { "cache-control": "no-store" } as const;
+// RFC 9458 §9's media types, the ones a relay forwards.
+const SEALED_REQUEST_TYPE = "message/ohttp-req";
+const SEALED_ANSWER_TYPE = "message/ohttp-res";
 
 /**
  * Serves `intake` at `POST /v1/intake`. The body is a `Delivery` as
  * `application/octet-stream`; a share receipt record (`0x000c`) comes back
- * with 200, a refusal's code as text with 422.
+ * with 200, a refusal's code as text with 422. With `sealed`, also at
+ * `POST /v1/sealed-intake`: a sealed delivery (`0x0027`) as
+ * `message/ohttp-req`, and a sealed answer (`0x0028`) back with 200.
  */
 export async function serveIntake(intake: Intake, options: EndpointOptions): Promise<Endpoint> {
   if (!Number.isSafeInteger(options.queue) || options.queue < 1)
@@ -103,61 +130,151 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
     throw new RangeError("intake endpoint: plain HTTP only on a loopback address");
   let held = 0;
   // `intakeBallot` is synchronous work, so deliveries are checked one after
-  // another; the queue bounds how many wait.
+  // another, from either route; the queue bounds how many wait.
   let chain: Promise<unknown> = Promise.resolve();
-  const handle = (req: IncomingMessage, res: ServerResponse) => {
-    const path = (req.url ?? "").split("?")[0];
-    if (path !== ROUTE) return end(res, 404);
+  const check = (d: Delivery): Promise<IntakeOutcome> => {
+    const run = () => intake.intake(d.stub, d.transcript, d.record, d.ciphertext);
+    const outcome = chain.then(run, run);
+    chain = outcome.catch(() => undefined);
+    return outcome;
+  };
+  const log = (e: unknown) => options.log?.({ event: "intake-error", error: (e as Error).name });
+  // The route's bounds, shared by both routes (T-52): the declared length
+  // and the bodies held at once, before any of the body is read. Then the
+  // body, or undefined once it has answered.
+  const admit = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    base: Headers,
+    max: number,
+    serve: (body: Uint8Array) => Promise<void>,
+  ) => {
+    const length = Number(req.headers["content-length"] ?? Number.NaN);
+    if (length > max) return end(res, 413, base);
+    if (held >= options.queue)
+      return end(res, 503, { ...base, "retry-after": String(BUSY_RETRY_SECONDS) });
+    held++;
+    try {
+      let body;
+      try {
+        body = await readBody(req, max);
+      } catch {
+        // The peer went away or timed out mid-body: nothing to answer and
+        // nothing worth a log line, which anyone could flood.
+        return void res.destroy();
+      }
+      if (body === undefined) return end(res, 413, base);
+      await serve(body);
+    } catch (e) {
+      log(e);
+      end(res, 500, base);
+    } finally {
+      held--;
+    }
+  };
+  const plain = (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === "OPTIONS")
       return end(res, 204, {
+        ...CORS,
         "access-control-allow-methods": "POST",
         "access-control-allow-headers": "content-type",
         "access-control-max-age": "86400",
       });
-    if (req.method !== "POST") return end(res, 405, { allow: "POST, OPTIONS" });
-    if (req.headers["content-type"] !== "application/octet-stream") return end(res, 415);
-    const length = Number(req.headers["content-length"] ?? Number.NaN);
-    if (length > MAX_DELIVERY) return end(res, 413);
-    if (held >= options.queue) return end(res, 503, { "retry-after": String(BUSY_RETRY_SECONDS) });
-    held++;
-    void (async () => {
+    if (req.method !== "POST") return end(res, 405, { ...CORS, allow: "POST, OPTIONS" });
+    if (req.headers["content-type"] !== "application/octet-stream") return end(res, 415, CORS);
+    void admit(req, res, CORS, MAX_DELIVERY, async (body) => {
+      let delivery: Delivery;
       try {
-        let body;
-        try {
-          body = await readBody(req);
-        } catch {
-          // The peer went away or timed out mid-body: nothing to answer and
-          // nothing worth a log line, which anyone could flood.
-          return void res.destroy();
-        }
-        if (body === undefined) return end(res, 413);
-        let delivery: Delivery;
-        try {
-          delivery = decodeDelivery(body);
-        } catch (e) {
-          if (e instanceof DecodeError) return end(res, 400);
-          throw e;
-        }
-        const run = () =>
-          intake.intake(delivery.stub, delivery.transcript, delivery.record, delivery.ciphertext);
-        const outcome = chain.then(run, run);
-        chain = outcome.catch(() => undefined);
-        const out = await outcome;
-        if (out.ok)
-          return end(res, 200, { "content-type": "application/octet-stream" }, out.receipt);
-        return end(
-          res,
-          422,
-          { "content-type": "text/plain; charset=utf-8" },
-          new TextEncoder().encode(out.code),
-        );
+        delivery = decodeDelivery(body);
       } catch (e) {
-        options.log?.({ event: "intake-error", error: (e as Error).name });
-        end(res, 500);
-      } finally {
-        held--;
+        if (e instanceof DecodeError) return end(res, 400, CORS);
+        throw e;
       }
-    })();
+      const out = await check(delivery);
+      if (out.ok)
+        return end(res, 200, { ...CORS, "content-type": "application/octet-stream" }, out.receipt);
+      return end(
+        res,
+        422,
+        { ...CORS, "content-type": "text/plain; charset=utf-8" },
+        new TextEncoder().encode(out.code),
+      );
+    });
+  };
+  const sealed = (req: IncomingMessage, res: ServerResponse, keys: SealedKeys) => {
+    if (req.method !== "POST") return end(res, 405, { ...NO_STORE, allow: "POST" });
+    if (req.headers["content-type"] !== SEALED_REQUEST_TYPE) return end(res, 415, NO_STORE);
+    void admit(req, res, NO_STORE, MAX_SEALED_REQUEST, async (body) => {
+      try {
+        await answerSealed(res, keys, body);
+      } finally {
+        // Retention: the request is kept only until it is answered (T-15).
+        body.fill(0);
+      }
+    });
+  };
+  // The request check, then intake on the envelope, then the answer sealed
+  // under the request's key (docs/spec/sealed-delivery.md, Request check).
+  const answerSealed = async (res: ServerResponse, keys: SealedKeys, body: Uint8Array) => {
+    let request: SealedDelivery;
+    try {
+      request = decodeSealedDelivery(body, 1);
+    } catch (e) {
+      // `sealed-malformed`.
+      if (e instanceof DecodeError) return end(res, 400, NO_STORE);
+      throw e;
+    }
+    const opened = await keys.withHolder(request.kem_key_hash, (holder) =>
+      openSealedDelivery([holder], body),
+    );
+    // `sealed-key` (no holder) and every failure before the request opened
+    // get the same answer and no body: whether it opened is all the sender
+    // learns (T-39).
+    if (opened === undefined || (!opened.ok && opened.code !== "sealed-envelope"))
+      return end(res, 400, NO_STORE);
+    let answer: DeliveryAnswer;
+    try {
+      if (!opened.ok) answer = { outcome: "refused", code: "sealed-envelope" };
+      else {
+        const { envelope } = opened;
+        try {
+          const out = await check(envelope);
+          answer = out.ok
+            ? { outcome: "receipt", receipt: out.receipt }
+            : { outcome: "refused", code: out.code };
+        } catch (e) {
+          // Past the opening every outcome is a sealed 200, so the relay
+          // can't tell a request that reached intake from one that didn't
+          // (T-13).
+          log(e);
+          answer = { outcome: "busy" };
+        } finally {
+          // The plaintext only until the answer; intake keeps its own copy
+          // of what it holds (Retention; T-15).
+          envelope.record.fill(0);
+          envelope.ciphertext.fill(0);
+        }
+      }
+      let sealedAnswer: Uint8Array;
+      try {
+        sealedAnswer = sealAnswer(opened.opened, answer);
+      } catch (e) {
+        // A refusal code an answer can't carry: busy, as any error after
+        // the request opened is.
+        log(e);
+        sealedAnswer = sealAnswer(opened.opened, { outcome: "busy" });
+      }
+      return end(res, 200, { ...NO_STORE, "content-type": SEALED_ANSWER_TYPE }, sealedAnswer);
+    } finally {
+      opened.opened.key.fill(0);
+    }
+  };
+  const handle = (req: IncomingMessage, res: ServerResponse) => {
+    const path = (req.url ?? "").split("?")[0];
+    if (path === ROUTE) return plain(req, res);
+    if (path === SEALED_ROUTE && options.sealed !== undefined)
+      return sealed(req, res, options.sealed);
+    return end(res, 404, CORS);
   };
   const timeouts = {
     headersTimeout: HEADERS_MS,
@@ -191,8 +308,10 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
   });
   const { address, port } = server.address() as AddressInfo;
   const host = address.includes(":") ? `[${address}]` : address;
+  const origin = `${options.tls === undefined ? "http" : "https"}://${host}:${port}`;
   return {
-    url: `${options.tls === undefined ? "http" : "https"}://${host}:${port}${ROUTE}`,
+    url: `${origin}${ROUTE}`,
+    ...(options.sealed === undefined ? {} : { sealedUrl: `${origin}${SEALED_ROUTE}` }),
     server,
     close: () =>
       new Promise<void>((resolve) => {
@@ -202,25 +321,22 @@ export async function serveIntake(intake: Intake, options: EndpointOptions): Pro
   };
 }
 
-function end(
-  res: ServerResponse,
-  status: number,
-  headers: Record<string, string> = {},
-  body?: Uint8Array,
-): void {
+type Headers = Readonly<Record<string, string>>;
+
+function end(res: ServerResponse, status: number, headers: Headers, body?: Uint8Array): void {
   if (res.headersSent) return;
   // A refused request's body is never read, so the connection can't be reused.
   const close = status === 413 || status === 503 || status === 415 ? { connection: "close" } : {};
-  res.writeHead(status, { ...CORS, ...close, ...headers }).end(body);
+  res.writeHead(status, { ...close, ...headers }).end(body);
 }
 
-/** The body, or undefined once it passes `MAX_DELIVERY`. */
-async function readBody(req: IncomingMessage): Promise<Uint8Array | undefined> {
+/** The body, or undefined once it passes `max`. */
+async function readBody(req: IncomingMessage, max: number): Promise<Uint8Array | undefined> {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     length += chunk.length;
-    if (length > MAX_DELIVERY) return undefined;
+    if (length > max) return undefined;
     chunks.push(chunk);
   }
   return new Uint8Array(Buffer.concat(chunks));

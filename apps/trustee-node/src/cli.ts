@@ -71,6 +71,7 @@ import {
   tallyDeadline,
 } from "./duties.ts";
 import { type Endpoint, serveIntake } from "./endpoint.ts";
+import { seatKeys } from "./sealed-intake.ts";
 import { seatFromEnv } from "./env-seat.ts";
 import { givenReceipts, IntakeSeat, type RegistrationCheck } from "./intake.ts";
 import { type L1AnchorOptions, l1BoardAnchors } from "./l1.ts";
@@ -289,7 +290,7 @@ async function runConfig(text: string, io: CliIo): Promise<number> {
     event: "started",
     seat: config.seat,
     availability: availability !== undefined,
-    ...(endpoint === undefined ? {} : { intake: endpoint.url }),
+    ...(endpoint === undefined ? {} : { intake: endpoint.url, sealedIntake: endpoint.sealedUrl }),
   });
   // Any loop failing (a store it can't read) stops the others, and the
   // failure is rethrown once all have stopped and the gateway is closed.
@@ -370,6 +371,7 @@ async function intakeEndpoint(
       port: i.port,
       ...(tls === undefined ? {} : { tls }),
       queue: i.queue,
+      sealed: seatKeys(seat),
       log: (e) => io.out(e),
     });
   } catch (e) {

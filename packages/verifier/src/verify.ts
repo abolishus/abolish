@@ -319,7 +319,7 @@ const carriesDestruction = (v: BoardEntryVersion) =>
  */
 function releaseGate(definition: VerifiedDefinition): Outcome {
   // A live rolling poll's running copies aren't read yet (P2-17 part
-  // 4d-2b-2b), so its releases can't pass, as a live poll's can't before
+  // 4d-2b-2b-2b-2b-2), so its releases can't pass, as a live poll's can't before
   // 7.1 (T-16, T-45).
   if (definition.version === 7 && isRolling(definition))
     return definition.value.results_mode === RESULTS_MODES.live ? NOT_REACHED : PASS;
@@ -1182,8 +1182,7 @@ export function verifyBundle(
         board.unauthenticated === undefined ? undefined : board.entries - board.unauthenticated;
       // Under a rolling definition delivery (5.9) reads ballot version 5's
       // fields, its hash binding the step, and the counted set is per rolling
-      // tier; beside an author panel `countedChecks` stops at 5.9 (P2-17
-      // part 4d-2b-2b-2b-2).
+      // tier, each tallied per panel beside an author panel.
       if (
         chosen.report === undefined ||
         checked.registered === undefined ||
@@ -1269,9 +1268,8 @@ export function verifyBundle(
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition
       // versions 3 to 7 against their cells, a rolling one's one per rolling
       // tier, beside an author panel per panel with its own key set (docs/
-      // spec/verifier.md, Tally openings), except a rolling one's beside an
-      // author panel, which `tallyChecks` leaves not reached; the counted
-      // set, once known, settles the rest, `tally-early` included.
+      // spec/verifier.md, Tally openings); the counted set, once known,
+      // settles the rest, `tally-early` included.
       const opened = tallyChecks(
         definition.definition,
         definition.hash,

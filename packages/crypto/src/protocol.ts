@@ -347,6 +347,25 @@ export type PanelledFacts = (
  * doesn't export it.
  */
 export function panelledFacts(given: PanelledDefinition): PanelledFacts {
+  const facts = halvedFacts(given);
+  if (facts.rolling) throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, 7);
+  return facts;
+}
+
+/**
+ * `panelledFacts`, with a rolling version 7 read too, under its own hashes
+ * and rules, and labelled `rolling`: for the checks whose records ballot
+ * version 5 keeps from version 4 with each ballot's step bound in its hash
+ * (delivery records version 2, tally-opening version 3; delivery.md,
+ * Versions; tally.md, Rolling tiers), and that read the author panel as a
+ * fixed version 7's (P2-17 part 4d-2b-2b-2b-2b-1). Every other caller goes
+ * through `panelledFacts`, so a rolling definition reaches no check that
+ * would read its empty `electorate` as its roots (T-36). The package entry
+ * point doesn't export it.
+ */
+export function halvedFacts(
+  given: PanelledDefinition,
+): PanelledFacts & { readonly rolling: boolean } {
   // Another version is refused as unsupported before decoding, as it was
   // before version 7 was read; the decoder then holds the copy to the pin.
   const own = pinnedVersion(given, RECORD_TYPES.electionDefinition);
@@ -360,17 +379,17 @@ export function panelledFacts(given: PanelledDefinition): PanelledFacts {
       hash: electionDefinitionV6Hash(d),
       authorStubHash: electionAuthorStubV6Hash(d),
       wellFormed: electionDefinitionV6Rule(d) === undefined,
+      rolling: false,
     };
   }
   const d = decodeElectionDefinitionV7(encodeElectionDefinitionV7(given));
-  if (d.electorate_mode !== ELECTORATE_MODES.fixed)
-    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, 7);
   return {
     version: 7,
     value: d,
     hash: electionDefinitionV7Hash(d),
     authorStubHash: electionAuthorStubV7Hash(d),
     wellFormed: electionDefinitionV7Rule(d) === undefined,
+    rolling: d.electorate_mode === ELECTORATE_MODES.rolling,
   };
 }
 

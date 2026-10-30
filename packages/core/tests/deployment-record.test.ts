@@ -237,6 +237,37 @@ describe("buildDeploymentRecord", () => {
     });
   });
 
+  test("refuses a contract that isn't where its deployer's nonce put it", () => {
+    const other = `0x${"ee".repeat(20)}`;
+    for (const [file, name] of [
+      [L1, "BoardAnchor"],
+      [L1, "BallotRelay"],
+      [L2, "TrusteeRegistry"],
+      [L2, "GroupRegistry"],
+      [L2, "ElectionRegistry"],
+    ] as const) {
+      const edited = clone(file);
+      ((edited["contracts"] as Json)[name] as Json)["address"] = other;
+      // The other file's pins still name the anchor and relay where they were.
+      const l2 = clone(L2);
+      if (name === "BoardAnchor") (l2["pins"] as Json)["l1Anchor"] = other;
+      if (name === "BallotRelay") (l2["pins"] as Json)["l1Relay"] = other;
+      const r = file === L1 ? refusal(edited, l2, inputs()) : refusal(L1, edited, inputs());
+      expect(r, name).toEqual({ code: "address", contract: name });
+    }
+    // Both chains' records at another starting nonce.
+    for (const [l1Nonce, l2Nonce, contract] of [
+      [1, 0, "BoardAnchor"],
+      [0, 1, "TrusteeRegistry"],
+    ] as const) {
+      const l1 = clone(L1);
+      const l2 = clone(L2);
+      l1["deployerNonce"] = l1Nonce;
+      l2["deployerNonce"] = l2Nonce;
+      expect(refusal(l1, l2, inputs())).toEqual({ code: "address", contract });
+    }
+  });
+
   test("refuses a launch panel whose keys aren't the ones its identifier pins", () => {
     const l2 = clone(L2);
     const panel = (l2["pins"] as Json)["launchPanel"] as Json;
@@ -298,6 +329,42 @@ describe("buildDeploymentRecord", () => {
     add("inputs", ".backups", (_, __, off) => (off["backups"] = "true"));
     add("inputs", ".api[0]", (_, __, off) => (off["api"] = [1]));
     add("inputs", ".seatRelays", (_, __, off) => delete off["seatRelays"]);
+    add("l1", ".chainId", (l1) => (l1["chainId"] = -0));
+    // A checksummed address with one letter's case flipped.
+    add("l2", ".contracts.Board.address", (_, l2) => {
+      const board = (l2["contracts"] as Json)["Board"] as Json;
+      board["address"] = (board["address"] as string).replace("C", "c");
+    });
+    // Past each list's and string's bound in the record, which the encoder would refuse.
+    add(
+      "inputs",
+      ".api",
+      (_, __, off) => (off["api"] = ["a", "b", "c", "d", "e"].map((x) => `https://${x}.example`)),
+    );
+    add(
+      "inputs",
+      ".disputeGameTypes",
+      (_, __, off) => (off["disputeGameTypes"] = [...Array(9).keys()]),
+    );
+    add(
+      "inputs",
+      ".groups",
+      (_, __, off) => (off["groups"] = Array(65).fill((off["groups"] as Json[])[0])),
+    );
+    add(
+      "inputs",
+      ".l1Rpc[0]",
+      (_, __, off) => (off["l1Rpc"] = [`https://${"a".repeat(260)}.example`]),
+    );
+    add(
+      "inputs",
+      ".backupRpId",
+      (_, __, off) => (off["backupRpId"] = `${"a".repeat(250)}.example`),
+    );
+    add("l2", ".pins.registrars.addresses", (_, l2) => {
+      const r = (l2["pins"] as Json)["registrars"] as Json;
+      r["addresses"] = Array(17).fill((r["addresses"] as string[])[0]);
+    });
     for (const [l1, l2, off, expected] of cases) expect(refusal(l1, l2, off)).toEqual(expected);
     expect(refusal(null, L2, inputs())).toEqual({ code: "malformed", source: "l1", path: "." });
     expect(refusal(L1, L2, [])).toEqual({ code: "malformed", source: "inputs", path: "." });

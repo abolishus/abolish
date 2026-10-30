@@ -10,6 +10,7 @@
 // signers' (T-64), and the deploy workflow's, which confirms each file
 // against the receipts before committing it.
 
+import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   type DecodedDeploymentRecord,
   type DeploymentFailure,
@@ -19,6 +20,7 @@ import {
   type DeploymentSeatRelay,
   type DeploymentTokenKey,
   decodeDeploymentRecord,
+  DEPLOYMENT_LIMITS,
   encodeDeploymentRecord,
   PANEL_KINDS,
   panelId,
@@ -34,7 +36,8 @@ export type DeploymentRecordSource = "l1" | "l2" | "inputs";
 /**
  * Why no record was built. `malformed` names the file and the JSON path of
  * the first value that isn't what it must be; a mismatch names what the two
- * chain files disagree on; `ill-formed` is the first well-formedness rule
+ * chain files disagree on; `address` a contract that isn't at the address
+ * its deployer's nonce puts it; `ill-formed` is the first well-formedness rule
  * the record breaks, as crypto names it.
  */
 export type DeploymentRecordError =
@@ -52,6 +55,7 @@ export type DeploymentRecordError =
         | "relay"
         | "epoch";
     }
+  | { readonly code: "address"; readonly contract: string }
   | { readonly code: "panel-id" }
   | { readonly code: "seats" }
   | { readonly code: "ill-formed"; readonly failure: DeploymentFailure };
@@ -108,6 +112,16 @@ export function buildDeploymentRecord(
   if (!same(l2Pins.l1Anchor, a.contracts("BoardAnchor"))) mismatch("anchor");
   if (!same(l2Pins.l1Relay, a.contracts("BallotRelay"))) mismatch("relay");
   if (l2Pins.epoch !== l1Pins.epoch) mismatch("epoch");
+  // Each contract is the deployer's CREATE at its place in the script's
+  // order, so an address edited in either file, or a file from another run,
+  // is refused rather than pinned (T-34, T-64).
+  for (const [file, order] of [
+    [a, ["BoardAnchor", "BallotRelay"]],
+    [b, ["TrusteeRegistry", "GroupRegistry", "ElectionRegistry", "Board"]],
+  ] as const)
+    for (const [i, name] of order.entries())
+      if (!same(file.contracts(name), createAddress(file.deployer, file.deployerNonce + BigInt(i))))
+        throw new DeploymentRecordRefused({ code: "address", contract: name });
 
   const panel = l2Pins.launchPanel;
   if (off.ours.length !== panel.keys.length) throw new DeploymentRecordRefused({ code: "seats" });
@@ -188,6 +202,7 @@ interface ChainFile {
   readonly target: string;
   readonly chainId: bigint;
   readonly deployer: Uint8Array;
+  readonly deployerNonce: bigint;
   readonly commit: Uint8Array;
   readonly contracts: (name: string) => Uint8Array;
 }
@@ -196,12 +211,14 @@ function chainFile(r: Reader): ChainFile {
   const target = r.at("target").string();
   const chainId = r.at("chainId").u64();
   const deployer = r.at("deployer").address();
+  const deployerNonce = r.at("deployerNonce").u64();
   const commit = r.at("commit").commit();
   const contracts = r.at("contracts");
   return {
     target,
     chainId,
     deployer,
+    deployerNonce,
     commit,
     contracts: (name) => contracts.at(name).at("address").address(),
   };
@@ -244,7 +261,7 @@ function l2PinsOf(r: Reader) {
     registrarThreshold: registrars.at("threshold").uint(255),
     registrars: registrars
       .at("addresses")
-      .list()
+      .list(DEPLOYMENT_LIMITS.registrars)
       .map((x) => x.address()),
   };
 }
@@ -269,22 +286,23 @@ const INPUT_KEYS = [
 
 function inputsOf(r: Reader) {
   r.keys(INPUT_KEYS);
-  const text = (x: Reader) => new TextEncoder().encode(x.string());
+  const L = DEPLOYMENT_LIMITS;
+  const text = (max: number) => (x: Reader) => x.text(max);
   return {
     // Decimal strings, as a u64 may be past what a JSON number holds exactly.
     l2FromBlock: r.at("l2FromBlock").decimal(),
-    l2MaxSequencerDrift: BigInt(r.at("l2MaxSequencerDrift").uint(U32_MAX)),
+    l2MaxSequencerDrift: r.at("l2MaxSequencerDrift").u64(),
     disputeGameTypes: r
       .at("disputeGameTypes")
-      .list()
+      .list(L.gameTypes)
       .map((x) => x.uint(U32_MAX)),
     ours: r
       .at("ours")
-      .list()
+      .list(L.seats)
       .map((x) => x.bool()),
     groups: r
       .at("groups")
-      .list()
+      .list(L.groups)
       .map((g): DeploymentGroup => {
         g.keys(["groupId", "tier", "selfPaid", "region"]);
         const tier = g.at("tier").uint(1);
@@ -295,17 +313,17 @@ function inputsOf(r: Reader) {
           region: g.at("region").uint(U32_MAX),
         };
       }),
-    api: r.at("api").list().map(text),
-    l2Rpc: r.at("l2Rpc").list().map(text),
-    l1Rpc: r.at("l1Rpc").list().map(text),
-    backupRpId: text(r.at("backupRpId")),
+    api: r.at("api").list(L.origins).map(text(L.origin)),
+    l2Rpc: r.at("l2Rpc").list(L.origins).map(text(L.origin)),
+    l1Rpc: r.at("l1Rpc").list(L.origins).map(text(L.origin)),
+    backupRpId: text(L.rpId)(r.at("backupRpId")),
     backups: r.at("backups").bool(),
-    accountRpId: text(r.at("accountRpId")),
+    accountRpId: text(L.rpId)(r.at("accountRpId")),
     membershipZkeySha256: r.at("membershipZkeySha256").fixedHex(32),
     membershipWasmSha256: r.at("membershipWasmSha256").fixedHex(32),
     tier0TokenKeys: r
       .at("tier0TokenKeys")
-      .list()
+      .list(L.tokenKeys)
       .map((k): DeploymentTokenKey => {
         k.keys(["period", "key", "retired"]);
         return {
@@ -316,17 +334,20 @@ function inputsOf(r: Reader) {
       }),
     seatRelays: r
       .at("seatRelays")
-      .list()
+      .list(L.seatRelays)
       .map((s): DeploymentSeatRelay => {
         s.keys(["key", "relays"]);
         return {
           key: s.at("key").fixedHex(SEAT_KEY_BYTES),
           relays: s
             .at("relays")
-            .list()
+            .list(L.relays)
             .map((x) => {
               x.keys(["origin", "path"]);
-              return { origin: text(x.at("origin")), path: text(x.at("path")) };
+              return {
+                origin: text(L.origin)(x.at("origin")),
+                path: text(L.relayPath)(x.at("path")),
+              };
             }),
         };
       }),
@@ -374,14 +395,22 @@ class Reader {
         new Reader(this.source, undefined, `${this.path}.${key}`).refuse();
   }
 
-  list(): Reader[] {
-    if (!Array.isArray(this.value)) this.refuse();
+  /** A list of at most `max` entries, the record's bound for it, so none is cut off unseen (T-52). */
+  list(max: number): Reader[] {
+    if (!Array.isArray(this.value) || this.value.length > max) this.refuse();
     return this.value.map((v, i) => new Reader(this.source, v, `${this.path}[${i}]`));
   }
 
   string(): string {
     if (typeof this.value !== "string") this.refuse();
     return this.value;
+  }
+
+  /** A string as UTF-8 of at most `max` bytes; the rules judge its grammar. */
+  text(max: number): Uint8Array {
+    const b = new TextEncoder().encode(this.string());
+    if (b.length > max) this.refuse();
+    return b;
   }
 
   bool(): boolean {
@@ -391,7 +420,9 @@ class Reader {
 
   /** A JSON integer from 0 to `max`, which must be a safe integer. */
   uint(max: number): number {
+    // `-0` is never what the script writes.
     if (typeof this.value !== "number" || !Number.isSafeInteger(this.value)) this.refuse();
+    if (Object.is(this.value, -0)) this.refuse();
     if (this.value < 0 || this.value > max) this.refuse();
     return this.value;
   }
@@ -425,9 +456,23 @@ class Reader {
     return b;
   }
 
-  /** An address as forge prints it: `0x` and 40 hex digits, checksummed or not. */
+  /**
+   * An address as forge prints it: `0x` and 40 hex digits, and if their
+   * case is mixed, EIP-55's checksum, so a digit edited by hand is caught.
+   */
   address(): Uint8Array {
-    return this.fixedHex(20);
+    const b = this.fixedHex(20);
+    const digits = this.string().slice(2);
+    if (digits !== digits.toLowerCase() && digits !== digits.toUpperCase()) {
+      const lower = digits.toLowerCase();
+      const hash = keccak_256(new TextEncoder().encode(lower));
+      const sum = Array.from(lower, (c, i) => {
+        const nibble = ((hash[i >> 1] ?? 0) >> (i % 2 === 0 ? 4 : 0)) & 0xf;
+        return nibble >= 8 ? c.toUpperCase() : c;
+      }).join("");
+      if (sum !== digits) this.refuse();
+    }
+    return b;
   }
 
   /** The deploy script's commit: 40 lower-case hex digits, no `0x` (its `_checkCommit`). */
@@ -436,6 +481,17 @@ class Reader {
     if (!/^[0-9a-f]{40}$/.test(s)) this.refuse();
     return Uint8Array.from(s.match(/../g) ?? [], (h) => parseInt(h, 16));
   }
+}
+
+/** `keccak256(rlp([deployer, nonce]))[12..]`, the address CREATE gives a contract. */
+function createAddress(deployer: Uint8Array, nonce: bigint): Uint8Array {
+  const n: number[] = [];
+  for (let v = nonce; v > 0n; v >>= 8n) n.unshift(Number(v & 0xffn));
+  // RLP: 0 is the empty string, a byte below 0x80 is itself, else a length prefix.
+  const encodedNonce =
+    n.length === 0 ? [0x80] : n.length === 1 && (n[0] ?? 0) < 0x80 ? n : [0x80 + n.length, ...n];
+  const body = [0x80 + 20, ...deployer, ...encodedNonce];
+  return keccak_256(Uint8Array.from([0xc0 + body.length, ...body])).slice(12);
 }
 
 function same(a: Uint8Array, b: Uint8Array): boolean {

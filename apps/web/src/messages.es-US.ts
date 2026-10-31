@@ -1347,7 +1347,7 @@ export const esUS: Messages = {
     "¿Apelar esta decisión? La revisa un moderador distinto del que decidió. Solo puedes apelar una decisión una vez.",
   moderationAppealConfirm: "Enviar apelación",
   moderationAppealCancel: "Ahora no",
-  moderationAppealFiled: "Tu apelación se presentó. La revisará otro moderador.",
+  moderationAppealFiled: "Tu apelación se presentó.",
   moderationFailure_signedOut:
     "Se cerró tu sesión. Vuelve a iniciar sesión para ver la moderación de esta encuesta.",
   moderationFailure_gone: "Esa encuesta ya no está aquí.",

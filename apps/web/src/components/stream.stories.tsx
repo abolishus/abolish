@@ -532,6 +532,33 @@ export const PastTheLast: Story = {
   },
 };
 
+/**
+ * A later page, reached by "More questions": the chosen order's and topic's
+ * links lead back to the first page, so they are marked as chosen, never as
+ * this page (P2-29, the stream's iteration 20).
+ */
+export const LaterPage: Story = {
+  args: { later: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByRole("article").length).toBeGreaterThan(0);
+    const orders = within(canvas.getByRole("navigation", { name: "Order" }));
+    const chosen = orders.getByRole("link", { name: "New" });
+    await expect(chosen).toHaveAttribute("aria-current", "true");
+    await expect(chosen).toHaveAttribute("href", "/discover");
+    // Still drawn as the chosen one, as on the first page.
+    await expect(getComputedStyle(chosen).backgroundColor).not.toBe(
+      getComputedStyle(orders.getByRole("link", { name: "Closing soon" })).backgroundColor,
+    );
+    const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
+    await expect(topics.getByRole("link", { name: "All topics" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect(canvasElement.querySelector('[aria-current="page"]')).toBeNull();
+  },
+};
+
 /** A search: the order and every next page keep it, and the box shows what was typed. */
 export const Searching: Story = {
   args: { sort: "closing", typed: " library  hours", filter: { q: "library  hours" } },

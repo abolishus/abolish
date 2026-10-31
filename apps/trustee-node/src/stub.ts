@@ -284,7 +284,10 @@ export async function checkStub(
     !equal(stub.membership_vk_hash, membershipVkHash())
   )
     return { ok: false, code: "stub-membership-key" };
-  // 3, [[verifier]] 2.4: the electorate, against the chain: a fixed tier's
+  // 3, [[verifier]] 2.4: the electorate, against the chain (a rolling stub
+  // too, though check 4 refuses it: what a coordinator can make the seat
+  // replay is no more than any stub that passes checks 1 and 2 makes it,
+  // and the recount is the one check 4's lifting will rest on): a fixed tier's
   // regions and cells, a rolling tier's opening state and its groups'
   // strict replay.
   // The hash is of the stub as checked above; the deployment's check gets

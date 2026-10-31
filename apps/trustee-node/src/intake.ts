@@ -308,6 +308,11 @@ export class IntakeSeat {
       if (e instanceof DecodeError) return { ok: false, code: "intake-unapproved" };
       throw e;
     }
+    // A rolling stub never passes check 4 yet, so no seat approved one; its
+    // ballots (version 5, against step roots) are [[P2-17]] part 7c-3b's.
+    // Refused before anything is read, so a version-7 value is never read
+    // as version 5 below.
+    if (stub.version === 7) return { ok: false, code: "intake-definition" };
     const stubHash = hashOfStub(stub);
     const transcriptHash = ceremonyTranscriptHash(transcript);
     const name = `${hex(stubHash)}/${hex(transcriptHash)}`;
@@ -329,7 +334,7 @@ export class IntakeSeat {
   }
 
   async #check(
-    record: Stub,
+    record: Exclude<Stub, { readonly version: 7 }>,
     stubBytes: Uint8Array,
     stubHash: Uint8Array,
     transcript: Uint8Array,
@@ -376,9 +381,6 @@ export class IntakeSeat {
       if (!again.ok) return { ok: false, code: "intake-definition" };
       this.#stubPassed.add(stubName);
     }
-    // A rolling stub never passes check 4 yet, so no seat approved one; its
-    // ballots (version 5, against step roots) are [[P2-17]] part 7c-3b's.
-    if (record.version === 7) return { ok: false, code: "intake-definition" };
     // Under definition version 5, ballot version 3: its questions' ranges
     // and the cell each ballot names (P2-14).
     const definition: Stub =

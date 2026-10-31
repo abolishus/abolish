@@ -16,6 +16,7 @@ import {
   shareReceiptBatchStatement,
   verifyStatement,
   type ViewBallot,
+  encodeElectionDefinitionV7,
 } from "@abolishus/crypto";
 import { beforeAll, describe, expect, it } from "vite-plus/test";
 import {
@@ -35,7 +36,7 @@ import {
 } from "../src/index.ts";
 import { RELEASE_WINDOWS } from "../src/stub.ts";
 import { MemoryStore } from "../src/store.ts";
-import { election, L2_CHAIN_ID, TRUSTEE_REGISTRY } from "./fixture.ts";
+import { election, L2_CHAIN_ID, rollingStubFor, TRUSTEE_REGISTRY } from "./fixture.ts";
 
 import { cast, castAgain, type Cast, seatsOf, setup, type Setup, TIER } from "./ballots.ts";
 
@@ -442,6 +443,12 @@ describe("the election's checks before intake", () => {
       ok: false,
       code: "intake-unapproved",
     });
+  });
+
+  it("refuses a rolling stub, which no seat approves yet, before reading its approval", async () => {
+    const [seat] = seatsOf(s).intake;
+    const bytes = encodeElectionDefinitionV7(rollingStubFor(s.e.panelists.panel));
+    expect(await deliver(seat!, bytes)).toEqual({ ok: false, code: "intake-definition" });
   });
 
   it("refuses any transcript but the one the seat approved (T-37)", async () => {

@@ -514,6 +514,7 @@ const enUS = {
   resultsNoneAnswered: "No one answered.",
   resultsTurnout: "Turnout",
   resultsTurnoutOf: { one: "{share} of {count} member", other: "{share} of {count} members" },
+  resultsTurnoutIs: "Turnout: {turnout}",
   resultsTierPending:
     "Part of this group's count isn't published yet. Its results appear here once it all is.",
   resultsLeader: "Most picked: {option}, by {share} of those who answered.",
@@ -535,7 +536,7 @@ const enUS = {
   resultsByGroup: "Results by group",
   resultsSideBySide: "The groups side by side",
   resultsSideBySideCaption:
-    "One row per group. There is no total row: the groups are never added together.",
+    "One column per group. There is no total column: the groups are never added together.",
   resultsAnswer: "Answer",
   resultsAnswers: "Answers",
   resultsNotAllPublished: "Not all published yet",

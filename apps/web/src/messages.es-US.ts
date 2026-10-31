@@ -525,6 +525,7 @@ export const esUS: Messages = {
   resultsNoneAnswered: "Nadie respondió.",
   resultsTurnout: "Participación",
   resultsTurnoutOf: { one: "{share} de {count} miembro", other: "{share} de {count} miembros" },
+  resultsTurnoutIs: "Participación: {turnout}",
   resultsTierPending:
     "Parte del conteo de este grupo todavía no se publica. Sus resultados aparecen aquí cuando se publique completo.",
   resultsLeader: "La más elegida: {option}, por el {share} de quienes respondieron.",
@@ -546,7 +547,8 @@ export const esUS: Messages = {
     "Cada grupo se cuenta y se informa por separado, y cada pregunta también. Ninguna cifra de esta página suma dos grupos ni dos preguntas.",
   resultsByGroup: "Resultados por grupo",
   resultsSideBySide: "Los grupos uno al lado del otro",
-  resultsSideBySideCaption: "Una fila por grupo. No hay fila de total: los grupos nunca se suman.",
+  resultsSideBySideCaption:
+    "Una columna por grupo. No hay columna de total: los grupos nunca se suman.",
   resultsAnswer: "Respuesta",
   resultsAnswers: "Respuestas",
   resultsNotAllPublished: "Aún no se publica todo",

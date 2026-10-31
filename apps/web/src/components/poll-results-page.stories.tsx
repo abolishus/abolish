@@ -109,7 +109,7 @@ type Story = StoryObj<typeof meta>;
 
 /**
  * A tab per tier, its sentences and bars first, then its cells; the tiers
- * side by side with no total row; and the way to check them (T-16, T-34).
+ * side by side with no total column; and the way to check them (T-16, T-34).
  */
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
@@ -146,6 +146,15 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const side = within(canvas.getByRole("region", { name: "The groups side by side" }));
   await expect(side.getAllByRole("table")).toHaveLength(2);
   await expect(side.getAllByText("Not all published yet")).toHaveLength(2);
+  // Each column headed by its own tier's turnout, in every question's table.
+  await expect(side.getAllByText("Turnout: 17.1% of 7,220 members")).toHaveLength(2);
+  await expect(side.getAllByText("Turnout: 33.3% of 120 members")).toHaveLength(2);
+  await expect(
+    side.getAllByText(
+      "One column per group. There is no total column: the groups are never added together.",
+      { exact: false },
+    ),
+  ).toHaveLength(2);
 
   // Another tier is a tap away; it has no counts yet and one cell, so no parts.
   await userEvent.click(within(tabs).getByRole("tab", { name: /Tier 2/ }));
@@ -273,6 +282,12 @@ export const TurnoutUnstated: Story = {
   play: async ({ canvasElement }) => {
     const panel = within(within(canvasElement).getByRole("tabpanel"));
     await expect(panel.queryByText("Turnout")).toBeNull();
+    // Nor in its column side by side, while the other tier's still stands.
+    const side = within(
+      within(canvasElement).getByRole("region", { name: "The groups side by side" }),
+    );
+    await expect(side.queryByText(/^Turnout: .* of 1,000 members$/)).toBeNull();
+    await expect(side.getAllByText("Turnout: 33.3% of 120 members")).toHaveLength(2);
     await expect(
       panel.getByText("Most picked: ⁨Yes⁩, by 56.7% of those who answered."),
     ).toBeVisible();

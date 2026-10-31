@@ -754,8 +754,13 @@ describe("results page", () => {
     expect(page).toContain("12 people answered");
     expect(page).toContain("Tier 2 (document-verified)");
     expect(page).toContain("Most picked: \u2068Yes\u2069, by 50% of those who answered.");
-    expect(page).toContain("There is no total row: the groups are never added together.");
+    expect(page).toContain("There is no total column: the groups are never added together.");
     expect(page).toContain("Not all published yet");
+    // Each group's column headed by its own turnout, never one across them (T-16).
+    expect(page.match(/Turnout: [^A-Z]*members/g)).toEqual([
+      "Turnout: 0.2% of 5,000 members",
+      "Turnout: 1.7% of 120 members",
+    ]);
     expect(page).not.toContain("14 people");
     expect(page).not.toContain("Part by part");
   });

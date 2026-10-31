@@ -407,7 +407,8 @@ export const esUS: Messages = {
   streamMore: "Más preguntas",
   streamSortUnavailableTitle: "Este orden no está disponible en este momento",
   streamSortUnavailable:
-    "El servidor no puede contar las respuestas de esta semana en este momento. Los otros órdenes siguen funcionando.",
+    "El servidor no puede contar las respuestas de esta semana en este momento.",
+  streamSortUnavailableAction: "Ver las preguntas más nuevas",
   streamCursorLostTitle: "Esa página ya cambió",
   streamCursorLost:
     "La pregunta tras la que empezaba esta página ya no se puede ubicar en este orden.",

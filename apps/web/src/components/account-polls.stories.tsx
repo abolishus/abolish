@@ -181,6 +181,15 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   await expect(setup!.queryByText(/ceremony/i)).toBeNull();
   await expect(setup!.getByText("Submitted October 16, 2026 at 6:05 PM UTC")).toBeVisible();
   await expect(setup!.queryByRole("button")).toBeNull();
+  // On the list there is no page to wait on: its reason says nothing more is
+  // needed and where the outcome shows, not "You can leave this page", the
+  // setup page's words (P2-29, the author's list's iteration 29).
+  await expect(
+    setup!.getByText(
+      /Nothing more is needed from you: it opens on its own, and this list shows when it does, or why it didn't\./,
+    ),
+  ).toBeVisible();
+  await expect(setup!.queryByText(/leave this page/)).toBeNull();
   await expect(open!.getByText("Closes November 4, 2026 at 12:00 AM UTC")).toBeVisible();
   await expect(open!.queryByRole("button")).toBeNull();
   // The list still says `open` once the close has passed: the clock decides.

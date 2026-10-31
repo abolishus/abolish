@@ -1294,7 +1294,7 @@ const enUS = {
   moderationOfPoll: "Moderation",
   moderationDecision: "{action}: {reason}, {when}\u00a0UTC",
   moderationDecisionWhat: "{action}: {reason}",
-  moderationDecidedOn: "On {when}\u00a0UTC",
+  moderationDecidedOn: "On {when}\u00a0UTC, decision No.\u00a0{seq}",
   moderationMeans_visible: "Our pages list and show this poll again.",
   moderationMeans_delisted:
     "Our pages don't list this poll, but it stays open at its address. The board, the count and the result aren't affected.",

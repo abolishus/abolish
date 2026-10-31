@@ -534,7 +534,7 @@ export const AppealADecision: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const block = await canvas.findByRole("group", {
-      name: /^Delisted: Spam\sOn October 17, 2026 at 4:45\sPM\sUTC$/,
+      name: /^Delisted: Spam\sOn October 17, 2026 at 4:45\sPM\sUTC, decision No.\s41$/,
     });
     const moderation = within(block);
     await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
@@ -625,7 +625,7 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const hidden = within(
     await canvas.findByRole("group", {
-      name: /^Text hidden: Personal data\sOn October 16, 2026 at 8:00\sAM\sUTC$/,
+      name: /^Text hidden: Personal data\sOn October 16, 2026 at 8:00\sAM\sUTC, decision No.\s52$/,
     }),
   );
   await expect(hidden.getByText(/don't show this poll's text/)).toBeVisible();
@@ -644,7 +644,7 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   ).toHaveAttribute("href", `/polls/${"2d".repeat(32)}`);
   const restored = within(
     canvas.getByRole("group", {
-      name: /^Restored: Appeal upheld\sOn October 17, 2026 at 3:00\sPM\sUTC$/,
+      name: /^Restored: Appeal upheld\sOn October 17, 2026 at 3:00\sPM\sUTC, decision No.\s60$/,
     }),
   );
   await expect(restored.getByText("Our pages list and show this poll again.")).toBeVisible();
@@ -706,6 +706,8 @@ export const ModerationHistoryDesktop: Story = {
  * Each decision's date is on one line. Run on after its reason, the
  * heading broke it at a phone's 360, "October" over "16, 2026" (P2-29, the
  * author's list's iteration 16); the time now starts a line of its own.
+ * Its log number, which the appeals name decisions by and the heading
+ * left out (iteration 17), is whole on that line too.
  */
 const decisionDatesWhole = async (canvasElement: HTMLElement) => {
   let dates = 0;
@@ -713,7 +715,7 @@ const decisionDatesWhole = async (canvasElement: HTMLElement) => {
     const heading = group.firstElementChild!;
     const walker = document.createTreeWalker(heading, NodeFilter.SHOW_TEXT);
     for (let text = walker.nextNode(); text !== null; text = walker.nextNode()) {
-      for (const m of text.textContent!.matchAll(/[A-Z][a-z]+\s\d{1,2},\s\d{4}/g)) {
+      for (const m of text.textContent!.matchAll(/[A-Z][a-z]+\s\d{1,2},\s\d{4}|No\.\s\d+/g)) {
         const range = document.createRange();
         range.setStart(text, m.index);
         range.setEnd(text, m.index + m[0].length);
@@ -722,7 +724,8 @@ const decisionDatesWhole = async (canvasElement: HTMLElement) => {
       }
     }
   }
-  await expect(dates).toBe(2);
+  // Each of the two decisions: its date and its number.
+  await expect(dates).toBe(4);
 };
 
 export const ModerationHistoryPhone: Story = {

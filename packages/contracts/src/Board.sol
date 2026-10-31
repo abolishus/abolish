@@ -99,6 +99,23 @@ contract Board is EventAccumulator {
     event RollingBallotSubmitted(
         bytes32 indexed definitionHash, bytes32 indexed ballotHash, bytes32 root, bytes record
     );
+    /// @notice A rolling poll's ballot (version 5) forced through the L1
+    /// relay passed the ballot check against `root`, the root the relay
+    /// carried, its stamp inside the window, archived under contract-event
+    /// version 11. The call fields and the root are the deposit's, carried,
+    /// never judged: the verifier matches all five, with the record, against
+    /// the word the relay stored for call `index` (4.5), and compares the
+    /// root with the step's (`root-step-mismatch`; T-50, T-04).
+    event RelayedRollingBallotSubmitted(
+        bytes32 indexed definitionHash,
+        bytes32 indexed ballotHash,
+        uint64 index,
+        uint64 l1Block,
+        uint64 stamp,
+        uint64 gasLimit,
+        bytes32 root,
+        bytes record
+    );
 
     error InvalidDeployment();
     error ReceiptBatchLength(uint256 length);
@@ -117,8 +134,8 @@ contract Board is EventAccumulator {
 
     IBoardElections public immutable electionRegistry;
     IBoardTrustees public immutable trusteeRegistry;
-    /// The L1 relay, whose alias alone may call `submitRelayedBallot`
-    /// (docs/spec/contracts.md, Board, Deployment): verifier 1.2 compares it
+    /// The L1 relay, whose alias alone may call `submitRelayedBallot` and
+    /// `submitRelayedRollingBallot` (docs/spec/contracts.md, Board, Deployment): verifier 1.2 compares it
     /// with the definition's `l1_relay`.
     address public immutable relay;
     /// The ballot check, which this board created in its constructor, so it
@@ -240,13 +257,7 @@ contract Board is EventAccumulator {
         uint64 gasLimit,
         bytes calldata record
     ) external {
-        // Only a deposit the relay made, or one L2 governance forges from its
-        // alias, gets past this, and 4.5 matches no call for a forgery (T-71).
-        unchecked {
-            if (msg.sender != address(uint160(relay) + ALIAS_OFFSET)) {
-                revert RelaySender(msg.sender);
-            }
-        }
+        _requireRelay();
         CanonicalCalldata.requireWordsThenBytes(4, record);
         uint256[2] memory q = _qualified(record);
         (BallotCheckLib.Admitted memory a,) =
@@ -262,6 +273,43 @@ contract Board is EventAccumulator {
             a.definitionHash,
             a.ballotHash,
             abi.encode(index, l1Block, stamp, gasLimit, record)
+        );
+    }
+
+    /// @notice A rolling poll's ballot forced through the L1 relay: the
+    /// deposit the relay's rolling call `index` made, recorded in L1 block
+    /// `l1Block` stamped `stamp`, with `gasLimit` gas, carrying `root`, the
+    /// root of the step tree the ballot's membership proof was made against
+    /// (docs/spec/contracts.md, Board, Relayed rolling ballots). Only the
+    /// relay's alias may call; the record passes the ballot check as
+    /// `submitRollingBallot`'s does, its proof checked against `root`, and
+    /// its stamp is inside the window. As on `submitRelayedBallot`, every
+    /// deposit it accepts emits, repeats included (T-50, T-25). The relay's
+    /// call hash binds the root, so a deposit carrying another root matches
+    /// no call, and a second call with another root fails the proof here,
+    /// which fixes its root (T-38).
+    function submitRelayedRollingBallot(
+        uint64 index,
+        uint64 l1Block,
+        uint64 stamp,
+        uint64 gasLimit,
+        bytes32 root,
+        bytes calldata record
+    ) external {
+        _requireRelay();
+        CanonicalCalldata.requireWordsThenBytes(5, record);
+        uint256[2] memory q = _qualified(record);
+        (BallotCheckLib.Admitted memory a,) =
+            ballotCheck.checkRolling(record, electionRegistry, uint256(root), q[0], q[1]);
+        if (stamp < a.opensAt || stamp > a.closesAt) {
+            revert RelayWindow(stamp, a.opensAt, a.closesAt);
+        }
+        _accepted[keccak256(record)] = true;
+        _log3(
+            RelayedRollingBallotSubmitted.selector,
+            a.definitionHash,
+            a.ballotHash,
+            abi.encode(index, l1Block, stamp, gasLimit, root, record)
         );
     }
 
@@ -489,6 +537,17 @@ contract Board is EventAccumulator {
     {
         _accepted[key] = true;
         _log3(selector, t1, t2, abi.encode(record));
+    }
+
+    /// `relay-sender`: only a deposit the relay made, or one L2 governance
+    /// forges from its alias, gets past this, and 4.5 matches no call for a
+    /// forgery (T-71).
+    function _requireRelay() private view {
+        unchecked {
+            if (msg.sender != address(uint160(relay) + ALIAS_OFFSET)) {
+                revert RelaySender(msg.sender);
+            }
+        }
     }
 
     /// A share receipt's length from its version byte: 165 bytes at version

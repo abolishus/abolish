@@ -11,17 +11,11 @@ import {MembershipProofLib} from "../src/MembershipProof.sol";
 import {ElectionsStub, TrusteesStub} from "./utils/BoardFixture.sol";
 import {TestBase, Vm} from "./utils/Vm.sol";
 
-/// The board's rolling call (docs/spec/contracts.md, Board, Rolling ballots;
-/// P2-17 part 5d-1) against ballot-v5-records.json (version-5 records with
-/// real membership proofs against the step roots an independent generator
-/// rebuilt from the groups' events) and contract-event-v10.json (the
-/// `RollingBallotSubmitted` records an independent generator wrote for them,
-/// each with its supplied root). The registries are stubs set from the
-/// files, each rolling cell with the recorded root 0, as the election
-/// registry records it: the only root the call checks a proof against is
-/// the one supplied, and the verifier, not the board, compares it with the
-/// step's (T-04, T-08, T-25, T-38).
-contract BoardRollingBallotTest is TestBase {
+/// What the board's two rolling calls' tests share: ballot-v5-records.json's
+/// elections in stub registries, each rolling cell with the recorded root 0,
+/// as the election registry records it, and the helpers that read the files
+/// and call the board.
+abstract contract BoardRollingFixture is TestBase {
     string internal constant V5 = "../../docs/spec/vectors/ballot-v5-records.json";
     string internal constant EVENTS = "../../docs/spec/vectors/contract-event-v10.json";
 
@@ -33,8 +27,11 @@ contract BoardRollingBallotTest is TestBase {
     ElectionsStub internal elections;
     TrusteesStub internal trustees;
     Board internal board;
+    /// Who `_accept` and `_refuse` call the board as; the test contract
+    /// itself while zero.
+    address internal sender;
 
-    function setUp() public {
+    function setUp() public virtual {
         string memory json = vm.readFile(V5);
         elections = new ElectionsStub();
         trustees = new TrusteesStub();
@@ -43,6 +40,294 @@ contract BoardRollingBallotTest is TestBase {
         _election(json, "default-only", 5);
     }
 
+    /// Where the default panel's first share hash is: after the step, the
+    /// VSS list (`T` rows of `k` 32-byte elements, each counted) and the
+    /// share hashes' count.
+    function _firstShareHash(bytes memory record) internal pure returns (uint256 o) {
+        o = 368;
+        uint256 rows = _u32(record, o);
+        o += 4;
+        for (uint256 j; j < rows; j++) {
+            o += 4 + 32 * _u32(record, o);
+        }
+        o += 4;
+    }
+
+    function _u32(bytes memory r, uint256 o) internal pure returns (uint256 v) {
+        for (uint256 i; i < 4; i++) {
+            v = (v << 8) | uint8(r[o + i]);
+        }
+    }
+
+    /// As Board.t.sol's: a run of 12 printable bytes, or an at sign flanked by
+    /// two printable bytes on each side (an e-mail address).
+    function _looksLikeText(bytes memory b) internal pure returns (bool) {
+        uint256 run;
+        for (uint256 i; i < b.length; i++) {
+            bool printable = uint8(b[i]) >= 0x20 && uint8(b[i]) < 0x7f;
+            run = printable ? run + 1 : 0;
+            if (run >= 12) return true;
+            if (b[i] == 0x40 && i >= 2 && i + 2 < b.length) {
+                bool flanked = true;
+                for (uint256 k = i - 2; k <= i + 2; k++) {
+                    if (uint8(b[k]) < 0x20 || uint8(b[k]) >= 0x7f) flanked = false;
+                }
+                if (flanked) return true;
+            }
+        }
+        return false;
+    }
+
+    /// The board's verdict on a ballot whose verifier admission code is
+    /// `code`: `accepted`, or the code it refuses with. The validity proofs
+    /// are the verifier's, and so is `root-step-range`: of the file's ballots
+    /// naming a step the poll doesn't accept, the two whose proofs are
+    /// against their own steps' trees ("its tree holds the member") pass the
+    /// board's proof check, and the others' proofs (relabelled, or another
+    /// ballot's) fail it.
+    function _boardCode(string memory id, string memory code)
+        internal
+        pure
+        returns (string memory)
+    {
+        if (_eq(code, "ok") || _eq(code, "option-proof") || _eq(code, "sum-proof")) {
+            return "accepted";
+        }
+        if (_eq(code, "root-step-range")) {
+            return _eq(id, "root-step-range-before-registration")
+                || _eq(id, "root-step-range-after-close")
+                ? "accepted"
+                : "membership-proof";
+        }
+        return code;
+    }
+
+    /// One election of the file in the stubs, pinning ballot version
+    /// `version`.
+    function _election(string memory json, string memory e, uint8 version) internal {
+        (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
+            _parameters(json, e, version);
+        bytes32 h = bytes32(_bytes(json, string.concat(".elections.", e, ".definitionHash")));
+        elections.set(h, p, tiers, roots);
+        elections.setCeremony(h, h, PANEL);
+    }
+
+    /// The parameters the election registry records for election `e` of the
+    /// file, with a window holding every time: its panels and questions,
+    /// and one cell per rolling tier with the root 0 (contracts.md, Election
+    /// registry, Parameters).
+    function _parameters(string memory json, string memory e, uint8 version)
+        internal
+        view
+        returns (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots)
+    {
+        string memory k = string.concat(".elections.", e);
+        p.ballotVersion = version;
+        p.threshold = uint8(vm.parseJsonUint(json, string.concat(k, ".threshold")));
+        p.panelSize = uint8(vm.parseJsonUint(json, string.concat(k, ".panelSize")));
+        p.authorThreshold = uint8(vm.parseJsonUint(json, string.concat(k, ".authorThreshold")));
+        p.authorPanelSize = uint8(vm.parseJsonUint(json, string.concat(k, ".authorPanelSize")));
+        p.closesAt = type(uint64).max;
+        uint256 n;
+        while (vm.keyExistsJson(json, _at(string.concat(k, ".questions"), n, ""))) n++;
+        p.questions = new ElectionRegistry.Question[](n);
+        for (uint256 q; q < n; q++) {
+            p.questions[q].method = 1;
+            string memory jq = _at(string.concat(k, ".questions"), q, "");
+            p.questions[q].optionCount =
+                uint16(vm.parseJsonUint(json, string.concat(jq, ".optionCount")));
+            p.questions[q].minSelections =
+                uint16(vm.parseJsonUint(json, string.concat(jq, ".minSelections")));
+            p.questions[q].maxSelections =
+                uint16(vm.parseJsonUint(json, string.concat(jq, ".maxSelections")));
+            p.optionCount += p.questions[q].optionCount;
+        }
+        n = 0;
+        while (vm.keyExistsJson(json, _at(string.concat(k, ".cells"), n, ""))) n++;
+        tiers = new uint8[](n);
+        roots = new uint256[](n);
+        for (uint256 c; c < n; c++) {
+            tiers[c] = uint8(vm.parseJsonUint(json, _at(string.concat(k, ".cells"), c, ".tier")));
+        }
+    }
+
+    /// The ballot's two key sets, as the file registers them.
+    function _registerKeySets(string memory json, string memory b) internal {
+        bytes32 h = bytes32(
+            _bytes(
+                json,
+                string.concat(
+                    ".elections.", _str(json, string.concat(b, ".election")), ".definitionHash"
+                )
+            )
+        );
+        trustees.setKeySet(
+            h, PANEL, _mask(vm.parseJsonUintArray(json, string.concat(b, ".registered")))
+        );
+        elections.setAuthorKeySet(
+            h, _mask(vm.parseJsonUintArray(json, string.concat(b, ".authorRegistered")))
+        );
+    }
+
+    /// The key of ballot-v5-records.json's ballot `id`.
+    function _ballot(string memory json, string memory id) internal pure returns (string memory) {
+        string[] memory ids = abi.decode(vm.parseJson(json, ".ballots[*].id"), (string[]));
+        for (uint256 i; i < ids.length; i++) {
+            if (_eq(ids[i], id)) return _at(".ballots", i, "");
+        }
+        revert(string.concat("no ballot ", id));
+    }
+
+    /// The `.fields` key of contract-event-v10.json's record `id`.
+    function _eventFields(string memory ej, string memory id)
+        internal
+        pure
+        returns (string memory)
+    {
+        string[] memory ids = abi.decode(vm.parseJson(ej, ".records[*].id"), (string[]));
+        for (uint256 i; i < ids.length; i++) {
+            if (_eq(ids[i], id)) return _at(".records", i, ".fields");
+        }
+        revert(string.concat("no event record ", id));
+    }
+
+    /// The supplied root and the record a `RollingBallotSubmitted` carries.
+    function _rolling(string memory ej, string memory f)
+        internal
+        pure
+        returns (bytes32 root, bytes memory record)
+    {
+        (root, record) = abi.decode(_bytes(ej, string.concat(f, ".data")), (bytes32, bytes));
+    }
+
+    /// The log is the file's record: its topics and its data.
+    function _assertLog(string memory ej, string memory f, Vm.Log memory log, string memory id)
+        internal
+        pure
+    {
+        assertEq(log.topics.length, 3, string.concat("three topics for ", id));
+        assertEq(log.topics[0], ROLLING_SUBMITTED, string.concat("topic 0 of ", id));
+        for (uint256 t; t < 3; t++) {
+            assertEq(
+                bytes32(vm.parseBytes(_str(ej, _at(string.concat(f, ".topics"), t, "")))),
+                log.topics[t],
+                string.concat("the file's topic of ", id)
+            );
+        }
+        assertEq(
+            keccak256(_bytes(ej, string.concat(f, ".data"))),
+            keccak256(log.data),
+            string.concat("the file's data of ", id)
+        );
+    }
+
+    /// Calls the board, requires success, and checks every log it emitted
+    /// against its accumulator.
+    function _accept(bytes memory data) internal returns (Vm.Log[] memory logs) {
+        (bytes32 acc, uint64 count) = board.eventAccumulator();
+        vm.recordLogs();
+        if (sender != address(0)) vm.prank(sender);
+        (bool ok, bytes memory ret) = address(board).call(data);
+        if (!ok) revert(string.concat("refused: ", vm.toString(ret)));
+        logs = vm.getRecordedLogs();
+        for (uint256 i; i < logs.length; i++) {
+            assertTrue(logs[i].emitter == address(board), "emitter");
+            acc = EventAccumulatorLib.step(
+                acc, uint64(count + i), block.number, block.timestamp, logs[i].topics, logs[i].data
+            );
+        }
+        (bytes32 after_, uint64 countAfter) = board.eventAccumulator();
+        assertEq(after_, acc, "accumulator");
+        assertEq(countAfter, count + logs.length, "count");
+    }
+
+    function _refuse(bytes memory data, bytes memory expected, string memory what) internal {
+        (bytes32 acc, uint64 count) = board.eventAccumulator();
+        if (sender != address(0)) vm.prank(sender);
+        (bool ok, bytes memory ret) = address(board).call(data);
+        assertTrue(!ok, string.concat(what, ": accepted"));
+        if (keccak256(ret) != keccak256(expected)) {
+            revert(string.concat(what, ": refused with ", vm.toString(ret)));
+        }
+        (bytes32 after_, uint64 countAfter) = board.eventAccumulator();
+        assertEq(after_, acc, "no event");
+        assertEq(countAfter, count, "no count");
+    }
+
+    function _mask(uint256[] memory seats) internal pure returns (uint256 m) {
+        for (uint256 i; i < seats.length; i++) {
+            m |= 1 << seats[i];
+        }
+    }
+
+    function _code(string memory s) internal pure returns (BallotCheckLib.Code) {
+        bytes32 c = keccak256(bytes(s));
+        if (c == keccak256("ballot-stray")) return BallotCheckLib.Code.BallotStray;
+        if (c == keccak256("ballot-cell")) return BallotCheckLib.Code.BallotCell;
+        if (c == keccak256("validity-shape")) return BallotCheckLib.Code.ValidityShape;
+        if (c == keccak256("share-hash-unqualified")) {
+            return BallotCheckLib.Code.ShareHashUnqualified;
+        }
+        if (c == keccak256("membership-proof")) return BallotCheckLib.Code.MembershipProof;
+        revert(string.concat("unknown result ", s));
+    }
+
+    function _decodeError(string memory s)
+        internal
+        pure
+        returns (ElectionDefinitionLib.DecodeError)
+    {
+        bytes32 c = keccak256(bytes(s));
+        if (c == keccak256("truncated")) return ElectionDefinitionLib.DecodeError.Truncated;
+        if (c == keccak256("trailing-bytes")) {
+            return ElectionDefinitionLib.DecodeError.TrailingBytes;
+        }
+        if (c == keccak256("non-canonical")) return ElectionDefinitionLib.DecodeError.NonCanonical;
+        if (c == keccak256("profile-mismatch")) {
+            return ElectionDefinitionLib.DecodeError.ProfileMismatch;
+        }
+        revert(string.concat("unknown decode error ", s));
+    }
+
+    function _slice(bytes memory b, uint256 at, uint256 n) internal pure returns (bytes memory s) {
+        s = new bytes(n);
+        for (uint256 i; i < n; i++) {
+            s[i] = b[at + i];
+        }
+    }
+
+    function _at(string memory list, uint256 i, string memory field)
+        internal
+        pure
+        returns (string memory)
+    {
+        return string.concat(list, "[", vm.toString(i), "]", field);
+    }
+
+    function _str(string memory j, string memory key) internal pure returns (string memory) {
+        return vm.parseJsonString(j, key);
+    }
+
+    function _bytes(string memory j, string memory key) internal pure returns (bytes memory) {
+        return vm.parseBytes(_str(j, key));
+    }
+
+    function _eq(string memory a, string memory b) internal pure returns (bool) {
+        return keccak256(bytes(a)) == keccak256(bytes(b));
+    }
+}
+
+/// The board's rolling call (docs/spec/contracts.md, Board, Rolling ballots;
+/// P2-17 part 5d-1) against ballot-v5-records.json (version-5 records with
+/// real membership proofs against the step roots an independent generator
+/// rebuilt from the groups' events) and contract-event-v10.json (the
+/// `RollingBallotSubmitted` records an independent generator wrote for them,
+/// each with its supplied root). The registries are stubs set from the
+/// files, each rolling cell with the recorded root 0, as the election
+/// registry records it: the only root the call checks a proof against is
+/// the one supplied, and the verifier, not the board, compares it with the
+/// step's (T-04, T-08, T-25, T-38).
+contract BoardRollingBallotTest is BoardRollingFixture {
     /// Every ballot of the file, submitted with the root contract-event-v10
     /// supplies for it (its step's root), is accepted and emitted exactly as
     /// the file's record, or refused with the board's code. The board runs
@@ -437,281 +722,5 @@ contract BoardRollingBallotTest is TestBase {
         assertTrue(_looksLikeText(proof), "detector misses the proof");
         (bool ok,) = address(board).call(abi.encodeCall(Board.submitRollingBallot, (root, proof)));
         assertTrue(!ok, "text as the proof");
-    }
-
-    // --- helpers -------------------------------------------------------------
-
-    /// Where the default panel's first share hash is: after the step, the
-    /// VSS list (`T` rows of `k` 32-byte elements, each counted) and the
-    /// share hashes' count.
-    function _firstShareHash(bytes memory record) internal pure returns (uint256 o) {
-        o = 368;
-        uint256 rows = _u32(record, o);
-        o += 4;
-        for (uint256 j; j < rows; j++) {
-            o += 4 + 32 * _u32(record, o);
-        }
-        o += 4;
-    }
-
-    function _u32(bytes memory r, uint256 o) internal pure returns (uint256 v) {
-        for (uint256 i; i < 4; i++) {
-            v = (v << 8) | uint8(r[o + i]);
-        }
-    }
-
-    /// As Board.t.sol's: a run of 12 printable bytes, or an at sign flanked by
-    /// two printable bytes on each side (an e-mail address).
-    function _looksLikeText(bytes memory b) internal pure returns (bool) {
-        uint256 run;
-        for (uint256 i; i < b.length; i++) {
-            bool printable = uint8(b[i]) >= 0x20 && uint8(b[i]) < 0x7f;
-            run = printable ? run + 1 : 0;
-            if (run >= 12) return true;
-            if (b[i] == 0x40 && i >= 2 && i + 2 < b.length) {
-                bool flanked = true;
-                for (uint256 k = i - 2; k <= i + 2; k++) {
-                    if (uint8(b[k]) < 0x20 || uint8(b[k]) >= 0x7f) flanked = false;
-                }
-                if (flanked) return true;
-            }
-        }
-        return false;
-    }
-
-    /// The board's verdict on a ballot whose verifier admission code is
-    /// `code`: `accepted`, or the code it refuses with. The validity proofs
-    /// are the verifier's, and so is `root-step-range`: of the file's ballots
-    /// naming a step the poll doesn't accept, the two whose proofs are
-    /// against their own steps' trees ("its tree holds the member") pass the
-    /// board's proof check, and the others' proofs (relabelled, or another
-    /// ballot's) fail it.
-    function _boardCode(string memory id, string memory code)
-        internal
-        pure
-        returns (string memory)
-    {
-        if (_eq(code, "ok") || _eq(code, "option-proof") || _eq(code, "sum-proof")) {
-            return "accepted";
-        }
-        if (_eq(code, "root-step-range")) {
-            return _eq(id, "root-step-range-before-registration")
-                || _eq(id, "root-step-range-after-close")
-                ? "accepted"
-                : "membership-proof";
-        }
-        return code;
-    }
-
-    /// One election of the file in the stubs, pinning ballot version
-    /// `version`.
-    function _election(string memory json, string memory e, uint8 version) internal {
-        (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots) =
-            _parameters(json, e, version);
-        bytes32 h = bytes32(_bytes(json, string.concat(".elections.", e, ".definitionHash")));
-        elections.set(h, p, tiers, roots);
-        elections.setCeremony(h, h, PANEL);
-    }
-
-    /// The parameters the election registry records for election `e` of the
-    /// file, with a window holding every time: its panels and questions,
-    /// and one cell per rolling tier with the root 0 (contracts.md, Election
-    /// registry, Parameters).
-    function _parameters(string memory json, string memory e, uint8 version)
-        internal
-        view
-        returns (ElectionRegistry.Parameters memory p, uint8[] memory tiers, uint256[] memory roots)
-    {
-        string memory k = string.concat(".elections.", e);
-        p.ballotVersion = version;
-        p.threshold = uint8(vm.parseJsonUint(json, string.concat(k, ".threshold")));
-        p.panelSize = uint8(vm.parseJsonUint(json, string.concat(k, ".panelSize")));
-        p.authorThreshold = uint8(vm.parseJsonUint(json, string.concat(k, ".authorThreshold")));
-        p.authorPanelSize = uint8(vm.parseJsonUint(json, string.concat(k, ".authorPanelSize")));
-        p.closesAt = type(uint64).max;
-        uint256 n;
-        while (vm.keyExistsJson(json, _at(string.concat(k, ".questions"), n, ""))) n++;
-        p.questions = new ElectionRegistry.Question[](n);
-        for (uint256 q; q < n; q++) {
-            p.questions[q].method = 1;
-            string memory jq = _at(string.concat(k, ".questions"), q, "");
-            p.questions[q].optionCount =
-                uint16(vm.parseJsonUint(json, string.concat(jq, ".optionCount")));
-            p.questions[q].minSelections =
-                uint16(vm.parseJsonUint(json, string.concat(jq, ".minSelections")));
-            p.questions[q].maxSelections =
-                uint16(vm.parseJsonUint(json, string.concat(jq, ".maxSelections")));
-            p.optionCount += p.questions[q].optionCount;
-        }
-        n = 0;
-        while (vm.keyExistsJson(json, _at(string.concat(k, ".cells"), n, ""))) n++;
-        tiers = new uint8[](n);
-        roots = new uint256[](n);
-        for (uint256 c; c < n; c++) {
-            tiers[c] = uint8(vm.parseJsonUint(json, _at(string.concat(k, ".cells"), c, ".tier")));
-        }
-    }
-
-    /// The ballot's two key sets, as the file registers them.
-    function _registerKeySets(string memory json, string memory b) internal {
-        bytes32 h = bytes32(
-            _bytes(
-                json,
-                string.concat(
-                    ".elections.", _str(json, string.concat(b, ".election")), ".definitionHash"
-                )
-            )
-        );
-        trustees.setKeySet(
-            h, PANEL, _mask(vm.parseJsonUintArray(json, string.concat(b, ".registered")))
-        );
-        elections.setAuthorKeySet(
-            h, _mask(vm.parseJsonUintArray(json, string.concat(b, ".authorRegistered")))
-        );
-    }
-
-    /// The key of ballot-v5-records.json's ballot `id`.
-    function _ballot(string memory json, string memory id) internal pure returns (string memory) {
-        string[] memory ids = abi.decode(vm.parseJson(json, ".ballots[*].id"), (string[]));
-        for (uint256 i; i < ids.length; i++) {
-            if (_eq(ids[i], id)) return _at(".ballots", i, "");
-        }
-        revert(string.concat("no ballot ", id));
-    }
-
-    /// The `.fields` key of contract-event-v10.json's record `id`.
-    function _eventFields(string memory ej, string memory id)
-        internal
-        pure
-        returns (string memory)
-    {
-        string[] memory ids = abi.decode(vm.parseJson(ej, ".records[*].id"), (string[]));
-        for (uint256 i; i < ids.length; i++) {
-            if (_eq(ids[i], id)) return _at(".records", i, ".fields");
-        }
-        revert(string.concat("no event record ", id));
-    }
-
-    /// The supplied root and the record a `RollingBallotSubmitted` carries.
-    function _rolling(string memory ej, string memory f)
-        internal
-        pure
-        returns (bytes32 root, bytes memory record)
-    {
-        (root, record) = abi.decode(_bytes(ej, string.concat(f, ".data")), (bytes32, bytes));
-    }
-
-    /// The log is the file's record: its topics and its data.
-    function _assertLog(string memory ej, string memory f, Vm.Log memory log, string memory id)
-        internal
-        pure
-    {
-        assertEq(log.topics.length, 3, string.concat("three topics for ", id));
-        assertEq(log.topics[0], ROLLING_SUBMITTED, string.concat("topic 0 of ", id));
-        for (uint256 t; t < 3; t++) {
-            assertEq(
-                bytes32(vm.parseBytes(_str(ej, _at(string.concat(f, ".topics"), t, "")))),
-                log.topics[t],
-                string.concat("the file's topic of ", id)
-            );
-        }
-        assertEq(
-            keccak256(_bytes(ej, string.concat(f, ".data"))),
-            keccak256(log.data),
-            string.concat("the file's data of ", id)
-        );
-    }
-
-    /// Calls the board, requires success, and checks every log it emitted
-    /// against its accumulator.
-    function _accept(bytes memory data) internal returns (Vm.Log[] memory logs) {
-        (bytes32 acc, uint64 count) = board.eventAccumulator();
-        vm.recordLogs();
-        (bool ok, bytes memory ret) = address(board).call(data);
-        if (!ok) revert(string.concat("refused: ", vm.toString(ret)));
-        logs = vm.getRecordedLogs();
-        for (uint256 i; i < logs.length; i++) {
-            assertTrue(logs[i].emitter == address(board), "emitter");
-            acc = EventAccumulatorLib.step(
-                acc, uint64(count + i), block.number, block.timestamp, logs[i].topics, logs[i].data
-            );
-        }
-        (bytes32 after_, uint64 countAfter) = board.eventAccumulator();
-        assertEq(after_, acc, "accumulator");
-        assertEq(countAfter, count + logs.length, "count");
-    }
-
-    function _refuse(bytes memory data, bytes memory expected, string memory what) internal {
-        (bytes32 acc, uint64 count) = board.eventAccumulator();
-        (bool ok, bytes memory ret) = address(board).call(data);
-        assertTrue(!ok, string.concat(what, ": accepted"));
-        if (keccak256(ret) != keccak256(expected)) {
-            revert(string.concat(what, ": refused with ", vm.toString(ret)));
-        }
-        (bytes32 after_, uint64 countAfter) = board.eventAccumulator();
-        assertEq(after_, acc, "no event");
-        assertEq(countAfter, count, "no count");
-    }
-
-    function _mask(uint256[] memory seats) internal pure returns (uint256 m) {
-        for (uint256 i; i < seats.length; i++) {
-            m |= 1 << seats[i];
-        }
-    }
-
-    function _code(string memory s) internal pure returns (BallotCheckLib.Code) {
-        bytes32 c = keccak256(bytes(s));
-        if (c == keccak256("ballot-stray")) return BallotCheckLib.Code.BallotStray;
-        if (c == keccak256("ballot-cell")) return BallotCheckLib.Code.BallotCell;
-        if (c == keccak256("validity-shape")) return BallotCheckLib.Code.ValidityShape;
-        if (c == keccak256("share-hash-unqualified")) {
-            return BallotCheckLib.Code.ShareHashUnqualified;
-        }
-        if (c == keccak256("membership-proof")) return BallotCheckLib.Code.MembershipProof;
-        revert(string.concat("unknown result ", s));
-    }
-
-    function _decodeError(string memory s)
-        internal
-        pure
-        returns (ElectionDefinitionLib.DecodeError)
-    {
-        bytes32 c = keccak256(bytes(s));
-        if (c == keccak256("truncated")) return ElectionDefinitionLib.DecodeError.Truncated;
-        if (c == keccak256("trailing-bytes")) {
-            return ElectionDefinitionLib.DecodeError.TrailingBytes;
-        }
-        if (c == keccak256("non-canonical")) return ElectionDefinitionLib.DecodeError.NonCanonical;
-        if (c == keccak256("profile-mismatch")) {
-            return ElectionDefinitionLib.DecodeError.ProfileMismatch;
-        }
-        revert(string.concat("unknown decode error ", s));
-    }
-
-    function _slice(bytes memory b, uint256 at, uint256 n) internal pure returns (bytes memory s) {
-        s = new bytes(n);
-        for (uint256 i; i < n; i++) {
-            s[i] = b[at + i];
-        }
-    }
-
-    function _at(string memory list, uint256 i, string memory field)
-        internal
-        pure
-        returns (string memory)
-    {
-        return string.concat(list, "[", vm.toString(i), "]", field);
-    }
-
-    function _str(string memory j, string memory key) internal pure returns (string memory) {
-        return vm.parseJsonString(j, key);
-    }
-
-    function _bytes(string memory j, string memory key) internal pure returns (bytes memory) {
-        return vm.parseBytes(_str(j, key));
-    }
-
-    function _eq(string memory a, string memory b) internal pure returns (bool) {
-        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

@@ -437,6 +437,20 @@ export const boardAbi = [
   {
     type: "function",
     inputs: [
+      { name: "index", internalType: "uint64", type: "uint64" },
+      { name: "l1Block", internalType: "uint64", type: "uint64" },
+      { name: "stamp", internalType: "uint64", type: "uint64" },
+      { name: "gasLimit", internalType: "uint64", type: "uint64" },
+      { name: "root", internalType: "bytes32", type: "bytes32" },
+      { name: "record", internalType: "bytes", type: "bytes" },
+    ],
+    name: "submitRelayedRollingBallot",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
       { name: "root", internalType: "bytes32", type: "bytes32" },
       { name: "record", internalType: "bytes", type: "bytes" },
     ],
@@ -564,6 +578,46 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "RelayedBallotSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      { name: "index", internalType: "uint64", type: "uint64", indexed: false },
+      {
+        name: "l1Block",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      { name: "stamp", internalType: "uint64", type: "uint64", indexed: false },
+      {
+        name: "gasLimit",
+        internalType: "uint64",
+        type: "uint64",
+        indexed: false,
+      },
+      {
+        name: "root",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: false,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "RelayedRollingBallotSubmitted",
   },
   {
     type: "event",

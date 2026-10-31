@@ -20,10 +20,10 @@
 // independent generators. The election registry declares version 9's three,
 // so versions 1 to 8 are compared with it less AuthorPanelRegistered, which
 // they lack; the board declares version 8's eleven, which versions 9 to 12
-// keep, and version 10's rolling ballot, so only versions 8 to 12 are
-// compared with it, versions 8 and 9 less the rolling ballot, which they
-// lack, and versions 11 and 12 less the relayed rolling ballot version 11
-// adds, which the board doesn't take until P2-17 part 5; the group registry
+// keep, and versions 10 and 11's rolling and relayed rolling ballots, so
+// only versions 8 to 12 are compared with it, versions 8 and 9 less both,
+// which they lack, and version 10 less the relayed rolling ballot, which
+// version 11 adds; the group registry
 // declares version 7's seven, so only versions 7 to 12 are compared with it;
 // and the trustee registry logs each panel's
 // kind, so only version 12 is compared with it: no trustee registry that
@@ -106,25 +106,25 @@ const versions = [
 // to 8 lack the election registry's AuthorPanelRegistered, and every other
 // event the registry declares must still match their rows.
 const AUTHOR_PANEL = "AuthorPanelRegistered(bytes32,bytes32,bytes)";
-// Versions 8 and 9 lack the board's rolling ballot, which version 10 adds.
+// Versions 8 and 9 lack the board's rolling ballot, which version 10 adds,
+// and versions 8 to 10 its relayed rolling ballot, which version 11 adds.
 const ROLLING = "RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)";
-// The events a table names that the contract doesn't declare yet: the
-// relayed rolling ballot version 11 adds, which the board takes in a later
-// part of P2-17 part 5.
 const RELAYED_ROLLING =
   "RelayedRollingBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes32,bytes)";
 const cases = [
-  ...versions.slice(11).map((file) => [file, ...trusteeRegistry, [], []] as const),
-  ...versions.slice(6).map((file) => [file, ...groupRegistry, [], []] as const),
+  ...versions.slice(11).map((file) => [file, ...trusteeRegistry, []] as const),
+  ...versions.slice(6).map((file) => [file, ...groupRegistry, []] as const),
   ...versions
     .slice(7)
     .map(
       (file, i) =>
-        [file, ...board, i < 2 ? [ROLLING] : [], i < 3 ? [] : [RELAYED_ROLLING]] as const,
+        [
+          file,
+          ...board,
+          i < 2 ? [ROLLING, RELAYED_ROLLING] : i < 3 ? [RELAYED_ROLLING] : [],
+        ] as const,
     ),
-  ...versions.map(
-    (file, i) => [file, ...electionRegistry, i < 8 ? [AUTHOR_PANEL] : [], []] as const,
-  ),
+  ...versions.map((file, i) => [file, ...electionRegistry, i < 8 ? [AUTHOR_PANEL] : []] as const),
 ];
 
 // The events a contract declares that no version's table lists yet.
@@ -153,26 +153,19 @@ const isPending = (role: string, signature: string) =>
   (pending[role] ?? []).some((e) => e.signature === signature);
 
 describe("contract-event tables", () => {
-  test.each(cases)(
-    "%s: %s declares exactly its table's events",
-    (file, role, abi, later, undeclared) => {
-      const vectors = load(file);
-      const declared = declaredEvents(abi).filter(
-        (e) => !isPending(role, e.signature) && !(later as readonly string[]).includes(e.signature),
-      );
-      const table = vectors.events
-        .filter((e) => e.role === role)
-        .map((e) => ({ signature: e.signature, indexed: [...e.indexed] }))
-        .sort((a, b) => a.signature.localeCompare(b.signature));
-      expect(table.length).toBeGreaterThan(0);
-      expect(table.some((e) => (later as readonly string[]).includes(e.signature))).toBe(false);
-      for (const signature of undeclared)
-        expect(table.some((e) => e.signature === signature)).toBe(true);
-      expect(declared).toEqual(
-        table.filter((e) => !(undeclared as readonly string[]).includes(e.signature)),
-      );
-    },
-  );
+  test.each(cases)("%s: %s declares exactly its table's events", (file, role, abi, later) => {
+    const vectors = load(file);
+    const declared = declaredEvents(abi).filter(
+      (e) => !isPending(role, e.signature) && !(later as readonly string[]).includes(e.signature),
+    );
+    const table = vectors.events
+      .filter((e) => e.role === role)
+      .map((e) => ({ signature: e.signature, indexed: [...e.indexed] }))
+      .sort((a, b) => a.signature.localeCompare(b.signature));
+    expect(table.length).toBeGreaterThan(0);
+    expect(table.some((e) => (later as readonly string[]).includes(e.signature))).toBe(false);
+    expect(declared).toEqual(table);
+  });
 
   test("the version rule 9 pins names every event of the contracts deployed together", () => {
     const source = readFileSync(new URL("../src/ElectionRegistry.sol", import.meta.url), "utf8");

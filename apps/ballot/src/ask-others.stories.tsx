@@ -8,11 +8,12 @@ import { AskOthers } from "./ask-others.tsx";
 
 const URL = "https://abolish.us/p/3j55dw1";
 const TITLE = "Which improvement matters most to you?";
+const SEAL = "3f8a0c51d2e4b69788a1c0d3e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718";
 
 const meta = {
   title: "Ballot/Ask others",
   component: AskOthers,
-  args: { share: { url: URL, title: TITLE }, canShare: true },
+  args: { share: { url: URL, title: TITLE }, seal: SEAL, canShare: true },
 } satisfies Meta<typeof AskOthers>;
 
 export default meta;
@@ -110,5 +111,26 @@ export const CopyFails: Story = {
     } finally {
       restore();
     }
+  },
+};
+
+export const Card: Story = {
+  name: "The \u201cI answered\u201d card, asked for",
+  play: async ({ canvasElement }) => {
+    const part = within(within(canvasElement).getByRole("region", { name: "Ask others" }));
+    // Drawn only when asked for, like the QR code.
+    const toggle = part.getByRole("button", { name: "Make an \u201cI answered\u201d card" });
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(part.queryByRole("img")).toBeNull();
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(
+      part.getByRole("img", {
+        name: `Card: I answered this poll. ${TITLE} Answer it too at abolish.us/p/3j55dw1.`,
+      }),
+    ).toBeVisible();
+    await waitFor(() => expect(part.getByRole("button", { name: "Save the card" })).toBeEnabled());
+    await userEvent.click(toggle);
+    await expect(part.queryByRole("img")).toBeNull();
   },
 };

@@ -360,7 +360,7 @@ export function Sent({
       <Part title={t("sentUnsignedTitle")}>
         <p className="m-0">{t("sentUnsigned")}</p>
       </Part>
-      {share === undefined ? null : <AskOthers share={share} />}
+      {share === undefined ? null : <AskOthers share={share} seal={poll.definitionHash} />}
       <Part title={t("answerAgain")}>
         <p className="m-0">{t("revoteExplained")}</p>
       </Part>
@@ -413,7 +413,7 @@ export function Answered({
       <Part title={t("sentUnsignedTitle")}>
         <p className="m-0">{t("sentUnsigned")}</p>
       </Part>
-      {share === undefined ? null : <AskOthers share={share} />}
+      {share === undefined ? null : <AskOthers share={share} seal={poll.definitionHash} />}
       <Part title={t("answeredFreshTitle")}>
         <p className="m-0">{t("answeredFresh")}</p>
       </Part>

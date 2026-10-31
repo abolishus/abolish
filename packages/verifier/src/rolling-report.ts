@@ -2,7 +2,8 @@
 // verifier.md, Counted set and tally, step 8; 8.1; docs/spec/membership.md,
 // Reported counts; P2-17 part 4e-1): its member counts at opening, at its
 // last boundary and at the smallest step its ballots used, its eligible
-// count and its growth per anchoring period, each computed by
+// count, its growth per anchoring period and, under a live definition, its
+// eligible count at each release the tier chose, each computed by
 // @abolishus/crypto's `rollingTierReport` from the chain the ballots were
 // judged against, never read from the definition, a release or a submitter
 // (T-16, T-13, T-01, T-06). A rolling result describes the people who
@@ -39,6 +40,22 @@ export interface RollingElectorateReport {
     readonly removed: number;
     readonly members: number;
   }[];
+  /**
+   * Under a live definition whose releases were read, each release the tier
+   * chose, in snapshot order: `E(n_r)` with `n_r`, or with `step` `null` the
+   * opening count, labelled as at opening.
+   */
+  readonly releases?: readonly {
+    readonly snapshot: number;
+    readonly step: number | null;
+    readonly count: number;
+  }[];
+}
+
+/** A release a rolling tier chose: snapshot `r`, from 1, the board through segment `σ_r`. */
+export interface RollingChosenRelease {
+  readonly snapshot: number;
+  readonly segment: number;
 }
 
 /**
@@ -47,7 +64,11 @@ export interface RollingElectorateReport {
  * verify against their steps' roots, admitted or not. Only those in the
  * counted extent, the entries before `extent`, are read: the sealed board's
  * whole. Each such step is one the poll accepts (5.1), so `rollingTierReport`
- * never refuses it.
+ * never refuses it. `releases`, given under a live definition whose releases
+ * were read, maps each rolling tier to the releases it chose: a release's
+ * snapshot holds the copies boarded through its segment, whose steps join
+ * `n_r` since a segment's label isn't tied to its ballots' L1 references
+ * (docs/spec/membership.md, Reported counts, At a live release).
  */
 export function rollingElectorates(
   definition: ElectionDefinitionV7Record,
@@ -55,9 +76,16 @@ export function rollingElectorates(
   clock: AnchorClock,
   steps: readonly RollingBallotStep[],
   extent: number,
+  releases?: ReadonlyMap<number, readonly RollingChosenRelease[]>,
 ): readonly RollingElectorateReport[] {
   const d = definition.value;
   return d.rolling_electorate.map((tier, cell) => {
+    const own = steps.filter((s) => s.cell === cell && s.entry < extent);
+    const chosen = releases?.get(tier.tier);
+    // The releases report lists every tier of the same definition, so a
+    // missing one is the caller's error, never a tier that chose none.
+    if (releases !== undefined && chosen === undefined)
+      throw new Error(`rollingElectorates: no releases for tier ${tier.tier}`);
     const r = rollingTierReport(
       chain.events,
       {
@@ -68,10 +96,11 @@ export function rollingElectorates(
       },
       {
         clock: { epoch: clock.epoch, period: clock.period },
-        ballotSteps: steps
-          .filter((s) => s.cell === cell && s.entry < extent)
-          .map((s) => BigInt(s.step)),
-        releases: [],
+        ballotSteps: own.map((s) => BigInt(s.step)),
+        releases: (chosen ?? []).map((c) => ({
+          segment: BigInt(c.segment),
+          snapshotSteps: own.filter((s) => s.segment <= c.segment).map((s) => BigInt(s.step)),
+        })),
       },
     );
     return {
@@ -91,6 +120,18 @@ export function rollingElectorates(
         removed: g.removed,
         members: g.members,
       })),
+      ...(chosen !== undefined && {
+        releases: chosen.map((c, i) => {
+          // One per release given, in order.
+          const got = r.releases[i];
+          if (got === undefined) throw new Error("rollingElectorates: a release without its count");
+          return {
+            snapshot: c.snapshot,
+            step: got.step === null ? null : Number(got.step),
+            count: got.count,
+          };
+        }),
+      }),
     };
   });
 }

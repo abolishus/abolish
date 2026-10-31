@@ -6,7 +6,9 @@ verifier-ballots-v5-tier0-live.json's polls reports about its electorate
 (docs/spec/verifier.md, Counted set and tally, step 8; docs/spec/membership.md,
 Reported counts; P2-17 part 4e-1): its member count at opening, its eligible
 count, its count at the last boundary, the smallest step its ballots used and
-its growth per anchoring period.
+its growth per anchoring period; and, for the live poll, its eligible count
+at each release its tier chose (membership.md, At a live release; P2-17 part
+4e-2).
 
 Each poll is rebuilt by its own generator's `build` (every value but the
 proofs' bytes, deterministically from fixed labels), whose ballots are every
@@ -43,12 +45,16 @@ lv = _load("verifier_ballots_v5_tier0_live_vectors", "verifier-ballots-v5-tier0-
 r5 = sv.r5
 
 
-def tier_report(d, events, registered_at, epoch, period, steps):
-    """rolling-report-vectors.py's report of the definition's one rolling tier, under (epoch, period)."""
+def tier_report(d, events, registered_at, epoch, period, steps, releases=None):
+    """rolling-report-vectors.py's report of the definition's one rolling tier, under (epoch, period).
+
+    `releases`, under a live definition, is each chosen release's (snapshot, segment,
+    snapshot steps): the steps named by the ballots boarded through its segment.
+    """
     (tier,) = d["rolling_electorate"]
     # rr's periods are read from its module's clock, so it is set to the bundle's.
     rr.EPOCH, rr.PERIOD = epoch, period
-    rep, releases = rr.report(
+    rep, got_releases = rr.report(
         {
             "id": "tier 0",
             "events": events,
@@ -57,10 +63,11 @@ def tier_report(d, events, registered_at, epoch, period, steps):
             "registered_at": registered_at,
             "closes_at": d["closes_at"],
             "ballot_steps": steps,
-            "releases": [],
+            "releases": [(segment, snap) for _, segment, snap in releases or []],
         }
     )
-    assert releases == []
+    if releases is not None:
+        rep["releases"] = [{"snapshot": snapshot, "step": got["step"], "count": got["count"]} for (snapshot, _, _), got in zip(releases, got_releases)]
     return {"tier": tier["tier"], "electorate": rep}
 
 
@@ -70,13 +77,29 @@ def sealed(constants):
     # The sealed bundle's clock (verifier-ballots-v5-tier0-sealed-vectors.py, assemble).
     epoch = d["closes_at"] - 2 * sv.PERIOD
     steps = [b["step"] for _, b, _ in s["ballots"]]
-    return tier_report(d, r5.EVENTS, r5.REGISTERED_AT, epoch, sv.PERIOD, steps)
+    # Live too, but shorter than `live_every` periods: no scheduled snapshot,
+    # so no release (that file's docstring; tally.md, Schedule).
+    assert d["results_mode"] == r5.d6.LIVE
+    return tier_report(d, r5.EVENTS, r5.REGISTERED_AT, epoch, sv.PERIOD, steps, [])
+
+
+# The live poll's one chosen release: the decision at snapshot 2 chooses
+# snapshot 1 (verifier-ballots-v5-tier0-live-vectors.py's assemble asserts
+# it), the board through segment σ_1 = 1 (that file's docstring; tally.md,
+# Schedule).
+LIVE_RELEASES = [(1, 1)]
 
 
 def live(constants):
     s = lv.build(constants)
     steps = [b["ballot"]["step"] for b in s["ballots"]]
-    return tier_report(s["definition"], lv.r5.EVENTS, lv.REGISTERED_AT, lv.EPOCH, lv.PERIOD, steps)
+    # A snapshot holds the ballots boarded through its segment: snapshot 1
+    # holds the early joiner's, at step MID, beside the twenty at step M,
+    # both below the newest boundary in period 1, which is n_r.
+    rr.EPOCH, rr.PERIOD = lv.EPOCH, lv.PERIOD
+    assert rr.last_boundary(rr.period_end(1)) > lv.MID
+    releases = [(snapshot, segment, [b["ballot"]["step"] for b in s["ballots"] if b["segment"] <= segment]) for snapshot, segment in LIVE_RELEASES]
+    return tier_report(s["definition"], lv.r5.EVENTS, lv.REGISTERED_AT, lv.EPOCH, lv.PERIOD, steps, releases)
 
 
 def main():
@@ -93,7 +116,10 @@ def main():
         ),
         "description": (
             "For each vector file, its report's `tiers` electorate counts, as strings: every ballot on its board names "
-            "its step with a membership proof that verifies, so every one counts toward the smallest step used."
+            "its step with a membership proof that verifies, so every one counts toward the smallest step used. "
+            "Both polls are live: `releases` gives each release its tier chose, with `step` (n_r) and `count` (E(n_r)), "
+            "as strings or null; the shorter poll has no scheduled snapshot and so none, and the longer one's snapshot 1's n_r is the newest boundary in its period, above every step its ballots name, "
+            "and its count includes the joiners, though only twenty ballots are released there."
         ),
         "polls": {
             "verifier-ballots-v5-tier0-sealed.json": [sealed(constants)],

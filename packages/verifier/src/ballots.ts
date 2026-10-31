@@ -627,7 +627,9 @@ export function ballotChecks(
     ...(steps !== undefined &&
       finished !== undefined && {
         steps: finished.flatMap((c) =>
-          c.member && c.step !== undefined ? [{ entry: c.entry, cell: c.cell, step: c.step }] : [],
+          c.member && c.step !== undefined
+            ? [{ entry: c.entry, segment: c.segment, cell: c.cell, step: c.step }]
+            : [],
         ),
       }),
   };
@@ -838,6 +840,7 @@ function windowCode(
 /** A copy whose membership proof verifies against the root of the step it names. */
 export interface RollingBallotStep {
   readonly entry: number;
+  readonly segment: number;
   readonly cell: number;
   readonly step: number;
 }

@@ -22,6 +22,7 @@ const enUS = {
   homeStreamPick:
     "Choose an answer on any card to open it in the ballot app. Nothing is sent until you cast your ballot there.",
   homeStreamAll: "See all questions",
+  homeFeaturedAll: "More of the most answered",
   homeStreamEmpty: "No questions are open just now. When someone asks one, it shows up here.",
   homeListUnavailable:
     "The newest questions couldn't be loaded just now. Try again in a little while.",

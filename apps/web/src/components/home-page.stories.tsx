@@ -69,6 +69,24 @@ const cards: StreamCard[] = [
   },
 ];
 
+const PARK = "40".repeat(32);
+
+/** The most answered this week of the polls not among the newest. */
+const featured: StreamCard = {
+  kind: "poll",
+  poll: poll(PARK, {
+    closesAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
+  }),
+  text: {
+    language: "en",
+    heading: "Should the park stay open late?",
+    question: undefined,
+    options: ["Yes", "No"],
+  },
+  tags: { topic: "community", place: "Riverside Park" },
+  answered: [{ tier: 0, answered: "1204" }],
+};
+
 const meta = {
   component: HomePage,
   parameters: { layout: "fullscreen" },
@@ -254,4 +272,55 @@ export const Unavailable: Story = {
     await expect(main.queryByRole("link", { name: "See all questions" })).toBeNull();
     await expect(main.getByRole("link", { name: "Browse questions" })).toBeVisible();
   },
+};
+
+/**
+ * The question the mockup features beside the promise: the most answered
+ * this week of those not among the newest, answerable from its own card,
+ * which says what choosing an answer does since the newest's lede comes
+ * after it. On a phone it follows both ways in, which stay on the first
+ * screen.
+ */
+export const Featured: Story = {
+  args: {
+    newest: { cards, ballot: "https://ballot.example/", phoneVerification: false },
+    featured,
+  },
+  play: async ({ canvasElement }) => {
+    const main = within(within(canvasElement).getByRole("main"));
+    const region = main.getByRole("region", { name: "Most answered this week" });
+    const card = within(region);
+    await expect(
+      card.getByRole("heading", { name: "Should the park stay open late?" }),
+    ).toBeVisible();
+    await expect(card.getByRole("link", { name: "No" })).toHaveAttribute(
+      "href",
+      `https://ballot.example/#election=${PARK}&pick=1`,
+    );
+    await expect(card.getByRole("link", { name: "More of the most answered" })).toHaveAttribute(
+      "href",
+      "/discover?sort=answered",
+    );
+    await expect(card.getByText(/^Choose an answer to open it in the ballot app\./)).toBeVisible();
+    // The newest three stay as they were, below it.
+    const newest = main.getByRole("list", { name: "What people are asking" });
+    await expect(within(newest).getAllByRole("article")).toHaveLength(3);
+    await expect(region.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+      newest.getBoundingClientRect().top,
+    );
+    const browse = main.getByRole("link", { name: "Browse questions" }).getBoundingClientRect();
+    if (canvasElement.ownerDocument.documentElement.clientWidth < 1024) {
+      // Stacked: after the ways in, which stay on a small phone's first screen.
+      await expect(region.getBoundingClientRect().top).toBeGreaterThanOrEqual(browse.bottom);
+      await expect(browse.bottom).toBeLessThanOrEqual(568);
+    } else {
+      // Beside the lede and the ways in, in the columns they leave.
+      await expect(region.getBoundingClientRect().left).toBeGreaterThan(browse.right);
+    }
+  },
+};
+
+export const FeaturedPhone: Story = {
+  ...Featured,
+  globals: { viewport: { value: "phone", isRotated: false } },
 };

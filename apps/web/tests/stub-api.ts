@@ -521,16 +521,33 @@ export const LOG_ENTRIES: readonly Record<string, string>[] = [
 /**
  * The stub's state: while `down`, it drops every connection unanswered, as a
  * dead API would; with `logCounts` unset, its read of the log's counts fails;
- * `log` is the moderation log it serves, oldest first.
+ * `log` is the moderation log it serves, oldest first; `mostAnswered` is the
+ * `answered` order it lists, which with it unset it can't sort by, as an API
+ * without the anchoring clock can't; `answered` is how many have answered
+ * each poll so far, tier by tier, as the API serves it.
  */
 export const stub: {
   down: boolean;
   logCounts: Record<string, string> | undefined;
   log: readonly Record<string, string>[];
+  mostAnswered: readonly string[] | undefined;
+  answered: Map<string, readonly { tier: number; answered: string }[]>;
 } = {
   down: false,
   logCounts: LOG_COUNTS,
   log: LOG_ENTRIES,
+  mostAnswered: undefined,
+  // A count claimed for tier 1, which STREAM_V5's definition doesn't name, is
+  // left out; its tier 2, with none served, counts 0.
+  answered: new Map([
+    [
+      STREAM_V5,
+      [
+        { tier: 0, answered: "1204" },
+        { tier: 1, answered: "7" },
+      ],
+    ],
+  ]),
 };
 
 /** Every request the stub API received, with its headers. */
@@ -606,6 +623,8 @@ export function stubApi(): Server {
       const after = url.searchParams.get("after") ?? "";
       const limit = Number(url.searchParams.get("limit"));
       const sort = url.searchParams.get("sort");
+      if (sort === "answered" && stub.mostAnswered !== undefined)
+        return json(200, { elections: stub.mostAnswered.slice(0, limit) });
       if (sort === "answered")
         return json(503, {
           defined: true,
@@ -743,17 +762,8 @@ export function stubApi(): Server {
           });
         return json(200, TAGS.get(electionId) ?? {});
       case "/elections/answered":
-        // A count claimed for tier 1, which STREAM_V5's definition doesn't name, is
-        // left out; its tier 2, with none served, counts 0.
-        if (electionId === STREAM_V5)
-          return json(200, {
-            tiers: [
-              { tier: 0, answered: "1204" },
-              { tier: 1, answered: "7" },
-            ],
-          });
         if (electionId === STREAM_V1) return json(500, {});
-        return json(200, { tiers: [] });
+        return json(200, { tiers: stub.answered.get(electionId) ?? [] });
       case "/elections/results": {
         if (electionId === RESULTS_FAILS_ID) return json(500, {});
         if (electionId === RESULTS_NOT_READY_ID)

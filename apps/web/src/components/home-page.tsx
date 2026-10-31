@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { Fragment } from "react";
 
 import { catalogs } from "../messages.ts";
-import type { StreamCard as Card } from "../stream.ts";
+import { type StreamCard as Card, streamHref } from "../stream.ts";
 import { StreamCard } from "./stream.tsx";
 import { TrustScene } from "./trust-scene.tsx";
 
@@ -20,9 +20,17 @@ export interface Newest {
  * way to ask and a way to browse, the newest questions answerable from their
  * cards, and why an answer can be trusted. `newest` is `undefined` when the
  * API didn't answer, so the page stays up without it and says nothing of
- * why (T-67).
+ * why (T-67). `featured` is the question beside the promise, the most
+ * answered this week of those not among the newest, answerable from its
+ * card as they are; with none, the promise has the row to itself.
  */
-export function HomePage({ newest }: { newest: Newest | undefined }) {
+export function HomePage({
+  newest,
+  featured,
+}: {
+  newest: Newest | undefined;
+  featured?: Card | undefined;
+}) {
   const t = useTranslate(catalogs);
   const listed = newest !== undefined && newest.cards.length > 0;
   const answerable =
@@ -61,6 +69,33 @@ export function HomePage({ newest }: { newest: Newest | undefined }) {
           </div>
           <p className="m-0 text-base text-muted-foreground">{t("homeNonBinding")}</p>
         </div>
+        {/* After the ways in, so on a phone both stay on the first screen;
+            beside them from 1024px, in the columns the lede leaves. Its
+            card says what choosing an answer does, since the newest
+            questions' lede, which says it for theirs, comes below it. */}
+        {newest === undefined || featured === undefined ? null : (
+          <section
+            aria-labelledby="featured-title"
+            className="grid content-start gap-3 lg:col-span-5"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h2 id="featured-title" className="m-0 text-lg font-medium">
+                {t("sort_answered")}
+              </h2>
+              <a
+                href={streamHref("answered")}
+                className="inline-flex min-h-12 items-center text-base underline underline-offset-4"
+              >
+                {t("homeFeaturedAll")}
+              </a>
+            </div>
+            <StreamCard
+              card={featured}
+              ballot={newest.ballot}
+              phoneVerification={newest.phoneVerification}
+            />
+          </section>
+        )}
       </section>
       <section aria-labelledby="newest-title" className="grid gap-8 border-t border-border pt-16">
         <div className="flex flex-wrap items-end justify-between gap-4">

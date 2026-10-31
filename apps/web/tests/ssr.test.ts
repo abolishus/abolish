@@ -727,6 +727,11 @@ describe("results page", () => {
     expect(page).toContain("Counting it again without us starts from this poll&#x27;s ID");
     expect(page).toContain("Poll ID");
     expect(page).toContain("Definition hash, to compare with the election registry on chain");
+    // Where a receipt is, before the recount, and no lookup of one (T-11).
+    const receipt = page.indexOf("Your receipt");
+    expect(receipt).toBeGreaterThan(page.indexOf("Check it yourself"));
+    expect(receipt).toBeLessThan(page.indexOf("Count this poll again"));
+    expect(page).toContain("This page doesn&#x27;t look a receipt up");
   });
 
   test("a tier counted in several cells shows each cell's own results, with its regions and members", async () => {
@@ -2890,12 +2895,12 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/": { html: 10, js: 179, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 176, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 178, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 173, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 170, css: 40, fonts: 58 },
   "/account": { html: 6, js: 199, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 253, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 174, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

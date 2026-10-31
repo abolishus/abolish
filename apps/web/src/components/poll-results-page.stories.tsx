@@ -198,6 +198,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(check.getByRole("figure", { name: /^Definition hash/ })).toHaveTextContent(
     definitionHash,
   );
+  // Where the voter's receipt is, and that this page never looks one up (T-11).
+  await expect(check.getByRole("heading", { name: "Your receipt" })).toBeVisible();
+  await expect(
+    check.getByText(/kept by the ballot app on the device you answered from/),
+  ).toBeVisible();
+  await expect(check.getByText(/doesn't look a receipt up/)).toBeVisible();
   // The verifier's command for this poll alone, its ID filled in.
   await expect(check.getByRole("heading", { name: "Count this poll again" })).toBeVisible();
   await expect(check.getByLabelText("Count this poll again")).toHaveTextContent(

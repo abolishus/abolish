@@ -568,6 +568,11 @@ const enUS = {
     "This poll's results are counted from its public board. Entries are only ever added at the end, and none shows how anyone voted.",
   resultsBoardUnavailable: "The board couldn't be read just now.",
   resultsVerify: "How to count it yourself",
+  resultsReceiptTitle: "Your receipt",
+  resultsReceiptBody:
+    "If you answered, your receipt is kept by the ballot app on the device you answered from. It shows that your ballot is on this poll's board, not how you answered.",
+  resultsReceiptCheck:
+    "This page doesn't look a receipt up: asking our server for your entry would tell it which one is yours. To check yours, copy the whole board, as How to count it yourself sets out, and find your entry in your copy.",
   resultsRecountTitle: "Count this poll again",
   resultsRecountBody:
     "Once the community node has copied and verified the boards, as How to count it yourself sets out, the verifier checks this poll on its own with this command. Its exit code is the verdict.",

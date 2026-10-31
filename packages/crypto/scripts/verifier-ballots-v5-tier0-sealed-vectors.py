@@ -17,7 +17,8 @@ registry's events, beside
 - the five honest ballots of verifier-ballots-v5-tier0.json's board, cast
   again naming those blocks, with fresh membership proofs, since M binds the
   reference: a member who joined during the poll (dan, step N0), an opening
-  member (ada, N0 − 1) and her re-vote (N0 + 1), group 2's member (cleo, N0)
+  member (ada, N0 − 1) and her re-vote (N0 + 1), boarded before it, group
+  2's member (cleo, N0)
   and a member added during the poll at the step whose boundary is closes_at
   (eve, naming the block at closes_at itself);
 - every registered seat's receipt for each selected ballot by its version-5
@@ -143,12 +144,14 @@ FIRST_BLOCK = 21_000_000
 # Each ballot of verifier-ballots-v5-tier0.json's board that admission passed,
 # by its entry there, with its label and the L1 timestamp of the block it now
 # names: at or after its step's boundary, inside ROOT_WINDOW, at or before
-# closes_at (membership.md, Root clock and steps; revoting.md, Admission).
+# closes_at (membership.md, Root clock and steps; revoting.md, Admission),
+# in the order they are boarded here: ada's re-vote before her first ballot,
+# so only the higher block it names, never its place on the board, selects it.
 BALLOTS = [
     (1, "dan", tau(N0) + 12),
-    (2, "ada", tau(N0 - 1) + 12),
-    (3, "cleo", tau(N0) + 24),
     (4, "ada-revote", tau(N0 + 1) + 12),
+    (3, "cleo", tau(N0) + 24),
+    (2, "ada", tau(N0 - 1) + 12),
     (5, "eve-at-close", r5.CLOSES_AT),
 ]
 
@@ -273,7 +276,7 @@ def assemble(constants, proofs_path, out_dir):
 
     # 6.1: ada's re-vote names the higher block.
     chosen = rev.select(admitted)
-    assert chosen == {"selected": [1, 3, 4, 5], "repeats": [], "ties": []}, chosen
+    assert chosen == {"selected": [1, 2, 3, 5], "repeats": [], "ties": []}, chosen
     labels = {1 + n: label for n, (label, _, _) in enumerate(s["ballots"])}
     selected = [dict(b, ctx=r5.ctx_of(b), hash=r5.ballot_hash(b)) for n, (label, b, _) in enumerate(s["ballots"]) if 1 + n in chosen["selected"]]
 
@@ -316,10 +319,9 @@ def assemble(constants, proofs_path, out_dir):
     assert counts == [str(sum(s["constants"][w][j][0] for w in counted)) for j in range(m)]
 
     segments = [(0, [t]), (1, records), (3, receipts), (4, openings)]
-    entries, at = [], []
+    entries = []
     for seg, payloads in segments:
         for p in payloads:
-            at.append(len(entries))
             entries.append(vc.entry(BOARD_VERSION, eid, len(entries), seg, p))
     ceremony_rows, _ = vc.expected(panel, d, entries, panel, BOARD_VERSION)
     assert ceremony_rows["3.2"] == outcome("pass")
@@ -360,10 +362,10 @@ def assemble(constants, proofs_path, out_dir):
         ),
         "description": (
             "verifier-ballots-v5-tier0.json's live-tier0 poll, with its definition, panel, transcript and events, sealed: in segment 0 the transcript; "
-            "in segment 1 the five honest ballots (dan at step N0, ada at N0 − 1, cleo at N0, ada's re-vote at N0 + 1 and eve at N0 + 3, whose boundary "
+            "in segment 1 the five honest ballots (dan at step N0, ada's re-vote at N0 + 1, cleo at N0, ada's first ballot at N0 − 1, boarded after her re-vote, and eve at N0 + 3, whose boundary "
             "is closes_at), each naming a block of l1Blocks inside its step's window, eve's the block at closes_at itself; in segment 3 every registered "
             "seat's receipt for each selected ballot; in segment 4 each registered seat's honest opening of Tier 0's cell under tally-opening version 2. "
-            "ada's re-vote names the higher block, so it is selected over her first ballot; every selected ballot is delivered and counted. "
+            "ada's re-vote names the higher block, so it is selected over her first ballot, which the board holds after it; every selected ballot is delivered and counted. "
             "The poll is shorter than live_every periods, so it has no scheduled snapshot and no release."
         ),
         "definition": vc.encode(d).hex(),
@@ -393,7 +395,8 @@ def assemble(constants, proofs_path, out_dir):
             "openings": [],
         },
     }
-    assert at[first_opening] == first_opening
+    assert first_opening == 1 + len(BALLOTS) + len(SEATS) * len(selected)
+    assert all(int.from_bytes(vc.decode_entry(x, BOARD_VERSION)["payload"][:2], "big") == 0x0006 for x in entries[first_opening:])
     out = pathlib.Path(out_dir, "verifier-ballots-v5-tier0-sealed.json")
     out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"wrote {out}")

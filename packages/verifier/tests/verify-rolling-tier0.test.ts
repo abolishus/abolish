@@ -329,7 +329,8 @@ function sealedBundle(): Bundle {
         entries,
         6,
         clock,
-        { number: 20_000_000n, timestamp: now },
+        // B, after the run of headers in number as in time.
+        { number: 21_000_100n, timestamp: now },
         receiptKeyStorage(v.receipt_keys, BigInt(file.registeredAt)),
       ),
       panel: sealed.panel,

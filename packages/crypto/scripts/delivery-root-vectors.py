@@ -446,16 +446,17 @@ def check_delivery(definition_hash, registered, threshold, bound, seg_d, seg_k, 
 
 
 def commits_roots(e, w):
-    """What a node owes, Elections that commit roots: alone, with batches, it doesn't fit."""
-    return not ob.fits([e], w)
+    """What a node owes, Elections that commit roots: a rolling election always
+    does, decided from the definition alone; a fixed one when, alone, with
+    batches, it doesn't fit."""
+    return bool(e.get("rolling")) or not ob.fits([e], w)
 
 
 def root_intervals(e, w):
     """An election's two intervals, each one root call per seat if it commits roots."""
-    spans = ob.intervals(e, w)
     if not commits_roots(e, w):
-        return spans
-    return [(start, end, e["seats"] * ROOT_CALL_GAS, kind) for start, end, _, kind in spans]
+        return ob.intervals(e, w)
+    return [(start, end, e["seats"] * ROOT_CALL_GAS, kind) for start, end, kind in ob.spans(e, w)]
 
 
 def fits(elections, w):
@@ -901,7 +902,7 @@ def main():
                 "windows": {k: str(v) for k, v in w.items()},
                 "elections": [
                     dict(
-                        {k: str(v) for k, v in e.items()},
+                        {k: v if k == "rolling" else str(v) for k, v in e.items()},
                         commitsRoots=commits_roots(e, w),
                         **{kind: {"start": str(s), "end": str(t), "gas": str(g)} for s, t, g, kind in root_intervals(e, w)},
                     )
@@ -932,6 +933,12 @@ def main():
     assert not cap("batches-beside-roots", "An election at the 3-seat batch cap beside one that commits roots, closing together: the batched one takes the whole target, so they don't fit together", [ob.election(lim3, 3), big], w1)
     later = ob.election(1_000_000, 16, closes_at=1_800_000_000 + 2 * ob.HOUR)
     assert cap("roots-apart", f"{most + 1} elections that commit roots, the last closing two hours later, after the others' receipt intervals end", [big] * most + [later], w1)
+    # Rolling elections (definition version 7, electorate_mode 2) commit roots
+    # whatever their size, with no M (ADR 0045).
+    assert cap("rolling-small", "A rolling election of 3 seats commits roots with no member count, and fits", [ob.rolling_election(3)], w1)
+    assert cap("rolling-beside-fixed", "A rolling election beside a fixed one of 1,000 members closing together: batches for the fixed one, roots for the rolling one, and they fit", [ob.election(1_000, 3), ob.rolling_election(3)], w1)
+    assert not cap("rolling-beside-cap", "A rolling election beside one at the 3-seat batch cap, closing together: the batched one takes the whole target, so they don't fit together", [ob.election(lim3, 3), ob.rolling_election(3)], w1)
+    assert cap("rolling-beside-cap-apart", "The same two, the rolling one closing two hours later, after the batched one's receipt interval ends: they fit", [ob.election(lim3, 3), ob.rolling_election(3, closes_at=1_800_000_000 + 2 * ob.HOUR)], w1)
 
     data = {
         "format": "abolish-delivery-root-vectors/1",

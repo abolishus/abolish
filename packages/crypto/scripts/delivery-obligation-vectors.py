@@ -284,30 +284,41 @@ def error_cases():
 # --- Capacity ---------------------------------------------------------------
 
 
-def intervals(e, w):
-    """(start, end, gas, kind) of one election's receipts and complaints."""
+def spans(e, w):
+    """(start, end, kind) of one election's receipt and complaint intervals, which need no M."""
     end = e["closesAt"] + e["l1InclusionBound"]
     t_d, t_k = end + DELIVERY_WINDOW, end + COMPLAINT_WINDOW
     c_d = t_d - w["forcedInclusion"]
-    owed = 2 * e["members"]
-    calls = -(-owed // FORCED_PATH["receiptsPerCall"])
-    complaint_calls = -(-owed // FORCED_PATH["complaintsPerCall"])
     return [
-        (c_d - w["margin"], c_d, e["seats"] * calls * FORCED_PATH["receiptCallGas"], "receipts"),
-        (
-            t_d + w["contractEventWindow"],
-            t_k - w["forcedInclusion"],
-            e["seats"] * complaint_calls * FORCED_PATH["complaintCallGas"],
-            "complaints",
-        ),
+        (c_d - w["margin"], c_d, "receipts"),
+        (t_d + w["contractEventWindow"], t_k - w["forcedInclusion"], "complaints"),
     ]
 
 
+def intervals(e, w):
+    """(start, end, gas, kind) of one fixed election's receipts and complaints, with batches."""
+    assert not e.get("rolling"), "a rolling election has no batch figures"
+    owed = 2 * e["members"]
+    calls = {
+        "receipts": -(-owed // FORCED_PATH["receiptsPerCall"]) * FORCED_PATH["receiptCallGas"],
+        "complaints": -(-owed // FORCED_PATH["complaintsPerCall"]) * FORCED_PATH["complaintCallGas"],
+    }
+    return [(start, end, e["seats"] * calls[kind], kind) for start, end, kind in spans(e, w)]
+
+
 def fits(elections, w):
-    """Sweep the intervals in time order, tracking the summed rate exactly."""
+    """Sweep the intervals in time order, tracking the summed rate exactly.
+
+    Every election is counted with batches (Capacity), and a rolling one has
+    none, since it commits roots whatever its size: a set holding one never fits.
+    """
     events = []
     for e in elections:
-        assert e["members"] >= 0 and 1 <= e["seats"] <= 2 * MAX_TRUSTEES
+        assert 1 <= e["seats"] <= 2 * MAX_TRUSTEES
+        assert e.get("rolling") or e["members"] >= 0
+    if any(e.get("rolling") for e in elections):
+        return False
+    for e in elections:
         for start, stop, gas, _ in intervals(e, w):
             assert stop > start
             rate = Fraction(gas, stop - start)
@@ -348,6 +359,11 @@ def windows(margin_hours, seconds=None):
 
 def election(members, seats, closes_at=1_800_000_000, bound=600):
     return {"members": members, "seats": seats, "closesAt": closes_at, "l1InclusionBound": bound}
+
+
+def rolling_election(seats, closes_at=1_800_000_000, bound=600):
+    """A rolling election (definition version 7, electorate_mode 2): no M."""
+    return {"rolling": True, "seats": seats, "closesAt": closes_at, "l1InclusionBound": bound}
 
 
 def capacity_cases():
@@ -417,6 +433,24 @@ def capacity_cases():
             w1,
             [election(l3, 3), election(l3, 3, closes_at=1_800_000_000 + HOUR)],
         ),
+        (
+            "rolling-alone",
+            "A rolling election of 3 seats alone: it has no batch figures, so counted with batches it never fits",
+            w1,
+            [rolling_election(3)],
+        ),
+        (
+            "rolling-beside-fixed",
+            "A rolling election beside a fixed one of 1,000 members closing together: the set doesn't fit with batches",
+            w1,
+            [election(1_000, 3), rolling_election(3)],
+        ),
+        (
+            "rolling-apart",
+            "A rolling election closing a week after a fixed one, their intervals apart: it still doesn't fit with batches",
+            w1,
+            [election(1_000, 3), rolling_election(3, closes_at=1_800_000_000 + 7 * 24 * HOUR)],
+        ),
     ]
     out = []
     for cid, description, w, es in cases:
@@ -426,7 +460,9 @@ def capacity_cases():
                 "description": description,
                 "windows": {k: str(v) for k, v in w.items()},
                 "elections": [
-                    {
+                    {"rolling": True, "seats": e["seats"], "closesAt": str(e["closesAt"]), "l1InclusionBound": str(e["l1InclusionBound"])}
+                    if e.get("rolling")
+                    else {
                         "members": str(e["members"]),
                         "seats": e["seats"],
                         "closesAt": str(e["closesAt"]),
@@ -443,13 +479,13 @@ def capacity_cases():
                         },
                     }
                     for e in es
-                    for i in [intervals(e, w)]
+                    for i in [None if e.get("rolling") else intervals(e, w)]
                 ],
                 "fits": fits(es, w),
             }
         )
     assert [c["fits"] for c in out] == [
-        True, False, True, True, False, True, False, True, True, False, True, False, True, True
+        True, False, True, True, False, True, False, True, True, False, True, False, True, True, False, False, False
     ], [c["fits"] for c in out]
     limits = [
         {"seats": s, "margin": str(m * HOUR), "members": str(lone_limit(s, windows(m)))}

@@ -18,6 +18,7 @@ import {
   electionDefinitionV5Rule,
   electionStubHash,
   electionStubV5Hash,
+  type FixedForcedPathElection,
   forcedPathDemand,
   type ForcedPathElection,
   forcedPathFits,
@@ -82,9 +83,15 @@ export function stubDefinitionHash(stub: Stub, transcriptHash: Uint8Array): Uint
     : electionDefinitionV5Hash({ ...stub.value, ceremony_transcript_hash: transcriptHash });
 }
 
-/** What the capacity check reads from a stub (versions 1 and 5: one panel, no author seats). */
-export function stubDemand(stub: ElectionDefinition | ElectionDefinitionV5): ForcedPathElection {
-  return forcedPathElectionOf(stub);
+/** What the capacity check reads from a stub (versions 1 and 5: one panel, no author seats, a fixed electorate). */
+export function stubDemand(
+  stub: ElectionDefinition | ElectionDefinitionV5,
+): FixedForcedPathElection {
+  const demand = forcedPathElectionOf(stub);
+  // Versions 1 and 5 have no `electorate_mode`, so they are always fixed.
+  if (demand.rolling === true)
+    throw new Error("trustee node: a version 1 or 5 stub read as rolling");
+  return demand;
 }
 
 /** What the node's release and deployment pin. */
@@ -145,7 +152,9 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
  * Stub checks 1 to 4. Definition versions 1 and 5 are read (`Stub`); any
  * other is refused (`stub-version`), so no ceremony runs for an election the
  * node can't check: no author panel's (version 6), and no rolling one
- * (version 7), whose members over the poll check 4 can't count.
+ * (version 7), which commits roots whatever its size and so is refused while
+ * roots can't be sent or read (docs/spec/delivery.md, Capacity; check 3's
+ * rolling recount and the version-7 read are [[P2-17]] part 7c-3).
  * `served` holds the demand of every election the seat has approved, by stub
  * hash (hex); the stub's own entry, if any, is left out.
  */

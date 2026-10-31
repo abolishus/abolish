@@ -329,6 +329,18 @@ const play: Story["play"] = async ({ canvasElement }) => {
       .map((li) => li.textContent),
   ).toEqual(["38 people with a verified e-mail", "1 person verified with a passport or ID"]);
   await expect(within(counts[1]!).queryByText(/Tier \d/)).toBeNull();
+  // On a phone the band reaches the card's borders, its words starting where
+  // the question's do, so a count of one tier keeps one line at 360px, where
+  // inset in the card's padding it wrapped "e-mail" alone.
+  const libraryCount = within(counts[0]!).getByRole("listitem");
+  const countText = document.createRange();
+  countText.selectNodeContents(libraryCount);
+  await expect(countText.getClientRects()).toHaveLength(1);
+  if (window.innerWidth < 640)
+    await expect(
+      libraryCount.getBoundingClientRect().left -
+        list.getByRole("heading", { name: "Library hours" }).getBoundingClientRect().left,
+    ).toBe(0);
 
   // The card's top line keeps its facts together rather than spread to the
   // card's two edges and middle at desktop width.

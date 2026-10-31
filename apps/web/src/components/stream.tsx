@@ -303,13 +303,17 @@ function Answered({
   const t = useTranslate(catalogs);
   const titleId = useId();
   return (
-    <div className="grid max-w-xl gap-1 bg-muted/60 px-4 py-3 text-sm">
+    // On a phone the band reaches the card's borders and its words start
+    // where the question's do: inset in the card's own padding, a count at
+    // 320px had 166px of the screen and wrapped "e-mail" alone at 360px
+    // (P2-29, the stream's iteration 10).
+    <div className="-mx-5 grid max-w-xl gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4">
       <p id={titleId} className="m-0 font-medium">
         {t("streamAnsweredSoFar")}
       </p>
       <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
         {answered.map(({ tier, answered: count }) => (
-          <li key={tier} className="text-pretty tabular-nums">
+          <li key={tier} className="text-balance tabular-nums">
             {t(answeredMessage(tier, phoneVerification), { count: BigInt(count) })}
           </li>
         ))}

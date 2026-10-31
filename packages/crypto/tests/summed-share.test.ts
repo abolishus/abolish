@@ -872,10 +872,12 @@ describe("summed-share messages under definition versions 3 to 7", () => {
         ...rolling.value,
         author_threshold: own.author_threshold,
         author_keys: own.author_keys,
+        author_transcript_hash: own.author_transcript_hash,
       },
     };
     expect(authored.value.author_keys.length).toBeGreaterThan(0);
-    expect(() => sealRolling(authored, 0)).toThrow(RangeError);
+    expect(electionDefinitionV7Rule(authored.value)).toBeUndefined();
+    expect(() => sealRolling(authored, 0)).toThrow(/per panel/);
     // A rolling one that isn't well-formed is refused before any value is read (T-28).
     const unsorted = {
       ...rolling,
@@ -885,6 +887,6 @@ describe("summed-share messages under definition versions 3 to 7", () => {
       },
     };
     expect(electionDefinitionV7Rule(unsorted.value)).toBeDefined();
-    expect(() => sealRolling(unsorted, 0)).toThrow(RangeError);
+    expect(() => sealRolling(unsorted, 0)).toThrow(/well-formed/);
   });
 });

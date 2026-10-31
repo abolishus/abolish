@@ -55,12 +55,14 @@ import {
 } from "./election-definition.ts";
 import {
   type AnyElectionDefinitionRecord,
+  decodeElectionDefinitionV7,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
   electionDefinitionV7Hash,
   type ElectionDefinitionV7Record,
+  encodeElectionDefinitionV7,
   panelledFacts,
   UnsupportedVersionError,
 } from "./protocol.ts";
@@ -297,15 +299,18 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
  * an author panel, read as version 6, is refused as version 6 is (T-36).
  */
 function rollingContextOf(definition: ElectionDefinitionV7Record): DefinitionContext {
-  if (definition.value.electorate_mode !== ELECTORATE_MODES.rolling)
+  // Every value below is read from one decoded copy, so the rules judged
+  // are the hash, transcript and cells returned (T-28, T-37).
+  const v = decodeElectionDefinitionV7(encodeElectionDefinitionV7(definition.value));
+  if (v.electorate_mode !== ELECTORATE_MODES.rolling)
     throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
-  // Refuses one that isn't well-formed or has an author panel (T-28, T-37).
-  const rules = tallyRules(definition);
+  // Refuses one that isn't well-formed or has an author panel.
+  const rules = tallyRules({ version: 7, value: v });
   return {
-    definitionHash: electionDefinitionV7Hash(definition.value),
-    ceremonyTranscriptHash: Uint8Array.from(definition.value.ceremony_transcript_hash),
+    definitionHash: electionDefinitionV7Hash(v),
+    ceremonyTranscriptHash: Uint8Array.from(v.ceremony_transcript_hash),
     rules,
-    cells: definition.value.rolling_electorate.length,
+    cells: v.rolling_electorate.length,
   };
 }
 

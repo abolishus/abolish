@@ -1181,7 +1181,13 @@ async function run(
     counted.set(poll, {
       ballots: kept.map(({ ballot, receipts }) => ({
         payload: ballot.bytes,
-        shares: new Map(receipts.map((r, i) => [c.secrets[i]?.index ?? 0, r.shares])),
+        shares: new Map(
+          receipts.map((r, i) => {
+            const seat = c.secrets[i]?.index;
+            if (seat === undefined) throw new Error("shares from no seat");
+            return [seat, r.shares] as const;
+          }),
+        ),
       })),
       registered: casting.registered,
       counts: countsOf(kept.map(({ votes }) => votes)),

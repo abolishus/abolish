@@ -492,6 +492,11 @@ const enUS = {
   pollAnswerScheduled: "You can answer here once the poll opens.",
   pollScheduledLede:
     "Nothing can be answered until it opens. Who can answer, when, and how it's counted are set out below.",
+  pollOpenLede: {
+    one: "One question. You can change your answer until the poll closes, and only your last one counts.",
+    other:
+      "{count} questions, answered together. You can change your answers until the poll closes, and only your last ones count.",
+  },
   pollQuestionsTitle: "What it asks",
   pollQuestionsFixed:
     "The poll's definition fixes these words, so they can't be edited before it opens or while it runs.",

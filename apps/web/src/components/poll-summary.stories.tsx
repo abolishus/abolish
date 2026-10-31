@@ -569,6 +569,12 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   // Said only before it opens, as the scheduled poll's mockup says it.
   await expect(within(asks).queryByText(/^The poll's definition fixes these words/)).toBeNull();
   await expect(canvas.queryByText(/^Nothing can be answered until it opens/)).toBeNull();
+  // The open poll's lede: answered again until it closes, the last one counting (G-11).
+  await expect(
+    canvas.getByText(
+      "One question. You can change your answer until the poll closes, and only your last one counts.",
+    ),
+  ).toBeVisible();
   // One way into the ballot client, with the poll in the fragment alone (T-10, T-11).
   await expect(canvas.getByRole("link", { name: "Answer the question" })).toHaveAttribute(
     "href",
@@ -623,6 +629,9 @@ export const WordedQuestions: Story = {
     await expect(canvas.getByText("Pick any from 5 options")).toBeVisible();
     await expect(canvas.getByText("Public holidays")).toBeVisible();
     await expect(canvas.getByRole("link", { name: "Answer 2 questions" })).toBeVisible();
+    await expect(
+      canvas.getByText(/^2 questions, answered together\. You can change your answers until/),
+    ).toBeVisible();
   },
 };
 
@@ -671,6 +680,7 @@ export const WordedScheduled: Story = {
     await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
     await expect(canvas.getByText("You can answer here once the poll opens.")).toBeVisible();
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+    await expect(canvas.queryByText(/You can change your answers? until/)).toBeNull();
   },
 };
 
@@ -683,6 +693,8 @@ export const WordedNoBallot: Story = {
       canvas.getByText("Answering from this page isn't set up on this site yet."),
     ).toBeVisible();
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+    // Nothing to answer here, so nothing promised about answering again.
+    await expect(canvas.queryByText(/You can change your answers? until/)).toBeNull();
   },
 };
 

@@ -501,6 +501,11 @@ export const esUS: Messages = {
   pollAnswerScheduled: "Podrás responder aquí en cuanto abra la encuesta.",
   pollScheduledLede:
     "No se puede responder nada hasta que abra. Abajo se indica quién puede responder, cuándo y cómo se cuenta.",
+  pollOpenLede: {
+    one: "Una pregunta. Puedes cambiar tu respuesta hasta que cierre la encuesta, y solo cuenta la última.",
+    other:
+      "{count} preguntas, que se responden juntas. Puedes cambiar tus respuestas hasta que cierre la encuesta, y solo cuentan las últimas.",
+  },
   pollQuestionsTitle: "Lo que pregunta",
   pollQuestionsFixed:
     "La definición de la encuesta fija estas palabras, así que no se pueden editar antes de que abra ni mientras está abierta.",

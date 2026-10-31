@@ -657,6 +657,25 @@ describe("results", () => {
     expect(es).toContain("Las respuestas siguen selladas hasta que la encuesta cierre el ");
   });
 
+  // P2-19 part 41: an open poll's lede, in its mockup's words.
+  test("an open poll says under its status that its answers can be changed until it closes", async () => {
+    const one = (await (await get(`/polls/${OPEN_ONE}`)).text()).replace(/<[^>]+>/g, "");
+    expect(one).toContain(
+      "One question. You can change your answer until the poll closes, and only your last one counts.",
+    );
+    // Under the status, before the facts and what it asks.
+    expect(one.indexOf("Open for answers")).toBeLessThan(one.indexOf("One question. You can"));
+    expect(one.indexOf("One question. You can")).toBeLessThan(one.indexOf("What it asks"));
+    const many = (await (await get(`/polls/${OPEN_MANY}`)).text()).replace(/<[^>]+>/g, "");
+    expect(many).toContain(
+      "2 questions, answered together. You can change your answers until the poll closes, and only your last ones count.",
+    );
+    const es = (
+      await (await get(`/polls/${OPEN_ONE}`, { "accept-language": "es-MX" })).text()
+    ).replace(/<[^>]+>/g, "");
+    expect(es).toContain("Una pregunta. Puedes cambiar tu respuesta hasta que cierre la encuesta");
+  });
+
   test("a closed poll counted in its one tier is summed up under its heading, question by question", async () => {
     const html = await (await get(`/polls/${CELLS_ID}`)).text();
     const header = /<article[^>]*>\s*<header[^>]*>([\s\S]*?)<\/header>/.exec(html)?.[1] ?? "";
@@ -2921,7 +2940,7 @@ const KB = 1024;
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 179, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 176, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 177, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 178, css: 40, fonts: 58 },

@@ -679,6 +679,11 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   await expect(
     hidden.getByText(/decision No. 52 .*: rejected on October 17, 2026 at 11:00 AM UTC\./),
   ).toBeVisible();
+  // The appeal of the decision in the heading comes first, right under its
+  // meaning; an older decision's after it (P2-29, the author's list's iteration 25).
+  await expect(
+    hidden.getAllByText(/^You appealed decision No\./).map((a) => a.textContent?.slice(0, 28)),
+  ).toEqual(["You appealed decision No. 52", "You appealed decision No. 47"]);
   await expect(hidden.queryByRole("button")).toBeNull();
   // Hidden text leaves the poll at its address, and its row still goes there.
   await expect(

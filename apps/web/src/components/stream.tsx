@@ -543,11 +543,15 @@ function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) 
   ];
   if (lines.length === 0) return null;
   return (
-    <ul className="m-0 grid list-none gap-1 p-0">
+    // Each line apart from the next, and each link 24px tall: 4px apart, a
+    // phone stacked four lines of small text where which link cleared what
+    // showed only by order, each link a 20px tap (WCAG 2.5.8; P2-29, the
+    // stream's iteration 12).
+    <ul className="m-0 grid list-none gap-3 p-0">
       {lines.map(({ key, note, clear, href }) => (
-        <li key={key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+        <li key={key} className="flex flex-wrap items-center gap-x-3 text-sm">
           {note === undefined ? null : <span>{note}</span>}
-          <a className="underline underline-offset-4" href={href}>
+          <a className="inline-flex min-h-6 items-center underline underline-offset-4" href={href}>
             {clear}
           </a>
         </li>

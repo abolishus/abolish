@@ -1976,6 +1976,9 @@ describe("stream", () => {
       /<a href="\/discover\?topic=community" aria-current="page"[^>]*>Community</,
     );
     expect(html).toMatch(/<a href="\/discover"[^>]*>All topics</);
+    // Only the orders' "New" and the topics' own list link the page's topic:
+    // no card repeats it.
+    expect(html.split('href="/discover?topic=community"')).toHaveLength(3);
     expect(html).toContain('href="/discover?sort=closing&amp;topic=community"');
     expect(html).toMatch(/<input type="hidden" name="topic" value="community"/);
     html = await (await get("/discover?sort=closing&topic=transport&q=park")).text();

@@ -321,18 +321,22 @@ function Answered({
  * page that says once, above its cards, what choosing an answer does: the
  * card then says only which question a poll of several answers. How many
  * have answered so far is shown tier by tier, each named as the poll page
- * names it (`phoneVerification`), never summed (T-01).
+ * names it (`phoneVerification`), never summed (T-01). `narrowed` is the
+ * page's narrowing: a card leaves out the topic or place every card on the
+ * page shares.
  */
 export function StreamCard({
   card,
   ballot,
   phoneVerification = false,
   explained = false,
+  narrowed = {},
 }: {
   card: Card;
   ballot: string | null;
   phoneVerification?: boolean;
   explained?: boolean;
+  narrowed?: StreamFilter;
 }) {
   const t = useTranslate(catalogs);
   const titleId = useId();
@@ -341,7 +345,7 @@ export function StreamCard({
     return (
       <article
         aria-labelledby={titleId}
-        className="grid gap-3 border border-dashed border-border p-5"
+        className="grid gap-3 border border-dashed border-border p-5 sm:p-6"
       >
         {/* Everyday words, not the register's ID and "server": a visitor
             here came for questions, and the poll's page has the detail. The
@@ -373,6 +377,14 @@ export function StreamCard({
   }
   const { poll, text } = card;
   const questions = poll.questions.length;
+  // Every card on a topic's page is filed under it, and on a place's page at
+  // it (the place matches whole, ignoring capitals and spacing): said on each
+  // card, the same chip repeated down the page under a title or a line that
+  // already says it (P2-29, the stream's iteration 7).
+  const tags = {
+    topic: card.tags.topic === narrowed.topic ? undefined : card.tags.topic,
+    place: narrowed.place === undefined ? card.tags.place : undefined,
+  };
   return (
     <article
       aria-labelledby={titleId}
@@ -413,7 +425,7 @@ export function StreamCard({
         )}
       </div>
       {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
-      <ListedUnder tags={card.tags} linked />
+      <ListedUnder tags={tags} linked />
       {card.answered === undefined ? null : (
         <Answered answered={card.answered} phoneVerification={phoneVerification} />
       )}
@@ -661,6 +673,7 @@ export function StreamPage({
                     ballot={ballot}
                     phoneVerification={phoneVerification}
                     explained
+                    narrowed={filter}
                   />
                 </li>
               ))}

@@ -621,14 +621,15 @@ contract BoardDeliveryV2Test is TestBase {
         return abi.encodePacked(body, r, s);
     }
 
-    /// Ballot version 4 fixes every batch and root at version 2, and the
-    /// board knows no later ballot version: under a pinned ballot version 5
+    /// Ballot versions 4 and 5 fix every batch and root at version 2, and
+    /// the board knows no later ballot version: under a pinned ballot
+    /// version 6
     /// each version-2 record, and its version-1 relabelling, is
-    /// `unknown-version` (Delivery records (version 2), Step 3).
+    /// `unknown-version` (Delivery records (ballot version 5), Step 3).
     function test_BatchesAndRootsUnderAnUnknownBallotVersion() public {
         string memory bj = vm.readFile(BATCHES);
         ElectionRegistry.Parameters memory p = _shape(alice);
-        p.ballotVersion = 5;
+        p.ballotVersion = 6;
         uint8[] memory tiers = new uint8[](1);
         uint256[] memory roots = new uint256[](1);
         roots[0] = 1;

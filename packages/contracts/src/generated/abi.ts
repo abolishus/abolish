@@ -460,6 +460,17 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "root", internalType: "bytes32", type: "bytes32" },
+      { name: "posting", internalType: "bytes", type: "bytes" },
+      { name: "ballot", internalType: "bytes", type: "bytes" },
+    ],
+    name: "submitRollingPosting",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "trusteeRegistry",
     outputs: [{ name: "", internalType: "contract IBoardTrustees", type: "address" }],

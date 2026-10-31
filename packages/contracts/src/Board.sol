@@ -476,12 +476,29 @@ contract Board is EventAccumulator {
     /// emitted.
     function submitPosting(bytes calldata posting, bytes calldata ballot) external {
         CanonicalCalldata.requireTwoBytesArguments(posting, ballot);
-        bytes32 key = keccak256(posting);
-        if (_accepted[key]) return;
-        (bytes32 definitionHash, bytes32 ballotHash) = DeliveryCheckLib.checkPosting(
-            posting, ballot, electionRegistry, trusteeRegistry, ballotCheck, _qualified(ballot)
-        );
-        _emit(SharePosted.selector, key, definitionHash, ballotHash, posting);
+        _post(posting, ballot, false, 0);
+    }
+
+    /// @notice Submits a rolling poll's share posting with the version-5
+    /// record of the ballot it delivers and `root`, the root of the step
+    /// tree that ballot's membership proof was made against
+    /// (docs/spec/contracts.md, Board, Delivery records (ballot version 5),
+    /// Rolling postings). The posting is checked as `submitPosting`'s, and
+    /// its ballot as `submitRollingBallot` checks one, against `root`. Only
+    /// the posting is emitted, as `SharePosted`: the root is neither emitted
+    /// nor remembered, since the ballot is checked, never admitted, and the
+    /// verifier compares its own entry's root with its step's
+    /// (`root-step-mismatch`). A repeat is the posting's bytes alone, so an
+    /// accepted posting resent with another ballot or root is the no-op,
+    /// and a copy of an honest call with another root fails the proof: no
+    /// front-runner can keep the posting off the board (T-25, T-38). Anyone
+    /// can prove against a tree of their own, so what a sender archives
+    /// here is bounded by gas only (T-17, T-52).
+    function submitRollingPosting(bytes32 root, bytes calldata posting, bytes calldata ballot)
+        external
+    {
+        CanonicalCalldata.requireWordsThenTwoBytes(1, posting, ballot);
+        _post(posting, ballot, true, uint256(root));
     }
 
     /// @notice Submits a share complaint.
@@ -492,6 +509,22 @@ contract Board is EventAccumulator {
         (bytes32 definitionHash, bytes32 ballotHash) =
             DeliveryCheckLib.checkComplaint(record, 0, electionRegistry, trusteeRegistry);
         _emit(ShareComplaintSubmitted.selector, key, definitionHash, ballotHash, record);
+    }
+
+    /// Both posting calls once their calldata is canonical: a repeat of an
+    /// accepted posting's bytes is the no-op, whatever ballot or root comes
+    /// with it; otherwise the posting passes the delivery check against its
+    /// ballot, checked as `rolling` says, and is emitted alone.
+    function _post(bytes calldata posting, bytes calldata ballot, bool rolling, uint256 root)
+        private
+    {
+        bytes32 key = keccak256(posting);
+        if (_accepted[key]) return;
+        DeliveryCheckLib.PostingBallot memory pb =
+            DeliveryCheckLib.PostingBallot(ballotCheck, _qualified(ballot), rolling, root);
+        (bytes32 definitionHash, bytes32 ballotHash) =
+            DeliveryCheckLib.checkPosting(posting, ballot, electionRegistry, trusteeRegistry, pb);
+        _emit(SharePosted.selector, key, definitionHash, ballotHash, posting);
     }
 
     /// `availability-root`: every root an attestation names is the record

@@ -42,18 +42,35 @@ library CanonicalCalldata {
     /// arguments: the head's two offsets pointing at the first and second
     /// tails in order, each tail zero-padded, nothing after the second.
     function requireTwoBytesArguments(bytes calldata a, bytes calldata b) internal pure {
+        requireWordsThenTwoBytes(0, a, b);
+    }
+
+    /// The calldata is exactly the standard ABI encoding of `words` static
+    /// one-word arguments followed by two `bytes` arguments: the head's two
+    /// offsets pointing at the first and second tails in order, each tail
+    /// zero-padded, nothing after the second. As in `requireWordsThenBytes`,
+    /// the static words themselves are the decoder's.
+    function requireWordsThenTwoBytes(uint256 words, bytes calldata a, bytes calldata b)
+        internal
+        pure
+    {
         uint256 paddedA = (a.length + 31) & ~uint256(31);
         uint256 paddedB = (b.length + 31) & ~uint256(31);
-        // a's data follows the 4-byte selector, two offset words and its
-        // length word; b's follows a's padded data and its own length word.
+        // The head: the selector, the static words and two offsets. a's data
+        // follows it and its length word; b's follows a's padded data and its
+        // own length word. The decoder found each tail through its offset, so
+        // fixing where both start fixes both offsets.
+        uint256 head = 4 + 32 * (words + 2);
         uint256 offsetA;
         uint256 offsetB;
         assembly ("memory-safe") {
             offsetA := a.offset
             offsetB := b.offset
         }
-        if (offsetA != 4 + 96 || offsetB != 4 + 128 + paddedA) revert NonCanonicalCalldata();
-        if (msg.data.length != 4 + 128 + paddedA + paddedB) revert NonCanonicalCalldata();
+        if (offsetA != head + 32 || offsetB != head + 64 + paddedA) {
+            revert NonCanonicalCalldata();
+        }
+        if (msg.data.length != head + 64 + paddedA + paddedB) revert NonCanonicalCalldata();
         _requireZeroPadding(a);
         _requireZeroPadding(b);
     }

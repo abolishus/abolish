@@ -41,7 +41,9 @@ contract BoardChecks {
         IBoardTrustees t,
         uint256 qualified
     ) external view returns (bytes32, bytes32) {
-        return DeliveryCheckLib.checkPosting(r, b, e, t, checker, [qualified, 0]);
+        return DeliveryCheckLib.checkPosting(
+            r, b, e, t, DeliveryCheckLib.PostingBallot(checker, [qualified, 0], false, 0)
+        );
     }
 
     function receiptBatch(bytes calldata r, IBoardElections e, IBoardTrustees t)

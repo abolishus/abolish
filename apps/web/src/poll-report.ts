@@ -5,7 +5,7 @@
 // is ever joined to the poll it reported, and the API counts the report per
 // poll and ground with nothing about who sent it (T-10, T-11).
 
-import type { RemovalGround } from "./components/moderation-log.tsx";
+import type { RemovalGround } from "./moderation-grounds.ts";
 import { sendPollReport } from "./data.ts";
 import type { ReportOutcome } from "./profile-report.ts";
 

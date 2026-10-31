@@ -9,7 +9,7 @@
 
 import type { AppealOutcome, ProfileModerationState } from "@abolishus/core";
 
-import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
+import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
 
 import { PROFILE_HANDLE } from "../values.ts";
 

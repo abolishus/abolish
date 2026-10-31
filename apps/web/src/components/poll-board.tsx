@@ -29,7 +29,7 @@ import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
 import type { BoardHead, Histories, Inclusion } from "../server/load.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
-import { FilterGroup } from "./poll-register.tsx";
+import { FilterGroup } from "./filter-group.tsx";
 
 export interface PollBoardProps {
   poll: PollView;

@@ -2,35 +2,15 @@ import { buttonVariants, Fingerprint, useI18n, useTranslate } from "@abolishus/u
 import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, Tags, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
+import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
 import type { ModerationLog as Log } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
-import { FilterGroup } from "./poll-register.tsx";
+import { FilterGroup } from "./filter-group.tsx";
 
 type Entry = Log["entries"][number];
-type Reason = Entry["reason"];
-
-/** The policy's removal grounds, in its order; `moderation.test.ts` ties them to the API's. */
-export const REMOVAL_GROUNDS = [
-  "illegal",
-  "personal-data",
-  "threat",
-  "harassment",
-  "spam",
-  "impersonation",
-  "legal-notice",
-] as const satisfies readonly Reason[];
-
-export type RemovalGround = (typeof REMOVAL_GROUNDS)[number];
-
-/** The policy's grounds for restoring a poll, tied to the API's as above. */
-export const RESTORE_GROUNDS = [
-  "appeal-upheld",
-  "error",
-  "notice-withdrawn",
-] as const satisfies readonly Reason[];
 
 const NEVER_GROUNDS = [
   "moderationNever_viewpoint",

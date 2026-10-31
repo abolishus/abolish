@@ -433,6 +433,20 @@ contract ElectionRegistry is EventAccumulator {
         view
         returns (ElectionDefinitionLib.Definition memory def, bytes32 stub)
     {
+        // Rule 2 reads definition versions 1 and 3 to 6: the library decodes
+        // version 7 too, but this registry doesn't yet serve it (its cells,
+        // root blocks and profile are P2-17 part 5d-4b's), so its bytes are
+        // `unknown-version` here exactly where the decoder used to refuse
+        // them, after the record type and before anything else (T-34).
+        if (
+            definition.length > 2
+                && uint16(bytes2(definition[:2])) == ElectionDefinitionLib.RECORD_TYPE
+                && uint8(definition[2]) == 7
+        ) {
+            revert ElectionDefinitionLib.DefinitionMalformed(
+                ElectionDefinitionLib.DecodeError.UnknownVersion, 2
+            );
+        }
         def = ElectionDefinitionLib.decode(definition);
         ElectionDefinitionLib.Rule r = ElectionDefinitionLib.rule(def);
         if (r != ElectionDefinitionLib.Rule.None) revert DefinitionIllFormed(r);
@@ -526,7 +540,9 @@ contract ElectionRegistry is EventAccumulator {
         if (bytes32(registration[0:32]) != authorPanel) revert AuthorRegistrationMismatch(1);
         if (
             bytes32(registration[32:64])
-                != ElectionDefinitionLib.authorStubHash(definition, def.transcriptOffset)
+                != ElectionDefinitionLib.authorStubHash(
+                    definition, def.transcriptOffset, def.authorTranscriptOffset
+                )
         ) revert AuthorRegistrationMismatch(2);
         if (bytes32(registration[64:96]) != def.authorTranscriptHash) {
             revert AuthorRegistrationMismatch(3);

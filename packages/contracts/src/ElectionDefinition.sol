@@ -4,7 +4,7 @@ pragma solidity 0.8.30;
 import {P256} from "@openzeppelin/contracts/utils/cryptography/P256.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
-/// @title The election definition, record type 0x0001 versions 1 and 3 to 6
+/// @title The election definition, record type 0x0001 versions 1 and 3 to 7
 /// (docs/spec/election-definition.md).
 /// @notice A strict decoder, the well-formedness rules, and the definition and
 /// stub hashes, so the election registry admits only definitions that decode
@@ -46,7 +46,9 @@ library ElectionDefinitionLib {
         ReceiptKeys,
         Results,
         CivicSealed,
-        AuthorPanel
+        AuthorPanel,
+        RollingClass,
+        RollingTier
     }
 
     struct TierGroup {
@@ -79,7 +81,18 @@ library ElectionDefinitionLib {
         Cell[] cells;
     }
 
-    /// Version 5 and 6's `question`.
+    /// Version 7's `rolling_tier`: a tier whose ballots prove against step
+    /// roots of its groups' additions (docs/spec/election-definition.md,
+    /// Rolling electorates).
+    struct RollingTier {
+        uint8 tier;
+        uint64 rootL2Block;
+        uint64[] groups;
+        uint256 root;
+        uint64 groupSize;
+    }
+
+    /// Version 5 to 7's `question`.
     struct Question {
         uint8 method;
         uint16 optionCount;
@@ -96,9 +109,9 @@ library ElectionDefinitionLib {
 
     /// Every version's fields. A field a version's layout doesn't have is
     /// zero or empty: `electionType` to `maxSelections` are versions 1, 3
-    /// and 4's, `questions` 5 and 6's; `electorate` is version 1's,
-    /// `tiers` 3 to 6's; `receiptKeys` 4 to 6's; `pollClass` to
-    /// `authorTranscriptHash` 6's.
+    /// and 4's, `questions` 5 to 7's; `electorate` is version 1's,
+    /// `tiers` 3 to 7's; `receiptKeys` 4 to 7's; `pollClass` to
+    /// `authorTranscriptHash` 6 and 7's; `electorateMode` and `rolling` 7's.
     struct Definition {
         uint8 version;
         uint8 protocolMajor;
@@ -140,8 +153,13 @@ library ElectionDefinitionLib {
         uint8 authorThreshold;
         P256Key[] authorKeys;
         bytes32 authorTranscriptHash;
+        uint8 electorateMode;
+        RollingTier[] rolling;
         /// Where `ceremony_transcript_hash` starts in the encoding, for the stub hash.
         uint256 transcriptOffset;
+        /// Where `author_transcript_hash` starts, for the author stub hash:
+        /// version 6's last field, but version 7's fields follow it.
+        uint256 authorTranscriptOffset;
     }
 
     error DefinitionMalformed(DecodeError code, uint256 offset);
@@ -149,7 +167,7 @@ library ElectionDefinitionLib {
     uint16 internal constant RECORD_TYPE = 0x0001;
     uint256 internal constant MAX_PINS = 64;
     uint256 internal constant MAX_TIERS = 3;
-    // The limits of versions 1 to 6, written out: raising a protocol-wide
+    // The limits of versions 1 to 7, written out: raising a protocol-wide
     // limit is a new record version (docs/spec/parameters.md), so no
     // version's limits ever change.
     uint256 internal constant MAX_OPTIONS = 64;
@@ -168,6 +186,8 @@ library ElectionDefinitionLib {
     uint8 internal constant APPROVAL = 2;
     uint8 internal constant CIVIC = 3;
     uint8 internal constant SEALED = 1;
+    uint8 internal constant EVERYDAY = 1;
+    uint8 internal constant ROLLING = 2;
     /// `(p + 1) / 4` for P-256's prime `p` (OpenZeppelin's `P256.P`):
     /// `p ≡ 3 (mod 4)`, so `a^((p + 1) / 4)` is a square root of `a`
     /// whenever `a` has one.
@@ -185,7 +205,7 @@ library ElectionDefinitionLib {
     // --- decoding ----------------------------------------------------------
 
     /// Decodes `d` strictly as record type 0x0001 under the layout its
-    /// version byte names (1, or 3 to 6; 2 is never assigned), then checks
+    /// version byte names (1, or 3 to 7; 2 is never assigned), then checks
     /// the definition's own profile pins exactly that version
     /// (docs/spec/election-definition.md, Decoding). Reverts with the first
     /// failure, left to right. `view` only for the `ModExp` precompile, which
@@ -207,7 +227,7 @@ library ElectionDefinitionLib {
             );
         }
         (v, o) = _uint(d, o, 1);
-        if (v != 1 && (v < 3 || v > 6)) revert DefinitionMalformed(DecodeError.UnknownVersion, 2);
+        if (v != 1 && (v < 3 || v > 7)) revert DefinitionMalformed(DecodeError.UnknownVersion, 2);
         def.version = uint8(v);
 
         o = _decodeHead(d, o, def);
@@ -230,7 +250,8 @@ library ElectionDefinitionLib {
         o = def.version == 1 ? _decodeElectorate(d, o, def) : _decodeTiers(d, o, def);
         o = _decodeTail(d, o, def);
         if (def.version >= 4) (def.receiptKeys, o) = _keys(d, o, MAX_RECEIPT_KEYS);
-        if (def.version == 6) o = _decodeV6(d, o, def);
+        if (def.version >= 6) o = _decodeV6(d, o, def);
+        if (def.version == 7) o = _decodeRolling(d, o, def);
         if (o != d.length) revert DefinitionMalformed(DecodeError.TrailingBytes, o);
 
         // Step 2: exactly one pin for 0x0001, at the record's own version,
@@ -281,7 +302,7 @@ library ElectionDefinitionLib {
         return o;
     }
 
-    /// Version 5 and 6's `questions`.
+    /// Version 5 to 7's `questions`.
     function _decodeQuestions(bytes calldata d, uint256 o, Definition memory def)
         private
         pure
@@ -330,7 +351,7 @@ library ElectionDefinitionLib {
         return o;
     }
 
-    /// Version 3 to 6's `electorate`, a list of `tier_electorate`.
+    /// Version 3 to 7's `electorate`, a list of `tier_electorate`.
     function _decodeTiers(bytes calldata d, uint256 o, Definition memory def)
         private
         pure
@@ -414,7 +435,7 @@ library ElectionDefinitionLib {
         return o;
     }
 
-    /// Version 6's fields after `receipt_keys`.
+    /// Version 6's fields after `receipt_keys`, which version 7 has too.
     function _decodeV6(bytes calldata d, uint256 o, Definition memory def)
         private
         view
@@ -432,8 +453,42 @@ library ElectionDefinitionLib {
         (v, o) = _uint(d, o, 1);
         def.authorThreshold = uint8(v);
         (def.authorKeys, o) = _keys(d, o, MAX_TRUSTEES);
+        def.authorTranscriptOffset = o;
         (v, o) = _uint(d, o, 32);
         def.authorTranscriptHash = bytes32(v);
+        return o;
+    }
+
+    /// Version 7's `electorate_mode` and `rolling_electorate`, after
+    /// `author_transcript_hash`.
+    function _decodeRolling(bytes calldata d, uint256 o, Definition memory def)
+        private
+        pure
+        returns (uint256)
+    {
+        uint256 v;
+        uint256 count;
+        (v, o) = _enum(d, o, 1, ROLLING);
+        def.electorateMode = uint8(v);
+        (count, o) = _count(d, o, MAX_TIERS);
+        def.rolling = new RollingTier[](count);
+        for (uint256 i; i < count; i++) {
+            RollingTier memory t = def.rolling[i];
+            (v, o) = _enum(d, o, 0, 2);
+            t.tier = uint8(v);
+            (v, o) = _uint(d, o, 8);
+            t.rootL2Block = uint64(v);
+            uint256 groups;
+            (groups, o) = _count(d, o, MAX_GROUPS);
+            t.groups = new uint64[](groups);
+            for (uint256 j; j < groups; j++) {
+                (v, o) = _uint(d, o, 8);
+                t.groups[j] = uint64(v);
+            }
+            (t.root, o) = _field(d, o);
+            (v, o) = _uint(d, o, 8);
+            t.groupSize = uint64(v);
+        }
         return o;
     }
 
@@ -542,16 +597,26 @@ library ElectionDefinitionLib {
     /// The first well-formedness rule `def` breaks, or `Rule.None`: version
     /// 1's rules, with version 3's `electorate` and `cells` for regional
     /// cells, version 4's `receipt-keys`, version 5's `questions` in place of
-    /// the one question's rules, and version 6's three rules last.
+    /// the one question's rules, version 6's three rules, and version 7's
+    /// `electorate` under its mode, then `rolling-class` and `rolling-tier`
+    /// last.
     function rule(Definition memory def) internal pure returns (Rule) {
         Rule r = _profileRule(def);
         if (r != Rule.None) return r;
         r = def.version >= 5 ? _questionsRule(def.questions) : _questionRule(def);
         if (r != Rule.None) return r;
+        bool rolling = def.electorateMode == ROLLING;
         if (def.version == 1) {
             if (!_electorateWellFormed(def.electorate)) return Rule.Electorate;
+        } else if (rolling) {
+            // A list the mode doesn't use would be a second electorate a
+            // reader could take for the poll's; a rolling tier is one cell
+            // and states none, so `cells` holds.
+            if (def.tiers.length != 0 || !_rollingTiersOrdered(def.rolling)) {
+                return Rule.Electorate;
+            }
         } else {
-            if (!_tiersWellFormed(def.tiers)) return Rule.Electorate;
+            if (def.rolling.length != 0 || !_tiersWellFormed(def.tiers)) return Rule.Electorate;
             if (!_cellsWellFormed(def.tiers)) return Rule.Cells;
         }
         // T-14: a 1-of-n panel would let one trustee open every sharing alone.
@@ -568,8 +633,12 @@ library ElectionDefinitionLib {
         if (def.version >= 4 && (def.receiptKeys.length == 0 || !_ascending(def.receiptKeys))) {
             return Rule.ReceiptKeys;
         }
-        if (def.version == 6) return _v6Rule(def);
-        return Rule.None;
+        if (def.version < 6) return Rule.None;
+        r = _v6Rule(def);
+        if (r != Rule.None || !rolling) return r;
+        // Civic polls keep a fixed electorate (the owner, 2026-10-12).
+        if (def.pollClass != EVERYDAY) return Rule.RollingClass;
+        return _rollingGroupsWellFormed(def.rolling) ? Rule.None : Rule.RollingTier;
     }
 
     function _profileRule(Definition memory def) private pure returns (Rule) {
@@ -663,6 +732,49 @@ library ElectionDefinitionLib {
             }
         }
         return true;
+    }
+
+    /// Version 7's `electorate` under mode 2: rolling tiers non-empty and in
+    /// strictly ascending order of tier.
+    function _rollingTiersOrdered(RollingTier[] memory ts) private pure returns (bool) {
+        if (ts.length == 0) return false;
+        for (uint256 i = 1; i < ts.length; i++) {
+            if (ts[i - 1].tier >= ts[i].tier) return false;
+        }
+        return true;
+    }
+
+    /// Version 7's `rolling-tier`: each rolling tier's groups non-empty, in
+    /// strictly ascending order and in no other tier, so no member's leaf is
+    /// in two tiers' trees (T-01, T-16).
+    function _rollingGroupsWellFormed(RollingTier[] memory ts) private pure returns (bool) {
+        for (uint256 i; i < ts.length; i++) {
+            uint64[] memory groups = ts[i].groups;
+            if (groups.length == 0) return false;
+            for (uint256 j; j < groups.length; j++) {
+                if (j > 0 && groups[j - 1] >= groups[j]) return false;
+                // Earlier tiers passed, so their groups are ascending and a
+                // search finds a repeat in log time (T-52).
+                for (uint256 k; k < i; k++) {
+                    if (_holds(ts[k].groups, groups[j])) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /// Whether `ids`, in strictly ascending order, holds `id`.
+    function _holds(uint64[] memory ids, uint64 id) private pure returns (bool) {
+        uint256 lo;
+        uint256 hi = ids.length;
+        while (lo < hi) {
+            uint256 mid = (lo + hi) / 2;
+            uint64 m = ids[mid];
+            if (m == id) return true;
+            if (m < id) lo = mid + 1;
+            else hi = mid;
+        }
+        return false;
     }
 
     /// Whether `groups`, in strictly ascending `group_id`, holds `id`.
@@ -825,24 +937,23 @@ library ElectionDefinitionLib {
     }
 
     /// `author_stub_hash = H(DS("abolish/v1/election-stub", encode(author_stub)))`
-    /// of a version-6 definition: both `ceremony_transcript_hash` at
-    /// `transcriptOffset` and `author_transcript_hash`, the layout's last
-    /// field and so its last 32 bytes, zeroed (docs/spec/election-definition.md,
-    /// Stub hash and the ceremony). Only version 6 has an author panel among
-    /// the versions this decoder reads; a later one with fields after
-    /// `author_transcript_hash` (version 7) needs its offset recorded instead.
-    function authorStubHash(bytes calldata d, uint256 transcriptOffset)
-        internal
-        pure
-        returns (bytes32)
-    {
+    /// of a version-6 or version-7 definition: both `ceremony_transcript_hash`
+    /// at `transcriptOffset` and `author_transcript_hash` at
+    /// `authorTranscriptOffset` zeroed, and version 7's fields after it kept
+    /// (docs/spec/election-definition.md, Stub hash and the ceremony).
+    function authorStubHash(
+        bytes calldata d,
+        uint256 transcriptOffset,
+        uint256 authorTranscriptOffset
+    ) internal pure returns (bytes32) {
         return sha256(
             abi.encodePacked(
                 DS_STUB,
                 d[:transcriptOffset],
                 bytes32(0),
-                d[transcriptOffset + 32:d.length - 32],
-                bytes32(0)
+                d[transcriptOffset + 32:authorTranscriptOffset],
+                bytes32(0),
+                d[authorTranscriptOffset + 32:]
             )
         );
     }

@@ -28,9 +28,10 @@ contract DefinitionHarness {
     }
 
     function authorStubHash(bytes calldata d) external view returns (bytes32) {
+        ElectionDefinitionLib.Definition memory def = ElectionDefinitionLib.decode(d);
         return
             ElectionDefinitionLib.authorStubHash(
-                d, ElectionDefinitionLib.decode(d).transcriptOffset
+                d, def.transcriptOffset, def.authorTranscriptOffset
             );
     }
 
@@ -165,7 +166,7 @@ library DefinitionEncoder {
         w.put(d.maxSequencerDrift, 8);
         w.put(uint256(d.displayTextCommitment), 32);
         if (d.version >= 4) _keys(w, d.receiptKeys);
-        if (d.version == 6) {
+        if (d.version >= 6) {
             w.put(d.pollClass, 1);
             w.put(d.resultsMode, 1);
             w.put(d.liveEvery, 4);
@@ -174,6 +175,7 @@ library DefinitionEncoder {
             _keys(w, d.authorKeys);
             w.put(uint256(d.authorTranscriptHash), 32);
         }
+        if (d.version == 7) _rolling(w, d);
         return w.finish();
     }
 
@@ -215,6 +217,25 @@ library DefinitionEncoder {
                 w.put(t.cells[j].root, 32);
                 w.put(t.cells[j].members, 8);
             }
+        }
+    }
+
+    function _rolling(ByteWriter.Writer memory w, ElectionDefinitionLib.Definition memory d)
+        private
+        pure
+    {
+        w.put(d.electorateMode, 1);
+        w.put(d.rolling.length, 4);
+        for (uint256 i; i < d.rolling.length; i++) {
+            ElectionDefinitionLib.RollingTier memory t = d.rolling[i];
+            w.put(t.tier, 1);
+            w.put(t.rootL2Block, 8);
+            w.put(t.groups.length, 4);
+            for (uint256 j; j < t.groups.length; j++) {
+                w.put(t.groups[j], 8);
+            }
+            w.put(t.root, 32);
+            w.put(t.groupSize, 8);
         }
     }
 

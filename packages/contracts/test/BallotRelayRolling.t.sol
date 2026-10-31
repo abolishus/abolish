@@ -433,7 +433,8 @@ contract BallotRelayRollingTest is TestBase {
     }
 
     /// No calldata carries bytes its arguments don't define: a trailing
-    /// word, dirty padding or the fixed call's offset is refused.
+    /// word or dirty padding is refused (the fixed call's offset is the
+    /// `offset-0x40` calldata vector's).
     function test_RefusesNonCanonicalCalldata() public {
         bytes memory good = abi.encodeCall(
             BallotRelay.relayRollingBallot, (5_000_000, ROOT, bytes.concat(_framed(), hex"01"))

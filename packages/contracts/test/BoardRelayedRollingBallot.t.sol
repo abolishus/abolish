@@ -104,9 +104,10 @@ contract BoardRelayedRollingBallotTest is BoardRollingFixture {
     /// `relayed-rolling-call`, and the next call's, the same record and root
     /// one slot later, as `relayed-rolling-call-repeat`, so the relay's
     /// deposit and the board's call agree on every byte (T-50). The call with
-    /// step N0 − 1's root is refused (`membership-proof`), as are roots of 0,
-    /// r and 2²⁵⁶ − 1 and the shortest record, so each leaves its relay call
-    /// with no event, which the verifier reports and never fails.
+    /// step N0 − 1's root is refused (`membership-proof`), and the deposits of
+    /// the shortest record, alone or with roots of 0, r and 2²⁵⁶ − 1, as
+    /// `ballot-stray`, so each leaves its relay call with no event, which the
+    /// verifier reports and never fails.
     function test_TheRelaysDepositsAreTheFiles() public {
         string memory json = vm.readFile(V5);
         _registerKeySets(json, _ballot(json, "ok-newest-step"));
@@ -123,11 +124,13 @@ contract BoardRelayedRollingBallotTest is BoardRollingFixture {
             BallotCheckLib.BallotRefused.selector, BallotCheckLib.Code.MembershipProof
         );
         _refuseFromRelay(_relayDeposit(rj, "v5-ballot-other-root"), refused, "other root");
+        // Their 35-byte record names no election the board knows.
+        bytes memory stray = abi.encodeWithSelector(
+            BallotCheckLib.BallotRefused.selector, BallotCheckLib.Code.BallotStray
+        );
         string[4] memory others = ["root-zero", "root-r", "root-max", "shortest"];
         for (uint256 i; i < others.length; i++) {
-            vm.prank(ALIAS);
-            (bool ok,) = address(board).call(_relayDeposit(rj, others[i]));
-            assertTrue(!ok, others[i]);
+            _refuseFromRelay(_relayDeposit(rj, others[i]), stray, others[i]);
         }
     }
 
@@ -239,7 +242,8 @@ contract BoardRelayedRollingBallotTest is BoardRollingFixture {
     }
 
     /// The call fields are carried, never judged: any index, block, stamp
-    /// inside the window and gas limit is emitted as given, after the
+    /// (the fixture's window holds every one) and gas limit is emitted as
+    /// given, after the
     /// record's own topics (T-50; the verifier matches them, 4.5).
     function testFuzz_TheCallFieldsAreCarried(
         uint64 index,
@@ -350,8 +354,8 @@ contract BoardRelayedRollingBallotTest is BoardRollingFixture {
             bytes memory wide = bytes.concat(call);
             wide[4 + 32 * w + 23] = 0x01;
             vm.prank(ALIAS);
-            (bool ok,) = address(board).call(wide);
-            assertTrue(!ok, "a call field at or above 2^64");
+            (bool ok, bytes memory ret) = address(board).call(wide);
+            assertTrue(!ok && ret.length == 0, "a call field at or above 2^64");
         }
         assertEq(_acceptFromRelay(call).length, 1, "the canonical call");
     }

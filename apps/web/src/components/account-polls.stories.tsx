@@ -135,7 +135,8 @@ const EVERY = [DRAFT, UNTITLED, SETTING_UP, OPEN, CLOSED, TIMED_OUT, REGISTERED]
 const meta = {
   component: AccountPolls,
   // Every story reads the list on one day: after CLOSED's close, before OPEN's.
-  args: { index: "01", now: () => new Date("2026-10-18T12:00:00.000Z") },
+  // Retrying opens the draft's page; here it is only recorded.
+  args: { index: "01", now: () => new Date("2026-10-18T12:00:00.000Z"), onRetried: fn() },
 } satisfies Meta<typeof AccountPolls>;
 
 export default meta;
@@ -205,7 +206,10 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   // Trustees are invisible in an everyday poll: a reason never names them (P2-29, iteration 24).
   await expect(timedOut!.queryByText(/trustee/i)).toBeNull();
   await expect(
-    timedOut!.getByRole("button", { name: "Try again", description: "Repaint the bandstand?" }),
+    timedOut!.getByRole("button", {
+      name: "Edit and submit again",
+      description: "Repaint the bandstand?",
+    }),
   ).toBeVisible();
   // Why a poll waits or failed comes before what the author can do about it.
   const before = (reason: Element, action: Element) =>
@@ -216,7 +220,7 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   );
   await before(
     timedOut!.getByText(/didn't finish after four tries/),
-    timedOut!.getByRole("button", { name: "Try again" }),
+    timedOut!.getByRole("button", { name: "Edit and submit again" }),
   );
   // A registered poll stays: nothing to retry or discard. Its reason ends
   // with asking again as a new poll, and the row has the way to, after the
@@ -258,7 +262,7 @@ export const EveryStatePhone: Story = {
     await expect(
       timedOut.getByText(/didn't finish after four tries/).getBoundingClientRect().bottom,
     ).toBeLessThanOrEqual(
-      timedOut.getByRole("button", { name: "Try again" }).getBoundingClientRect().top,
+      timedOut.getByRole("button", { name: "Edit and submit again" }).getBoundingClientRect().top,
     );
   },
 };
@@ -365,20 +369,29 @@ export const Empty: Story = {
   },
 };
 
+/**
+ * Retrying puts a poll back to its draft and nothing more, so the button
+ * says what comes next and takes the author to the draft, where it is
+ * submitted again: "Try again" left the author on the list, the poll a
+ * draft three taps from being submitted, and read as if setup had started
+ * over (P2-29, the author's list's iteration 28).
+ */
 export const RetryAFailedPoll: Story = {
   args: { client: fakeDrafts([TIMED_OUT]) },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
-    await expect(await canvas.findByText("Draft")).toBeVisible();
-    await expect(canvas.getByRole("status")).toHaveTextContent(
-      "Your poll is a draft again, as you wrote it.",
-    );
-    await expect(canvas.queryByText(/four tries/)).toBeNull();
     await expect(
-      canvas.getByRole("heading", { level: 2, name: "Polls you created" }),
-    ).toHaveFocus();
+      await canvas.findByText(
+        /Your question wasn't published\. You can submit it again or discard it\.$/,
+      ),
+    ).toBeVisible();
+    const retry = canvas.getByRole("button", { name: "Edit and submit again" });
+    await userEvent.click(retry);
+    await waitFor(() => expect(args.onRetried).toHaveBeenCalledWith(TIMED_OUT.id));
     await expect(calls(args.client)).toEqual([`retry ${TIMED_OUT.id}`]);
+    // Nothing more to click while the draft's page opens.
+    await expect(retry).toBeDisabled();
+    await expect(canvas.getByRole("button", { name: "Discard…" })).toBeDisabled();
   },
 };
 
@@ -424,13 +437,15 @@ export const DeleteADraft: Story = {
 
 export const RefusedAsRegistered: Story = {
   args: { client: fakeDrafts([TIMED_OUT], { refuse: new DraftsError("registered") }) },
-  play: async ({ canvasElement }) => {
+  play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Edit and submit again" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "That poll is registered on the public record, so it stays.",
     );
     await expect(canvas.getByRole("status")).toBeEmptyDOMElement();
+    // Refused, it stays on the list, which says why.
+    await expect(args.onRetried).not.toHaveBeenCalled();
   },
 };
 
@@ -458,10 +473,9 @@ export const OutcomeAboveALongList: Story = {
   globals: { viewport: { value: "phone", isRotated: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
-    await expect(await canvas.findByRole("status")).toHaveTextContent(
-      "Your poll is a draft again, as you wrote it.",
-    );
+    await userEvent.click(await canvas.findByRole("button", { name: "Discard…" }));
+    await userEvent.click(canvas.getByRole("button", { name: "Discard permanently" }));
+    await expect(await canvas.findByRole("status")).toHaveTextContent("The poll is discarded.");
     await outcomeUnderTheHeading(canvasElement, canvas.getByRole("status"));
   },
 };
@@ -471,7 +485,7 @@ export const RefusedInALongList: Story = {
   globals: { viewport: { value: "phone", isRotated: false } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await userEvent.click(await canvas.findByRole("button", { name: "Try again" }));
+    await userEvent.click(await canvas.findByRole("button", { name: "Edit and submit again" }));
     const alert = await canvas.findByRole("alert");
     await expect(alert).toHaveTextContent(
       "That poll is registered on the public record, so it stays.",

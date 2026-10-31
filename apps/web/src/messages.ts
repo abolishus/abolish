@@ -708,33 +708,33 @@ const enUS = {
   pollFailure_closesTooSoon:
     "Setting up took longer than expected, and your poll would have closed too soon after opening. Choose a later closing time and submit it again.",
   pollFailure_creationReverted:
-    "Your poll couldn't be created on the public record. Your question wasn't published. You can try again or discard it.",
+    "Your poll couldn't be created on the public record. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_creationReplaced:
-    "Something went wrong on our side while your poll was being created, so we stopped. Your question wasn't published. You can try again or discard it.",
+    "Something went wrong on our side while your poll was being created, so we stopped. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_creationTimeout:
-    "Creating your poll on the public record took too long. Your question wasn't published. You can try again or discard it.",
+    "Creating your poll on the public record took too long. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_creationAnchored:
-    "Your poll couldn't get a clean start on the public record after three tries, so its answers couldn't be protected. Your question wasn't published. You can try again or discard it.",
+    "Your poll couldn't get a clean start on the public record after three tries, so its answers couldn't be protected. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_tierUnavailable:
     "Polls can't be set up yet for the voters you chose. Your question wasn't published. Change who can answer and submit it again.",
   pollFailure_electorateEmpty:
-    "Nobody could have answered: no one was yet in the group of voters you chose when your poll was set up. Your question wasn't published. You can try again later or discard it.",
+    "Nobody could have answered: no one was yet in the group of voters you chose when your poll was set up. Your question wasn't published. You can submit it again later or discard it.",
   pollFailure_stubRefused:
-    "Something went wrong on our side while your poll was being prepared. Your question wasn't published. You can try again or discard it.",
+    "Something went wrong on our side while your poll was being prepared. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_registrationRefused:
-    "Your poll's setup didn't pass our checks, so we didn't register it. Your question wasn't published. You can try again or discard it.",
+    "Your poll's setup didn't pass our checks, so we didn't register it. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_registrationReverted:
-    "The public record refused to register your poll. Your question wasn't published. You can try again or discard it.",
+    "The public record refused to register your poll. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_registrationReplaced:
-    "Something went wrong on our side while your poll was being registered, so we stopped. Your question wasn't published. You can try again or discard it.",
+    "Something went wrong on our side while your poll was being registered, so we stopped. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_registrationTimeout:
-    "Registering your poll took too long. Your question wasn't published. You can try again or discard it.",
+    "Registering your poll took too long. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_registrationMismatch:
     "Something other than your poll was registered under its place on the public record, so we stopped before it opened. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   pollFailure_openMismatch:
     "What the public record holds for your poll isn't exactly what you wrote, so we didn't open it. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   pollFailure_ceremonyTimeout:
-    "Making the key that seals your poll's answers didn't finish after four tries. Your question wasn't published. You can try again or discard it.",
+    "Making the key that seals your poll's answers didn't finish after four tries. Your question wasn't published. You can submit it again or discard it.",
   pollFailure_openTimeout:
     "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   evidenceSummary: "How do we know this is real?",
@@ -1299,13 +1299,12 @@ const enUS = {
   pollsProfileIs: "Your profile is",
   pollsProfileHelp:
     "Ticking “Show on your profile” under a poll lists it on your profile, and its page says your profile asked it, while the poll is listed. A poll that hasn't opened yet is listed once it opens. Untick a box at any time.",
-  pollsRetry: "Try again",
+  pollsRetry: "Edit and submit again",
   pollsDiscard: "Discard…",
   pollsDiscardQuestion: "Discard this poll and its draft? This can't be undone.",
   pollsDiscardConfirm: "Discard permanently",
   pollsKeep: "Keep it",
   pollsRemoved: "The draft is deleted.",
-  pollsRetried: "Your poll is a draft again, as you wrote it.",
   pollsDiscarded: "The poll is discarded.",
   pollsFailure_signedOut: "You've been signed out. Sign in again to see your polls.",
   pollsFailure_gone: "That poll is no longer here. The list is up to date now.",
@@ -1405,7 +1404,7 @@ const enUS = {
   setupPollPage: "Go to your poll's page",
   setupDraft: "This poll hasn't been submitted, so nothing is being set up.",
   setupFailed: "Your poll didn't open.",
-  setupFailedNext: "Back to your polls, to try again or discard it",
+  setupFailedNext: "Back to your polls, to submit it again or discard it",
   pollFormAboutTitle: "What is it about?",
   pollFormTitleLabel: "Title",
   pollFormTitleHelp: "What people see first, in lists and on the poll's page.",

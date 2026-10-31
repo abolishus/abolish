@@ -63,7 +63,7 @@ const shownAt = (p: PollSummary, now: Date): Shown =>
 /** The list's links share the buttons' 48px target and underline, so a row's actions line up. */
 const LINK = buttonVariants({ variant: "link", className: "px-0" });
 
-type Done = "pollsRemoved" | "pollsRetried" | "pollsDiscarded";
+type Done = "pollsRemoved" | "pollsDiscarded";
 
 /** An action waiting for its second click: which poll, and what it does. */
 type Confirming = { readonly id: string; readonly action: "remove" | "discard" };
@@ -82,17 +82,19 @@ export interface AccountPollsProps {
   readonly onProfileChanged?: () => void;
   /** The clock that says whether an open poll has closed. */
   readonly now?: () => Date;
+  /** Called with a failed poll's ID once it is a draft again; by default, opens that draft. */
+  readonly onRetried?: (id: string) => void;
 }
 
 /**
  * The polls an account created: drafts, polls in setup, open polls and
  * those that failed in setup, each failure in plain words with what the
  * author can do about it (ADR 0032, rule 14). A failed poll that can be
- * retried goes back to its draft or is discarded; one whose election is
- * registered stays, as an open poll does. Under each poll past its draft,
- * what moderation decided about it and the author's appeal. Where the
- * account has a profile, each poll has its choice of whether the profile
- * shows it (P2-27 part 1d-3).
+ * retried goes back to its draft, opened for the author to submit again, or
+ * is discarded; one whose election is registered stays, as an open poll
+ * does. Under each poll past its draft, what moderation decided about it
+ * and the author's appeal. Where the account has a profile, each poll has
+ * its choice of whether the profile shows it (P2-27 part 1d-3).
  */
 export function AccountPolls({
   client,
@@ -102,6 +104,7 @@ export function AccountPolls({
   profileRevision = 0,
   onProfileChanged,
   now = () => new Date(),
+  onRetried = (id) => window.location.assign(`/account/polls/${id}`),
 }: AccountPollsProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
@@ -174,14 +177,19 @@ export function AccountPolls({
     onProfileChanged?.();
   };
 
-  /** Runs one action, then shows the list as the server now has it. */
-  const act = (action: () => Promise<void>, then: Done) => async () => {
+  /**
+   * Runs one action, then shows the list as the server now has it, or, for
+   * an action whose next step is on another page, goes there.
+   */
+  const act = (action: () => Promise<void>, then: Done | (() => void)) => async () => {
     setBusy(true);
     setDone(undefined);
     setFailure(undefined);
     setConfirming(undefined);
     try {
       await action();
+      // Still busy while the page leaves, so nothing is clicked twice.
+      if (typeof then === "function") return then();
       setDone(then);
     } catch (e) {
       failed(e, "failed");
@@ -309,7 +317,13 @@ export function AccountPolls({
           className="px-0"
           aria-describedby={which}
           disabled={busy}
-          onClick={act(() => client.retry(p.id), "pollsRetried")}
+          // Retrying puts the poll back to its draft and nothing more: the
+          // draft is where it is checked, changed if its reason says so,
+          // and submitted again, so that is where it goes.
+          onClick={act(
+            () => client.retry(p.id),
+            () => onRetried(p.id),
+          )}
         >
           {t("pollsRetry")}
         </Button>

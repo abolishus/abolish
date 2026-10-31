@@ -201,6 +201,62 @@ contract BoardRollingBallotTest is TestBase {
         );
     }
 
+    /// Whatever one byte of an honest rolling record is changed to, and
+    /// whichever root and path carry it, the board refuses it or accepts it
+    /// exactly once: an accepted change re-passes the rolling check with its
+    /// root, is emitted only as `RollingBallotSubmitted`, and never on the
+    /// ordinary path; any change to the step, which the proof binds through
+    /// the ballot hash, is refused (T-38, T-31).
+    function testFuzz_OneByteChanged(
+        uint256 at,
+        uint8 xor,
+        bool ordinary,
+        bool ownRoot,
+        bytes32 other
+    ) public {
+        vm.assume(xor != 0);
+        (bytes32 root, bytes memory record) = _changed(at, xor, ownRoot, other);
+        at %= record.length;
+        bytes memory call = ordinary
+            ? abi.encodeCall(Board.submitBallot, (record))
+            : abi.encodeCall(Board.submitRollingBallot, (root, record));
+        (bytes32 acc, uint64 count) = board.eventAccumulator();
+        vm.recordLogs();
+        (bool ok,) = address(board).call(call);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        if (!ok) {
+            (bytes32 after_, uint64 countAfter) = board.eventAccumulator();
+            assertTrue(after_ == acc && countAfter == count, "no event");
+            return;
+        }
+        assertTrue(!ordinary, "a version-5 record on the ordinary path");
+        assertTrue(at < 364 || at > 367, "a changed step");
+        assertEq(logs.length, 1, "one event");
+        assertEq(logs[0].topics[0], ROLLING_SUBMITTED, "the rolling event");
+        board.ballotCheck()
+            .checkRolling(record, elections, uint256(root), 1 << 1 | 1 << 2, 1 << 1 | 1 << 2);
+        vm.recordLogs();
+        (ok,) = address(board).call(call);
+        assertTrue(ok, "a repeat");
+        assertEq(vm.getRecordedLogs().length, 0, "a repeat emits nothing");
+    }
+
+    /// ok-newest-step's record, with its seats registered, byte `at` (mod its
+    /// length) XORed with `xor`, and its own root or `other`.
+    function _changed(uint256 at, uint8 xor, bool ownRoot, bytes32 other)
+        internal
+        returns (bytes32, bytes memory record)
+    {
+        string memory json = vm.readFile(V5);
+        _registerKeySets(json, _ballot(json, "ok-newest-step"));
+        string memory ej = vm.readFile(EVENTS);
+        bytes32 own;
+        (own, record) = _rolling(ej, _eventFields(ej, "rolling-ballot-ok-newest-step"));
+        at %= record.length;
+        record[at] = bytes1(uint8(record[at]) ^ xor);
+        return (ownRoot ? own : other, record);
+    }
+
     /// The file's decode rejections are refused with their codes and offsets,
     /// the step's own among them (`truncated` at 364).
     function test_Version5DecodeRejections() public {
@@ -245,6 +301,10 @@ contract BoardRollingBallotTest is TestBase {
             2
         );
         _refuse(abi.encodeCall(Board.submitBallot, (record)), unknown, "ordinary call");
+        vm.prank(address(uint160(RELAY) + uint160(0x1111000000000000000000000000000000001111)));
+        (bool ok, bytes memory ret) =
+            address(board).call(abi.encodeCall(Board.submitRelayedBallot, (0, 1, 1, 1, record)));
+        assertTrue(!ok && keccak256(ret) == keccak256(unknown), "relayed call");
         _election(json, "rolling", 4);
         record[2] = 0x04;
         _refuse(

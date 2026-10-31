@@ -331,8 +331,8 @@ library BallotCheckLib {
     /// encoding framed, every scalar below `ℓ`, and nothing after the last
     /// field. Version 4's author half, between the share hashes and the
     /// option proofs, is framed as the default half is, its rows counted
-    /// against `kA`; version 5's committed vote is version 4's. Reverts with `BallotMalformed` at the first failure,
-    /// left to right.
+    /// against `kA`; version 5's committed vote is version 4's. Reverts with
+    /// `BallotMalformed` at the first failure, left to right.
     function frameVote(bytes calldata r, uint256 o, uint8 version, uint256 k, uint256 kA)
         internal
         pure

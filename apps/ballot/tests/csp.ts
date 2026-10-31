@@ -12,8 +12,10 @@
 //   origins of different operators (the second confirms a `moved` outcome
 //   before the client offers a new identity, T-16) and one L1 JSON-RPC origin
 //   (the block a ballot names, and chain time), all untrusted (the client
-//   checks every answer against the registry or the chain, T-34); and nothing
-//   else. Staging's values; a release names its own.
+//   checks every answer against the registry or the chain, T-34); the intake
+//   relay's origin, which carries a sealed delivery to a seat's node and
+//   reads neither it nor the answer (T-25, T-11); and nothing else. Staging's
+//   values; a release names its own.
 // - frame-src: the challenge page's origin alone (apps/challenge), where
 //   Turnstile runs instead of in the client; staging's, as above.
 // - worker-src 'self': the Web Workers that encrypt and prove load only from
@@ -43,6 +45,7 @@ export const BALLOT_CSP: Csp = {
     "https://sepolia.base.org",
     "https://base-sepolia-rpc.publicnode.com",
     "https://ethereum-sepolia-rpc.publicnode.com",
+    "https://intake-relay-staging.up.railway.app",
   ],
   "frame-src": ["https://challenge-staging.up.railway.app"],
   "worker-src": ["'self'"],

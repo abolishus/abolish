@@ -487,7 +487,11 @@ const enUS = {
   pollAnswerOpen: { one: "Answer the question", other: "Answer {count} questions" },
   pollAnswerOpenNote: "Opens the ballot app. Nothing is sent until you cast your answers there.",
   pollAnswerScheduled: "You can answer here once the poll opens.",
+  pollScheduledLede:
+    "Nothing can be answered until it opens. Who can answer, when, and how it's counted are set out below.",
   pollQuestionsTitle: "What it asks",
+  pollQuestionsFixed:
+    "The poll's definition fixes these words, so they can't be edited before it opens or while it runs.",
   pollPickFrom: "{instruction} from {options}",
   pollFinal: {
     one: "Final results. {count} person answered; here is what they said.",

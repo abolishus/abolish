@@ -89,14 +89,32 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
  * definition's, as the proof enforces them (T-29, T-34); the words are
  * those the definition commits to (T-41).
  */
-function PollQuestions({ poll, words }: { poll: PollView; words: PollWords }) {
+function PollQuestions({
+  poll,
+  words,
+  scheduled,
+}: {
+  poll: PollView;
+  words: PollWords;
+  scheduled: boolean;
+}) {
   const t = useTranslate(catalogs);
   const headed = words.title === "" && words.questions.length === 1;
   return (
     <section aria-labelledby="questions-title" className="grid max-w-3xl gap-6">
-      <h2 id="questions-title" className="m-0 font-heading text-2xl font-semibold">
-        {t("pollQuestionsTitle")}
-      </h2>
+      <div className="grid gap-2">
+        <h2 id="questions-title" className="m-0 font-heading text-2xl font-semibold">
+          {t("pollQuestionsTitle")}
+        </h2>
+        {/* Before it opens, as the scheduled poll's mockup says it: the words
+            are the definition's, which the definition hash in the evidence
+            pins, and the ballot app checks against the registry (T-34). */}
+        {scheduled ? (
+          <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
+            {t("pollQuestionsFixed")}
+          </p>
+        ) : null}
+      </div>
       <ol className="m-0 grid list-none gap-4 p-0">
         {words.questions.map((q, i) => {
           const limits = poll.questions[i];
@@ -316,6 +334,12 @@ export function PollSummary({
           )}
         </div>
 
+        {/* The scheduled poll's mockup opens on this: there is nothing to do
+            yet, and the facts below say when there will be. */}
+        {status === "scheduled" ? (
+          <p className="m-0 max-w-prose text-lg text-pretty">{t("pollScheduledLede")}</p>
+        ) : null}
+
         {final === undefined ? null : (
           <>
             <InShort final={final} words={moderation.state === "hidden" ? undefined : words} />
@@ -391,7 +415,9 @@ export function PollSummary({
         )}
       </header>
 
-      {words === undefined ? null : <PollQuestions poll={poll} words={words} />}
+      {words === undefined ? null : (
+        <PollQuestions poll={poll} words={words} scheduled={status === "scheduled"} />
+      )}
 
       {/* Shown on a hidden poll too, by number: moderation never withholds a
           result (docs/moderation-policy.md). Nothing is counted before it opens. */}

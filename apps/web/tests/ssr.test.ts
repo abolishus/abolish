@@ -1485,6 +1485,39 @@ describe("poll list", () => {
     expect(html).toContain("sent another poll&#x27;s definition");
   });
 
+  // P2-19 part 16: the register in polls' own words.
+  test("names each poll in its own words where its definition commits to them, by its ID otherwise", async () => {
+    const html = await (await get(`/polls?after=${LOST_ID}`)).text();
+    // A version-5 poll by its title, a version-1 poll by its question, in
+    // their language and direction, each with its ID under it.
+    expect(html).toMatch(
+      new RegExp(
+        `<h3[^>]*lang="en" dir="auto"[^>]*><a[^>]*href="/polls/${STREAM_V5}">Park and library</a></h3>`,
+      ),
+    );
+    expect(html).toMatch(
+      new RegExp(
+        `<h3[^>]*lang="en" dir="auto"[^>]*><a[^>]*href="/polls/${STREAM_V1}">Should the park stay open late\\?</a></h3>`,
+      ),
+    );
+    expect(html).toContain(`>${STREAM_V5.slice(0, 16)}…</p>`);
+    // Text the definition doesn't commit to, or none, gives no words (T-34, T-41).
+    for (const id of [STREAM_BAD_TEXT, STREAM_NO_TEXT])
+      expect(html).toMatch(new RegExp(`href="/polls/${id}">${id.slice(0, 16)}…</a>`));
+    expect(html).not.toMatch(new RegExp(`href="/polls/${STREAM_BAD_TEXT}">[^<]*[^0-9a-f…<]`));
+  });
+
+  test("names each poll in the page's language", async () => {
+    const html = await (
+      await get(`/polls?after=${LOST_ID}`, { "accept-language": "es-MX" })
+    ).text();
+    expect(html).toMatch(
+      new RegExp(
+        `<h3[^>]*lang="es-419"[^>]*><a[^>]*href="/polls/${STREAM_V1}">¿Debe el parque abrir hasta tarde\\?</a>`,
+      ),
+    );
+  });
+
   test("lists a refiling with its topic and what it did to the place", async () => {
     const html = await (await get("/moderation")).text();
     expect(html).toContain("Refiled");
@@ -1550,6 +1583,7 @@ describe("poll list", () => {
     await get("/polls?status=open&counting=approval");
     expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(20);
+    expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(20);
   });
 
   test("asks the API for nothing of the visitor's (T-10)", async () => {

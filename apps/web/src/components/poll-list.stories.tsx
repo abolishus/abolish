@@ -28,9 +28,19 @@ const meta = {
   args: {
     label: "Listed polls",
     polls: [
-      { kind: "poll", poll: poll(FIRST) },
       {
         kind: "poll",
+        poll: poll(FIRST),
+        text: {
+          language: "en",
+          heading: "Should the library open on Sundays?",
+          question: undefined,
+          options: ["Yes", "No", "Only in winter"],
+        },
+      },
+      {
+        kind: "poll",
+        text: undefined,
         poll: poll(SECOND, {
           counting: "approval",
           illFormed: { rule: "timing", question: undefined },
@@ -50,7 +60,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   const items = within(canvas.getByRole("list", { name: "Listed polls" })).getAllByRole("listitem");
   await expect(items).toHaveLength(3);
-  await expect(within(items[0]!).getByRole("link")).toHaveAttribute("href", `/polls/${FIRST}`);
+  // A poll in its own words, in their language, with its ID under them.
+  const first = within(items[0]!).getByRole("link");
+  await expect(first).toHaveAttribute("href", `/polls/${FIRST}`);
+  await expect(first).toHaveTextContent("Should the library open on Sundays?");
+  await expect(first.closest("h3")).toHaveAttribute("lang", "en");
+  await expect(within(items[0]!).getByText("1010101010101010…")).toBeVisible();
+  // One with no words to show goes by its ID.
+  await expect(within(items[1]!).getByRole("link")).toHaveTextContent("2020202020202020…");
   await expect(within(items[0]!).getByText("One choice")).toBeVisible();
   await expect(within(items[0]!).getByText("Open")).toBeVisible();
   await expect(within(items[0]!).getByText(/January 8, 2026/)).toBeVisible();

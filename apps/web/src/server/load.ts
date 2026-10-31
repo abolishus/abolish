@@ -36,7 +36,7 @@ import {
 import type { RemovalGround } from "../moderation-grounds.ts";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
-import { cardText, checkedWords, streamCard } from "./stream-card.ts";
+import { cardText, checkedText, checkedWords, streamCard } from "./stream-card.ts";
 
 export interface BoardHead {
   /** Entries on the board, as a canonical decimal `u64`. */
@@ -640,7 +640,12 @@ export async function reportPoll(
 }
 
 export type ListedPoll =
-  | { readonly kind: "poll"; readonly poll: PollView }
+  | {
+      readonly kind: "poll";
+      readonly poll: PollView;
+      /** Its words in the page's locale, checked against the definition; `undefined` if none can be shown. */
+      readonly text: CardText | undefined;
+    }
   | {
       readonly kind: "unavailable";
       readonly electionId: string;
@@ -666,13 +671,15 @@ export interface PollList {
 
 /**
  * A page of the polls the API lists for discovery, from just above `after`
- * (an election ID, or `""` from the start). The API leaves out delisted and
- * hidden polls (T-68); each listed poll's definition is decoded and checked
- * here as on its own page, so the list shows nothing the poll page wouldn't
- * (T-31, T-34). A poll stops being served between the listing and its
- * definition only if the database lost it, so it drops out of the page.
+ * (an election ID, or `""` from the start), each poll's words in `locale`.
+ * The API leaves out delisted and hidden polls (T-68); each listed poll's
+ * definition is decoded and checked here as on its own page, and its display
+ * text as a stream card's (src/server/stream-card.ts), so the list shows
+ * nothing the poll page wouldn't (T-31, T-34, T-41). A poll stops being
+ * served between the listing and its definition only if the database lost
+ * it, so it drops out of the page.
  */
-export async function loadPollList(api: Api, after: string): Promise<PollList> {
+export async function loadPollList(api: Api, after: string, locale: string): Promise<PollList> {
   const { elections } = await api.elections.list({
     ...(after === "" ? {} : { after }),
     limit: String(LIST_PAGE),
@@ -680,8 +687,11 @@ export async function loadPollList(api: Api, after: string): Promise<PollList> {
   const answers = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const { definition } = await api.elections.getDefinition({ electionId });
-        return { electionId, definition };
+        const [{ definition }, displayText] = await Promise.all([
+          api.elections.getDefinition({ electionId }),
+          displayTextOf(api, electionId),
+        ]);
+        return { electionId, definition, displayText };
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;
@@ -694,7 +704,11 @@ export async function loadPollList(api: Api, after: string): Promise<PollList> {
     const view = definitionView(answer.electionId, answer.definition);
     polls.push(
       view.ok
-        ? { kind: "poll", poll: view.poll }
+        ? {
+            kind: "poll",
+            poll: view.poll,
+            text: checkedText(view.poll, answer.definition, answer.displayText, locale),
+          }
         : { kind: "unavailable", electionId: answer.electionId, problem: view.problem },
     );
   }

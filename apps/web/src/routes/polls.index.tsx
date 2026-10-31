@@ -33,7 +33,7 @@ export const Route = createFileRoute("/polls/")({
       throw redirect({ to: "/polls/$electionId", params: { electionId } });
   },
   loaderDeps: ({ search }) => ({ after: search.after ?? "" }),
-  loader: ({ deps }) => fetchPollList({ data: deps.after }),
+  loader: ({ context: { locale }, deps }) => fetchPollList({ data: { after: deps.after, locale } }),
   head: ({ match }) => {
     const { pageTitle, text } = titles(match.context.locale);
     return { meta: [pageTitle(text("navPolls"))] };

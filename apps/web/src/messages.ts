@@ -998,6 +998,7 @@ const enUS = {
   rule_timing: "opening and closing times",
   "rule_receipt-keys": "receipt keys",
   utcTime: "{time}\u00a0UTC",
+  zonedTime: "{time}\u00a0{zone}",
   shortId: "{prefix}…",
   moderationDelisted:
     "This poll is left out of discovery and search ({reason}). Its board and result are unaffected.",

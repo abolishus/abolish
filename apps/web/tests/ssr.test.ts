@@ -1952,6 +1952,10 @@ describe("stream", () => {
     expect(html).toMatch(/<a href="\/discover" aria-current="page"[^>]*>New</);
     expect(html).toContain(`href="/discover?after=${streamed[9]}"`);
     expect(html).not.toContain("These come after the first page.");
+    // The server doesn't know the visitor's zone, so each card's closing time
+    // is served in UTC; the browser redraws it on the visitor's own clock
+    // (P2-29, the stream's iteration 22).
+    expect(html).toMatch(/Closes(?:<!-- -->)? <time datetime="[^"]+Z"[^>]*>[^<]*\u00a0UTC<\/time>/i);
   });
 
   test("shows where each card's poll is listed, each tag a link into the stream", async () => {

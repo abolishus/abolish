@@ -1013,6 +1013,7 @@ export const esUS: Messages = {
   rule_timing: "horas de apertura y cierre",
   "rule_receipt-keys": "claves de comprobante",
   utcTime: "{time}\u00a0UTC",
+  zonedTime: "{time}\u00a0{zone}",
   shortId: "{prefix}…",
   moderationDelisted:
     "Esta encuesta queda fuera de Descubrir y de la búsqueda ({reason}). Su tablero y su resultado no se ven afectados.",

@@ -77,9 +77,9 @@ export const fetchBoardPage = createServerFn({ method: "GET" })
   .handler(({ data }) => opaque(() => loadBoardPage(api(), data.electionId, data.from)));
 
 export const fetchModerationLog = createServerFn({ method: "GET" })
-  .inputValidator((after: unknown) => {
-    if (!isCanonicalU64(after)) throw new TypeError("expected a canonical decimal u64");
-    return after;
+  .inputValidator((before: unknown) => {
+    if (!isCanonicalU64(before)) throw new TypeError("expected a canonical decimal u64");
+    return before;
   })
   .handler(({ data }) => opaque(() => loadModerationLog(api(), data)));
 

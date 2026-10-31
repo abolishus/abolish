@@ -968,7 +968,7 @@ const enUS = {
   moderationResultsStay:
     "Whatever our pages show, every poll's board stays public, and anyone who downloads it can count it again.",
   moderationLogMark: "The log",
-  moderationLogTitle: "Decisions, oldest first",
+  moderationLogTitle: "Decisions, newest first",
   moderationLogLede:
     "Times are the database's clock, in UTC, not the moderator's. A row holds only the poll or profile, the action and its ground, never free text, so not even a profile's name or a poll's place: a refiling says only whether it changed or cleared the place. Our API serves the same log for anyone to copy:",
   moderationEmpty: "No decisions yet.",
@@ -979,10 +979,12 @@ const enUS = {
   moderationAction: "Action",
   moderationReason: "Ground",
   moderationDecided: "Time",
-  moderationMore: "Later decisions",
+  moderationMore: "Earlier decisions",
+  moderationLatest: "Latest decisions",
   moderationActionApply: "Show these decisions",
   moderationActionMatches: "{shown} of the {total} decisions on this page took this action.",
-  moderationActionNone: "No decision on this page took this action. Later decisions may have some.",
+  moderationActionNone: "No decision on this page took this action.",
+  moderationActionEarlier: "Earlier decisions may have some.",
   moderationGroundsMark: "Grounds",
   moderationGroundsTitle: "The only seven grounds",
   moderationGroundsLede:

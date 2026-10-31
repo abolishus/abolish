@@ -588,7 +588,7 @@ export const AppealADecision: Story = {
     // The log opens at the decision the heading names (P2-29, the author's
     // list's iteration 26).
     const log = moderation.getByRole("link", { name: "See it in the moderation log" });
-    await expect(log).toHaveAttribute("href", "/moderation?after=40");
+    await expect(log).toHaveAttribute("href", "/moderation?before=42");
     // The history's actions are drawn as the row's, 48px targets (P2-29,
     // the author's list's iteration 13).
     for (const action of [moderation.getByRole("button", { name: "Appeal this decision…" }), log])
@@ -728,11 +728,11 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   // not at the log's first page (P2-29, the author's list's iteration 26).
   await expect(hidden.getByRole("link", { name: "See it in the moderation log" })).toHaveAttribute(
     "href",
-    "/moderation?after=51",
+    "/moderation?before=53",
   );
   await expect(
     restored.getByRole("link", { name: "See it in the moderation log" }),
-  ).toHaveAttribute("href", "/moderation?after=59");
+  ).toHaveAttribute("href", "/moderation?before=61");
   // A poll nothing was decided about, and a draft, show no moderation at all.
   await expect(canvas.getAllByRole("group")).toHaveLength(2);
 };

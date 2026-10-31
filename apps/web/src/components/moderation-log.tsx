@@ -1,5 +1,14 @@
 import { buttonVariants, Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
-import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, Tags, UserRound } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Ban,
+  EyeOff,
+  ListX,
+  RotateCcw,
+  Tags,
+  UserRound,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
@@ -189,9 +198,9 @@ function Row({ entry }: { entry: Entry }) {
 
 export interface ModerationLogProps {
   log: Log;
-  /** Where this page starts, if not at the beginning. */
-  after: string | undefined;
-  /** Where the next page starts, if this one was full. */
+  /** The number this page reads below, if not from the latest decision. */
+  before: string | undefined;
+  /** The number the earlier page reads below, if this one was full. */
   next: string | undefined;
   /** The action the page shows, or every action with `"all"` or `undefined`. */
   action: LogAction | "all" | undefined;
@@ -201,10 +210,11 @@ export interface ModerationLogProps {
  * The public moderation log (T-68): what was done to which poll or profile,
  * including where a poll is listed, and why, never who did it or who reported it, with the policy's limits and grounds
  * beside it. The log carries no free text, so a row can't carry personal
- * data (T-17); the page shows the API's rows as they come, oldest first,
- * filtered by action over the page in hand.
+ * data (T-17); the page shows the API's rows as they come, newest first, so
+ * what moderation did last is what a reader meets first, filtered by action
+ * over the page in hand.
  */
-export function ModerationLog({ log, after, next, action }: ModerationLogProps) {
+export function ModerationLog({ log, before, next, action }: ModerationLogProps) {
   const t = useTranslate(catalogs);
   const only = action === "all" ? undefined : action;
   const shown =
@@ -212,7 +222,7 @@ export function ModerationLog({ log, after, next, action }: ModerationLogProps) 
   // Values are canonical decimals and actions from a fixed list: nothing needs escaping.
   const pageHref = (from: string | undefined, of: LogAction | undefined) => {
     const query = [
-      ...(from === undefined ? [] : [`after=${from}`]),
+      ...(from === undefined ? [] : [`before=${from}`]),
       ...(of === undefined ? [] : [`action=${of}`]),
     ].join("&");
     return query === "" ? "/moderation" : `/moderation?${query}`;
@@ -248,7 +258,7 @@ export function ModerationLog({ log, after, next, action }: ModerationLogProps) 
           <p className="m-0 text-lg">{t("moderationEmpty")}</p>
         ) : (
           <form method="get" action="/moderation" className="grid gap-4">
-            {after === undefined ? null : <input type="hidden" name="after" value={after} />}
+            {before === undefined ? null : <input type="hidden" name="before" value={before} />}
             <FilterGroup
               name="action"
               legend={t("moderationAction")}
@@ -269,7 +279,7 @@ export function ModerationLog({ log, after, next, action }: ModerationLogProps) 
                 {t("moderationActionApply")}
               </button>
               {only === undefined ? null : (
-                <a className="underline underline-offset-4" href={pageHref(after, undefined)}>
+                <a className="underline underline-offset-4" href={pageHref(before, undefined)}>
                   {t("filterClear")}
                 </a>
               )}
@@ -284,6 +294,8 @@ export function ModerationLog({ log, after, next, action }: ModerationLogProps) 
         {log.entries.length === 0 ? null : shown.length === 0 ? (
           <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
             {t("moderationActionNone")}
+            {/* Only where there are earlier decisions to look through. */}
+            {next === undefined ? null : ` ${t("moderationActionEarlier")}`}
           </p>
         ) : (
           <div className="grid gap-0">
@@ -307,15 +319,31 @@ export function ModerationLog({ log, after, next, action }: ModerationLogProps) 
             </ol>
           </div>
         )}
-        {next !== undefined ? (
-          <a
-            className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
-            href={pageHref(next, only)}
-          >
-            {t("moderationMore")}
-            <ArrowRight aria-hidden="true" className="size-4" />
-          </a>
-        ) : null}
+        {next === undefined && before === undefined ? null : (
+          <div className="flex flex-wrap items-center gap-x-6">
+            {/* Back to the latest page rather than one page later: the API
+                pages back from a number, and the latest is where a reader of
+                an earlier page is likeliest to want to return. */}
+            {before === undefined ? null : (
+              <a
+                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
+                href={pageHref(undefined, only)}
+              >
+                <ArrowLeft aria-hidden="true" className="size-4" />
+                {t("moderationLatest")}
+              </a>
+            )}
+            {next === undefined ? null : (
+              <a
+                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
+                href={pageHref(next, only)}
+              >
+                {t("moderationMore")}
+                <ArrowRight aria-hidden="true" className="size-4" />
+              </a>
+            )}
+          </div>
+        )}
       </Section>
 
       <Section

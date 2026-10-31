@@ -602,10 +602,19 @@ const getModerationLog = oc
     path: "/moderation/log",
     summary: "A page of the public moderation log",
     description:
-      "Moderation decisions with a sequence number above `after`, oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. A refiling (`refile`) names a poll by `electionId` and changes where it is listed, not its state: `topic` is the topic it filed the poll under, `null` if it filed it under none, and absent if it kept the topic; `place` says only whether it `changed` the place or filed the poll under none (`cleared`), never the place's words, which may be personal data a later refiling clears (T-17); a poll's first refiling reports both tags, so a tag it didn't give reads as `null` or `cleared` even if the poll had none; `GET /elections/tags` serves the place the poll is filed under now. Each cites one of the policy's reason codes, and every kind shares one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
+      "Moderation decisions with a sequence number above `after` (from the first without it), oldest first: at most `limit`. Fewer than `limit` entries means the log ends there for now. With `before` instead, those with a sequence number below it, newest first, and fewer than `limit` means none earlier; a `before` above every number (the largest u64, say) reads from the latest decision, so a reader can start where moderation is now (T-68). `after` and `before` together are refused. Sequence numbers increase but may skip. A decision about a poll names it by `electionId` and delists it, hides its display text or restores it; one about a creator profile names it by its public `handle`, never its account, and hides its name and the polls it shows on our pages or restores it; a hide leaves those polls listed. A refiling (`refile`) names a poll by `electionId` and changes where it is listed, not its state: `topic` is the topic it filed the poll under, `null` if it filed it under none, and absent if it kept the topic; `place` says only whether it `changed` the place or filed the poll under none (`cleared`), never the place's words, which may be personal data a later refiling clears (T-17); a poll's first refiling reports both tags, so a tag it didn't give reads as `null` or `cleared` even if the poll had none; `GET /elections/tags` serves the place the poll is filed under now. Each cites one of the policy's reason codes, and every kind shares one numbering in the order they were made. None of them touches a poll's board, definition or result (docs/moderation-policy.md).",
     tags: ["moderation"],
   })
-  .input(z.strictObject({ after: U64, limit: PageSize }))
+  .input(
+    z
+      .strictObject({ after: z.optional(U64), before: z.optional(U64), limit: PageSize })
+      .check(
+        z.refine(
+          (input) => input.after === undefined || input.before === undefined,
+          "after and before can't both be given",
+        ),
+      ),
+  )
   .output(
     z.strictObject({
       entries: z

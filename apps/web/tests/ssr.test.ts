@@ -2159,23 +2159,50 @@ describe("moderation log", () => {
     const html = await (await get("/moderation")).text();
     expect(html).toContain("Profile hidden");
     expect(html).toMatch(new RegExp(`href="/by/${PROFILE_HANDLE}"[^>]*>${PROFILE_HANDLE}<`));
-    expect(html.indexOf(PROFILE_HANDLE)).toBeLessThan(html.indexOf(`href="/polls/${HIDDEN_ID}"`));
   });
 
-  test.each(["?after=abc", "?after=99999999999999999999", "?after=1&after=2", "?after=-1"])(
-    "%s starts from the beginning, quoting no error",
-    async (search) => {
-      const response = await follow(`/moderation${search}`);
-      expect(response.status).toBe(200);
-      const html = await response.text();
-      expect(html).toContain("Text hidden");
-      expect(html).not.toMatch(/new Error|expected a canonical/);
-    },
-  );
+  test("starts from the latest decision, newest first (T-68)", async () => {
+    seen.length = 0;
+    const html = await (await get("/moderation")).text();
+    expect(seen.filter((r) => r.path === "/moderation/log").map((r) => `${r.query}`)).toEqual([
+      "before=18446744073709551615&limit=50",
+    ]);
+    expect(html).toContain("Decisions, newest first");
+    // The rows, after the filter's labels.
+    const rows = html
+      .slice(html.indexOf('<ol aria-labelledby="log-title"'))
+      .replace(/<[^>]+>/g, "");
+    expect(rows.indexOf("Refiled")).toBeLessThan(rows.indexOf("Text hidden"));
+    expect(rows.indexOf("Text hidden")).toBeLessThan(rows.indexOf("Profile hidden"));
+    expect(rows.indexOf("Refiled")).toBeGreaterThanOrEqual(0);
+    // The latest page links to no later one.
+    expect(html).not.toContain("Latest decisions");
+  });
 
-  test("pages by sequence number", async () => {
-    const html = await (await get("/moderation?after=7")).text();
+  test.each([
+    "?before=abc",
+    "?before=99999999999999999999",
+    "?before=1&before=2",
+    "?before=-1",
+    "?after=3",
+  ])("%s starts from the latest, quoting no error", async (search) => {
+    seen.length = 0;
+    const response = await follow(`/moderation${search}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("Text hidden");
+    expect(html).not.toMatch(/new Error|expected a canonical/);
+    expect(seen.find((r) => r.path === "/moderation/log")?.query.get("before")).toBe(
+      "18446744073709551615",
+    );
+  });
+
+  test("pages back by sequence number, with a way back to the latest", async () => {
+    seen.length = 0;
+    const html = await (await get("/moderation?before=5")).text();
+    expect(seen.find((r) => r.path === "/moderation/log")?.query.get("before")).toBe("5");
     expect(html).toContain("No decisions yet.");
+    expect(html).toMatch(/href="\/moderation"[^>]*>(<[^>]+>)*Latest decisions/);
   });
 
   test("filters the page in hand by action, asking the API for the same page (T-10)", async () => {
@@ -2196,9 +2223,10 @@ describe("moderation log", () => {
   });
 
   test("keeps the page it filters, in the form and the clear link", async () => {
-    const html = await (await get("/moderation?after=3&action=refile")).text();
-    expect(html).toMatch(/<input type="hidden" name="after" value="3"\/>/);
-    expect(html).toContain('href="/moderation?after=3"');
+    const html = await (await get("/moderation?before=9&action=refile")).text();
+    expect(html).toMatch(/<input type="hidden" name="before" value="9"\/>/);
+    expect(html).toContain('href="/moderation?before=9"');
+    expect(html).toContain('href="/moderation?action=refile"');
     expect(html.replace(/<[^>]+>/g, "")).toContain("Refiled");
     expect(html).not.toContain(`href="/by/${PROFILE_HANDLE}"`);
   });
@@ -2214,7 +2242,7 @@ describe("moderation log", () => {
   );
 
   test("states what moderation can't reach and every ground, with the log or without it", async () => {
-    for (const path of ["/moderation", "/moderation?after=7"]) {
+    for (const path of ["/moderation", "/moderation?before=5"]) {
       const html = await (await get(path)).text();
       expect(html).toContain("Moderation acts on poll text, never on results");
       expect(html).toContain("The count and the result");

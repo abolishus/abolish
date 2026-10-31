@@ -32,9 +32,11 @@ import {
   profileReports,
 } from "./db/schema/index.ts";
 import {
+  checkLogPage,
   HANDLE,
+  type LogPage,
+  logPageOf,
   lockModeration,
-  MAX_MODERATION_PAGE,
   ModerationError,
   moderationLogOf,
   moderatorAccount,
@@ -249,20 +251,19 @@ export async function readProfileModerationLog(
   after: bigint,
   limit: number,
 ): Promise<PublicProfileModerationEntry[]> {
-  if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
-    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
-  return profileModerationLogOf(drizzle({ client }), after, limit);
+  checkLogPage({ after }, limit);
+  return profileModerationLogOf(drizzle({ client }), { after }, limit);
 }
 
-/** `readProfileModerationLog` in a transaction the caller holds, with arguments it has checked. */
+/** One page of `readProfileModerationLog`'s table in a transaction the caller holds, with arguments it has checked. */
 async function profileModerationLogOf(
   db: Pick<ModerationTx, "select">,
-  after: bigint,
+  page: LogPage,
   limit: number,
 ): Promise<PublicProfileModerationEntry[]> {
-  if (after >= INT8_MAX) return [];
   const t = profileModerationActions;
+  const bounds = logPageOf(t.seq, page);
+  if (bounds === undefined) return [];
   const rows = await db
     .select({
       seq: t.seq,
@@ -272,8 +273,8 @@ async function profileModerationLogOf(
       decidedAt: t.decidedAt,
     })
     .from(t)
-    .where(gt(t.seq, after))
-    .orderBy(asc(t.seq))
+    .where(bounds.where)
+    .orderBy(bounds.order)
     .limit(limit);
   return rows.map((r) => ({
     seq: r.seq,
@@ -308,14 +309,31 @@ export async function readPublicModerationLog(
   after: bigint,
   limit: number,
 ): Promise<PublicLogEntry[]> {
-  if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
-    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+  return publicLogPage(client, { after }, limit);
+}
+
+/**
+ * Up to `limit` entries of the whole public log with a sequence number below
+ * `before`, newest first, as `readPublicModerationLog` reads them otherwise;
+ * a `before` past the largest Postgres `bigint` reads from the latest
+ * decision. The log's latest page is where a reader starts, so they meet
+ * what moderation did last rather than its first decisions (T-68).
+ */
+export async function readPublicModerationLogBefore(
+  client: Sql,
+  before: bigint,
+  limit: number,
+): Promise<PublicLogEntry[]> {
+  return publicLogPage(client, { before }, limit);
+}
+
+async function publicLogPage(client: Sql, page: LogPage, limit: number): Promise<PublicLogEntry[]> {
+  checkLogPage(page, limit);
   const [polls, refilings, profiles] = await drizzle({ client }).transaction(
     async (tx) => [
-      await moderationLogOf(tx, after, limit),
-      await refilingLogOf(tx, after, limit),
-      await profileModerationLogOf(tx, after, limit),
+      await moderationLogOf(tx, page, limit),
+      await refilingLogOf(tx, page, limit),
+      await profileModerationLogOf(tx, page, limit),
     ],
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
@@ -324,8 +342,11 @@ export async function readPublicModerationLog(
     ...refilings.map((e) => ({ target: "refiling" as const, ...e })),
     ...profiles.map((e) => ({ target: "profile" as const, ...e })),
   ];
-  // Every number comes from one sequence, so no two entries share one.
-  return entries.sort((a, b) => (a.seq < b.seq ? -1 : 1)).slice(0, limit);
+  // Every number comes from one sequence, so no two entries share one. Each
+  // table gave its own first `limit` in the page's order, so the first
+  // `limit` of the three together are the page's.
+  const newestFirst = "before" in page;
+  return entries.sort((a, b) => (a.seq < b.seq !== newestFirst ? -1 : 1)).slice(0, limit);
 }
 
 /**

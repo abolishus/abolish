@@ -25,6 +25,7 @@ import {
   readEntryAt,
   readPollTags,
   readPublicModerationLog,
+  readPublicModerationLogBefore,
   report,
   SearchQueryError,
   searchTerms,
@@ -487,11 +488,18 @@ export const router = os.router({
     // Profiles' decisions name the public handle only, from the operational
     // log table; the API still reads no account table (T-10).
     getLog: os.moderation.getLog.handler(async ({ input, context }) => {
-      const entries = await readPublicModerationLog(
-        context.sql,
-        BigInt(input.after),
-        Number(input.limit),
-      );
+      const entries =
+        input.before === undefined
+          ? await readPublicModerationLog(
+              context.sql,
+              BigInt(input.after ?? "0"),
+              Number(input.limit),
+            )
+          : await readPublicModerationLogBefore(
+              context.sql,
+              BigInt(input.before),
+              Number(input.limit),
+            );
       return {
         entries: entries.map((e) => {
           const common = { seq: e.seq.toString(), decidedAt: e.decidedAt.toISOString() };

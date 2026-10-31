@@ -642,9 +642,13 @@ export async function loadBoardPage(
 
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;
 
-/** The moderation log after sequence number `after` (a canonical decimal `u64`). */
-export async function loadModerationLog(api: Api, after: string): Promise<ModerationLog> {
-  return api.moderation.getLog({ after, limit: String(LOG_PAGE) });
+/**
+ * The moderation log below sequence number `before` (a canonical decimal
+ * `u64`, `LOG_LATEST` for the latest decisions), newest first: a reader meets
+ * what moderation did last, not its first decisions (T-68).
+ */
+export async function loadModerationLog(api: Api, before: string): Promise<ModerationLog> {
+  return api.moderation.getLog({ before, limit: String(LOG_PAGE) });
 }
 
 /**

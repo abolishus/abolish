@@ -29,6 +29,8 @@ import {
   ModerationError,
   type ModerationState,
   moderatorAccount,
+  type LogPage,
+  logPageOf,
   type ModerationTx,
   REMOVAL_REASONS,
   statusOf,
@@ -285,9 +287,6 @@ export async function refilePoll(
   );
 }
 
-/** The largest Postgres `bigint`. */
-const INT8_MAX = (1n << 63n) - 1n;
-
 /**
  * One refiling as the public log shows it: everything but the moderator and
  * the place's words. The topic is one of `POLL_TOPICS`, so it can say nothing
@@ -310,19 +309,18 @@ export interface PublicRefilingEntry {
 }
 
 /**
- * Up to `limit` refilings with a sequence number above `after`, oldest first,
- * in a transaction the caller holds, with arguments it has checked: the
- * refilings' half of the public log (`readPublicModerationLog`).
+ * Up to `limit` refilings on one page of the log, in a transaction the caller
+ * holds, with arguments it has checked: the refilings' part of the public log
+ * (`readPublicModerationLog`).
  */
 export async function refilingLogOf(
   db: Pick<ModerationTx, "select">,
-  after: bigint,
+  page: LogPage,
   limit: number,
 ): Promise<PublicRefilingEntry[]> {
-  // Past the largest Postgres `bigint` there is nothing, and Postgres would
-  // refuse the comparison rather than say so.
-  if (after >= INT8_MAX) return [];
   const t = pollTagActions;
+  const bounds = logPageOf(t.seq, page);
+  if (bounds === undefined) return [];
   const rows = await db
     .select({
       seq: t.seq,
@@ -335,8 +333,8 @@ export async function refilingLogOf(
       decidedAt: t.decidedAt,
     })
     .from(t)
-    .where(gt(t.seq, after))
-    .orderBy(asc(t.seq))
+    .where(bounds.where)
+    .orderBy(bounds.order)
     .limit(limit);
   return rows.map((r) => ({
     seq: r.seq,

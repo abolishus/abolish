@@ -17,7 +17,7 @@ import {
   ACCUMULATOR_SLOT,
   accumulatorAtOutputRoot,
   OutputRootError,
-  type OutputRootEvidence,
+  type OutputRootAccumulator,
 } from "@abolishus/verifier";
 import {
   type Address,
@@ -228,6 +228,15 @@ export function encodeHeader(block: RawBlock): Uint8Array {
   return toRlp(fields, "bytes");
 }
 
+/** Accumulators proven under one output root, each in the order asked for. */
+export interface ProvenAccumulators {
+  /** The L2 block the root commits to. */
+  readonly block: bigint;
+  /** That block's timestamp, from the header the root commits to. */
+  readonly timestamp: bigint;
+  readonly accumulators: readonly ProvenEventAccumulator[];
+}
+
 /** One L2 node, read only under output roots from `roots`. Made by `connect`. */
 export class ProvenRegistryAccumulator {
   readonly #client: PublicClient;
@@ -256,40 +265,70 @@ export class ProvenRegistryAccumulator {
    * proves a block other than the one the game claims.
    */
   async proven(contract: Address): Promise<ProvenEventAccumulator> {
+    const { accumulators } = await this.provenTogether([contract]);
+    return accumulators[0] as ProvenEventAccumulator;
+  }
+
+  /**
+   * `proven` for each of `contracts`, all under one output root, with the
+   * timestamp of its block from the header the root commits to: records
+   * read against these run through that one block, whatever root is newest
+   * by the time the last is read (P2-17 part 7b-2; T-08, T-71).
+   */
+  async provenTogether(contracts: readonly Address[]): Promise<ProvenAccumulators> {
+    if (contracts.length === 0) throw new RangeError("contracts must name at least one contract");
     const { outputRoot, l2Block } = await this.#roots.latest();
     const blockNumber = toHex(l2Block);
-    const [block, passer, account] = await Promise.all([
+    const [block, passer, ...accounts] = await Promise.all([
       this.#client.request({ method: "eth_getBlockByNumber", params: [blockNumber, false] }),
       this.#client.getProof({ address: MESSAGE_PASSER, storageKeys: [], blockNumber: l2Block }),
-      this.#client.getProof({
-        address: contract,
-        storageKeys: [
-          toHex(ACCUMULATOR_SLOT, { size: 32 }),
-          toHex(ACCUMULATOR_SLOT + 1n, { size: 32 }),
-        ],
-        blockNumber: l2Block,
-      }),
+      ...contracts.map((contract) =>
+        this.#client.getProof({
+          address: contract,
+          storageKeys: [
+            toHex(ACCUMULATOR_SLOT, { size: 32 }),
+            toHex(ACCUMULATOR_SLOT + 1n, { size: 32 }),
+          ],
+          blockNumber: l2Block,
+        }),
+      ),
     ]);
     if (block === null || typeof block !== "object")
       throw new Error("the L2 node has no block at the output root's number");
-    let evidence: OutputRootEvidence;
+    let header: Uint8Array;
+    let messagePasserStorageRoot: Uint8Array;
+    let nodes: Uint8Array[][];
     try {
-      evidence = {
-        outputRoot,
-        messagePasserStorageRoot: bytesOf(passer.storageHash),
-        header: encodeHeader(block as RawBlock),
-        nodes: [account.accountProof, ...account.storageProof.map((p) => p.proof)]
-          .flat()
-          .map(bytesOf),
-      };
+      header = encodeHeader(block as RawBlock);
+      messagePasserStorageRoot = bytesOf(passer.storageHash);
+      nodes = accounts.map((account) =>
+        [account.accountProof, ...account.storageProof.map((p) => p.proof)].flat().map(bytesOf),
+      );
     } catch (e) {
       // An answer that isn't even hex is the node's, refused as a header or
       // proof the root can't commit to rather than failing as internal.
       if (e instanceof MalformedAnswer) throw new OutputRootError(e.code);
       throw e;
     }
-    const proven = accumulatorAtOutputRoot(evidence, hexToBytes(contract));
-    if (proven.block !== l2Block) throw new GameBlockError();
-    return { block: proven.block, accumulator: proven.accumulator, count: proven.count };
+    // One header for every contract, so one block and one timestamp.
+    const proven = contracts.map((contract, i) =>
+      accumulatorAtOutputRoot(
+        { outputRoot, messagePasserStorageRoot, header, nodes: nodes[i] as Uint8Array[] },
+        hexToBytes(contract),
+      ),
+    );
+    // Every contract was read against the one header above, so the first's
+    // block and timestamp are every one's.
+    const [first] = proven as [OutputRootAccumulator];
+    if (first.block !== l2Block) throw new GameBlockError();
+    return {
+      block: first.block,
+      timestamp: first.timestamp,
+      accumulators: proven.map((p) => ({
+        block: p.block,
+        accumulator: p.accumulator,
+        count: p.count,
+      })),
+    };
   }
 }

@@ -69,9 +69,11 @@ let anvil: ChildProcess;
 let rpcUrl: string;
 let l2: PublicClient;
 const REGISTRY: Address = "0x00000000000000000000000000000000000e1ec7";
+const REGISTRY_2: Address = "0x00000000000000000000000000000000000e1ec8";
 const NO_CODE: Address = "0x00000000000000000000000000000000000b0a0d";
 const ACC_1 = keccak256("0x01");
 const ACC_2 = keccak256("0x02");
+const ACC_3 = keccak256("0x03");
 let b1: bigint;
 let b2: bigint;
 
@@ -97,14 +99,16 @@ beforeAll(async () => {
   // STOP), written to by transactions: Anvil's anvil_setStorageAt rewrites
   // past blocks' storage too, which would leave b1's proofs b2's.
   await rpc("anvil_setCode", [REGISTRY, "0x602035600035550000"]);
+  await rpc("anvil_setCode", [REGISTRY_2, "0x602035600035550000"]);
   const [from] = (await rpc("eth_accounts", [])) as unknown as Hex[];
   // Each write's block, from its receipt: viem caches getBlockNumber.
-  const write = async (key: Hex, value: Hex) => {
-    const hash = await rpc("eth_sendTransaction", [
-      { from, to: REGISTRY, data: concat([key, value]) },
-    ]);
+  const write = async (key: Hex, value: Hex, to = REGISTRY) => {
+    const hash = await rpc("eth_sendTransaction", [{ from, to, data: concat([key, value]) }]);
     return (await l2.waitForTransactionReceipt({ hash: hash as unknown as Hex })).blockNumber;
   };
+  // A second registry, written before b1 and never after.
+  await write(slot(ACCUMULATOR_SLOT), ACC_3, REGISTRY_2);
+  await write(slot(ACCUMULATOR_SLOT + 1n), slot(7n), REGISTRY_2);
   await write(slot(ACCUMULATOR_SLOT), ACC_1);
   b1 = await write(slot(ACCUMULATOR_SLOT + 1n), slot(3n));
   await write(slot(ACCUMULATOR_SLOT), ACC_2);
@@ -167,6 +171,51 @@ describe("the L2 node's proven adapter", () => {
       block: b2,
       accumulator: hexToBytes(ACC_2),
       count: 4n,
+    });
+  });
+
+  test("proves several contracts under one root, with the block's timestamp from its header", async () => {
+    const node = await ProvenRegistryAccumulator.connect(
+      l2,
+      CHAIN,
+      source(async () => ({ outputRoot: await rootOf(b1), l2Block: b1 })),
+    );
+    const { timestamp } = await l2.getBlock({ blockNumber: b1 });
+    expect(await node.provenTogether([REGISTRY, REGISTRY_2])).toEqual({
+      block: b1,
+      timestamp,
+      accumulators: [
+        { block: b1, accumulator: hexToBytes(ACC_1), count: 3n },
+        { block: b1, accumulator: hexToBytes(ACC_3), count: 7n },
+      ],
+    });
+    await expect(node.provenTogether([])).rejects.toThrow(RangeError);
+  });
+
+  test("proves every contract under the one root read, even if a newer one comes meanwhile", async () => {
+    let calls = 0;
+    const node = await ProvenRegistryAccumulator.connect(
+      l2,
+      CHAIN,
+      source(async () => {
+        calls += 1;
+        const n = calls === 1 ? b1 : b2;
+        return { outputRoot: await rootOf(n), l2Block: n };
+      }),
+    );
+    const read = await node.provenTogether([REGISTRY, REGISTRY_2]);
+    expect(calls).toBe(1);
+    expect(read.accumulators.map((a) => a.block)).toEqual([b1, b1]);
+  });
+
+  test("refuses every contract when one of them doesn't prove", async () => {
+    const node = await ProvenRegistryAccumulator.connect(
+      l2,
+      CHAIN,
+      source(async () => ({ outputRoot: await rootOf(b1), l2Block: b1 })),
+    );
+    await expect(node.provenTogether([REGISTRY, NO_CODE])).rejects.toMatchObject({
+      code: "l2-contract-absent",
     });
   });
 

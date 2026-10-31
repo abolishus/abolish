@@ -1,7 +1,10 @@
 import {
   anchoredCountedTally,
   BallotAdmissions,
+  type BallotAdmissionOptions,
   type ContractEventArchive,
+  type RollingChains,
+  rollingChains,
   CREATE_DAILY_CEILING,
   DestructionBoardings,
   destructionTargets,
@@ -12,6 +15,7 @@ import {
   Tier1Batches,
 } from "@abolishus/core";
 import { parseRpcUrl, rpcClient } from "@abolishus/node";
+import { PINNED_REGISTRIES } from "@abolishus/verifier";
 import { Redis } from "ioredis";
 import postgres from "postgres";
 import { BaseError, createPublicClient, getAddress, http } from "viem";
@@ -25,6 +29,7 @@ import { HttpArweaveClient } from "./arweave-client.ts";
 import { registrySyncFromEnv, REGISTRY_SYNC_ENV } from "./registry-env.ts";
 import { DisputeGameRoots, ProvenRegistryAccumulator } from "./output-roots.ts";
 import { RegistrySync } from "./registry-sync.ts";
+import { checkPinnedRegistries, ProvenRegistryRecordSource } from "./registry-records.ts";
 import { ChainContractEvents } from "./contract-events.ts";
 import { POLL_ROOT_ENV, pollRootFromEnv } from "./poll-root-env.ts";
 import { PollRoots } from "./poll-roots.ts";
@@ -167,6 +172,7 @@ if (
   throw new Error("a worker holding the creation key runs nothing else");
 
 let ballots: WorkerOptions["ballots"];
+let ballotAdmission: BallotAdmissionOptions | undefined;
 let openings: WorkerOptions["openings"];
 let destructions: WorkerOptions["destructions"];
 const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
@@ -213,9 +219,9 @@ if (ballotEnv.some((v) => v !== undefined)) {
     epoch: BigInt(env.BALLOT_ANCHOR_EPOCH),
     period: BigInt(env.BALLOT_ANCHOR_PERIOD),
   };
-  ballots = {
-    admissions: new BallotAdmissions({ panels, clock, ...(l1 !== undefined && { l1 }) }),
-  };
+  // Built once the registry sync's nodes are known: a rolling poll's
+  // ballots are judged against the registries' records read through them.
+  ballotAdmission = { panels, clock, ...(l1 !== undefined && { l1 }) };
   // The trustees' destruction statements (P2-13 part 5c-3b), beside ballot
   // admission and by its clock: the Boarding rule reads only the stored
   // definition, its transcript and the statements already boarded, never
@@ -436,6 +442,12 @@ if (pollStubConfig !== undefined && registryConfig === undefined)
   throw new Error("the stub step runs only beside the registry sync");
 let pollStubs: WorkerOptions["pollStubs"];
 let contractEvents: ContractEventArchive | undefined;
+let rollingRecords:
+  | {
+      readonly source: ProvenRegistryRecordSource;
+      readonly deployment: Parameters<typeof checkPinnedRegistries>[1];
+    }
+  | undefined;
 if (registryConfig !== undefined) {
   const c = registryConfig;
   let accumulator;
@@ -491,6 +503,22 @@ if (registryConfig !== undefined) {
     max: 1,
     connection: { statement_timeout: 120_000 },
   });
+  // The registries' records for a rolling poll's ballots, through the
+  // same nodes and index as the sync, under one output root for both.
+  const deployment = {
+    chainId: c.chainId,
+    groupRegistry: bytes(c.groupRegistry),
+    electionRegistry: bytes(c.electionRegistry),
+  };
+  rollingRecords = {
+    deployment,
+    source: new ProvenRegistryRecordSource({
+      index,
+      indexSchema: c.indexSchema,
+      accumulators: accumulator,
+      ...deployment,
+    }),
+  };
   registry = {
     sync: new RegistrySync({
       sql,
@@ -547,6 +575,26 @@ if (registryConfig !== undefined) {
         },
       }),
     };
+}
+
+// Ballot admission, with a rolling poll's ballots judged against the
+// registries' records proven under the registry sync's output roots
+// (P2-17 part 7b-2), once the release pins the registries their chains are
+// built under. Until then, or on a worker without the sync, every rolling
+// ballot is refused `not-open`, as the verifier's admission refuses one
+// without a chain (T-08, T-71).
+if (ballotAdmission !== undefined) {
+  let rolling: RollingChains | undefined;
+  if (PINNED_REGISTRIES !== undefined && rollingRecords !== undefined) {
+    checkPinnedRegistries(PINNED_REGISTRIES, rollingRecords.deployment);
+    rolling = rollingChains(rollingRecords.source, PINNED_REGISTRIES);
+  }
+  ballots = {
+    admissions: new BallotAdmissions({
+      ...ballotAdmission,
+      ...(rolling !== undefined && { rolling }),
+    }),
+  };
 }
 
 // The creation step (ADR 0032, P2-22 parts 3a, 3b-1 and 5b), only when

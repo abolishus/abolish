@@ -165,6 +165,7 @@ export {
   MAX_GAMES_SCANNED,
   MESSAGE_PASSER,
   type OutputRootSource,
+  type ProvenAccumulators,
   ProvenRegistryAccumulator,
 } from "./output-roots.ts";
 export {
@@ -204,6 +205,14 @@ export {
 export { PollRoots, type PollRootsOptions } from "./poll-roots.ts";
 export { type PollStubPins, pollStubDeployment } from "./poll-stub-chain.ts";
 export { POLL_STUB_ENV, type PollStubConfig, pollStubFromEnv } from "./poll-stub-env.ts";
+export {
+  checkPinnedRegistries,
+  MAX_CLOCK_SKEW_SECONDS,
+  ProvenRegistryRecordSource,
+  REGISTRY_RECORDS_MAX_AGE_MS,
+  type RegistryAccumulators,
+  type RegistryRecordsOptions,
+} from "./registry-records.ts";
 export {
   type RegistryAccumulator,
   RegistrySync,

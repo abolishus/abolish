@@ -1972,6 +1972,10 @@ describe("stream", () => {
   test("pages and orders as the API does, never with an endless scroll", async () => {
     const second = await (await get(`/discover?after=${streamed[9]}`)).text();
     expect(cards(second)).toEqual(streamed.slice(10, 20));
+    // A later page marks its order as chosen, not as this page: the link
+    // leads back to the first (P2-29, the stream's iteration 20).
+    expect(second).toMatch(/<a href="\/discover" aria-current="true"[^>]*>New</);
+    expect(second).toMatch(/<a href="\/discover" aria-current="true"[^>]*>All topics</);
     const third = await (await get(`/discover?after=${streamed[19]}`)).text();
     expect(cards(third)).toEqual(streamed.slice(20));
     expect(third).not.toContain("More questions");

@@ -36,19 +36,27 @@ const SORT_NOTE = {
   answered: "sortNote_answered",
 } as const satisfies Record<StreamSort, keyof Messages>;
 
+/**
+ * How a chosen order or topic is marked: `page` where its link leads to this
+ * very page, `true` (the chosen one of a set) where it leads elsewhere.
+ */
+type Current = "page" | "true";
+
 const LINK =
-  "inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none aria-[current=page]:border-foreground aria-[current=page]:bg-foreground aria-[current=page]:text-background";
+  "inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&[aria-current]]:border-foreground [&[aria-current]]:bg-foreground [&[aria-current]]:text-background";
 
 /** The orders, as links: each one a plain GET, so they work before the page's script loads. */
 function Sorts({
   sort,
   filter,
   unavailable,
+  current,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   /** Whether the chosen order couldn't be drawn, which the box below says. */
   unavailable: boolean;
+  current: Current;
 }) {
   const t = useTranslate(catalogs);
   return (
@@ -61,7 +69,7 @@ function Sorts({
           <li key={option} className="flex flex-auto sm:flex-none">
             <a
               href={streamHref(option, filter)}
-              aria-current={option === sort ? "page" : undefined}
+              aria-current={option === sort ? current : undefined}
               className={cn(
                 LINK,
                 "w-full justify-center px-2 py-1 text-center text-pretty sm:w-auto sm:justify-start sm:px-4 sm:text-left",
@@ -87,7 +95,15 @@ function Sorts({
  * The topics, as links like the orders, each keeping the order, the search
  * and the place. Topics are a fixed list, so naming one quotes nobody.
  */
-function Topics({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
+function Topics({
+  sort,
+  filter,
+  current,
+}: {
+  sort: StreamSort;
+  filter: StreamFilter;
+  current: Current;
+}) {
   const t = useTranslate(catalogs);
   const { topic, ...rest } = filter;
   return (
@@ -96,7 +112,7 @@ function Topics({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
         <li>
           <a
             href={streamHref(sort, rest)}
-            aria-current={topic === undefined ? "page" : undefined}
+            aria-current={topic === undefined ? current : undefined}
             className={LINK}
           >
             {t("topicAll")}
@@ -106,7 +122,7 @@ function Topics({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
           <li key={option}>
             <a
               href={streamHref(sort, { ...rest, topic: option })}
-              aria-current={option === topic ? "page" : undefined}
+              aria-current={option === topic ? current : undefined}
               className={LINK}
             >
               {t(POLL_TOPIC_MESSAGES[option])}
@@ -332,11 +348,13 @@ function Narrowing({
   filter,
   typedPlace,
   withPlace,
+  current,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typedPlace: string;
   withPlace: boolean;
+  current: Current;
 }) {
   const t = useTranslate(catalogs);
   return (
@@ -351,7 +369,7 @@ function Narrowing({
         {t(withPlace ? "streamNarrow" : "discoverTopics")}
       </summary>
       <div className="mt-4 grid gap-6">
-        <Topics sort={sort} filter={filter} />
+        <Topics sort={sort} filter={filter} current={current} />
         {withPlace ? <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} /> : null}
       </div>
     </details>
@@ -656,6 +674,11 @@ export function StreamPage({
   // A refused page says why in place of the cards, with its own way to drop
   // what was refused, and narrows by nothing.
   const refused = stream.kind === "search-refused" || stream.kind === "place-refused";
+  // The chosen order's and topic's links lead to the first page, so a later
+  // page marks them as chosen, not as the page itself: a screen reader on
+  // page three read "New, current page" on a link back to page one (P2-29,
+  // the stream's iteration 20).
+  const current: Current = later ? "true" : "page";
   return (
     <div className="grid gap-10">
       <PageHeader
@@ -683,8 +706,19 @@ export function StreamPage({
             narrowed={place !== undefined && !refused}
           />
         ) : null}
-        <Sorts sort={sort} filter={filter} unavailable={stream.kind === "sort-unavailable"} />
-        <Narrowing sort={sort} filter={filter} typedPlace={typedPlace} withPlace={!placeShown} />
+        <Sorts
+          sort={sort}
+          filter={filter}
+          unavailable={stream.kind === "sort-unavailable"}
+          current={current}
+        />
+        <Narrowing
+          sort={sort}
+          filter={filter}
+          typedPlace={typedPlace}
+          withPlace={!placeShown}
+          current={current}
+        />
         {refused ? null : <TopicClear sort={sort} filter={filter} />}
       </div>
       {/* A reading width: at desktop width a card the page's whole width

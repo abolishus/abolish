@@ -375,9 +375,9 @@ export const esUS: Messages = {
   streamPick: {
     one: "Elige una respuesta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
     other:
-      "Elige una respuesta a la pregunta 1 de {count} para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
+      "Elige una respuesta a la pregunta 1\u00a0de\u00a0{count} para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
   },
-  streamPickFirst: "Estas respuestas son para la pregunta 1 de {count}.",
+  streamPickFirst: "Estas respuestas son para la pregunta 1\u00a0de\u00a0{count}.",
   streamNoBallot: "Responder desde esta página todavía no está disponible en este sitio.",
   streamUnreadable: "Esta encuesta no se puede mostrar aquí",
   streamUnreadableId: "Encuesta {prefix}…",

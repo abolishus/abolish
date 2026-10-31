@@ -134,14 +134,17 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
         {latest === undefined ? (
           t("moderationOfPoll")
         ) : (
-          // The time on a line of its own under the decision, as each row's time is under its state: run on after the reason, a narrow heading broke it between "October" and "16".
+          // The time on a line of its own under the decision, as each row's time is under its state: run on after the reason, a narrow heading broke it between "October" and "16". Its log number is there too, since the appeals below name decisions by it.
           <span>
             {t("moderationDecisionWhat", {
               action: t(`action_${latest.action}`),
               reason: t(`reason_${latest.reason}`),
             })}
             <span className="block font-normal text-muted-foreground">
-              {t("moderationDecidedOn", { when: at(latest.decidedAt) })}
+              {t("moderationDecidedOn", {
+                seq: latest.seq.toString(),
+                when: at(latest.decidedAt),
+              })}
             </span>
           </span>
         )}

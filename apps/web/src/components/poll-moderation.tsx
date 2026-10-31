@@ -149,7 +149,7 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           </span>
         )}
       </p>
-      {/* Under the heading focus returns to after filing, as the list's own outcomes are under its heading: at the block's end, under the log link, a phone drew it a screen below. Empty, it is out of the grid, so it takes no gap; it stays in the tree, so its words are announced when they come. */}
+      {/* Under the heading focus returns to after filing, as the list's own outcomes are under its heading: at the block's end, it sat under the means line, the appeals and the log link. Empty, it is out of the grid, so it takes no gap; it stays in the tree, so its words are announced when they come. */}
       <div role="status" className="max-w-prose text-pretty empty:absolute">
         {notice}
       </div>

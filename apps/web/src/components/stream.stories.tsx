@@ -214,6 +214,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "Poll 4040404040404040…",
   );
   await expect(list.queryByText(/server/)).toBeNull();
+  // Its words start where a readable card's do, at every width.
+  await expect(
+    within(unreadable).getByRole("link").getBoundingClientRect().left -
+      list.getByRole("heading", { name: "Library hours" }).getBoundingClientRect().left,
+  ).toBe(0);
 
   // The three orders share one row at every width; on a phone each label
   // wraps within its own box rather than the third taking a row alone.
@@ -518,11 +523,25 @@ export const SearchRefused: Story = {
 };
 
 /** A topic's page: titled with it, and every link and the form keep it. */
+/** The stream's cards as a narrowed page lists them: each filed as it narrows. */
+const filed = (tags: { topic?: "transport"; place?: string }): StreamCard[] =>
+  cards.map((card) => (card.kind === "poll" ? { ...card, tags: { ...card.tags, ...tags } } : card));
+
 export const Topic: Story = {
-  args: { sort: "closing", filter: { topic: "transport" } },
+  args: {
+    sort: "closing",
+    filter: { topic: "transport" },
+    stream: { kind: "stream", cards: filed({ topic: "transport" }), next: NEXT },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Transport");
+    // Every card here is filed under the title's topic, so none repeats it;
+    // a card's place still shows.
+    const list = questions(canvasElement);
+    await expect(list.queryByRole("link", { name: "Transport" })).toBeNull();
+    await expect(list.getByRole("link", { name: "Eastside" })).toBeVisible();
+    await expect(list.getAllByRole("list", { name: "Where it's listed" })).toHaveLength(2);
     // A topic's page keeps the topics folded, as its title names the topic:
     // the narrowed-by line offers the way back to every topic, keeping the
     // order, rather than fifteen topics above a phone's first question.
@@ -564,9 +583,16 @@ export const Place: Story = {
     typed: "library",
     typedPlace: " Old  Town",
     filter: { q: "library", place: "Old Town" },
+    stream: { kind: "stream", cards: filed({ place: "Old town" }), next: NEXT },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    // Every card here is filed at the place, so none repeats it (and the
+    // page names it only in its box, T-67); a card's topic still shows.
+    const list = questions(canvasElement);
+    await expect(list.queryByText(/Old town/i)).toBeNull();
+    await expect(list.getByRole("link", { name: "Culture" })).toBeVisible();
+    await expect(list.queryByRole("link", { name: /Riverside Park|Eastside/ })).toBeNull();
     await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveValue(" Old  Town");
     // Each form keeps the other's accepted value.
     await expect(searchForm(canvasElement).querySelector('input[name="place"]')).toHaveValue(

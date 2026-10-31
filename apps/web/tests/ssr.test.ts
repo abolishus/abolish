@@ -300,6 +300,18 @@ describe("poll page", () => {
     expect(html).toContain("This poll has closed.");
     // The evidence is one step down, but in the server's HTML, so it opens without script.
     expect(html).toMatch(/<details\b[^>]*>\s*<summary\b/);
+    // Above it, the heading and what the evidence shows in plain words,
+    // whose summary offers to show it, saying so without script.
+    const section = /<section aria-labelledby="evidence-title"[^>]*>([\s\S]*?)<details/.exec(
+      html,
+    )?.[1];
+    expect(section?.replace(/<[^>]+>/g, "")).toBe(
+      "How do we know this is real?" +
+        "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again.",
+    );
+    const summary = /<summary[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
+    expect(summary).toMatch(/<span class="group-open:hidden">Show the evidence<\/span>/);
+    expect(summary).toMatch(/<span class="hidden group-open:inline">Hide the evidence<\/span>/);
     expect(html).not.toContain('name="robots"');
     expect(html).toContain(`href="/p/${CODE}"`);
     expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
@@ -2941,7 +2953,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 179, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 177, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 217, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 178, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 173, css: 40, fonts: 58 },

@@ -522,6 +522,8 @@ export const esUS: Messages = {
     "No se pudieron cargar los resultados en este momento. Vuelve a intentarlo en un rato.",
   resultsAnswered: { one: "Respondió {count} persona", other: "Respondieron {count} personas" },
   resultsNoneAnswered: "Nadie respondió.",
+  resultsTurnout: "Participación",
+  resultsTurnoutOf: { one: "{share} de {count} miembro", other: "{share} de {count} miembros" },
   resultsTierPending:
     "Parte del conteo de este grupo todavía no se publica. Sus resultados aparecen aquí cuando se publique completo.",
   resultsLeader: "La más elegida: {option}, por el {share} de quienes respondieron.",

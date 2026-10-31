@@ -166,6 +166,21 @@ export function shareOf(count: string, counted: number): number {
 }
 
 /**
+ * How many of a tier's members answered, from 0 to 1: the ballots it
+ * counted out of the members the poll's definition names for it. Scaled in
+ * bigint, as `shareOf` is, since a group can outgrow a double. `undefined`
+ * where it can't be said: no members, or more ballots counted than members,
+ * which can't happen when each member's ballot is counted once and which the
+ * page won't print as a share past 100% (T-34).
+ */
+export function turnoutOf(counted: number, members: string): number | undefined {
+  const of = BigInt(members);
+  const answered = BigInt(counted);
+  if (of === 0n || answered > of) return undefined;
+  return Number((answered * 1_000_000n) / of) / 1_000_000;
+}
+
+/**
  * The options picked most, by index in option order: every option tied at
  * the top, or none when nothing was picked at all.
  */

@@ -127,7 +127,11 @@ import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import { releaseChecks, type ReleasesReport } from "./live.ts";
 import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 import { archivedChain, PINNED_REGISTRIES, type RollingChainRelease } from "./rolling-chain.ts";
-import { type RollingElectorateReport, rollingElectorates } from "./rolling-report.ts";
+import {
+  type RollingChosenRelease,
+  type RollingElectorateReport,
+  rollingElectorates,
+} from "./rolling-report.ts";
 import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
@@ -324,6 +328,23 @@ function releaseGate(definition: VerifiedDefinition): Outcome {
   if (!isLive(definition)) return PASS;
   if (pinnedVersion(definition.value, RECORD_TYPES.tallyOpening) !== 2) return UNSUPPORTED;
   return { status: "unverifiable", code: "not-reached", at: {} };
+}
+
+/** Each tier's chosen releases, with the segment each one's snapshot is the board through. */
+function chosenReleases(
+  releases: ReleasesReport,
+): ReadonlyMap<number, readonly RollingChosenRelease[]> {
+  return new Map(
+    releases.tiers.map((t) => [
+      t.tier,
+      t.releases.map(({ snapshot }) => {
+        // Snapshots are numbered from 1, in order.
+        const at = releases.snapshots[snapshot - 1];
+        if (at === undefined) throw new Error("verifyBundle: a release of no snapshot");
+        return { snapshot, segment: at.segment };
+      }),
+    ]),
+  );
 }
 
 function copyAt(at: BoardErrorAt): CheckAt {
@@ -1222,28 +1243,6 @@ export function verifyBundle(
         });
       }
       implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
-      // A rolling tier's result carries its electorate's counts, from the
-      // same chain its ballots were judged against and the steps their
-      // verifying proofs named, admitted or not, once 7.1 passed: the board
-      // is then sealed and its counted extent fixed (docs/spec/verifier.md,
-      // Counted set and tally, step 8; T-16, T-13).
-      if (
-        definition.definition.version === 7 &&
-        definition.rolling !== undefined &&
-        implemented.get("7.1")?.status === "pass" &&
-        counted.tiers !== undefined &&
-        admission.steps !== undefined &&
-        extent !== undefined
-      ) {
-        electorates = rollingElectorates(
-          definition.definition,
-          definition.rolling,
-          bundle.clock,
-          admission.steps,
-          extent,
-        );
-        rollingTiers = definition.definition.value.rolling_electorate.map((t) => t.tier);
-      }
       // Under a live definition pinning tally-opening version 2, the
       // releases are read once 7.1 passed: the board is then sealed and
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
@@ -1285,6 +1284,31 @@ export function verifyBundle(
         });
         implemented = new Map<string, Outcome>([...implemented, ...live.rows]);
         releases = live.report;
+      }
+      // A rolling tier's result carries its electorate's counts, from the
+      // same chain its ballots were judged against and the steps their
+      // verifying proofs named, admitted or not, once 7.1 passed: the board
+      // is then sealed and its counted extent fixed (docs/spec/verifier.md,
+      // Counted set and tally, step 8; T-16, T-13). Under a live definition
+      // whose releases were read, each release a tier chose has its eligible
+      // count too, so they come after the releases.
+      if (
+        definition.definition.version === 7 &&
+        definition.rolling !== undefined &&
+        implemented.get("7.1")?.status === "pass" &&
+        counted.tiers !== undefined &&
+        admission.steps !== undefined &&
+        extent !== undefined
+      ) {
+        electorates = rollingElectorates(
+          definition.definition,
+          definition.rolling,
+          bundle.clock,
+          admission.steps,
+          extent,
+          releases === undefined ? undefined : chosenReleases(releases),
+        );
+        rollingTiers = definition.definition.value.rolling_electorate.map((t) => t.tier);
       }
       // Sorting and attribution need only the definition and the registered
       // signing keys, so 7.4 runs wherever 3.2 passed, under definition

@@ -209,6 +209,11 @@ const reported = read("verifier-rolling-report.json") as {
           readonly growth: readonly Readonly<
             Record<"period" | "added" | "removed" | "members", string>
           >[];
+          readonly releases?: readonly {
+            readonly snapshot: number;
+            readonly step: string | null;
+            readonly count: string;
+          }[];
         };
       }[]
     >
@@ -238,6 +243,13 @@ const electoratesOf = (file: string) =>
         removed: Number(g.removed),
         members: Number(g.members),
       })),
+      ...(e.releases !== undefined && {
+        releases: e.releases.map((x) => ({
+          snapshot: x.snapshot,
+          step: x.step === null ? null : Number(x.step),
+          count: Number(x.count),
+        })),
+      }),
     },
   }));
 
@@ -486,7 +498,13 @@ describe(
       expect(close.members).toBeGreaterThan(smallest.members);
       const extent = 10;
       const smallestOf = (steps: { entry: number; cell: number; step: number }[]) =>
-        rollingElectorates(d, chain, sealedBundle().clock, steps, extent)[0]?.smallestStep;
+        rollingElectorates(
+          d,
+          chain,
+          sealedBundle().clock,
+          steps.map((x) => ({ ...x, segment: 1 })),
+          extent,
+        )[0]?.smallestStep;
       const atClose = { entry: 1, cell: 0, step: close.step };
       expect(smallestOf([atClose])).toEqual({ step: close.step, members: close.members });
       // A copy past the extent, or naming another cell, is none of the tier's.
@@ -592,6 +610,47 @@ describe(
       expect(r.tiers?.map(({ tier, electorate }) => ({ tier, electorate }))).toEqual(
         electoratesOf("verifier-ballots-v5-tier0-live.json"),
       );
+    });
+
+    test("a release's count reaches the newest step its snapshot's ballots name, and no later copy's", () => {
+      const chain = archivedChain(
+        { version: 7, value: lv },
+        replayOf(live.events, { ...live, registeredAt: live.registeredAt }),
+        liveRegistries,
+      );
+      if (chain === undefined) throw new Error("fixture: no chain");
+      const [want] = electoratesOf("verifier-ballots-v5-tier0-live.json");
+      const at = want?.electorate.releases?.[0];
+      const close = want?.electorate.close;
+      const smallest = want?.electorate.smallestStep;
+      if (at?.step == null || close == null || smallest == null)
+        throw new Error("fixture: no release step, close or smallest step");
+      // The close's step is accepted and later than the newest boundary in
+      // snapshot 1's period, so only a ballot naming it can set n_r there.
+      expect(close.step).toBeGreaterThan(at.step);
+      const releaseOf = (
+        steps: { entry: number; segment: number; step: number }[],
+        chosen: ReadonlyMap<number, readonly { snapshot: number; segment: number }[]> | undefined,
+      ) =>
+        rollingElectorates(
+          { version: 7, value: lv },
+          chain,
+          sealedBundle(live, live.events, live.registeredAt).clock,
+          steps.map((x) => ({ ...x, cell: 0 })),
+          100,
+          chosen,
+        )[0]?.releases;
+      const first = new Map([[0, [{ snapshot: 1, segment: 1 }]]]);
+      const early = { entry: 1, segment: 1, step: smallest.step };
+      expect(releaseOf([early], first)).toEqual([at]);
+      expect(releaseOf([early, { entry: 2, segment: 1, step: close.step }], first)).toEqual([
+        { snapshot: 1, step: close.step, count: want?.electorate.eligible },
+      ]);
+      // A copy boarded after the snapshot's segment isn't in it.
+      expect(releaseOf([early, { entry: 2, segment: 2, step: close.step }], first)).toEqual([at]);
+      // A tier that chose no release reports none; without the releases read, no member.
+      expect(releaseOf([early], new Map())).toEqual([]);
+      expect(releaseOf([early], undefined)).toBeUndefined();
     });
 
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {

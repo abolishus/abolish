@@ -2,7 +2,7 @@ import { Button, buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
 import { POLL_TOPICS } from "@abolishus/core/poll-topics";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, ChevronDown, Search } from "lucide-react";
 import { useId } from "react";
 
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
@@ -99,35 +99,63 @@ function Topics({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
   );
 }
 
+/** The hidden fields that keep what a form doesn't ask for, as the links keep it. */
+function Keep({
+  sort,
+  filter,
+  asks,
+}: {
+  sort: StreamSort;
+  filter: StreamFilter;
+  asks: "q" | "place";
+}) {
+  return (
+    <>
+      {sort === "new" ? null : <input type="hidden" name="sort" value={sort} />}
+      {asks === "q" || filter.q === undefined ? null : (
+        <input type="hidden" name="q" value={filter.q} />
+      )}
+      {filter.topic === undefined ? null : (
+        <input type="hidden" name="topic" value={filter.topic} />
+      )}
+      {asks === "place" || filter.place === undefined ? null : (
+        <input type="hidden" name="place" value={filter.place} />
+      )}
+    </>
+  );
+}
+
 /**
- * The search box and the place: a plain GET form, so it works before the
- * page's script loads, keeping the order and the topic. What was typed is
- * shown back only in the boxes, never in the page's text, so a link can't
- * put words in our voice (T-67).
+ * The search box: a plain GET form, so it works before the page's script
+ * loads, keeping the order, the topic and the place. What was typed is
+ * shown back only in the box, never in the page's text, so a link can't put
+ * words in our voice (T-67).
  */
 function SearchForm({
   sort,
-  topic,
+  filter,
   typed,
-  typedPlace,
 }: {
   sort: StreamSort;
-  topic: StreamFilter["topic"];
+  filter: StreamFilter;
   typed: string;
-  typedPlace: string;
 }) {
   const t = useTranslate(catalogs);
   const inputId = useId();
   const hintId = useId();
-  const placeId = useId();
-  const placeHintId = useId();
   return (
-    <form role="search" method="get" action="/discover" className="grid max-w-2xl gap-4">
-      <div className="grid gap-2">
-        <Label htmlFor={inputId} className="text-base font-semibold">
-          {t("streamSearchLabel")}
-        </Label>
-        <div className="relative min-w-0">
+    <form
+      role="search"
+      aria-label={t("streamSearchLabel")}
+      method="get"
+      action="/discover"
+      className="grid max-w-2xl gap-2"
+    >
+      <Label htmlFor={inputId} className="text-base font-semibold">
+        {t("streamSearchLabel")}
+      </Label>
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
           <Search
             aria-hidden="true"
             className="pointer-events-none absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground"
@@ -143,14 +171,46 @@ function SearchForm({
             className="h-12 ps-11 text-base md:text-base"
           />
         </div>
-        <p id={hintId} className="m-0 text-sm text-muted-foreground">
-          {t("streamSearchHint", { words: MAX_STREAM_TERMS })}
-        </p>
+        <Button type="submit" variant="outline" className="h-12 shrink-0 px-5">
+          {t("streamSearchSubmit")}
+        </Button>
       </div>
-      <div className="grid gap-2">
-        <Label htmlFor={placeId} className="text-base font-semibold">
-          {t("streamPlaceLabel")}
-        </Label>
+      <p id={hintId} className="m-0 text-sm text-muted-foreground">
+        {t("streamSearchHint", { words: MAX_STREAM_TERMS })}
+      </p>
+      <Keep sort={sort} filter={filter} asks="q" />
+    </form>
+  );
+}
+
+/**
+ * The place: a GET form of its own like the search, keeping the order, the
+ * topic and the search. What was typed is shown back only in its box (T-67).
+ */
+function PlaceForm({
+  sort,
+  filter,
+  typedPlace,
+}: {
+  sort: StreamSort;
+  filter: StreamFilter;
+  typedPlace: string;
+}) {
+  const t = useTranslate(catalogs);
+  const placeId = useId();
+  const placeHintId = useId();
+  return (
+    <form
+      role="search"
+      aria-label={t("streamPlaceLabel")}
+      method="get"
+      action="/discover"
+      className="grid max-w-2xl gap-2"
+    >
+      <Label htmlFor={placeId} className="text-base font-semibold">
+        {t("streamPlaceLabel")}
+      </Label>
+      <div className="flex gap-2">
         <Input
           id={placeId}
           type="text"
@@ -160,18 +220,52 @@ function SearchForm({
           maxLength={MAX_STREAM_PLACE * 2}
           autoComplete="off"
           aria-describedby={placeHintId}
-          className="h-12 text-base md:text-base"
+          className="h-12 min-w-0 flex-1 text-base md:text-base"
         />
-        <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
-          {t("streamPlaceHint")}
-        </p>
+        <Button type="submit" variant="outline" className="h-12 shrink-0 px-5">
+          {t("streamPlaceSubmit")}
+        </Button>
       </div>
-      {sort === "new" ? null : <input type="hidden" name="sort" value={sort} />}
-      {topic === undefined ? null : <input type="hidden" name="topic" value={topic} />}
-      <Button type="submit" variant="outline" className="h-12 justify-self-start px-5">
-        {t("streamSearchSubmit")}
-      </Button>
+      <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
+        {t("streamPlaceHint")}
+      </p>
+      <Keep sort={sort} filter={filter} asks="place" />
     </form>
+  );
+}
+
+/**
+ * The topics and the place, folded under one line until a visitor opens it
+ * or the page is narrowed by either: fifteen topics and a second box put a
+ * phone's first question two screens down. A native disclosure, so it opens
+ * before the page's script loads.
+ */
+function Narrowing({
+  sort,
+  filter,
+  typedPlace,
+  open,
+}: {
+  sort: StreamSort;
+  filter: StreamFilter;
+  typedPlace: string;
+  open: boolean;
+}) {
+  const t = useTranslate(catalogs);
+  return (
+    <details open={open} className="group">
+      <summary className="inline-flex min-h-12 cursor-pointer items-center gap-2 text-base font-semibold focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none">
+        <ChevronDown
+          aria-hidden="true"
+          className="size-4 -rotate-90 transition-transform group-open:rotate-0 motion-reduce:transition-none"
+        />
+        {t("streamNarrow")}
+      </summary>
+      <div className="mt-4 grid gap-6">
+        <Topics sort={sort} filter={filter} />
+        <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} />
+      </div>
+    </details>
   );
 }
 
@@ -458,9 +552,14 @@ export function StreamPage({
         lede={topic === undefined ? t("discoverLede") : t("discoverTopicLede")}
       />
       <div className="grid gap-6">
-        <SearchForm sort={sort} topic={topic} typed={typed} typedPlace={typedPlace} />
+        <SearchForm sort={sort} filter={filter} typed={typed} />
         <Sorts sort={sort} filter={filter} />
-        <Topics sort={sort} filter={filter} />
+        <Narrowing
+          sort={sort}
+          filter={filter}
+          typedPlace={typedPlace}
+          open={topic !== undefined || place !== undefined || stream.kind === "place-refused"}
+        />
         {stream.kind === "search-refused" || stream.kind === "place-refused" ? null : (
           <Narrowed sort={sort} filter={filter} />
         )}
@@ -513,13 +612,26 @@ export function StreamPage({
         ) : stream.cards.length === 0 ? (
           <Empty title={t("streamEmpty")}>{t("streamEmptyLede")}</Empty>
         ) : (
-          <ol aria-label={t("streamQuestions")} className="m-0 grid list-none gap-6 p-0">
-            {stream.cards.map((card) => (
-              <li key={card.kind === "poll" ? card.poll.electionId : card.electionId}>
-                <StreamCard card={card} ballot={ballot} phoneVerification={phoneVerification} />
-              </li>
-            ))}
-          </ol>
+          <>
+            {/* Said once here rather than on every card (`explained`). */}
+            {ballot === null ? null : (
+              <p className="m-0 text-base text-pretty text-muted-foreground">
+                {t("homeStreamPick")}
+              </p>
+            )}
+            <ol aria-label={t("streamQuestions")} className="m-0 grid list-none gap-6 p-0">
+              {stream.cards.map((card) => (
+                <li key={card.kind === "poll" ? card.poll.electionId : card.electionId}>
+                  <StreamCard
+                    card={card}
+                    ballot={ballot}
+                    phoneVerification={phoneVerification}
+                    explained
+                  />
+                </li>
+              ))}
+            </ol>
+          </>
         )}
         {stream.kind === "stream" && stream.next !== undefined ? (
           <a

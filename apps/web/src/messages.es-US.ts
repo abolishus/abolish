@@ -392,7 +392,7 @@ export const esUS: Messages = {
   streamStart: "Empezar desde arriba",
   streamSearchLabel: "Buscar en las preguntas",
   streamSearchHint:
-    "Cada palabra que escribas debe aparecer en una pregunta o en su título, hasta {words} palabras. Los resultados mantienen el orden de arriba.",
+    "Cada palabra que escribas debe aparecer en una pregunta o en su título, hasta {words} palabras. Los resultados mantienen el orden de abajo.",
   streamSearchSubmit: "Buscar",
   streamSearching: "Solo las preguntas que contienen todas las palabras que buscaste.",
   streamSearchClear: "Borrar la búsqueda",
@@ -405,6 +405,8 @@ export const esUS: Messages = {
   listedUnder: "Dónde aparece",
   streamTagsNote:
     "Quienes preguntan eligen el tema y el lugar de su encuesta. No forman parte de la encuesta, y la moderación puede cambiarlos si no encajan.",
+  streamNarrow: "Tema y lugar",
+  streamPlaceSubmit: "Buscar",
   streamPlaceLabel: "Lugar",
   streamPlaceHint:
     "Un pueblo, barrio o escuela, tal como lo escriben quienes preguntan. No importan las mayúsculas ni los espacios, pero el nombre completo debe coincidir.",

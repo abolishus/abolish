@@ -386,7 +386,7 @@ const enUS = {
   streamStart: "Start from the top",
   streamSearchLabel: "Search the questions",
   streamSearchHint:
-    "Every word you type must appear in a question or its title, up to {words} words. Results keep the order above.",
+    "Every word you type must appear in a question or its title, up to {words} words. Results keep the order below.",
   streamSearchSubmit: "Search",
   streamSearching: "Only the questions that hold every word you searched for.",
   streamSearchClear: "Clear the search",
@@ -398,6 +398,8 @@ const enUS = {
   listedUnder: "Where it's listed",
   streamTagsNote:
     "Askers choose their poll's topic and place. They aren't part of the poll, and moderation can change them if they don't fit.",
+  streamNarrow: "Topic and place",
+  streamPlaceSubmit: "Find",
   streamPlaceLabel: "Place",
   streamPlaceHint:
     "A town, neighbourhood or school, as askers write it. Capitals and spacing don't matter, but the whole name must match.",

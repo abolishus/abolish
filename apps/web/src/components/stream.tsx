@@ -5,7 +5,8 @@ import { POLL_TOPICS } from "@abolishus/core/poll-topics";
 import { ArrowRight, ChevronDown, Search } from "lucide-react";
 import { useId } from "react";
 
-import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import type { Tier } from "../poll.ts";
 import type { Stream, StreamFilter } from "../server/load.ts";
 import {
   type CardAnswered,
@@ -278,6 +279,17 @@ function Narrowing({
 }
 
 /**
+ * A tier's count as a phrase, the tier in words ([[language]]: never a code
+ * such as "Tier 0"). Tier 0 is named by what this deployment checks before an
+ * account takes a token, as `tierMessage` names it, so a card never claims a
+ * phone check the issuer doesn't make (T-01).
+ */
+function answeredMessage(tier: Tier, phoneVerification: boolean) {
+  if (tier === 0) return phoneVerification ? "streamAnswered_phone" : "streamAnswered_email";
+  return tier === 1 ? "streamAnswered_vouched" : "streamAnswered_document";
+}
+
+/**
  * How many have answered so far, one line per tier: the board's count of
  * distinct voters, never a result and never one figure across tiers (T-01).
  */
@@ -297,14 +309,8 @@ function Answered({
       </p>
       <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
         {answered.map(({ tier, answered: count }) => (
-          // On a phone the count and its tier take a line each, as one
-          // line they wrapped and left the dot ending the first.
-          <li key={tier} className="grid sm:flex sm:flex-wrap sm:gap-x-2">
-            <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>{" "}
-            <span aria-hidden="true" className="hidden sm:inline">
-              ·
-            </span>{" "}
-            <span className="text-foreground/80">{t(tierMessage(tier, phoneVerification))}</span>
+          <li key={tier} className="text-pretty tabular-nums">
+            {t(answeredMessage(tier, phoneVerification), { count: BigInt(count) })}
           </li>
         ))}
       </ul>

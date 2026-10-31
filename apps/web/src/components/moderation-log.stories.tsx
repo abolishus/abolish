@@ -56,7 +56,9 @@ const meta = {
         },
       ],
     },
+    after: undefined,
     next: undefined,
+    action: undefined,
   },
 } satisfies Meta<typeof ModerationLog>;
 
@@ -95,6 +97,20 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(log).queryByRole("img")).toBeNull();
   await expect(canvas.getByText("October 1, 2026 at 12:00 PM UTC")).toBeVisible();
   await expect(canvas.queryByRole("link", { name: "Later decisions" })).toBeNull();
+  // The filter offers every action on the page, a poll's hiding apart from a profile's.
+  const filter = canvas.getByRole("radiogroup", { name: "Action" });
+  const options = within(filter).getAllByRole("radio");
+  await expect(options.map((option) => (option as HTMLInputElement).value)).toEqual([
+    "all",
+    "delist",
+    "hide",
+    "hide-profile",
+    "restore",
+    "refile",
+  ]);
+  await expect(within(filter).getByRole("radio", { name: "All 6" })).toBeChecked();
+  await expect(within(filter).getByRole("radio", { name: "Refiled 2" })).toBeInTheDocument();
+  await expect(canvas.queryByText(/decisions on this page took this action/)).toBeNull();
   const grounds = canvas.getByRole("region", { name: "The only seven grounds" });
   await expect(within(grounds).getAllByRole("heading", { level: 3 })).toHaveLength(9);
   await expect(within(grounds).getByText("personal-data")).toBeVisible();
@@ -115,6 +131,53 @@ export const WithMore: Story = {
     await expect(
       within(canvasElement).getByRole("link", { name: "Later decisions" }),
     ).toHaveAttribute("href", "/moderation?after=9");
+  },
+};
+
+export const Filtered: Story = {
+  args: { after: "3", next: "15", action: "hide" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const log = canvas.getByRole("list", { name: "Decisions, oldest first" });
+    // A poll's text hidden, never a profile hidden.
+    const rows = within(log).getAllByRole("listitem");
+    await expect(rows).toHaveLength(1);
+    await expect(within(rows[0]!).getByText("Text hidden")).toBeVisible();
+    await expect(
+      canvas.getByText("1 of the 6 decisions on this page took this action."),
+    ).toBeVisible();
+    const filter = canvas.getByRole("radiogroup", { name: "Action" });
+    await expect(within(filter).getByRole("radio", { name: "Text hidden 1" })).toBeChecked();
+    // The form keeps the page it filters; the links keep the filter.
+    await expect(canvasElement.querySelector('input[type="hidden"][name="after"]')).toHaveValue(
+      "3",
+    );
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      "/moderation?after=3",
+    );
+    await expect(canvas.getByRole("link", { name: "Later decisions" })).toHaveAttribute(
+      "href",
+      "/moderation?after=15&action=hide",
+    );
+  },
+};
+
+export const FilteredToNone: Story = {
+  args: { action: "delist", log: { entries: [meta.args.log.entries[2]!] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("No decision on this page took this action. Later decisions may have some."),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("list", { name: "Decisions, oldest first" })).toBeNull();
+    // The chosen action stays offered, so it can be seen and cleared.
+    const filter = canvas.getByRole("radiogroup", { name: "Action" });
+    await expect(within(filter).getByRole("radio", { name: "Delisted 0" })).toBeChecked();
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      "/moderation",
+    );
   },
 };
 

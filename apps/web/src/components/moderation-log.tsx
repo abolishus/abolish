@@ -1,11 +1,13 @@
-import { Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
+import { buttonVariants, Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
 import { ArrowRight, Ban, EyeOff, ListX, RotateCcw, Tags, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import type { ModerationLog as Log } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
+import { FilterGroup } from "./poll-register.tsx";
 
 type Entry = Log["entries"][number];
 type Reason = Entry["reason"];
@@ -45,6 +47,19 @@ const ACTION_ICON: Record<Entry["action"], ReactNode> = {
   restore: <RotateCcw className="size-4" />,
   refile: <Tags className="size-4" />,
 };
+
+const ACTION_TEXT = {
+  delist: "action_delist",
+  hide: "action_hide",
+  "hide-profile": "profileAction_hide",
+  restore: "action_restore",
+  refile: "action_refile",
+} as const satisfies Record<LogAction, keyof Messages>;
+
+/** What a decision did, as the filter names it. */
+function logAction(entry: Entry): LogAction {
+  return "electionId" in entry || entry.action === "restore" ? entry.action : "hide-profile";
+}
 
 type Refiling = Extract<Entry, { action: "refile" }>;
 
@@ -194,18 +209,34 @@ function Row({ entry }: { entry: Entry }) {
 
 export interface ModerationLogProps {
   log: Log;
+  /** Where this page starts, if not at the beginning. */
+  after: string | undefined;
   /** Where the next page starts, if this one was full. */
   next: string | undefined;
+  /** The action the page shows, or every action with `"all"` or `undefined`. */
+  action: LogAction | "all" | undefined;
 }
 
 /**
  * The public moderation log (T-68): what was done to which poll or profile,
  * including where a poll is listed, and why, never who did it or who reported it, with the policy's limits and grounds
  * beside it. The log carries no free text, so a row can't carry personal
- * data (T-17); the page shows the API's rows as they come, oldest first.
+ * data (T-17); the page shows the API's rows as they come, oldest first,
+ * filtered by action over the page in hand.
  */
-export function ModerationLog({ log, next }: ModerationLogProps) {
+export function ModerationLog({ log, after, next, action }: ModerationLogProps) {
   const t = useTranslate(catalogs);
+  const only = action === "all" ? undefined : action;
+  const shown =
+    only === undefined ? log.entries : log.entries.filter((entry) => logAction(entry) === only);
+  // Values are canonical decimals and actions from a fixed list: nothing needs escaping.
+  const pageHref = (from: string | undefined, of: LogAction | undefined) => {
+    const query = [
+      ...(from === undefined ? [] : [`after=${from}`]),
+      ...(of === undefined ? [] : [`action=${of}`]),
+    ].join("&");
+    return query === "" ? "/moderation" : `/moderation?${query}`;
+  };
   return (
     <div className="grid gap-16">
       <PageHeader
@@ -236,6 +267,45 @@ export function ModerationLog({ log, next }: ModerationLogProps) {
         {log.entries.length === 0 ? (
           <p className="m-0 text-lg">{t("moderationEmpty")}</p>
         ) : (
+          <form method="get" action="/moderation" className="grid gap-4">
+            {after === undefined ? null : <input type="hidden" name="after" value={after} />}
+            <FilterGroup
+              name="action"
+              legend={t("moderationAction")}
+              // Only the actions on this page, and the one chosen, as on the board.
+              options={LOG_ACTIONS.filter(
+                (a) => a === only || log.entries.some((entry) => logAction(entry) === a),
+              )}
+              checked={only}
+              count={(a) =>
+                a === "all"
+                  ? log.entries.length
+                  : log.entries.filter((entry) => logAction(entry) === a).length
+              }
+              label={(a) => t(ACTION_TEXT[a])}
+            />
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-border pt-4">
+              <button type="submit" className={buttonVariants()}>
+                {t("moderationActionApply")}
+              </button>
+              {only === undefined ? null : (
+                <a className="underline underline-offset-4" href={pageHref(after, undefined)}>
+                  {t("filterClear")}
+                </a>
+              )}
+            </div>
+          </form>
+        )}
+        {log.entries.length === 0 || only === undefined ? null : (
+          <p className="m-0 text-sm font-medium">
+            {t("moderationActionMatches", { shown: shown.length, total: log.entries.length })}
+          </p>
+        )}
+        {log.entries.length === 0 ? null : shown.length === 0 ? (
+          <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+            {t("moderationActionNone")}
+          </p>
+        ) : (
           <div className="grid gap-0">
             <div
               aria-hidden="true"
@@ -251,7 +321,7 @@ export function ModerationLog({ log, next }: ModerationLogProps) {
               aria-labelledby="log-title"
               className="m-0 grid list-none border-t-2 border-foreground p-0 lg:border-t-0"
             >
-              {log.entries.map((entry) => (
+              {shown.map((entry) => (
                 <Row key={entry.seq} entry={entry} />
               ))}
             </ol>
@@ -260,7 +330,7 @@ export function ModerationLog({ log, next }: ModerationLogProps) {
         {next !== undefined ? (
           <a
             className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
-            href={`/moderation?after=${next}`}
+            href={pageHref(next, only)}
           >
             {t("moderationMore")}
             <ArrowRight aria-hidden="true" className="size-4" />

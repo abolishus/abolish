@@ -947,6 +947,9 @@ const enUS = {
   moderationReason: "Ground",
   moderationDecided: "Time",
   moderationMore: "Later decisions",
+  moderationActionApply: "Show these decisions",
+  moderationActionMatches: "{shown} of the {total} decisions on this page took this action.",
+  moderationActionNone: "No decision on this page took this action. Later decisions may have some.",
   moderationGroundsMark: "Grounds",
   moderationGroundsTitle: "The only seven grounds",
   moderationGroundsLede:

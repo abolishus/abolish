@@ -678,3 +678,110 @@ export const WordedNoBallot: Story = {
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
   },
 };
+
+/** Closed, of two questions, with Tier 0 alone counting it. */
+const FINAL = {
+  ...WordedQuestions.args,
+  ...Closed.args,
+  poll: {
+    ...questions,
+    questions: questions.questions.slice(0, 2),
+    electorate: [{ tier: 0 as const, groupSize: "5000" }],
+    closesAt: { seconds: "1767830400", iso: "2026-01-08T00:00:00.000Z" },
+  },
+  results: {
+    kind: "read" as const,
+    tiers: [
+      {
+        tier: 0 as const,
+        counted: 8,
+        questions: [
+          ["4", "4", "0"],
+          ["5", "1", "0", "0", "2"],
+        ],
+      },
+    ],
+  },
+};
+
+const inShortPlay: Story["play"] = async ({ canvasElement }) => {
+  const canvas = within(canvasElement);
+  await expect(
+    canvas.getByText("Final results. 8 people answered; here is what they said."),
+  ).toBeVisible();
+  const items = within(canvas.getByRole("list", { name: "In short" })).getAllByRole("listitem");
+  await expect(items.map((li) => li.textContent)).toEqual([
+    "Should the park stay open late?" +
+      "Tied for most picked: ⁨Yes⁩ and ⁨No⁩, each by 50% of those who answered.",
+    "Which days should the library open on Sundays and holidays?" +
+      "Most picked: ⁨Sundays⁩, by 62.5% of those who answered.",
+  ]);
+};
+
+/** A closed poll counted in its one tier, each question's lead under its heading. */
+export const InShort: Story = { args: FINAL, play: inShortPlay };
+
+export const InShortDark: Story = {
+  args: FINAL,
+  parameters: { theme: "dark" },
+  play: inShortPlay,
+};
+
+/** A hidden poll's summary goes by question and answer number, as its results do. */
+export const InShortHidden: Story = {
+  args: {
+    ...FINAL,
+    // The loader withholds a hidden poll's words (T-68).
+    text: undefined,
+    words: undefined,
+    share: undefined,
+    moderation: {
+      state: "hidden",
+      latest: {
+        seq: "7",
+        action: "hide",
+        reason: "personal-data",
+        decidedAt: "2026-10-01T12:00:00.000Z",
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const items = within(
+      within(canvasElement).getByRole("list", { name: "In short" }),
+    ).getAllByRole("listitem");
+    await expect(items.map((li) => li.textContent)).toEqual([
+      "Question 1" +
+        "Tied for most picked: ⁨Answer 1⁩ and ⁨Answer 2⁩, each by 50% of those who answered.",
+      "Question 2Most picked: ⁨Answer 1⁩, by 62.5% of those who answered.",
+    ]);
+    await expect(within(canvasElement).queryByText(/Should the park/)).toBeNull();
+  },
+};
+
+/** Several tiers have no lead across them, so no summary (ADR 0026; T-16); nor has an open poll. */
+export const InShortNone: Story = {
+  args: {
+    ...FINAL,
+    poll: { ...FINAL.poll, electorate: questions.electorate },
+    results: {
+      kind: "read",
+      tiers: [
+        ...FINAL.results.tiers,
+        {
+          tier: 2,
+          counted: 1,
+          questions: [
+            ["1", "0", "0"],
+            ["0", "1", "0", "0", "0"],
+          ],
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "Results" })).toBeVisible();
+    await expect(canvas.queryByRole("list", { name: "In short" })).toBeNull();
+    await expect(canvas.queryByText(/^Final results/)).toBeNull();
+  },
+};

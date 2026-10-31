@@ -43,6 +43,33 @@ export function Bar({ share, lead }: { share: number; lead: boolean }) {
   );
 }
 
+/**
+ * How a question's results are worded: each share as a percentage, each
+ * option by its label or by number without one, and the result in a
+ * sentence (the option picked most, or each tied for it, with its share of
+ * those who answered), the author's labels in their own direction inside
+ * our sentence (T-75).
+ */
+export function useResultsWords() {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
+  const list = new Intl.ListFormat(locale, { type: "conjunction" });
+  const label = (options: readonly string[] | undefined, i: number) =>
+    options?.[i] ?? t("resultsOption", { number: i + 1 });
+  const lead = (counts: readonly string[], counted: number, options?: readonly string[]) => {
+    const leaders = leadersOf(counts);
+    const top = leaders[0];
+    return top === undefined
+      ? t("resultsNothingPicked")
+      : t(leaders.length === 1 ? "resultsLeader" : "resultsTied", {
+          option: list.format(leaders.map((i) => isolated(label(options, i)))),
+          share: percent.format(shareOf(counts[top] ?? "0", counted)),
+        });
+  };
+  return { percent, label, lead };
+}
+
 /** One question's results: its sentence, then each option's share, count and bar. */
 export function ResultsQuestion({
   number,
@@ -63,21 +90,9 @@ export function ResultsQuestion({
   level?: 3 | 4;
 }) {
   const t = useTranslate(catalogs);
-  const { locale } = useI18n();
+  const { percent, label, lead } = useResultsWords();
   const Heading = level === 3 ? "h3" : "h4";
-  const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
-  const list = new Intl.ListFormat(locale, { type: "conjunction" });
-  // The author's words, in their own direction inside our sentence (T-75).
-  const label = (i: number) => options?.[i] ?? t("resultsOption", { number: i + 1 });
   const leaders = leadersOf(counts);
-  const top = leaders[0];
-  const sentence =
-    top === undefined
-      ? t("resultsNothingPicked")
-      : t(leaders.length === 1 ? "resultsLeader" : "resultsTied", {
-          option: list.format(leaders.map((i) => isolated(label(i)))),
-          share: percent.format(shareOf(counts[top] ?? "0", counted)),
-        });
   return (
     <div className="grid gap-3">
       {heading === undefined && number === undefined ? null : (
@@ -89,7 +104,9 @@ export function ResultsQuestion({
           )}
         </Heading>
       )}
-      <p className="m-0 font-heading text-xl leading-snug font-semibold text-pretty">{sentence}</p>
+      <p className="m-0 font-heading text-xl leading-snug font-semibold text-pretty">
+        {lead(counts, counted, options)}
+      </p>
       <ol className="m-0 grid list-none border-t border-foreground p-0">
         {counts.map((count, i) => {
           const share = shareOf(count, counted);
@@ -100,7 +117,7 @@ export function ResultsQuestion({
               className="grid grid-cols-[1fr_auto_auto] items-baseline gap-x-4 gap-y-2 border-b border-border py-3"
             >
               <span className={cn("text-base text-pretty", lead && "font-semibold")}>
-                {options?.[i] === undefined ? label(i) : <bdi>{options[i]}</bdi>}
+                {options?.[i] === undefined ? label(options, i) : <bdi>{options[i]}</bdi>}
               </span>
               <span className="text-end font-mono text-base tabular-nums">
                 {percent.format(share)}

@@ -633,6 +633,31 @@ describe("results", () => {
     expect(html).not.toContain("answered</p>");
   });
 
+  test("a closed poll counted in its one tier is summed up under its heading, question by question", async () => {
+    const html = await (await get(`/polls/${CELLS_ID}`)).text();
+    const header = /<article[^>]*>\s*<header[^>]*>([\s\S]*?)<\/header>/.exec(html)?.[1] ?? "";
+    const inShort = /<ul aria-label="In short"[^>]*>([\s\S]*?)<\/ul>/.exec(header)?.[1];
+    expect(header.replace(/<[^>]+>/g, "")).toContain(
+      "Final results. 8 people answered; here is what they said.",
+    );
+    expect(inShort?.replace(/<[^>]+>/g, "|")).toMatch(
+      /Should the park stay open late\?\|+Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered\.\|+Should the library open on Sundays\?\|+Most picked: \u2068Yes\u2069, by 62\.5% of those who answered\./,
+    );
+    expect(inShort?.match(/<li/g)).toHaveLength(2);
+  });
+
+  test.each([
+    // T-16: no lead across tiers, nor a summary of a tier still partly unopened.
+    ["several tiers", STREAM_V1],
+    ["one tier counted of the two it names", STREAM_V5],
+    ["an open poll", OPEN_MANY],
+    ["one not counted yet", ID],
+  ])("%s has no summary", async (_, id) => {
+    const html = await (await get(`/polls/${id}`)).text();
+    expect(html).not.toContain('aria-label="In short"');
+    expect(html).not.toContain("Final results.");
+  });
+
   test("the API is asked for the results by the poll's ID alone", async () => {
     seen.length = 0;
     await get(`/polls/${STREAM_V1}`, { cookie: "__Secure-abolish-account.session_token=secret" });
@@ -2572,8 +2597,8 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 177, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 174, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 213, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 214, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 181, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 176, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 168, css: 40, fonts: 58 },

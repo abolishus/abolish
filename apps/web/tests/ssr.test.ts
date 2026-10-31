@@ -1852,7 +1852,8 @@ describe("stream", () => {
           ...html.matchAll(new RegExp(`href="${BALLOT}#election=${id}&amp;pick=([0-9]+)"`, "g")),
         ].map((m) => m[1]),
       ).toEqual(["0", "1", "2"]);
-    expect(html).toContain("Choose an answer to question 1 of 2");
+    expect(html).toContain("These answers are for question 1 of 2.");
+    expect(html).toContain("Choose an answer on any card to open it in the ballot app.");
     expect(html).not.toContain(`#election=${STREAM_V5}"`);
     // Text the definition doesn't commit to, or none, gets no words and no way to answer (T-41).
     expect(html).not.toContain(`#election=${STREAM_BAD_TEXT}`);
@@ -2682,9 +2683,9 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 169, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 198, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 199, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 253, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 173, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 174, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

@@ -1,6 +1,6 @@
 import { buttonVariants, cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
 import { ArrowRight, ChevronDown, CircleCheck, EyeOff } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 
 import type { FollowsClient } from "../account/follows.ts";
 import type { ReactionsClient } from "../account/reactions.ts";
@@ -281,6 +281,7 @@ export function PollSummary({
   // Summed up only once closed, and by number while the poll is hidden, as
   // its results are (docs/moderation-policy.md).
   const final = status === "closed" && results !== undefined ? finalOf(poll, results) : undefined;
+  const evidence = useRef<HTMLDetailsElement>(null);
 
   return (
     <article className="grid gap-16">
@@ -316,7 +317,31 @@ export function PollSummary({
         </div>
 
         {final === undefined ? null : (
-          <InShort final={final} words={moderation.state === "hidden" ? undefined : words} />
+          <>
+            <InShort final={final} words={moderation.state === "hidden" ? undefined : words} />
+            {/* From the results in short to what they rest on, as the closed
+                poll's mockup links it: the evidence says these are our
+                server's claims, with the hashes to check them (T-24, T-34). */}
+            <a
+              href="#evidence"
+              onClick={() => {
+                // Browsers that reveal a fragment's closed <details> do this
+                // without script; this covers those that don't.
+                if (evidence.current !== null) evidence.current.open = true;
+              }}
+              className="inline-flex min-h-12 items-center gap-3 self-start pe-3 underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+            >
+              {/* A seal only: the evidence names the same fingerprint. */}
+              <span aria-hidden="true" className="contents">
+                <Fingerprint
+                  value={poll.definitionHash}
+                  label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
+                  size={32}
+                />
+              </span>
+              {t("evidenceSummary")}
+            </a>
+          </>
         )}
 
         {/* The loader names no one for a hidden poll; the guard keeps this
@@ -437,7 +462,7 @@ export function PollSummary({
         <PollFollow electionId={poll.electionId} client={follows} />
       )}
 
-      <details className="group border-t border-border pt-8">
+      <details ref={evidence} className="group border-t border-border pt-8">
         <summary className="flex min-h-12 cursor-pointer list-none items-center gap-4 underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
           {/* A seal only: the evidence below names the same fingerprint. */}
           <span aria-hidden="true" className="contents">
@@ -450,7 +475,10 @@ export function PollSummary({
           <h2 className="m-0 font-heading text-2xl font-semibold">{t("evidenceSummary")}</h2>
           <ChevronDown aria-hidden="true" className="size-5 group-open:rotate-180" />
         </summary>
-        <div className="grid gap-12 pt-8">
+        {/* The link's target is inside the disclosure, not the disclosure
+            itself, so a fragment to it opens it (HTML's ancestor revealing);
+            the margin keeps the summary above it in view. */}
+        <div id="evidence" className="grid scroll-mt-20 gap-12 pt-8">
           <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
             {t("pollClaim")}
           </p>

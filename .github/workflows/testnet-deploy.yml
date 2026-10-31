@@ -1,0 +1,404 @@
+# Deploys the staging contracts to Sepolia (L1) and Base Sepolia (L2) from
+# main, by hand (P2-32 part 3b; docs/runbooks/staging-testnet.md; packages/
+# contracts/README.md, Deploy script, Confirming a deployment and Release
+# build). Threats: T-64 (deployed code that isn't the release's), T-34 (a
+# lying RPC provider), T-65 (deployer key leak), T-56 (compromised action or
+# runner), T-61.
+#
+#   release-build  forge build alone, on a fresh runner that runs no npm code,
+#                  with nothing but foundry.toml configuring it; output the
+#                  sha256 over its artifacts. No secrets.
+#   rehearse       always: the whole deployment on Anvil forks of both chains,
+#                  sending as the deployer without its key, then each record
+#                  confirmed against the release build and the deployment
+#                  record built and checked from them. No deployer key.
+#   checks         broadcast only: ci, repro-build and reference-election
+#                  passed on this commit.
+#   deploy         broadcast only, `staging` environment: the deploy script on
+#                  both chains with TESTNET_DEPLOYER_KEY. Runs no dependency
+#                  code: only the hash-verified toolchain, bash and jq see the key.
+#   confirm        each record confirmed against its chain and the release
+#                  build, then again once both chains have finalized every
+#                  block it names, through the main provider and through a
+#                  second one, all three alike; then the deployment record
+#                  and each service's Railway variables (job summary).
+#   verify         each contract's source on Etherscan (ETHERSCAN_API_KEY).
+#   publish        the confirmed records and the deployment record committed
+#                  to a new branch deploy/testnet-<run id>, for the owner to
+#                  open as a PR. A PR this workflow opened with its token
+#                  would start no workflows, so its checks could never pass.
+#
+# The `staging` environment holds, as secrets: TESTNET_DEPLOYER_KEY,
+# ETHERSCAN_API_KEY, TESTNET_L1_RPC_URL and TESTNET_L2_RPC_URL (the main
+# provider), TESTNET_L1_CHECK_RPC_URL and TESTNET_L2_CHECK_RPC_URL (another
+# provider); as variables: TESTNET_DEPLOY_CONFIG (the deploy script's
+# DEPLOY_CONFIG without commit, l1Nonce and l2Nonce, which the run adds),
+# TESTNET_DEPLOYMENT_INPUTS (admin-cli's deployment inputs without
+# l2FromBlock, which the run adds) and STAGING_COORDINATOR_URL.
+name: testnet-deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      broadcast:
+        description: Send the transactions. Off, the run only rehearses on forks and sends nothing.
+        type: boolean
+        default: false
+
+permissions: {}
+
+# One deployment at a time: two at once would race for the deployer's nonces.
+concurrency:
+  group: testnet-deploy
+  cancel-in-progress: false
+
+env:
+  DO_NOT_TRACK: "1"
+
+jobs:
+  release-build:
+    name: release build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      sha256: ${{ steps.build.outputs.sha256 }}
+    steps:
+      # Every deployment is made from main (README, Release build).
+      - name: Only main deploys
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::testnet-deploy runs only on main, not $GITHUB_REF"
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Noir, Barretenberg and Foundry
+        run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+      # forge reads a .env at its project root as well as in its working
+      # directory, FOUNDRY_* and DAPP_* variables, and ~/.foundry/foundry.toml.
+      # The build runs with a bare environment and an empty home, and the
+      # configuration forge reports must be the same with and without them,
+      # so foundry.toml alone sets it.
+      - name: forge build
+        id: build
+        working-directory: packages/contracts
+        run: |
+          for f in .env ../.env ../../.env; do
+            if [ -e "$f" ]; then
+              echo "::error::packages/contracts/$f exists; forge would read it"
+              exit 1
+            fi
+          done
+          home="$RUNNER_TEMP/forge-home"
+          mkdir -p "$home"
+          bare=(env -i "PATH=$PATH" "HOME=$home")
+          if [ "$(forge config --json)" != "$("${bare[@]}" forge config --json)" ]; then
+            echo "::error::forge's configuration depends on the environment, not only foundry.toml"
+            exit 1
+          fi
+          log="$RUNNER_TEMP/build.log"
+          if ! "${bare[@]}" forge build >"$log" 2>&1; then
+            cat "$log"
+            exit 1
+          fi
+          cat "$log"
+          rm -rf out/build-info
+          echo "sha256=$("$GITHUB_WORKSPACE/.github/scripts/testnet-deploy.sh" digest out)" >>"$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contracts-release-build
+          path: packages/contracts/out/
+          if-no-files-found: error
+
+  rehearse:
+    name: rehearse on forks
+    needs: release-build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: contracts-release-build
+          path: ${{ runner.temp }}/release
+      - name: The release build is release-build's
+        env:
+          WANT: ${{ needs.release-build.outputs.sha256 }}
+        run: test "$(.github/scripts/testnet-deploy.sh digest "$RUNNER_TEMP/release")" = "$WANT"
+      - name: Deploy, confirm and record on forks of both chains
+        env:
+          TESTNET_DEPLOY_CONFIG: ${{ vars.TESTNET_DEPLOY_CONFIG }}
+          TESTNET_DEPLOYMENT_INPUTS: ${{ vars.TESTNET_DEPLOYMENT_INPUTS }}
+          STAGING_COORDINATOR_URL: ${{ vars.STAGING_COORDINATOR_URL }}
+          L1_UPSTREAM: ${{ secrets.TESTNET_L1_RPC_URL }}
+          L2_UPSTREAM: ${{ secrets.TESTNET_L2_RPC_URL }}
+        run: |
+          s=.github/scripts/testnet-deploy.sh
+          DEPLOYER="$(jq -r .deployer <<<"$TESTNET_DEPLOY_CONFIG")"
+          export DEPLOYER
+          L1_RPC_URL="$(RPC_URL="$L1_UPSTREAM" "$s" fork 8545)"
+          L2_RPC_URL="$(RPC_URL="$L2_UPSTREAM" "$s" fork 9545)"
+          export L1_RPC_URL L2_RPC_URL
+          out="$RUNNER_TEMP/rehearsal"
+          mkdir -p "$out"
+          "$s" config >"$out/config.json"
+          "$s" deploy "$out/config.json" --unlocked
+          "$s" confirm "$out/config.json" "$RUNNER_TEMP/release" "$out"
+          "$s" record "$out" "$out"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ !cancelled() }}
+        with:
+          name: rehearsal
+          path: ${{ runner.temp }}/rehearsal/
+          if-no-files-found: ignore
+
+  checks:
+    name: checks
+    if: inputs.broadcast
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      checks: read
+    steps:
+      # As in deploy.yml: only check runs created by GitHub Actions (app
+      # 15368) count, and on a commit of main only push-triggered runs exist.
+      - name: ci, repro-build and reference-election passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          for check in ci repro-build reference-election; do
+            run="$(gh api "repos/$REPO/commits/$SHA/check-runs?check_name=$check&filter=latest" \
+              --jq '[.check_runs[] | select(.app.id == 15368)] | max_by(.id) // {} | "\(.status // "missing") \(.conclusion // "")"')"
+            if [ "$run" != "completed success" ]; then
+              echo "::error::$check is '$run' on $SHA; deploy a commit whose checks passed"
+              exit 1
+            fi
+          done
+
+  deploy:
+    name: deploy
+    needs: [release-build, rehearse, checks]
+    if: inputs.broadcast
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Secrets live only in this environment, which allows `main` alone
+    # (owner setting): a workflow run for a PR branch can't read them (T-65).
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # No vp and no dependency code in the job that holds the key: only the
+      # pinned, hash-verified forge and cast, bash and jq, beside the
+      # SHA-pinned checkout and upload actions, in steps without the key.
+      - name: Install Noir, Barretenberg and Foundry
+        run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+      - name: Deploy to Sepolia, then Base Sepolia
+        env:
+          TESTNET_DEPLOY_CONFIG: ${{ vars.TESTNET_DEPLOY_CONFIG }}
+          TESTNET_DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_KEY }}
+          L1_RPC_URL: ${{ secrets.TESTNET_L1_RPC_URL }}
+          L2_RPC_URL: ${{ secrets.TESTNET_L2_RPC_URL }}
+        run: |
+          s=.github/scripts/testnet-deploy.sh
+          out="$RUNNER_TEMP/deployment"
+          mkdir -p "$out"
+          "$s" config >"$out/config.json"
+          key_address="$(cast wallet address --private-key "$TESTNET_DEPLOYER_KEY")"
+          if [ "${key_address,,}" != "$(jq -r '.deployer | ascii_downcase' "$out/config.json")" ]; then
+            echo "::error::TESTNET_DEPLOYER_KEY isn't TESTNET_DEPLOY_CONFIG's deployer"
+            exit 1
+          fi
+          "$s" deploy "$out/config.json" --private-key "$TESTNET_DEPLOYER_KEY"
+      # Whatever was sent, even if the L2 run failed after the L1's, or the
+      # job timed out or was cancelled mid-broadcast: the broadcast files are
+      # the only record of the transactions.
+      - name: Collect the records and broadcast files
+        if: always()
+        run: |
+          out="$RUNNER_TEMP/deployment"
+          mkdir -p "$out"
+          cd packages/contracts
+          find deployments broadcast -name '*.json' -print0 2>/dev/null | xargs -0 -r cp --parents -t "$out"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: deployment
+          path: ${{ runner.temp }}/deployment/
+          if-no-files-found: error
+
+  confirm:
+    name: confirm
+    needs: [release-build, deploy]
+    runs-on: ubuntu-24.04
+    # Finality takes about 15 minutes on Sepolia and longer on Base Sepolia.
+    timeout-minutes: 120
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          toolchain: "true"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: contracts-release-build
+          path: ${{ runner.temp }}/release
+      - name: The release build is release-build's
+        env:
+          WANT: ${{ needs.release-build.outputs.sha256 }}
+        run: test "$(.github/scripts/testnet-deploy.sh digest "$RUNNER_TEMP/release")" = "$WANT"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deployment
+          path: ${{ runner.temp }}/deployment
+      - name: Confirm, wait for finality, and confirm again through both providers
+        env:
+          L1_RPC_URL: ${{ secrets.TESTNET_L1_RPC_URL }}
+          L2_RPC_URL: ${{ secrets.TESTNET_L2_RPC_URL }}
+          L1_CHECK_RPC_URL: ${{ secrets.TESTNET_L1_CHECK_RPC_URL }}
+          L2_CHECK_RPC_URL: ${{ secrets.TESTNET_L2_CHECK_RPC_URL }}
+        run: |
+          s="$GITHUB_WORKSPACE/.github/scripts/testnet-deploy.sh"
+          d="$RUNNER_TEMP/deployment"
+          cp -r "$d/deployments" "$d/broadcast" packages/contracts/
+          host() { sed -E 's#^[a-zA-Z]+://([^/@]*@)?([^/:?]+).*#\2#' <<<"$1"; }
+          if [ "$(host "$L1_RPC_URL")" = "$(host "$L1_CHECK_RPC_URL")" ] ||
+            [ "$(host "$L2_RPC_URL")" = "$(host "$L2_CHECK_RPC_URL")" ]; then
+            echo "::error::each chain's check provider must be another host than its main one"
+            exit 1
+          fi
+          "$s" confirm "$d/config.json" "$RUNNER_TEMP/release" "$RUNNER_TEMP/confirmed"
+          RPC_URL="$L1_RPC_URL" "$s" finalized "$RUNNER_TEMP/confirmed/11155111.json"
+          RPC_URL="$L2_RPC_URL" "$s" finalized "$RUNNER_TEMP/confirmed/84532.json"
+          RPC_URL="$L1_CHECK_RPC_URL" "$s" finalized "$RUNNER_TEMP/confirmed/11155111.json"
+          RPC_URL="$L2_CHECK_RPC_URL" "$s" finalized "$RUNNER_TEMP/confirmed/84532.json"
+          "$s" confirm "$d/config.json" "$RUNNER_TEMP/release" "$RUNNER_TEMP/final"
+          L1_RPC_URL="$L1_CHECK_RPC_URL" L2_RPC_URL="$L2_CHECK_RPC_URL" \
+            "$s" confirm "$d/config.json" "$RUNNER_TEMP/release" "$RUNNER_TEMP/check"
+          for id in 11155111 84532; do
+            if ! cmp -s "$RUNNER_TEMP/confirmed/$id.json" "$RUNNER_TEMP/final/$id.json" ||
+              ! cmp -s "$RUNNER_TEMP/final/$id.json" "$RUNNER_TEMP/check/$id.json"; then
+              echo "::error::chain $id's confirmed record changed after finality, or the providers disagree"
+              exit 1
+            fi
+          done
+      - name: Build the deployment record and the Railway variables
+        env:
+          TESTNET_DEPLOYMENT_INPUTS: ${{ vars.TESTNET_DEPLOYMENT_INPUTS }}
+          STAGING_COORDINATOR_URL: ${{ vars.STAGING_COORDINATOR_URL }}
+        run: |
+          out="$RUNNER_TEMP/confirmed"
+          .github/scripts/testnet-deploy.sh record "$out" "$out"
+          {
+            echo '## Deployment record'
+            echo
+            echo '```json'
+            cat "$out/record.json"
+            echo '```'
+            echo
+            echo "## Railway variables (docs/runbooks/staging-testnet.md, Deploy day)"
+            echo
+            echo '```json'
+            jq . "$out/variables.json"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: confirmed
+          path: ${{ runner.temp }}/confirmed/
+          if-no-files-found: error
+
+  verify:
+    name: verify on Etherscan
+    needs: [release-build, confirm]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Noir, Barretenberg and Foundry
+        run: .github/scripts/install-toolchain.sh "$RUNNER_TEMP/abolish-toolchain/bin"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: contracts-release-build
+          path: ${{ runner.temp }}/release
+      - name: The release build is release-build's
+        env:
+          WANT: ${{ needs.release-build.outputs.sha256 }}
+        run: test "$(.github/scripts/testnet-deploy.sh digest "$RUNNER_TEMP/release")" = "$WANT"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: deployment
+          path: ${{ runner.temp }}/deployment
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confirmed
+          path: ${{ runner.temp }}/confirmed
+      - name: Verify every contract's source
+        env:
+          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
+        run: |
+          cp -r "$RUNNER_TEMP/deployment/broadcast" packages/contracts/
+          for id in 11155111 84532; do
+            .github/scripts/testnet-deploy.sh verify "$RUNNER_TEMP/confirmed/$id.json" "$RUNNER_TEMP/release"
+          done
+
+  publish:
+    name: publish the records
+    needs: confirm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      # Credentials kept for the one push below. This job runs no toolchain
+      # and no npm code: git, cp and jq only.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: true
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: confirmed
+          path: ${{ runner.temp }}/confirmed
+      - name: Commit the records to a new branch
+        env:
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          c="$RUNNER_TEMP/confirmed"
+          branch="deploy/testnet-$RUN_ID"
+          cp "$c/11155111.json" "$c/84532.json" packages/contracts/deployments/
+          jq . "$c/record.json" >packages/contracts/deployments/staging-record.json
+          git switch -c "$branch"
+          git add packages/contracts/deployments
+          git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "chore(contracts): record the staging deployment (run $RUN_ID)"
+          git push origin "$branch"
+          {
+            echo "Records committed to \`$branch\`. Open the PR:"
+            echo "https://github.com/$REPO/compare/main...$branch?expand=1"
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -42,6 +42,7 @@ import {
   FALSE_CODE,
   FILLER,
   HEAD,
+  HEAD_FAILS_ID,
   HIDDEN_CODE,
   HIDDEN_ID,
   ID,
@@ -780,6 +781,26 @@ describe("results page", () => {
     expect(await (await get(`/polls/${ID}`)).text()).not.toContain(`/polls/${ID}/results`);
   });
 
+  test("states the board's head as the poll page does, as the server's word (T-23, T-34)", async () => {
+    const html = await (await get(`/polls/${CELLS_ID}/results`)).text();
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("What the board holds");
+    expect(page).toContain(`Entries: ${HEAD.treeSize}`);
+    expect(html).toContain(HEAD.chainHead);
+    expect(html).toContain(HEAD.root);
+    expect(html).toContain(`Fingerprint of the chain head ${HEAD.chainHead.slice(0, 8)}`);
+    expect(page).toContain("only this server&#x27;s word");
+  });
+
+  test("a failed read of the board's head leaves the results page up and says so", async () => {
+    const response = await get(`/polls/${HEAD_FAILS_ID}/results`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toContain("The board couldn&#x27;t be read just now.");
+    expect(html).not.toContain(HEAD.chainHead);
+  });
+
   test("refuses a definition that names another election (T-34)", async () => {
     const page = await text(`/polls/${SWAPPED_ID}/results`);
     expect(page).toContain("the definition of another poll");
@@ -803,6 +824,7 @@ describe("results page", () => {
       expect(r.headers["cookie"]).toBeUndefined();
     }
     expect(seen.filter((r) => r.path === "/elections/results")).toHaveLength(1);
+    expect(seen.filter((r) => r.path === "/board/head")).toHaveLength(1);
   });
 });
 
@@ -2619,7 +2641,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/": { html: 10, js: 178, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 175, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 214, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 184, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 169, css: 40, fonts: 58 },

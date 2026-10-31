@@ -5,6 +5,7 @@ import type { CellResults } from "../results.ts";
 import { PollResultsPage } from "./poll-results-page.tsx";
 
 const electionId = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f";
+const head = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
 
 // Tier 0 in three cells (two large regions and the small ones folded), Tier 2 in one.
 const cells: readonly CellResults[] = [
@@ -99,6 +100,7 @@ const meta = {
       ],
     },
     phoneVerification: false,
+    head,
   },
 } satisfies Meta<typeof PollResultsPage>;
 
@@ -156,6 +158,16 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "Tier 0 (verified e-mail) · Part 3Seat 1",
     "Tier 2 (document-verified)Not published yet",
   ]);
+
+  // The board's head as our server claims it, as the poll page states it (T-34).
+  const board = within(canvas.getByRole("region", { name: "What the board holds" }));
+  await expect(board.getByText(/^Entries/)).toHaveTextContent("Entries: 1,234");
+  await expect(
+    board.getByRole("img", { name: "Fingerprint of the chain head 1f1f1f1f" }),
+  ).toBeVisible();
+  await expect(board.getByRole("figure", { name: "Chain head" })).toHaveTextContent(head.chainHead);
+  await expect(board.getByRole("figure", { name: "Tree root" })).toHaveTextContent(head.root);
+  await expect(board.getByText(/only this server's word/)).toBeVisible();
 
   // What a recount starts from, with the ways to check it.
   const check = within(canvas.getByRole("region", { name: "Check it yourself" }));
@@ -298,5 +310,31 @@ export const NotCounted: Story = {
       /doesn't publish this poll's results/,
     );
     await expect(canvas.getByRole("link", { name: "Check the count on the board" })).toBeVisible();
+  },
+};
+
+/** An empty board says so, and never shows its all-zero head as if it were one. */
+export const BoardEmpty: Story = {
+  args: { head: { treeSize: "0", chainHead: "00".repeat(32), root: "00".repeat(32) } },
+  play: async ({ canvasElement }) => {
+    const board = within(
+      within(canvasElement).getByRole("region", { name: "What the board holds" }),
+    );
+    await expect(board.getByText("No entries yet.")).toBeVisible();
+    await expect(board.queryByRole("figure")).toBeNull();
+  },
+};
+
+/** A failed read of the board's head leaves the results up and says so. */
+export const BoardUnavailable: Story = {
+  args: { head: undefined },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const board = within(canvas.getByRole("region", { name: "What the board holds" }));
+    await expect(board.getByRole("status")).toHaveTextContent(
+      "The board couldn't be read just now.",
+    );
+    await expect(board.queryByRole("figure")).toBeNull();
+    await expect(canvas.getByRole("tablist", { name: "Results by group" })).toBeVisible();
   },
 };

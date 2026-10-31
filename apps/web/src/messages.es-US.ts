@@ -536,6 +536,10 @@ export const esUS: Messages = {
   resultsFingerprints:
     "Volver a contarla sin nosotros empieza por el ID de esta encuesta, y la definición que encuentre debe tener este hash, que fija las reglas de la encuesta antes de su primera respuesta.",
   resultsCheckTitle: "Compruébalo tú",
+  resultsBoardTitle: "Lo que guarda el tablero",
+  resultsBoardLede:
+    "Los resultados de esta encuesta se cuentan a partir de su tablero público. Las entradas solo se agregan al final, y ninguna muestra cómo votó nadie.",
+  resultsBoardUnavailable: "No se pudo leer el tablero en este momento.",
   resultsVerify: "Cómo contarlo tú",
   reactionsTitle: "Reacciones",
   reactionsLede:

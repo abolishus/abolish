@@ -163,15 +163,18 @@ export type ResultsPage =
       readonly results: PollResults;
       /** Each cell's results, as `cellResultsView` reads them; `undefined` where they don't fit. */
       readonly cells: readonly CellResults[] | undefined;
+      /** The board's head as our server claims it, as `headOf` reads it; `undefined` if the read failed. */
+      readonly head: BoardHead | undefined;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
 
 /**
  * The results page for `electionId`, which the caller has checked is
- * canonical hex: the poll page's reads of its definition, words and results,
- * with each cell's results beside its tiers'. Nothing else of the poll page
- * is read, and the results are asked for by the poll's ID alone (T-10).
+ * canonical hex: the poll page's reads of its definition, words, results and
+ * board head, with each cell's results beside its tiers'. Nothing else of
+ * the poll page is read, and everything is asked for by the poll's ID alone
+ * (T-10).
  */
 export async function loadResultsPage(
   api: Api,
@@ -185,12 +188,13 @@ export async function loadResultsPage(
       api.moderation.getStatus({ electionId }),
       wordsOf(api, electionId),
       resultsOf(api, electionId),
+      headOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, moderation, displayText, served] = answers;
+  const [{ definition }, moderation, displayText, served, head] = answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   // As on the poll page: a hidden poll's words are dropped, its results never are (T-68).
@@ -205,7 +209,22 @@ export async function loadResultsPage(
     words,
     results: "state" in served ? resultsView(view.poll, served) : served,
     cells: "state" in served ? cellResultsView(view.poll, view.cells, served) : [],
+    head,
   };
+}
+
+/**
+ * The board's head the API claims for `electionId` (`GET /board/head`), or
+ * `undefined` when the read fails: on the results page the board is
+ * evidence beside the results, not the page, so a failed read shows the
+ * results without it, as a failed read of their words does.
+ */
+async function headOf(api: Api, electionId: string): Promise<BoardHead | undefined> {
+  try {
+    return await api.board.getHead({ electionId });
+  } catch {
+    return undefined;
+  }
 }
 
 /** How long the poll page waits for its results before showing it without them. */

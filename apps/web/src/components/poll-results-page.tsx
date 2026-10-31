@@ -25,7 +25,9 @@ import {
   shareOf,
   type TierResults,
 } from "../results.ts";
+import type { BoardHead } from "../server/load.ts";
 import type { PollWords } from "../stream.ts";
+import { BoardHeadFacts } from "./board-head.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollFacts, StatusMark } from "./poll-facts.tsx";
 import { ResultsQuestion } from "./poll-results.tsx";
@@ -55,6 +57,8 @@ export interface PollResultsPageProps {
   words: PollWords | undefined;
   /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
   phoneVerification: boolean;
+  /** The board's head as our server claims it; `undefined` if it couldn't be read. */
+  head: BoardHead | undefined;
 }
 
 function usePercent() {
@@ -450,7 +454,8 @@ const STATE_TEXT = {
  * them (T-34). It is headed by the poll's facts as the poll page states
  * them, and marked counted only once it has closed with every tier's every
  * question read, as the register marks it; the poll's ID and definition
- * hash, which a recount starts from, are with the ways to check it.
+ * hash, which a recount starts from, are with the ways to check it, after
+ * the board's head as the poll page states it.
  */
 export function PollResultsPage({
   poll,
@@ -460,6 +465,7 @@ export function PollResultsPage({
   status,
   words,
   phoneVerification,
+  head,
 }: PollResultsPageProps) {
   const t = useTranslate(catalogs);
   const prefix = poll.electionId.slice(0, 16);
@@ -545,6 +551,18 @@ export function PollResultsPage({
       {read === undefined || cells === undefined || cells.length === 0 ? null : (
         <Openings poll={poll} cells={cells} phoneVerification={phoneVerification} />
       )}
+
+      <Section id="results-board-title" title={t("resultsBoardTitle")} lede={t("resultsBoardLede")}>
+        <div className="grid max-w-3xl gap-4">
+          {head === undefined ? (
+            <p role="status" className="m-0">
+              {t("resultsBoardUnavailable")}
+            </p>
+          ) : (
+            <BoardHeadFacts head={head} />
+          )}
+        </div>
+      </Section>
 
       <Section id="results-check-title" title={t("resultsCheckTitle")}>
         <div className="grid max-w-3xl gap-6">

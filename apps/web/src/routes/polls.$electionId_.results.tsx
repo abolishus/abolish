@@ -52,6 +52,7 @@ export const Route = createFileRoute("/polls/$electionId_/results")({
           status={pollStatus(page.poll, page.asOf)}
           words={page.words}
           phoneVerification={phoneVerification}
+          head={page.head}
         />
       );
     return (

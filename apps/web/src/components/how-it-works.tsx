@@ -1,4 +1,4 @@
-import { ScrollScene, SectionMark, useTranslate } from "@abolishus/ui";
+import { buttonVariants, ScrollScene, SectionMark, useTranslate } from "@abolishus/ui";
 import type { ComponentType } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
@@ -261,10 +261,15 @@ export function HowItWorks() {
         <ChapterSection key={chapter.id} chapter={chapter} index={i} />
       ))}
       <WeakPoints />
-      {/* Text, not a link: pages link only to this site (tests/ssr.test.ts). */}
-      <p className="m-0 max-w-prose border-t border-border pt-16 text-lg text-pretty">
-        {t("howSource")}
-      </p>
+      <div className="grid justify-items-start gap-6 border-t border-border pt-16">
+        {/* The verify page says first what the verifier can't find yet
+            (P4-1), so the link promises the how, not a result. */}
+        <a href="/verify" className={buttonVariants({ size: "lg" })}>
+          {t("howVerify")}
+        </a>
+        {/* Text, not a link: pages link only to this site (tests/ssr.test.ts). */}
+        <p className="m-0 max-w-prose text-lg text-pretty">{t("howSource")}</p>
+      </div>
     </div>
   );
 }

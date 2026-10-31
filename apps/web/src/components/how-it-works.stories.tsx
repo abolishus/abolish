@@ -49,6 +49,10 @@ export const Default: Story = {
     const limits = canvas.getAllByRole("listitem").filter((li) => li.closest("#weak-points"));
     await expect(limits[0]).toHaveTextContent("During launch, we hold every trustee seat");
     await expect(limits[0]).toHaveTextContent("T-14");
+    // It ends on how to verify a result, the verify page.
+    await expect(
+      canvas.getByRole("link", { name: "How to verify a result yourself" }),
+    ).toHaveAttribute("href", "/verify");
 
     // The count's diagram redraws as each step reaches the middle of the viewport.
     const counted = () => canvas.getByTestId("diagram-counted");

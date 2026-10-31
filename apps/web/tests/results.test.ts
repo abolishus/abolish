@@ -178,7 +178,7 @@ const opened = (cell: number, tier: number, counted: number, counts: string[]): 
   tier,
   counted,
   counts,
-  signers: [0],
+  signers: [1],
 });
 const unopened = (cell: number, tier: number, counted: number, code = "tally-missing") => ({
   cell,
@@ -206,7 +206,7 @@ const honest = withCells(
   ],
 );
 
-const v1 = { version: 1 as const, questions: one.questions };
+const v1 = { version: 1 as const, questions: one.questions, panelSize: 3 };
 
 describe("cellResultsView", () => {
   test("is empty while nothing is opened", () => {
@@ -215,10 +215,42 @@ describe("cellResultsView", () => {
 
   test("gives each cell's results with its partition cell, in partition order", () => {
     expect(cellResultsView(v1, partition, honest)).toEqual([
-      { cell: partition[0], counted: 5, state: "opened", questions: [["3", "2", "0"]] },
-      { cell: partition[1], counted: 3, state: "opened", questions: [["2", "1", "0"]] },
-      { cell: partition[2], counted: 1, state: "opened", questions: [["0", "0", "1"]] },
-      { cell: partition[3], counted: 2, state: "missing", questions: undefined },
+      {
+        cell: partition[0],
+        counted: 5,
+        state: "opened",
+        questions: [["3", "2", "0"]],
+        signers: [1],
+      },
+      {
+        cell: partition[1],
+        counted: 3,
+        state: "opened",
+        questions: [["2", "1", "0"]],
+        signers: [1],
+      },
+      {
+        cell: partition[2],
+        counted: 1,
+        state: "opened",
+        questions: [["0", "0", "1"]],
+        signers: [1],
+      },
+      { cell: partition[3], counted: 2, state: "missing", questions: undefined, signers: [] },
+    ]);
+  });
+
+  test("names the seats each cell's openings are attributed to, and none for a cell opened by no checked signature", () => {
+    const served = withCells(honest.tiers, [
+      { ...honest.cells[0]!, signers: [1, 3] },
+      { ...honest.cells[1]!, signers: [] },
+      ...honest.cells.slice(2),
+    ]);
+    expect(cellResultsView(v1, partition, served)?.map((c) => c.signers)).toEqual([
+      [1, 3],
+      [],
+      [1],
+      [],
     ]);
   });
 
@@ -267,7 +299,7 @@ describe("cellResultsView", () => {
         },
       ],
     );
-    expect(cellResultsView(two, p, served)?.[0]?.questions).toEqual([
+    expect(cellResultsView({ ...two, panelSize: 3 }, p, served)?.[0]?.questions).toEqual([
       ["1", "2", "1"],
       ["4", "3"],
     ]);
@@ -314,8 +346,57 @@ describe("cellResultsView", () => {
         [opened(0, 0, 5, ["6", "2", "0"]), ...cells.slice(1)],
       ),
     ],
+    // A seat the poll's panel doesn't have, or one named twice or out of order (T-34).
+    ["seat 0", withCells(honest.tiers, [{ ...cells[0]!, signers: [0] }, ...cells.slice(1)])],
+    [
+      "a seat past the panel",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [4] }, ...cells.slice(1)]),
+    ],
+    [
+      "seats out of order",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 1] }, ...cells.slice(1)]),
+    ],
+    [
+      "a seat named twice",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 2] }, ...cells.slice(1)]),
+    ],
+    [
+      "a seat on a cell with nothing boarded",
+      withCells(honest.tiers, [...cells.slice(0, 3), { ...cells[3]!, signers: [1] }]),
+    ],
+    // A seat the poll's panel doesn't have, or one named twice or out of order (T-34).
+    ["seat 0", withCells(honest.tiers, [{ ...cells[0]!, signers: [0] }, ...cells.slice(1)])],
+    [
+      "a seat past the panel",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [4] }, ...cells.slice(1)]),
+    ],
+    [
+      "seats out of order",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 1] }, ...cells.slice(1)]),
+    ],
+    [
+      "a seat named twice",
+      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 2] }, ...cells.slice(1)]),
+    ],
+    [
+      "a seat on a cell with nothing boarded",
+      withCells(honest.tiers, [...cells.slice(0, 3), { ...cells[3]!, signers: [1] }]),
+    ],
   ])("refuses %s", (_, served) => {
     expect(cellResultsView(v1, partition, served)).toBeUndefined();
+  });
+
+  test("takes exactly the lists of the panel's seats, each once and ascending", () => {
+    fc.assert(
+      fc.property(fc.array(fc.integer({ min: -1, max: 5 }), { maxLength: 5 }), (signers) => {
+        const served = withCells(honest.tiers, [{ ...cells[0]!, signers }, ...cells.slice(1)]);
+        const seats = signers.every((s, i) => s >= 1 && s <= 3 && (i === 0 || s > signers[i - 1]!));
+        expect(cellResultsView(v1, partition, served)?.[0]?.signers).toEqual(
+          seats ? signers : undefined,
+        );
+      }),
+      runs,
+    );
   });
 
   test("takes any split of a tier's counts into its cells, and nothing that doesn't sum", () => {

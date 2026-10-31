@@ -27,7 +27,7 @@ import { PageHeader, Section } from "./page-parts.tsx";
 import { ResultsQuestion } from "./poll-results.tsx";
 
 export interface PollResultsPageProps {
-  poll: Pick<PollView, "electionId" | "questions">;
+  poll: Pick<PollView, "electionId" | "questions" | "threshold" | "panelSize">;
   /** The poll's heading in its own words; without them, it goes by its ID. */
   heading: string | undefined;
   results: PollResults;
@@ -345,6 +345,78 @@ function TierPanel({
   );
 }
 
+/**
+ * Who opened each cell of the count: the seats its passing openings are
+ * attributed to, by the signature the board checked (docs/spec/tally.md,
+ * Opening record), one row per cell in partition order. A seat opens a cell
+ * only with `threshold` seats' shares, so naming it says who combined them,
+ * not that it could open the cell alone. These are our server's reading of
+ * the board, as the counts are (T-29, T-34).
+ */
+function Openings({
+  poll,
+  cells,
+  phoneVerification,
+}: {
+  poll: PollResultsPageProps["poll"];
+  cells: readonly CellResults[];
+  phoneVerification: boolean;
+}) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const list = new Intl.ListFormat(locale, { type: "conjunction" });
+  const numbers = new Intl.NumberFormat(locale);
+  return (
+    <Section
+      id="results-openings-title"
+      title={t("resultsOpeningsTitle")}
+      lede={t("resultsOpeningsLede", { threshold: poll.threshold, size: poll.panelSize })}
+    >
+      <Table className="max-w-3xl">
+        <TableHeader>
+          <TableRow>
+            <TableHead scope="col" className={WRAP}>
+              {t("resultsOpeningsPart")}
+            </TableHead>
+            <TableHead scope="col" className={WRAP}>
+              {t("resultsOpenedBy")}
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {cells.map((c, i) => {
+            const own = cells.filter((o) => o.cell.tier === c.cell.tier);
+            const tier = t(tierMessage(c.cell.tier, phoneVerification));
+            return (
+              <TableRow key={i}>
+                <TableHead scope="row" className={cn(WRAP, "font-normal")}>
+                  {own.length > 1
+                    ? `${tier} · ${t("resultsCellName", { number: own.indexOf(c) + 1 })}`
+                    : tier}
+                </TableHead>
+                <TableCell className={WRAP}>
+                  {c.state !== "opened" ? (
+                    <span className="text-muted-foreground">
+                      {t(c.state === "failed" ? "resultsCellFailed" : "resultsCellMissing")}
+                    </span>
+                  ) : c.signers.length === 0 ? (
+                    t("resultsOpenedUnsigned")
+                  ) : (
+                    t("resultsSeats", {
+                      count: c.signers.length,
+                      seats: list.format(c.signers.map((s) => numbers.format(s))),
+                    })
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </Section>
+  );
+}
+
 const STATE_TEXT = {
   "not-counted": "resultsNotCounted",
   "not-ready": "resultsUnavailable",
@@ -438,6 +510,10 @@ export function PollResultsPage({
             />
           ) : null}
         </>
+      )}
+
+      {read === undefined || cells === undefined || cells.length === 0 ? null : (
+        <Openings poll={poll} cells={cells} phoneVerification={phoneVerification} />
       )}
 
       <Section id="results-check-title" title={t("resultsCheckTitle")}>

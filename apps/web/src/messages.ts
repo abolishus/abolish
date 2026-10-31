@@ -513,6 +513,13 @@ const enUS = {
   resultsCellMissing: "Not published yet",
   resultsCellFailed: "Didn't pass the board's check",
   resultsCellsUnavailable: "This group's parts couldn't be shown just now.",
+  resultsOpeningsTitle: "Who opened the count",
+  resultsOpeningsLede:
+    "Each part of the count is opened by one of this poll's {size} trustee seats, once at least {threshold} of them have added their shares. The seat that opens it signs the opening, so the board shows which seat it was. During launch, Abolish runs every seat.",
+  resultsOpeningsPart: "Part of the count",
+  resultsOpenedBy: "Opened by",
+  resultsSeats: { one: "Seat {seats}", other: "Seats {seats}" },
+  resultsOpenedUnsigned: "No seat's signature on it checks",
   resultsCheckTitle: "Check it yourself",
   resultsVerify: "How to count it yourself",
   reactionsTitle: "Reactions",

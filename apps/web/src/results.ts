@@ -67,12 +67,14 @@ export function resultsView(
  * once a registered seat's opening of it passed, each question's count per
  * option; else whether it is unopened (`missing`, the board's
  * `tally-missing`) or its openings failed the board's check (`failed`).
+ * `signers` are the seats its passing openings are attributed to, ascending.
  */
 export interface CellResults {
   readonly cell: PartitionCell;
   readonly counted: number;
   readonly state: "opened" | "missing" | "failed";
   readonly questions: readonly (readonly string[])[] | undefined;
+  readonly signers: readonly number[];
 }
 
 /**
@@ -81,13 +83,15 @@ export interface CellResults {
  * partition order, each in its cell's tier, its counts the definition's
  * questions and options, none above the ballots it counted, and every tier
  * the sum of its cells, its counted ballots always and its counts exactly
- * once every cell has them (docs/spec/election-definition.md, Notes, Tally partition). So
- * the page can't print a cell's figures that disagree with its tier's, or
- * under another cell (T-34); whether either is right is the verifier's to
- * say.
+ * once every cell has them (docs/spec/election-definition.md, Notes, Tally partition), and
+ * its signers seats of the poll's panel, ascending, none for a cell with
+ * nothing boarded (docs/spec/verifier.md, 7.2). So the page can't print a
+ * cell's figures that disagree with its tier's, or under another cell, or
+ * name a seat the poll doesn't have (T-34); whether either is right is the
+ * verifier's to say.
  */
 export function cellResultsView(
-  poll: Pick<PollView, "version" | "questions">,
+  poll: Pick<PollView, "version" | "questions" | "panelSize">,
   partition: readonly PartitionCell[],
   served: ServedResults,
 ): readonly CellResults[] | undefined {
@@ -100,12 +104,11 @@ export function cellResultsView(
     const questions =
       c.counts === undefined ? undefined : poll.version === 5 ? c.byQuestion : [c.counts];
     if (c.counts !== undefined && !fits(poll.questions, c.counted, questions)) return undefined;
-    cells.push({
-      cell,
-      counted: c.counted,
-      state: questions !== undefined ? "opened" : c.code === "tally-missing" ? "missing" : "failed",
-      questions,
-    });
+    const state =
+      questions !== undefined ? "opened" : c.code === "tally-missing" ? "missing" : "failed";
+    if (!seatsOf(poll.panelSize, c.signers) || (state === "missing" && c.signers.length > 0))
+      return undefined;
+    cells.push({ cell, counted: c.counted, state, questions, signers: c.signers });
   }
   if (!cells.every((c) => served.tiers.some((t) => t.tier === c.cell.tier))) return undefined;
   for (const t of served.tiers) {
@@ -129,6 +132,11 @@ export function cellResultsView(
 // The cells' count of option `j` of question `i`.
 function sumOf(cells: readonly CellResults[], i: number, j: number): bigint {
   return cells.reduce((n, c) => n + BigInt(c.questions?.[i]?.[j] ?? "0"), 0n);
+}
+
+// Seats of a panel of `size`, numbered from 1 (docs/spec/ceremony.md), each once and ascending.
+function seatsOf(size: number, seats: readonly number[]): boolean {
+  return seats.every((s, i) => s >= 1 && s <= size && (i === 0 || s > (seats[i - 1] ?? 0)));
 }
 
 // No option is picked on more ballots than were counted.

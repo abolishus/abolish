@@ -23,8 +23,9 @@
 // keep, and version 10's rolling ballot, so only versions 8 to 12 are
 // compared with it, versions 8 and 9 less the rolling ballot, which they
 // lack, and versions 11 and 12 less the relayed rolling ballot version 11
-// adds, which the board doesn't take until P2-17 part 5; the group registry declares version 7's seven, so only versions 7
-// to 12 are compared with it; and the trustee registry logs each panel's
+// adds, which the board doesn't take until P2-17 part 5; the group registry
+// declares version 7's seven, so only versions 7 to 12 are compared with it;
+// and the trustee registry logs each panel's
 // kind, so only version 12 is compared with it: no trustee registry that
 // logs the kind may be deployed beside an election registry serving a
 // profile pinning versions 1 to 11, no election registry with the author

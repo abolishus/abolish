@@ -372,7 +372,8 @@ export const codes = new Map([
  * version-1 stream poll counted in Tier 0 with Tier 2 still partly unopened,
  * the version-5 one question by question, the hidden poll counted, the
  * typical poll and one open poll unopened, and the other open one counted
- * already, as no API should answer before the close. One poll answers counts that don't
+ * already, as no API should answer before the close. One filler is counted in
+ * both its tiers. One poll answers counts that don't
  * fit its definition, one isn't ready and one fails; the rest are polls this
  * server counts no results of.
  */
@@ -381,6 +382,8 @@ export const RESULTS_NOT_READY_ID = FILLER[5]!;
 export const RESULTS_FAILS_ID = FILLER[6]!;
 /** A poll whose cells don't add up to its tiers' results, which the results page refuses to show (T-34). */
 export const CELLS_MISFIT_ID = FILLER[7]!;
+/** A closed poll counted in both its tiers, which the register says is counted. */
+export const COUNTED_ID = FILLER[8]!;
 const counted = (tiers: unknown[], cells: unknown[] = []) => ({
   state: "read",
   openings: 3,
@@ -468,6 +471,13 @@ const RESULTS = new Map<string, unknown>([
     ]),
   ],
   [RESULTS_MISFIT_ID, counted([{ tier: 0, counted: 3, counts: ["1", "1"] }])],
+  [
+    COUNTED_ID,
+    counted([
+      { tier: 0, counted: 4, counts: ["2", "1", "1"] },
+      { tier: 2, counted: 1, counts: ["0", "1", "0"] },
+    ]),
+  ],
   [
     CELLS_MISFIT_ID,
     counted(

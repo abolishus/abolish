@@ -419,6 +419,7 @@ const enUS = {
   listUndecodable: "The server's definition doesn't decode.",
   listMismatch: "The server sent another poll's definition.",
   listOpens: "Opens",
+  listCounted: "counted",
   listClosed: "On",
   listPoll: "Poll",
   listCounting: "Counting",

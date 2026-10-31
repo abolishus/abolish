@@ -427,6 +427,7 @@ export const esUS: Messages = {
   listUndecodable: "La definición del servidor no se puede decodificar.",
   listMismatch: "El servidor envió la definición de otra encuesta.",
   listOpens: "Abre",
+  listCounted: "con recuento",
   listClosed: "Cerró",
   listPoll: "Encuesta",
   listCounting: "Conteo",

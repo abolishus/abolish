@@ -36,12 +36,14 @@ const LIST: PollList = {
       text: undefined,
       answered: [{ tier: 0, answered: "1204" }],
       tags: NO_TAGS,
+      counted: false,
     },
     {
       kind: "poll",
       text: undefined,
       answered: undefined,
       tags: NO_TAGS,
+      counted: false,
       poll: poll(SCHEDULED, {
         counting: "approval",
         opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
@@ -53,6 +55,7 @@ const LIST: PollList = {
       text: undefined,
       answered: undefined,
       tags: NO_TAGS,
+      counted: true,
       poll: poll(CLOSED, {
         closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
       }),
@@ -81,9 +84,10 @@ type Story = StoryObj<typeof meta>;
 /** The polls the register shows, by the IDs their links name. */
 function shown(canvasElement: HTMLElement): (string | null)[] {
   const list = within(canvasElement).getByRole("list", { name: "Listed polls" });
+  // Each row's heading link, not its results link.
   return within(list)
-    .getAllByRole("link")
-    .map((a) => a.getAttribute("href"));
+    .getAllByRole("heading")
+    .map((h) => within(h).getByRole("link").getAttribute("href"));
 }
 
 const play: Story["play"] = async ({ canvasElement }) => {
@@ -181,6 +185,7 @@ export const QuestionByQuestion: Story = {
           },
           answered: undefined,
           tags: NO_TAGS,
+          counted: false,
           poll: poll(QUESTIONS, {
             version: 5,
             counting: "questions",

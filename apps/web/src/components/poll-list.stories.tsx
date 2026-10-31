@@ -22,6 +22,7 @@ const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView =
 const FIRST = "10".repeat(32);
 const SECOND = "20".repeat(32);
 const THIRD = "30".repeat(32);
+const FOURTH = "40".repeat(32);
 
 const meta = {
   component: PollRows,
@@ -42,12 +43,14 @@ const meta = {
           { tier: 2, answered: "1204" },
         ],
         tags: { topic: "community", place: "Riverside" },
+        counted: false,
       },
       {
         kind: "poll",
         text: undefined,
         answered: undefined,
         tags: NO_TAGS,
+        counted: false,
         poll: poll(SECOND, {
           counting: "approval",
           illFormed: { rule: "timing", question: undefined },
@@ -55,6 +58,16 @@ const meta = {
         }),
       },
       { kind: "unavailable", electionId: THIRD, problem: "undecodable" },
+      {
+        kind: "poll",
+        text: undefined,
+        answered: undefined,
+        tags: NO_TAGS,
+        counted: true,
+        poll: poll(FOURTH, {
+          closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
+        }),
+      },
     ],
     asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
     phoneVerification: false,
@@ -71,7 +84,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const items = within(list)
     .getAllByRole("listitem")
     .filter((item) => item.parentElement === list);
-  await expect(items).toHaveLength(3);
+  await expect(items).toHaveLength(4);
   // A poll in its own words, in their language, with its ID under them.
   const first = within(items[0]!).getByRole("link", {
     name: "Should the library open on Sundays?",
@@ -116,6 +129,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // A definition that doesn't decode is still linked, with nothing shown from it.
   await expect(within(items[2]!).getByRole("link")).toHaveAttribute("href", `/polls/${THIRD}`);
   await expect(within(items[2]!).getByText(/doesn't decode/)).toBeVisible();
+  // A closed poll counted says so and links to its results; an open one doesn't.
+  await expect(within(items[3]!).getByText("· counted")).toBeVisible();
+  await expect(within(items[3]!).getByRole("link", { name: "See the results" })).toHaveAttribute(
+    "href",
+    `/polls/${FOURTH}/results`,
+  );
+  await expect(within(items[0]!).queryByText("· counted")).toBeNull();
+  await expect(within(items[0]!).queryByRole("link", { name: "See the results" })).toBeNull();
 };
 
 export const Default: Story = { play };

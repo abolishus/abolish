@@ -1,5 +1,5 @@
 import { buttonVariants, cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
-import { ArrowRight, ChevronDown, EyeOff, type LucideIcon } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, EyeOff, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { FollowsClient } from "../account/follows.ts";
@@ -15,7 +15,7 @@ import {
   type PollTags,
   type PollView,
 } from "../poll.ts";
-import type { PollResults as Results } from "../results.ts";
+import { finalOf, type PollResults as Results, type TierResults } from "../results.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
 import type { CardAnswered, CardText, PollWords } from "../stream.ts";
 import { ballotLink } from "../values.ts";
@@ -23,7 +23,7 @@ import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PollFollow } from "./poll-follow.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
-import { PollResults } from "./poll-results.tsx";
+import { PollResults, useResultsWords } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
 import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
 import { ReportSection, type ReportWords } from "./report-section.tsx";
@@ -234,6 +234,54 @@ function PollAnswered({
 }
 
 /**
+ * A closed poll's results in short, under its heading
+ * (`everyday-poll-closed-page.tsx`): how many its one tier counted, then
+ * each question's lead in a sentence, as the results section words it. The
+ * section below has every share and says these are our server's reading of
+ * the board, not a check (T-34).
+ */
+function InShort({
+  final,
+  words,
+}: {
+  final: TierResults & { readonly questions: readonly (readonly string[])[] };
+  words: PollWords | undefined;
+}) {
+  const t = useTranslate(catalogs);
+  const { lead } = useResultsWords();
+  const several = final.questions.length > 1;
+  return (
+    <div className="grid gap-4">
+      <p className="m-0 flex items-center gap-2 text-lg">
+        <CircleCheck aria-hidden="true" className="size-5 shrink-0 text-recorded" />
+        <span>{t("pollFinal", { count: final.counted })}</span>
+      </p>
+      <ul aria-label={t("pollInShort")} className="m-0 grid list-none gap-4 p-0 md:grid-cols-3">
+        {final.questions.map((counts, i) => {
+          const question = words?.questions[i];
+          return (
+            <li key={i} className="grid content-start gap-2 bg-muted/60 p-5">
+              {question === undefined ? (
+                several ? (
+                  <span className="text-sm text-foreground/80">
+                    {t("questionNumber", { number: i + 1 })}
+                  </span>
+                ) : null
+              ) : (
+                <bdi className="text-sm text-foreground/80">{question.question}</bdi>
+              )}
+              <span className="font-heading text-xl leading-snug font-semibold text-pretty">
+                {lead(counts, final.counted, question?.options)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * One poll's page, in the everyday register ([[language]]): what it is and
  * where it stands on the surface, and what our server says about it one step
  * down, behind "How do we know this is real?". That part says plainly that
@@ -272,6 +320,9 @@ export function PollSummary({
   // that names its ballot client, as the embed's is. The link carries the
   // poll in its fragment alone, which no server sees (T-10, T-11).
   const answering = status === "open" && text !== undefined && ballot != null ? ballot : null;
+  // Summed up only once closed, and by number while the poll is hidden, as
+  // its results are (docs/moderation-policy.md).
+  const final = status === "closed" && results !== undefined ? finalOf(poll, results) : undefined;
 
   const tiers = (
     <ul className="m-0 grid list-none gap-1 p-0">
@@ -313,6 +364,10 @@ export function PollSummary({
             </StatusMark>
           )}
         </div>
+
+        {final === undefined ? null : (
+          <InShort final={final} words={moderation.state === "hidden" ? undefined : words} />
+        )}
 
         {/* The loader names no one for a hidden poll; the guard keeps this
             component from naming anyone beside withheld text either way (T-68). */}

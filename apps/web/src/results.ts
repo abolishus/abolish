@@ -167,3 +167,21 @@ export function leadersOf(counts: readonly string[]): readonly number[] {
   if (most === 0n) return [];
   return values.flatMap((n, i) => (n === most ? [i] : []));
 }
+
+/**
+ * The one tier's counts a closed poll can be summed up by, or `undefined`
+ * unless its electorate names one tier and that tier's every question is
+ * counted, with at least one ballot. A poll of several tiers has no lead
+ * across them, so it has no summary (ADR 0026; T-16).
+ */
+export function finalOf(
+  poll: Pick<PollView, "electorate">,
+  results: PollResults,
+): (TierResults & { readonly questions: readonly (readonly string[])[] }) | undefined {
+  if (results.kind !== "read" || !poll.electorate.every((g) => g.tier === poll.electorate[0]?.tier))
+    return undefined;
+  const [tier, ...rest] = results.tiers;
+  if (tier === undefined || rest.length > 0 || tier.questions === undefined || tier.counted === 0)
+    return undefined;
+  return { ...tier, questions: tier.questions };
+}

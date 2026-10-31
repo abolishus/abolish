@@ -472,6 +472,11 @@ export const esUS: Messages = {
   pollAnswerScheduled: "Podrás responder aquí en cuanto abra la encuesta.",
   pollQuestionsTitle: "Lo que pregunta",
   pollPickFrom: "{instruction} entre {options}",
+  pollFinal: {
+    one: "Resultados finales. Respondió {count} persona; esto es lo que dijo.",
+    other: "Resultados finales. Respondieron {count} personas; esto es lo que dijeron.",
+  },
+  pollInShort: "En resumen",
   pollAnsweredClosed: "Respondieron antes del cierre",
   pollAnswerClosed:
     "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",

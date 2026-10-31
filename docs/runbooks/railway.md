@@ -71,6 +71,7 @@ Each environment also holds:
 - Secret `MIGRATE_DATABASE_URL`: the `abolish_migrate` login over the TCP proxy (Postgres, step 4). `RAILWAY_TOKEN` can read every Railway variable anyway, so keeping this beside it widens nothing.
 - Variables `RAILWAY_API_SERVICE_ID`, `RAILWAY_WEB_SERVICE_ID` and `RAILWAY_BALLOT_SERVICE_ID`: the `api`, `web` and `ballot` services' IDs (service settings in Railway). Not secret.
 - Variables `RAILWAY_SETUP_WORKER_SERVICE_ID`, `RAILWAY_CREATION_WORKER_SERVICE_ID`, `RAILWAY_POSTING_WORKER_SERVICE_ID` ([[posting-relay]], The deployment), `RAILWAY_SEAT_SERVICE_IDS` (the seven seats' IDs, seat 1 first, separated by spaces or commas) and `RAILWAY_INTAKE_RELAY_SERVICE_ID` ([[intake-relay]]). Optional: the deploy skips each service whose ID isn't set, with a notice, so set them only once the service's variables are filled in ([[staging-testnet]], Deploy day).
+- `staging` only: the testnet contract deploy's secrets and variables (`TESTNET_DEPLOYER_KEY`, the four `TESTNET_*_RPC_URL`s, `ETHERSCAN_API_KEY`, `TESTNET_DEPLOY_CONFIG`, `TESTNET_DEPLOYMENT_INPUTS`, `STAGING_COORDINATOR_URL`), listed in [[staging-testnet]] (What it reads). The deploy workflow reads none of them.
 
 Images go to `ghcr.io/abolishus/abolish-api`, `-web`, `-ballot`, `-worker`, `-trustee-node` and `-intake-relay`, tagged `sha-<commit>` for people and deployed by digest. After the first run creates each package, make it public in its GitHub package settings: Railway pulls it without credentials, and anyone can check a running digest against the build (T-49).
 

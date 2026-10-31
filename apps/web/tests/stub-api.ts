@@ -414,7 +414,7 @@ const RESULTS = new Map<string, unknown>([
         { tier: 0, counted: 12, counts: ["6", "3", "1"] },
         { tier: 2, counted: 2 },
       ],
-      [{ cell: 0, tier: 0, counted: 12, counts: ["6", "3", "1"], signers: [0] }, missing(1, 2, 2)],
+      [{ cell: 0, tier: 0, counted: 12, counts: ["6", "3", "1"], signers: [1] }, missing(1, 2, 2)],
     ),
   ],
   [
@@ -451,7 +451,7 @@ const RESULTS = new Map<string, unknown>([
         counted: n,
         counts: [...first, ...second],
         byQuestion: [first, second],
-        signers: [0],
+        signers: [1],
       })),
     ),
   ],
@@ -485,7 +485,7 @@ const RESULTS = new Map<string, unknown>([
         { tier: 0, counted: 4, counts: ["2", "1", "1"] },
         { tier: 2, counted: 0 },
       ],
-      [{ cell: 0, tier: 0, counted: 4, counts: ["1", "2", "1"], signers: [0] }, missing(1, 2, 0)],
+      [{ cell: 0, tier: 0, counted: 4, counts: ["1", "2", "1"], signers: [1] }, missing(1, 2, 0)],
     ),
   ],
 ]);

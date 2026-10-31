@@ -12,6 +12,7 @@ const cells: readonly CellResults[] = [
     cell: { tier: 0, members: "5000", regions: [0] },
     counted: 900,
     state: "opened",
+    signers: [1, 3],
     questions: [
       ["500", "300", "100"],
       ["450", "450"],
@@ -21,6 +22,7 @@ const cells: readonly CellResults[] = [
     cell: { tier: 0, members: "1200", regions: [1] },
     counted: 300,
     state: "opened",
+    signers: [2],
     questions: [
       ["180", "120", "0"],
       ["130", "130"],
@@ -30,6 +32,7 @@ const cells: readonly CellResults[] = [
     cell: { tier: 0, members: "1020", regions: [2, 3] },
     counted: 34,
     state: "opened",
+    signers: [1],
     questions: [
       ["20", "14", "0"],
       ["20", "20"],
@@ -39,6 +42,7 @@ const cells: readonly CellResults[] = [
     cell: { tier: 2, members: "120", regions: [0] },
     counted: 40,
     state: "missing",
+    signers: [],
     questions: undefined,
   },
 ];
@@ -53,6 +57,8 @@ const meta = {
         { optionCount: 3, minSelections: 0, maxSelections: 1 },
         { optionCount: 2, minSelections: 0, maxSelections: 2 },
       ],
+      threshold: 2,
+      panelSize: 3,
     },
     heading: "Riverside Park",
     results: {
@@ -118,6 +124,19 @@ const play: Story["play"] = async ({ canvasElement }) => {
   );
   await expect(within(canvas.getByRole("tabpanel")).queryByText("Part by part")).toBeNull();
 
+  // Who opened each part, by seat, out of the panel's three; one not opened yet.
+  const openings = within(canvas.getByRole("region", { name: "Who opened the count" }));
+  await expect(
+    openings.getByText(/opened by one of this poll's 3 trustee seats, once at least 2/),
+  ).toBeVisible();
+  const rows = openings.getAllByRole("row").slice(1);
+  await expect(rows.map((r) => r.textContent)).toEqual([
+    "Tier 0 (verified e-mail) · Part 1Seats 1 and 3",
+    "Tier 0 (verified e-mail) · Part 2Seat 2",
+    "Tier 0 (verified e-mail) · Part 3Seat 1",
+    "Tier 2 (document-verified)Not published yet",
+  ]);
+
   await expect(canvas.getByRole("link", { name: "Check the count on the board" })).toHaveAttribute(
     "href",
     `/polls/${electionId}/board`,
@@ -139,7 +158,12 @@ export const Dark: Story = { parameters: { theme: "dark" }, play };
 /** A hidden poll's results, by number: its words are withheld, its count never is. */
 export const ByNumber: Story = {
   args: {
-    poll: { electionId, questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }] },
+    poll: {
+      electionId,
+      questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
+      threshold: 1,
+      panelSize: 1,
+    },
     heading: undefined,
     results: { kind: "read", tiers: [{ tier: 0, counted: 3, questions: [["0", "3", "0"]] }] },
     cells: [
@@ -148,6 +172,7 @@ export const ByNumber: Story = {
         counted: 3,
         state: "opened",
         questions: [["0", "3", "0"]],
+        signers: [1],
       },
     ],
     words: undefined,
@@ -166,7 +191,7 @@ export const ByNumber: Story = {
   },
 };
 
-/** A cell whose openings failed the board's check, beside one not yet opened. */
+/** A cell whose openings failed the board's check, beside one not yet opened and one no seat signed. */
 export const CellFailed: Story = {
   args: {
     results: {
@@ -174,15 +199,22 @@ export const CellFailed: Story = {
       tiers: [{ tier: 0, counted: 1234, questions: undefined }],
     },
     cells: [
-      cells[0]!,
+      { ...cells[0]!, signers: [] },
       { ...cells[1]!, state: "failed", questions: undefined },
-      { ...cells[2]!, state: "missing", questions: undefined },
+      { ...cells[2]!, state: "missing", questions: undefined, signers: [] },
     ],
   },
   play: async ({ canvasElement }) => {
-    const panel = within(within(canvasElement).getByRole("tabpanel"));
+    const canvas = within(canvasElement);
+    const panel = within(canvas.getByRole("tabpanel"));
     await expect(panel.getAllByText("Didn't pass the board's check")).toHaveLength(2);
     await expect(panel.getAllByText("Not published yet")).toHaveLength(2);
+    // A failed part names no seat, even one whose opening passed; an opening
+    // no checked signature names says so.
+    const openings = within(canvas.getByRole("region", { name: "Who opened the count" }));
+    await expect(openings.getByText("Didn't pass the board's check")).toBeVisible();
+    await expect(openings.getByText("Not published yet")).toBeVisible();
+    await expect(openings.getByText("No seat's signature on it checks")).toBeVisible();
   },
 };
 
@@ -207,6 +239,7 @@ export const Sealed: Story = {
       "Answers stay sealed while the poll is open.",
     );
     await expect(canvas.queryByRole("tablist")).toBeNull();
+    await expect(canvas.queryByRole("region", { name: "Who opened the count" })).toBeNull();
   },
 };
 

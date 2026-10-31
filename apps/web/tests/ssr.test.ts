@@ -701,6 +701,14 @@ describe("results page", () => {
     expect(page).toContain("60%");
   });
 
+  test("names the seat that opened each part of the count, as the board attributes it", async () => {
+    const page = await text(`/polls/${CELLS_ID}/results`);
+    expect(page).toContain("Who opened the count");
+    expect(page).toMatch(/opened by one of this poll&#x27;s \d+ trustee seats, once at least \d+/);
+    for (const part of [1, 2, 3])
+      expect(page).toContain(`Tier 0 (verified e-mail) · Part ${part}Seat 1`);
+  });
+
   test("several tiers side by side, never added together, and a tier of one cell has no parts", async () => {
     const page = await text(`/polls/${STREAM_V1}/results`);
     expect(page).toContain("12 people answered");
@@ -716,6 +724,7 @@ describe("results page", () => {
     const page = await text(`/polls/${CELLS_MISFIT_ID}/results`);
     expect(page).toContain("4 people answered");
     expect(page).toContain("This group&#x27;s parts couldn&#x27;t be shown just now.");
+    expect(page).not.toContain("Who opened the count");
   });
 
   test("a hidden poll's results go by answer number, out of search engines", async () => {
@@ -2601,7 +2610,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 181, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 176, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 168, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 169, css: 40, fonts: 58 },
   "/account": { html: 6, js: 198, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 173, css: 40, fonts: 58 },

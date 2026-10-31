@@ -525,6 +525,13 @@ export const esUS: Messages = {
   resultsCellMissing: "Aún no se publica",
   resultsCellFailed: "No pasó la comprobación del tablero",
   resultsCellsUnavailable: "Las partes de este grupo no se pudieron mostrar en este momento.",
+  resultsOpeningsTitle: "Quién abrió el conteo",
+  resultsOpeningsLede:
+    "Cada parte del conteo la abre uno de los {size} puestos de custodio de esta encuesta, una vez que al menos {threshold} de ellos han aportado sus partes. El puesto que la abre firma la apertura, así que el tablero muestra cuál fue. Durante el lanzamiento, Abolish opera todos los puestos.",
+  resultsOpeningsPart: "Parte del conteo",
+  resultsOpenedBy: "Abierta por",
+  resultsSeats: { one: "Puesto {seats}", other: "Puestos {seats}" },
+  resultsOpenedUnsigned: "Ninguna firma de un puesto la valida",
   resultsCheckTitle: "Compruébalo tú",
   resultsVerify: "Cómo contarlo tú",
   reactionsTitle: "Reacciones",

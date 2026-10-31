@@ -138,7 +138,9 @@ function Keep({
  * the way to drop it alone. Said in a block of its own below the orders and
  * the fold, each "Clear" link stood apart from the box it empties, and a
  * place's page put two hints and two such lines above its first question
- * (P2-29, the stream's iteration 14).
+ * (P2-29, the stream's iteration 14). Each note is short enough for one line
+ * on a 320px phone, with its link the line under it (the stream's iteration
+ * 15).
  */
 function BoxNote({
   id,

@@ -416,7 +416,7 @@ export const esUS: Messages = {
   streamSearchHint:
     "Cada palabra que escribas debe aparecer en una pregunta o en su título, hasta {words} palabras. Los resultados mantienen el orden de abajo.",
   streamSearchSubmit: "Buscar",
-  streamSearching: "Solo las preguntas que contienen todas las palabras que buscaste.",
+  streamSearching: "Solo preguntas con todas tus palabras.",
   streamSearchClear: "Borrar la búsqueda",
   streamSearchEmpty: "Ninguna pregunta abierta coincide",
   streamSearchEmptyLede:
@@ -432,7 +432,7 @@ export const esUS: Messages = {
   streamPlaceLabel: "Lugar",
   streamPlaceHint:
     "Un pueblo, barrio o escuela, tal como lo escriben quienes preguntan. No importan las mayúsculas ni los espacios, pero el nombre completo debe coincidir.",
-  streamPlaceFiltering: "Solo las preguntas clasificadas en el lugar que escribiste.",
+  streamPlaceFiltering: "Solo preguntas clasificadas en este lugar.",
   streamPlaceClear: "Borrar el lugar",
   streamTopicClear: "Ver todos los temas",
   streamFilterEmpty: "No hay preguntas abiertas clasificadas aquí",

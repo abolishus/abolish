@@ -507,7 +507,7 @@ export const Searching: Story = {
       "href",
       `/discover?sort=closing&q=library%20%20hours&after=${NEXT}`,
     );
-    await expect(canvas.getByText(/hold every word you searched for/)).toBeVisible();
+    await expect(canvas.getByText(/with all your words/)).toBeVisible();
     await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
       "href",
       "/discover?sort=closing",
@@ -655,7 +655,7 @@ export const Place: Story = {
       "Old Town",
     );
     await expect(placeForm(canvasElement).querySelector('input[name="q"]')).toHaveValue("library");
-    await expect(canvas.getByText(/filed at the place you entered/)).toBeVisible();
+    await expect(canvas.getByText(/filed at this place/)).toBeVisible();
     await expect(canvas.getByRole("link", { name: "Clear the place" })).toHaveAttribute(
       "href",
       "/discover?q=library",
@@ -676,7 +676,7 @@ export const Place: Story = {
     const clearPlace = canvas.getByRole("link", { name: "Clear the place" });
     for (const link of [clearSearch, clearPlace])
       await expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
-    const placeNote = canvas.getByText(/filed at the place you entered/);
+    const placeNote = canvas.getByText(/filed at this place/);
     await expect(
       placeNote.getBoundingClientRect().top - clearSearch.getBoundingClientRect().bottom,
     ).toBeGreaterThanOrEqual(8);
@@ -691,10 +691,19 @@ export const Place: Story = {
     await expect(canvas.queryByText(/as askers write it/)).toBeNull();
     await expect(
       within(searchForm(canvasElement)).getByRole("searchbox"),
-    ).toHaveAccessibleDescription("Only the questions that hold every word you searched for.");
+    ).toHaveAccessibleDescription("Only questions with all your words.");
     await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveAccessibleDescription(
-      "Only the questions filed at the place you entered.",
+      "Only questions filed at this place.",
     );
+    // Each note is one line down to a 320px phone, its "Clear" link the
+    // line under it: at 360px each note took two lines, the place's
+    // leaving "entered." alone on its second, so each box's line was three
+    // (P2-29, the stream's iteration 15).
+    for (const form of [searchForm(canvasElement), placeForm(canvasElement)]) {
+      const note = document.createRange();
+      note.selectNodeContents(form.querySelector("p > span")!);
+      await expect(new Set([...note.getClientRects()].map((r) => Math.round(r.top))).size).toBe(1);
+    }
   },
 };
 

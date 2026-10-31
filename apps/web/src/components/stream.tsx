@@ -133,6 +133,43 @@ function Keep({
 }
 
 /**
+ * The line under a box. Unnarrowed, the hint on what to type; narrowed,
+ * what the page now holds, in our words and never the visitor's (T-67), and
+ * the way to drop it alone. Said in a block of its own below the orders and
+ * the fold, each "Clear" link stood apart from the box it empties, and a
+ * place's page put two hints and two such lines above its first question
+ * (P2-29, the stream's iteration 14).
+ */
+function BoxNote({
+  id,
+  hint,
+  narrowed,
+}: {
+  id: string;
+  hint: string;
+  narrowed?: { note: string; clear: string; href: string } | undefined;
+}) {
+  if (narrowed === undefined)
+    return (
+      <p id={id} className="m-0 text-sm text-muted-foreground">
+        {hint}
+      </p>
+    );
+  return (
+    <p className="m-0 flex flex-wrap items-center gap-x-3 text-sm">
+      <span id={id}>{narrowed.note}</span>
+      {/* A 24px tap (WCAG 2.5.8; P2-29, the stream's iteration 12). */}
+      <a
+        className="inline-flex min-h-6 items-center underline underline-offset-4"
+        href={narrowed.href}
+      >
+        {narrowed.clear}
+      </a>
+    </p>
+  );
+}
+
+/**
  * The search box: a plain GET form, so it works before the page's script
  * loads, keeping the order, the topic and the place. What was typed is
  * shown back only in the box, never in the page's text, so a link can't put
@@ -142,10 +179,13 @@ function SearchForm({
   sort,
   filter,
   typed,
+  narrowed,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typed: string;
+  /** Whether the page is narrowed by the search, so the box says so and offers to drop it. */
+  narrowed: boolean;
 }) {
   const t = useTranslate(catalogs);
   const inputId = useId();
@@ -182,9 +222,19 @@ function SearchForm({
           {t("streamSearchSubmit")}
         </Button>
       </div>
-      <p id={hintId} className="m-0 text-sm text-muted-foreground">
-        {t("streamSearchHint", { words: MAX_STREAM_TERMS })}
-      </p>
+      <BoxNote
+        id={hintId}
+        hint={t("streamSearchHint", { words: MAX_STREAM_TERMS })}
+        narrowed={
+          narrowed
+            ? {
+                note: t("streamSearching"),
+                clear: t("streamSearchClear"),
+                href: streamHref(sort, { topic: filter.topic, place: filter.place }),
+              }
+            : undefined
+        }
+      />
       <Keep sort={sort} filter={filter} asks="q" />
     </form>
   );
@@ -198,10 +248,13 @@ function PlaceForm({
   sort,
   filter,
   typedPlace,
+  narrowed = false,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typedPlace: string;
+  /** Whether the page is narrowed by the place, as `SearchForm`'s. */
+  narrowed?: boolean;
 }) {
   const t = useTranslate(catalogs);
   const placeId = useId();
@@ -233,9 +286,19 @@ function PlaceForm({
           {t("streamPlaceSubmit")}
         </Button>
       </div>
-      <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
-        {t("streamPlaceHint")}
-      </p>
+      <BoxNote
+        id={placeHintId}
+        hint={t("streamPlaceHint")}
+        narrowed={
+          narrowed
+            ? {
+                note: t("streamPlaceFiltering"),
+                clear: t("streamPlaceClear"),
+                href: streamHref(sort, { q: filter.q, topic: filter.topic }),
+              }
+            : undefined
+        }
+      />
       <Keep sort={sort} filter={filter} asks="place" />
     </form>
   );
@@ -508,55 +571,24 @@ function Empty({
 }
 
 /**
- * What a narrowed page is narrowed by, each with a way to drop it alone:
- * the search and the place in words of our own, quoting neither (T-67). A
- * topic needs no words, as the page's title names it: only the way back to
- * every topic, so its page needn't open the fifteen topics to offer one.
+ * A topic's way back to every topic, keeping the rest. A topic needs no
+ * words, as the page's title names it, and its page needn't open the
+ * fifteen topics to offer one. The search and the place say themselves
+ * under their own boxes (`BoxNote`).
  */
-function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
+function TopicClear({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
   const t = useTranslate(catalogs);
   const { q, place, topic } = filter;
-  const lines: { key: string; note?: string; clear: string; href: string }[] = [
-    ...(q === undefined
-      ? []
-      : [
-          {
-            key: "q",
-            note: t("streamSearching"),
-            clear: t("streamSearchClear"),
-            href: streamHref(sort, { topic, place }),
-          },
-        ]),
-    ...(place === undefined
-      ? []
-      : [
-          {
-            key: "place",
-            note: t("streamPlaceFiltering"),
-            clear: t("streamPlaceClear"),
-            href: streamHref(sort, { q, topic }),
-          },
-        ]),
-    ...(topic === undefined
-      ? []
-      : [{ key: "topic", clear: t("streamTopicClear"), href: streamHref(sort, { q, place }) }]),
-  ];
-  if (lines.length === 0) return null;
+  if (topic === undefined) return null;
   return (
-    // Each line apart from the next, and each link 24px tall: 4px apart, a
-    // phone stacked four lines of small text where which link cleared what
-    // showed only by order, each link a 20px tap (WCAG 2.5.8; P2-29, the
-    // stream's iteration 12).
-    <ul className="m-0 grid list-none gap-3 p-0">
-      {lines.map(({ key, note, clear, href }) => (
-        <li key={key} className="flex flex-wrap items-center gap-x-3 text-sm">
-          {note === undefined ? null : <span>{note}</span>}
-          <a className="inline-flex min-h-6 items-center underline underline-offset-4" href={href}>
-            {clear}
-          </a>
-        </li>
-      ))}
-    </ul>
+    <p className="m-0 text-sm">
+      <a
+        className="inline-flex min-h-6 items-center underline underline-offset-4"
+        href={streamHref(sort, { q, place })}
+      >
+        {t("streamTopicClear")}
+      </a>
+    </p>
   );
 }
 
@@ -601,6 +633,9 @@ export function StreamPage({
   const t = useTranslate(catalogs);
   const { q, topic, place } = filter;
   const placeShown = place !== undefined || stream.kind === "place-refused";
+  // A refused page says why in place of the cards, with its own way to drop
+  // what was refused, and narrows by nothing.
+  const refused = stream.kind === "search-refused" || stream.kind === "place-refused";
   return (
     <div className="grid gap-10">
       <PageHeader
@@ -609,18 +644,28 @@ export function StreamPage({
         lede={topic === undefined ? t("discoverLede") : t("discoverTopicLede")}
       />
       <div className="grid gap-6">
-        <SearchForm sort={sort} filter={filter} typed={typed} />
+        <SearchForm
+          sort={sort}
+          filter={filter}
+          typed={typed}
+          narrowed={q !== undefined && !refused}
+        />
         {/* A place's page shows its box beside the search's, as only its box
             says the place (T-67), and keeps the topics folded as a topic's
             page does (P2-29, the stream's iteration 3): opening the whole
             fold for the box put fifteen topics above a phone's first
             question, 1,686px down at 360px (the stream's iteration 13). */}
-        {placeShown ? <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} /> : null}
+        {placeShown ? (
+          <PlaceForm
+            sort={sort}
+            filter={filter}
+            typedPlace={typedPlace}
+            narrowed={place !== undefined && !refused}
+          />
+        ) : null}
         <Sorts sort={sort} filter={filter} />
         <Narrowing sort={sort} filter={filter} typedPlace={typedPlace} withPlace={!placeShown} />
-        {stream.kind === "search-refused" || stream.kind === "place-refused" ? null : (
-          <Narrowed sort={sort} filter={filter} />
-        )}
+        {refused ? null : <TopicClear sort={sort} filter={filter} />}
       </div>
       {/* A reading width: at desktop width a card the page's whole width
           held its question and answers in its left half, beside an empty one. */}

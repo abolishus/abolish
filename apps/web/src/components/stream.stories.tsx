@@ -680,6 +680,21 @@ export const Place: Story = {
     await expect(
       placeNote.getBoundingClientRect().top - clearSearch.getBoundingClientRect().bottom,
     ).toBeGreaterThanOrEqual(8);
+    // Each box says what it narrows to, in our words, with its own way to
+    // drop it under it, in place of its hint: below the orders and the fold,
+    // each "Clear" link sat apart from the box it empties, and the page put
+    // two hints and two such lines above its first question (P2-29, the
+    // stream's iteration 14).
+    await expect(within(searchForm(canvasElement)).getByRole("link")).toBe(clearSearch);
+    await expect(within(placeForm(canvasElement)).getByRole("link")).toBe(clearPlace);
+    await expect(canvas.queryByText(/Every word you type/)).toBeNull();
+    await expect(canvas.queryByText(/as askers write it/)).toBeNull();
+    await expect(
+      within(searchForm(canvasElement)).getByRole("searchbox"),
+    ).toHaveAccessibleDescription("Only the questions that hold every word you searched for.");
+    await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveAccessibleDescription(
+      "Only the questions filed at the place you entered.",
+    );
   },
 };
 

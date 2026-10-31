@@ -382,10 +382,14 @@ export const DiscardAFailedPoll: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     await userEvent.click(await canvas.findByRole("button", { name: "Discard…" }));
-    // Asks once more, and can step back.
+    // Asks once more, and can step back. Focus goes to the question, and
+    // "Keep it", which removes itself, returns it to the button that asked
+    // rather than to the page's start (P2-29, the author's list's iteration 19).
+    await expect(canvas.getByText(/^Discard this poll and its draft\?/)).toHaveFocus();
     await userEvent.click(canvas.getByRole("button", { name: "Keep it" }));
     await expect(canvas.queryByRole("group")).toBeNull();
-    await userEvent.click(canvas.getByRole("button", { name: "Discard…" }));
+    await expect(canvas.getByRole("button", { name: "Discard…" })).toHaveFocus();
+    await userEvent.keyboard("{Enter}");
     const question = canvas.getByRole("group", {
       name: "Discard this poll and its draft? This can't be undone. Repaint the bandstand?",
     });
@@ -566,9 +570,14 @@ export const AppealADecision: Story = {
         description: "Name the new ferry",
       }),
     );
+    // The ask replaces the button that had focus, and "Not now" removes
+    // itself: focus goes to the question, then back to the button, not to
+    // the page's start (P2-29, the author's list's iteration 19).
+    await expect(moderation.getByText(/^Appeal this decision\?/)).toHaveFocus();
     await userEvent.click(moderation.getByRole("button", { name: "Not now" }));
+    await expect(moderation.getByRole("button", { name: "Appeal this decision…" })).toHaveFocus();
     await expect(calls(args.client)).toEqual([]);
-    await userEvent.click(moderation.getByRole("button", { name: "Appeal this decision…" }));
+    await userEvent.keyboard("{Enter}");
     await expect(moderation.getByRole("group", { name: /^Appeal this decision\?/ })).toBeVisible();
     await userEvent.click(moderation.getByRole("button", { name: "Send appeal" }));
     await expect(await moderation.findByRole("status")).toHaveTextContent(

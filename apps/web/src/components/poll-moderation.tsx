@@ -52,6 +52,21 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
   const [failure, setFailure] = useState<Failure | undefined>();
   // Filing replaces the button that had focus: focus goes to the block's heading.
   const heading = useRef<HTMLParagraphElement>(null);
+  // Asking replaces the appeal button and "Not now" removes itself: focus
+  // moves once React has drawn the change, to the question when it opens,
+  // back to the appeal button when it closes.
+  const question = useRef<HTMLParagraphElement>(null);
+  const opener = useRef<HTMLButtonElement>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    (confirming ? question.current : opener.current)?.focus();
+  }, [confirming]);
+  const ask = (open: boolean) => {
+    moved.current = true;
+    setConfirming(open);
+  };
 
   const failed = useCallback(
     (e: unknown, otherwise: Failure) => {
@@ -187,14 +202,19 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           aria-labelledby={`${headingId}-confirm`}
           className="grid gap-4 border-2 border-foreground p-5"
         >
-          <p id={`${headingId}-confirm`} className="m-0 max-w-prose font-semibold text-pretty">
+          <p
+            id={`${headingId}-confirm`}
+            ref={question}
+            tabIndex={-1}
+            className="m-0 max-w-prose font-semibold text-pretty outline-none"
+          >
             {t("moderationAppealQuestion")}
           </p>
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy} onClick={() => void appeal()}>
               {t("moderationAppealConfirm")}
             </Button>
-            <Button variant="outline" disabled={busy} onClick={() => setConfirming(false)}>
+            <Button variant="outline" disabled={busy} onClick={() => ask(false)}>
               {t("moderationAppealCancel")}
             </Button>
           </div>
@@ -203,11 +223,12 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
       <p className="m-0 flex flex-wrap gap-x-4">
         {view?.appealable === true && !confirming ? (
           <Button
+            ref={opener}
             variant="link"
             className="px-0"
             aria-describedby={titleId}
             disabled={busy}
-            onClick={() => setConfirming(true)}
+            onClick={() => ask(true)}
           >
             {t("moderationAppeal")}
           </Button>

@@ -116,6 +116,26 @@ export function AccountPolls({
   // An action removes or replaces the buttons that had focus: focus goes
   // back to the section's heading, so keyboard users keep their place.
   const heading = useRef<HTMLHeadingElement>(null);
+  // Asking and stepping back move focus too, once React has drawn the
+  // change: to the question when it opens, back to the button that asked
+  // when "Keep it" removes the question and itself with it.
+  const question = useRef<HTMLParagraphElement>(null);
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const moved = useRef(false);
+  useEffect(() => {
+    if (!moved.current) return;
+    moved.current = false;
+    (confirming === undefined ? opener.current : question.current)?.focus();
+  }, [confirming]);
+  const ask = (button: HTMLButtonElement, c: Confirming) => {
+    opener.current = button;
+    moved.current = true;
+    setConfirming(c);
+  };
+  const keep = () => {
+    moved.current = true;
+    setConfirming(undefined);
+  };
   const profileHelp = `${useId()}-profile-help`;
 
   const refresh = useCallback(async () => setPolls(await client.list()), [client]);
@@ -208,7 +228,7 @@ export function AccountPolls({
   };
 
   const confirm = (p: PollSummary, title: string, c: Confirming["action"]) => {
-    const question = c === "remove" ? "pollsDeleteQuestion" : "pollsDiscardQuestion";
+    const words = c === "remove" ? "pollsDeleteQuestion" : "pollsDiscardQuestion";
     const questionId = `poll-${p.id}-confirm`;
     return (
       <div
@@ -216,8 +236,8 @@ export function AccountPolls({
         aria-labelledby={questionId}
         className="grid gap-4 border-2 border-destructive p-5 md:col-span-full"
       >
-        <p id={questionId} className="m-0 font-semibold">
-          {t(question)} <span className="sr-only">{title}</span>
+        <p id={questionId} ref={question} tabIndex={-1} className="m-0 font-semibold outline-none">
+          {t(words)} <span className="sr-only">{title}</span>
         </p>
         <div className="flex flex-wrap gap-2">
           <Button
@@ -231,7 +251,7 @@ export function AccountPolls({
           >
             {t(c === "remove" ? "pollsDeleteConfirm" : "pollsDiscardConfirm")}
           </Button>
-          <Button variant="outline" disabled={busy} onClick={() => setConfirming(undefined)}>
+          <Button variant="outline" disabled={busy} onClick={keep}>
             {t("pollsKeep")}
           </Button>
         </div>
@@ -253,7 +273,7 @@ export function AccountPolls({
             className="px-0"
             aria-describedby={which}
             disabled={busy}
-            onClick={() => setConfirming({ id: p.id, action: "remove" })}
+            onClick={(e) => ask(e.currentTarget, { id: p.id, action: "remove" })}
           >
             {t("pollsDelete")}
           </Button>
@@ -297,7 +317,7 @@ export function AccountPolls({
           className="px-0"
           aria-describedby={which}
           disabled={busy}
-          onClick={() => setConfirming({ id: p.id, action: "discard" })}
+          onClick={(e) => ask(e.currentTarget, { id: p.id, action: "discard" })}
         >
           {t("pollsDiscard")}
         </Button>

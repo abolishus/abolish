@@ -185,12 +185,13 @@ contract ElectionRegistryTest is TestBase {
         _assertParameters(lib.hash(enc), d);
     }
 
-    /// Versions 3 to 6 (docs/spec/contracts.md, Parameters): the cells are
-    /// every tier's `cells`, tier by tier; versions 5 and 6 record each
-    /// question and their total. A version-6 author panel's are recorded
+    /// Versions 3 to 7, version 7 under a fixed electorate
+    /// (docs/spec/contracts.md, Parameters): the cells are every tier's
+    /// `cells`, tier by tier; versions 5 to 7 record each question and their
+    /// total. A version-6 author panel's are recorded
     /// through `registerDefinitionWithAuthorPanel` (ElectionRegistryAuthorPanel.t.sol).
     function test_RecordsEachVersionsParameters() public {
-        for (uint8 version = 3; version <= 6; version++) {
+        for (uint8 version = 3; version <= 7; version++) {
             bytes32 id = _create();
             ElectionDefinitionLib.Definition memory d =
                 RegistryFixture.templateV(registry, id, version);
@@ -213,6 +214,55 @@ contract ElectionRegistryTest is TestBase {
             assertEq(p.questions.length, version < 5 ? 1 : 2, "questions");
             assertEq(p.authorThreshold, 0, "no author threshold");
             assertEq(p.authorPanelSize, 0, "no author panel");
+        }
+    }
+
+    /// Version 7 under a rolling electorate (docs/spec/contracts.md,
+    /// Parameters, Cells): one cell per rolling tier, in order, with its tier
+    /// and the root 0, never the opening root the definition lists, so no
+    /// path that reads a registered root finds one for a rolling poll, and
+    /// the ballot version is 5 (T-25, T-53).
+    function test_RecordsARollingDefinitionsCellsWithTheRoot0() public {
+        bytes32 id = _create();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateRolling(registry, id);
+        bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+        vm.prank(CREATOR);
+        registry.registerDefinition(enc);
+        bytes32 h = lib.hash(enc);
+        assertEq(registry.definitionHashOf(id), h, "registered");
+        _assertParameters(h, d);
+        ElectionRegistry.Parameters memory p = registry.parameters(h);
+        assertEq(p.ballotVersion, 5, "ballot version 5");
+        assertEq(p.cellCount, 2, "one cell per rolling tier");
+        (uint8 tier, uint256 root) = registry.cell(h, 0);
+        assertEq(tier, 0, "Tier 0's cell");
+        assertEq(root, 0, "no registered root");
+        (tier, root) = registry.cell(h, 1);
+        assertEq(tier, 2, "Tier 2's cell");
+        assertEq(root, 0, "no registered root");
+        assertEq(p.optionCount, 8, "T");
+    }
+
+    /// A rolling poll on the civic record is refused with `rolling-class`,
+    /// before its panel's kind is asked, whatever the kind (rule 3;
+    /// docs/spec/election-definition.md, Well-formedness; T-01, T-16).
+    function test_RefusesARollingPollOnTheCivicRecord() public {
+        for (uint8 class = 2; class <= 3; class++) {
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d =
+                RegistryFixture.templateRolling(registry, id);
+            d.pollClass = class;
+            trustees.setKind(d.panelId, 1);
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(
+                    ElectionRegistry.DefinitionIllFormed.selector,
+                    ElectionDefinitionLib.Rule.RollingClass
+                )
+            );
+            _assertNoParameters(lib.hash(enc));
         }
     }
 
@@ -244,14 +294,26 @@ contract ElectionRegistryTest is TestBase {
 
     /// The profile the registry serves for each definition version it
     /// decodes, by pin (type 0x0001 to 0x0009), written from the spec: 0
-    /// where any version is admitted. Version 6's is for a sealed poll
-    /// without an author panel, as `templateV` makes.
+    /// where any version is admitted. Versions 6 and 7's are for a sealed
+    /// poll without an author panel, as `templateV` makes; `ROLLING` stands
+    /// for version 7 under a rolling electorate. Contract-event version 13
+    /// for every one, since this registry registers version 7 (T-53).
     function _served(uint8 version) internal pure returns (uint8[9] memory v) {
-        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 12, 1];
-        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 12, 1];
-        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 12, 1];
-        if (version == 5) return [5, 3, 2, 0, 0, 0, 5, 12, 2];
-        return [6, 4, 3, 0, 0, 0, 5, 12, 2];
+        if (version == 1) return [1, 1, 1, 0, 0, 0, 5, 13, 1];
+        if (version == 3) return [3, 2, 2, 0, 0, 0, 5, 13, 1];
+        if (version == 4) return [4, 2, 2, 0, 0, 0, 5, 13, 1];
+        if (version == 5) return [5, 3, 2, 0, 0, 0, 5, 13, 2];
+        if (version == 6) return [6, 4, 3, 0, 0, 0, 5, 13, 2];
+        if (version == 7) return [7, 4, 3, 0, 0, 0, 5, 13, 2];
+        return [7, 5, 3, 0, 0, 0, 5, 13, 2];
+    }
+
+    /// Not a definition version: the tests' label for version 7 with a
+    /// rolling electorate.
+    uint8 internal constant ROLLING = 8;
+
+    function _versions() internal pure returns (uint8[7] memory) {
+        return [1, 3, 4, 5, 6, 7, ROLLING];
     }
 
     function _templateOf(bytes32 id, uint8 version)
@@ -259,6 +321,7 @@ contract ElectionRegistryTest is TestBase {
         view
         returns (ElectionDefinitionLib.Definition memory)
     {
+        if (version == ROLLING) return RegistryFixture.templateRolling(registry, id);
         return version == 1
             ? RegistryFixture.template(registry, id)
             : RegistryFixture.templateV(registry, id, version);
@@ -268,8 +331,8 @@ contract ElectionRegistryTest is TestBase {
     /// the verifier (the receipt and ceremony transcript, and a tally opening
     /// other than versions 2 and 3: 1, or 4 and 5, which no release reads).
     function test_RegistersEachServedProfile() public {
-        uint8[5] memory versions = [1, 3, 4, 5, 6];
-        for (uint256 i; i < 5; i++) {
+        uint8[7] memory versions = _versions();
+        for (uint256 i; i < 7; i++) {
             for (uint8 other = 1; other <= 3; other++) {
                 bytes32 id = _create();
                 ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
@@ -288,24 +351,25 @@ contract ElectionRegistryTest is TestBase {
         }
     }
 
-    /// Each served pin set to any other version from 1 to 13 is refused with
+    /// Each served pin set to any other version from 1 to 14 is refused with
     /// its record type and the version pinned, and nothing is recorded:
-    /// contract-event versions 1 to 11, which can't read every event of the
-    /// board, the group registry and the trustee registry (version 5 names no
-    /// Tier 1 addition, version 6 no self-paid group or addition, version 7
-    /// no availability record, versions 1 to 11 no kind-carrying
-    /// `PanelPinned`), and 13, which no release specifies;
+    /// contract-event versions 1 to 12, which can't read every event of the
+    /// board, the group registry, the trustee registry and this registry
+    /// (version 5 names no Tier 1 addition, version 6 no self-paid group or
+    /// addition, version 7 no availability record, versions 1 to 11 no
+    /// kind-carrying `PanelPinned`, versions 1 to 12 no version-7
+    /// `DefinitionRegistered`), and 14, which no release specifies;
     /// board-entry versions without the close statement; ballot versions the
     /// board can't check, or that don't name the definition's cells; opening
     /// versions that don't open the ballot's cores; and display-text versions
     /// without the definition's questions (T-25, T-50, T-42, T-53).
     function test_RefusesEachPinTheDeploymentDoesntServe() public {
-        uint8[5] memory versions = [1, 3, 4, 5, 6];
-        for (uint256 i; i < 5; i++) {
+        uint8[7] memory versions = _versions();
+        for (uint256 i; i < 7; i++) {
             uint8[9] memory served = _served(versions[i]);
             for (uint256 t = 1; t < 9; t++) {
                 if (served[t] == 0) continue;
-                for (uint8 v = 1; v <= 13; v++) {
+                for (uint8 v = 1; v <= 14; v++) {
                     if (v == served[t]) continue;
                     bytes32 id = _create();
                     ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
@@ -329,8 +393,8 @@ contract ElectionRegistryTest is TestBase {
     /// panel's kind: each registers under a panel whose kind is 0, as the
     /// trustee registry reports for one it doesn't know.
     function test_NonCivicDefinitionsNeedNoKind() public {
-        uint8[5] memory versions = [1, 3, 4, 5, 6];
-        for (uint256 i; i < 5; i++) {
+        uint8[7] memory versions = _versions();
+        for (uint256 i; i < 7; i++) {
             bytes32 id = _create();
             ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
             assertEq(trustees.kindOf(d.panelId), 0, "no kind");
@@ -346,8 +410,8 @@ contract ElectionRegistryTest is TestBase {
     /// this registry serves no live poll and 2.3 fails both beside every
     /// profile without either (T-16, T-17, T-31).
     function test_RefusesTallyOpeningVersions2And3() public {
-        uint8[5] memory versions = [1, 3, 4, 5, 6];
-        for (uint256 i; i < 5; i++) {
+        uint8[7] memory versions = _versions();
+        for (uint256 i; i < 7; i++) {
             for (uint8 v = 2; v <= 3; v++) {
                 bytes32 id = _create();
                 ElectionDefinitionLib.Definition memory d = _templateOf(id, versions[i]);
@@ -411,8 +475,7 @@ contract ElectionRegistryTest is TestBase {
     /// Any profile: registered exactly when every served pin is the served
     /// version, else refused at the first wrong one in type order.
     function testFuzz_ProfileServedExactly(uint256 which, uint8[9] memory pins) public {
-        uint8[5] memory versions = [1, 3, 4, 5, 6];
-        uint8 version = versions[_bound(which, 0, 4)];
+        uint8 version = _versions()[_bound(which, 0, 6)];
         uint8[9] memory served = _served(version);
         bytes32 id = _create();
         ElectionDefinitionLib.Definition memory d = _templateOf(id, version);
@@ -704,54 +767,78 @@ contract ElectionRegistryTest is TestBase {
         );
     }
 
-    /// Rule 2 still reads definition versions 1 and 3 to 6, though the
-    /// library decodes version 7 (P2-17 part 5d-4a): a version-7 definition
-    /// that would otherwise pass every rule, fixed or rolling, is
-    /// `unknown-version` at its version byte, before its profile or anything
-    /// else is read, as is every encoding labelled 7 in the version-7 vectors.
-    function test_RefusesDefinitionVersion7AtItsVersionByte() public {
-        bytes memory unknown = abi.encodeWithSelector(
-            ElectionDefinitionLib.DefinitionMalformed.selector,
-            ElectionDefinitionLib.DecodeError.UnknownVersion,
-            2
-        );
+    /// Rule 2 reads definition version 7 (P2-17 part 5d-4b): every encoding
+    /// labelled 7 in the version-7 vectors is refused here exactly as the
+    /// library judges it, with its decode error and offset, or its rule, or,
+    /// for a well-formed one, at rule 4, since the vectors name another
+    /// deployment; nothing is registered (T-34, T-17).
+    function test_JudgesEachVersion7VectorAsTheLibraryDoes() public {
         (bytes32 id,) = _created();
-        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 6);
-        d.version = 7;
-        d.pinVersions[0] = 7;
-        d.pinVersions[7] = 13;
-        d.electorateMode = 1;
-        bytes memory fixedEnc = RegistryFixture.approve(lib, trustees, d);
-        assertTrue(lib.rule(fixedEnc) == ElectionDefinitionLib.Rule.None, "fixed well formed");
-        _expectRefused(CREATOR, fixedEnc, unknown);
-
-        d.electorateMode = 2;
-        d.pinVersions[1] = 5;
-        d.tiers = new ElectionDefinitionLib.TierElectorate[](0);
-        d.rolling = new ElectionDefinitionLib.RollingTier[](1);
-        d.rolling[0].rootL2Block = RegistryFixture.ROOT_BLOCK;
-        d.rolling[0].groups = new uint64[](2);
-        (d.rolling[0].groups[0], d.rolling[0].groups[1]) = (1, 2);
-        d.rolling[0].root = 0x1234;
-        d.rolling[0].groupSize = 5000;
-        bytes memory rollingEnc = RegistryFixture.approve(lib, trustees, d);
-        assertTrue(lib.rule(rollingEnc) == ElectionDefinitionLib.Rule.None, "rolling well formed");
-        _expectRefused(CREATOR, rollingEnc, unknown);
-
-        // A profile the decoder would refuse is still refused at the version.
-        d.pinVersions[0] = 6;
-        _expectRefused(CREATOR, DefinitionEncoder.encode(d), unknown);
-
         string memory json = vm.readFile("../../docs/spec/vectors/election-definition-v7.json");
         uint256 labelled;
+        uint256 wellFormed;
         for (uint256 i; vm.keyExistsJson(json, _vectorKey(i, "")); i++) {
             bytes memory b = vm.parseBytes(vm.parseJsonString(json, _vectorKey(i, ".encoding")));
             if (b.length < 3 || uint8(b[2]) != 7) continue;
             labelled++;
-            _expectRefused(CREATOR, b, unknown);
+            (bool decodes, bytes memory err) =
+                address(lib).staticcall(abi.encodeCall(DefinitionHarness.decode, (b)));
+            vm.prank(CREATOR);
+            (bool ok, bytes memory ret) =
+                address(registry).call(abi.encodeCall(ElectionRegistry.registerDefinition, (b)));
+            assertTrue(!ok, "registered a vector");
+            if (!decodes) {
+                assertTrue(keccak256(ret) == keccak256(err), "the library's decode error");
+                continue;
+            }
+            ElectionDefinitionLib.Rule r = lib.rule(b);
+            if (r != ElectionDefinitionLib.Rule.None) {
+                assertTrue(
+                    keccak256(ret)
+                        == keccak256(
+                            abi.encodeWithSelector(ElectionRegistry.DefinitionIllFormed.selector, r)
+                        ),
+                    "the library's rule"
+                );
+                continue;
+            }
+            wellFormed++;
+            assertTrue(
+                bytes4(ret) == ElectionRegistry.WrongDeployment.selector, "another deployment"
+            );
         }
         assertTrue(labelled > 30, "version-7 vector coverage");
+        assertTrue(wellFormed >= 4, "well-formed vectors reach rule 4");
         assertEq(registry.definitionHashOf(id), bytes32(0), "nothing registered");
+    }
+
+    /// A rolling tier's opening state is in the past (rule 7; T-08, T-13):
+    /// its `root_l2_block` at the registering block is refused, whichever
+    /// tier, and one block earlier is not.
+    function test_RefusesARollingRootNotInThePast() public {
+        for (uint256 t; t < 2; t++) {
+            vm.roll(RegistryFixture.BLOCK);
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d =
+                RegistryFixture.templateRolling(registry, id);
+            d.rolling[t].rootL2Block = uint64(block.number);
+            bytes memory enc = RegistryFixture.approve(lib, trustees, d);
+            _expectRefused(
+                CREATOR,
+                enc,
+                abi.encodeWithSelector(
+                    ElectionRegistry.RootNotInPast.selector,
+                    d.rolling[t].tier,
+                    uint64(block.number),
+                    block.number
+                )
+            );
+            _assertNoParameters(lib.hash(enc));
+            vm.roll(block.number + 1);
+            vm.prank(CREATOR);
+            registry.registerDefinition(enc);
+            assertEq(registry.definitionHashOf(id), lib.hash(enc), "registered");
+        }
     }
 
     function _vectorKey(uint256 i, string memory field) internal pure returns (string memory) {

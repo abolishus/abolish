@@ -433,20 +433,6 @@ contract ElectionRegistry is EventAccumulator {
         view
         returns (ElectionDefinitionLib.Definition memory def, bytes32 stub)
     {
-        // Rule 2 reads definition versions 1 and 3 to 6: the library decodes
-        // version 7 too, but this registry doesn't yet serve it (its cells,
-        // root blocks and profile are P2-17 part 5d-4b's), so its bytes are
-        // `unknown-version` here exactly where the decoder used to refuse
-        // them, after the record type and before anything else (T-34).
-        if (
-            definition.length > 2
-                && uint16(bytes2(definition[:2])) == ElectionDefinitionLib.RECORD_TYPE
-                && uint8(definition[2]) == 7
-        ) {
-            revert ElectionDefinitionLib.DefinitionMalformed(
-                ElectionDefinitionLib.DecodeError.UnknownVersion, 2
-            );
-        }
         def = ElectionDefinitionLib.decode(definition);
         ElectionDefinitionLib.Rule r = ElectionDefinitionLib.rule(def);
         if (r != ElectionDefinitionLib.Rule.None) revert DefinitionIllFormed(r);
@@ -598,6 +584,15 @@ contract ElectionRegistry is EventAccumulator {
                 revert RootNotInPast(t.tier, t.rootL2Block, block.number);
             }
         }
+        // A rolling tier's opening state is its tree at `root_l2_block`
+        // (docs/spec/membership.md, Opening state), as public before the
+        // poll as a fixed tier's root (T-08, T-13).
+        for (uint256 i; i < def.rolling.length; i++) {
+            ElectionDefinitionLib.RollingTier memory t = def.rolling[i];
+            if (t.rootL2Block >= block.number) {
+                revert RootNotInPast(t.tier, t.rootL2Block, block.number);
+            }
+        }
     }
 
     /// Records what the board reads for definition `h`. The definition hash
@@ -647,6 +642,14 @@ contract ElectionRegistry is EventAccumulator {
                 _cellRoots[h].push(t.cells[j].root);
             }
         }
+        // Under electorate mode 2, one cell per rolling tier with the root 0:
+        // no rolling poll's root is registered, so the rolling calls take it
+        // from the submitter, and every other ballot path refuses ballot
+        // version 5 before reading a root (T-25, T-53).
+        for (uint256 i; i < def.rolling.length; i++) {
+            _cellTiers[h].push(def.rolling[i].tier);
+            _cellRoots[h].push(0);
+        }
         p.cellCount = uint16(_cellTiers[h].length);
     }
 
@@ -664,20 +667,22 @@ contract ElectionRegistry is EventAccumulator {
     /// definition's version (docs/spec/contracts.md, Election registry,
     /// Registration, rule 9), checked by record type in ascending order: the
     /// ballot version the board checks for it (1 for definition version 1, 2
-    /// for 3 and 4, 3 for 5, 4 for 6), the spoiled-ballot opening version that
+    /// for 3 and 4, 3 for 5, 4 for 6 and for 7 under a fixed electorate, 5
+    /// for 7 under a rolling one), the spoiled-ballot opening version that
     /// opens that ballot's cores, tally-opening version 3 for a definition
     /// with an author panel and any version but 2 and 3 for one without,
     /// board-entry version 5, the only one that allows the close statement
     /// without an author panel's approvals, for a sealed definition without an
     /// author panel, version 7, which adds them, for a sealed one with one,
     /// and none for a live poll (its running openings need version 6, which
-    /// verifier 2.3 fails here: T-16, T-17), contract-event version 12, whose
+    /// verifier 2.3 fails here: T-16, T-17), contract-event version 13, whose
     /// tables name every
     /// event of the board (the close rule's, the batches', the obligation
-    /// root's and the availability records'), of the group registry (its
-    /// Tier 1 additions and its self-paid groups and additions) and the
-    /// trustee registry's kind-carrying `PanelPinned`, which versions 1 to 11
-    /// don't, and the display-text version the
+    /// root's, the availability records' and both rolling calls'), of the
+    /// group registry (its Tier 1 additions and its self-paid groups and
+    /// additions), the trustee registry's kind-carrying `PanelPinned` and
+    /// this registry's version-7 `DefinitionRegistered`, which versions 1 to
+    /// 12 don't, for every definition version, and the display-text version the
     /// definition's layout needs. So no registered election leaves a voter's
     /// direct submission, a seat's statement or a challenge without a path
     /// the verifier reads (T-25, T-50, T-42, T-53). `profile-types` fixed the
@@ -685,11 +690,15 @@ contract ElectionRegistry is EventAccumulator {
     function _requireServedProfile(ElectionDefinitionLib.Definition memory def) private pure {
         uint8 v = def.version;
         uint8[] memory pins = def.pinVersions;
-        uint8 ballot = v == 1 ? 1 : v == 3 || v == 4 ? 2 : v == 5 ? 3 : 4;
+        // Version 7 pins ballot version 4 under electorate mode 1 and 5 under
+        // mode 2, whose ballots name their step (T-53).
+        uint8 ballot = v == 1
+            ? 1
+            : v == 3 || v == 4 ? 2 : v == 5 ? 3 : v == 6 || def.electorateMode == 1 ? 4 : 5;
         if (pins[1] != ballot) revert ProfileNotServed(0x0002, pins[1]);
         // Opening version 2 opens the cores of ballot versions 2 and 3, and
-        // version 3 those of ballot version 4.
-        if (pins[2] != (ballot == 1 ? 1 : ballot == 4 ? 3 : 2)) {
+        // version 3 those of ballot versions 4 and 5.
+        if (pins[2] != (ballot == 1 ? 1 : ballot >= 4 ? 3 : 2)) {
             revert ProfileNotServed(0x0003, pins[2]);
         }
         // Below definition version 6 `authorThreshold` is 0. Tally-opening
@@ -708,9 +717,12 @@ contract ElectionRegistry is EventAccumulator {
         if (pins[6] != (author ? 7 : 5) || def.resultsMode > ElectionDefinitionLib.SEALED) {
             revert ProfileNotServed(0x0007, pins[6]);
         }
-        if (pins[7] != 12) revert ProfileNotServed(0x0008, pins[7]);
+        // Version 13 for every definition: a version-7 registration in this
+        // registry's shared sequence fails versions 1 to 12 at 4.4, for
+        // every election it creates (T-53).
+        if (pins[7] != 13) revert ProfileNotServed(0x0008, pins[7]);
         // Display-text version 2 carries the questions of definition versions
-        // 5 and 6.
+        // 5 to 7.
         if (pins[8] != (v >= 5 ? 2 : 1)) revert ProfileNotServed(0x0009, pins[8]);
     }
 

@@ -47,7 +47,7 @@ library AuthorPanelFixture {
         d.pinVersions[2] = 3;
         d.pinVersions[5] = 3;
         d.pinVersions[6] = 7;
-        d.pinVersions[7] = 12;
+        d.pinVersions[7] = 13;
         d.pinVersions[8] = 2;
         d.authorThreshold = k;
         d.authorTranscriptHash = sha256(abi.encode("author transcript", id));

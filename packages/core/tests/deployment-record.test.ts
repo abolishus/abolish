@@ -498,7 +498,7 @@ describe("deploymentVariables", () => {
       REGISTRY_SYNC_TRUSTEE_REGISTRY: at("TrusteeRegistry"),
       REGISTRY_SYNC_GROUP_REGISTRY: at("GroupRegistry"),
       REGISTRY_SYNC_BOARD: at("Board"),
-      REGISTRY_SYNC_EVENT_VERSION: "12",
+      REGISTRY_SYNC_EVENT_VERSION: "13",
       POLL_ROOT_GROUPS: "0:1,0:2",
       POLL_ROOT_THRESHOLD: "2",
       POLL_STUB_PANEL_THRESHOLD: "4",

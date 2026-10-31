@@ -834,7 +834,7 @@ describe("the group registry's log", () => {
   const HEAD = 140n;
   const WITH_REGISTRY: Deployment = {
     ...DEPLOYMENT,
-    groupRegistry: { address: GROUP_REGISTRY, deployedAt: DEPLOYED_AT, eventVersion: 12 },
+    groupRegistry: { address: GROUP_REGISTRY, deployedAt: DEPLOYED_AT, eventVersion: 13 },
   };
   const quantity = (n: bigint) => `0x${n.toString(16)}`;
 
@@ -934,7 +934,7 @@ describe("the group registry's log", () => {
         if (!loaded.ok) throw new Error(loaded.problem);
         expect(loaded.block).toBe(HEAD);
         expect(loaded.timestamp).toBe(0x68f00000n);
-        expect(loaded.records.map((r) => decodeContractEvent(r, 12))).toEqual(
+        expect(loaded.records.map((r) => decodeContractEvent(r, 13))).toEqual(
           logs.map((l, n) => ({
             contract: Uint8Array.from(Buffer.from(GROUP_REGISTRY.slice(2), "hex")),
             n: BigInt(n),

@@ -206,7 +206,7 @@ beforeAll(async () => {
     board: stand(1),
     trusteeRegistry,
     groupRegistry: stand(3),
-    eventVersion: 12,
+    eventVersion: 13,
   };
   config = {
     panel: { threshold: 3, keys: seats.map((s) => s.encoded) },

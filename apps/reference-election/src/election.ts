@@ -166,17 +166,18 @@ export interface Timing {
 /**
  * The versions the profile pins where they aren't 1: board-entry version 5,
  * which carries the destruction statements tally-opening version 1 needs
- * ([[verifier]] 2.3) and the close statements, and contract-event version 12,
+ * ([[verifier]] 2.3) and the close statements, and contract-event version 13,
  * which archives every board event, the close rule's, the batches', the
- * obligation root's and the availability records', the group registry's
- * Tier 1 and self-paid additions and the trustee registry's kind-carrying
- * `PanelPinned`. The election registry
+ * obligation root's, the availability records' and both rolling calls', the
+ * group registry's Tier 1 and self-paid additions, the trustee registry's
+ * kind-carrying `PanelPinned` and the election registry's version-7
+ * `DefinitionRegistered`. The election registry
  * registers no other profile for a version-1 definition ([[contracts]],
  * Election registry, Registration, rule 9).
  */
 const PINNED: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 12],
+  [RECORD_TYPES.contractEvent, 13],
 ]);
 
 /**
@@ -190,7 +191,7 @@ const PINNED_V5: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.ballot, 3],
   [RECORD_TYPES.spoiledBallotOpening, 2],
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 12],
+  [RECORD_TYPES.contractEvent, 13],
   [RECORD_TYPES.displayText, 2],
 ]);
 

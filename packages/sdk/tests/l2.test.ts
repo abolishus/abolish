@@ -503,11 +503,11 @@ describe("SimulatedElectionRegistry's profile rule", { timeout }, () => {
       [0x0002, 2],
       [0x0003, 2],
       [0x0007, 5],
-      [0x0008, 12],
+      [0x0008, 13],
       [0x0009, 1],
     ];
     for (const [type, version] of served)
-      for (let v = 1; v <= 13; v++)
+      for (let v = 1; v <= 14; v++)
         if (v !== version) expect(withPins(new Map([[type, v]]))).toBe("ProfileNotServed");
   });
 

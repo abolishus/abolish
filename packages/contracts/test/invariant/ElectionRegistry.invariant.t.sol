@@ -48,18 +48,22 @@ contract RegistryHandler is TestBase {
 
     /// Registers a definition for a created election from `actorSeed`'s
     /// account. The definition varies with `variant`, its version (1, or 3 to
-    /// 6) and its options, so a second, different approved definition for the
-    /// same election is tried too.
+    /// 7, version 7 under a fixed or a rolling electorate) and its options, so
+    /// a second, different approved definition for the same election is
+    /// tried too.
     function register(uint256 idSeed, uint8 actorSeed, uint8 variant) external {
         if (ids.length == 0) return;
         bytes32 id = ids[idSeed % ids.length];
         address actor = _actor(actorSeed);
-        uint8 version = variant % 5 == 0 ? 1 : 2 + variant % 5;
+        // 8 stands for version 7 under a rolling electorate.
+        uint8 version = variant % 7 == 0 ? 1 : 2 + variant % 7;
         ElectionDefinitionLib.Definition memory d = version == 1
             ? RegistryFixture.template(registry, id)
-            : RegistryFixture.templateV(registry, id, version);
-        if (version < 5) d.optionCount = 2 + variant / 5 % 4;
-        else d.questions[0].optionCount = uint16(2 + variant / 5 % 4);
+            : version == 8
+                ? RegistryFixture.templateRolling(registry, id)
+                : RegistryFixture.templateV(registry, id, version);
+        if (version < 5) d.optionCount = 2 + variant / 7 % 4;
+        else d.questions[0].optionCount = uint16(2 + variant / 7 % 4);
         bytes memory enc = RegistryFixture.approve(lib, trustees, d);
         bool allowed = actor == shadowCreator[id] && shadowHash[id] == bytes32(0);
         vm.prank(actor);
@@ -131,8 +135,8 @@ contract RegistryHandler is TestBase {
 ///    changes afterwards (write-once; T-34, T-24).
 /// 4. A registration succeeds exactly when its caller is the creator, the
 ///    election has no definition yet, and its definition has a profile the
-///    deployment serves (every handler definition: a version-6 one is sealed
-///    with no author panel).
+///    deployment serves (every handler definition: a version-6 or version-7
+///    one is sealed with no author panel).
 /// 5. The event accumulator counts one event per creation and per registration.
 /// 6. The board's parameters are recorded for exactly the registered
 ///    definitions of every registered version, each exactly the registered definition's,

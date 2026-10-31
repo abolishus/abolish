@@ -22,10 +22,14 @@ join during the poll. The board holds
   followed by every registered seat's receipt for each: at snapshot 1's head
   `h_1` the step is final (`h_1` is ROOT_FINALITY or more after τ_M) and
   every one of them is admitted and fully receipted, so all twenty enter
-  R_1 (tally.md, Running set);
-- in segment 2 eighteen more opening members' ballots and the two joiners',
-  at step M + 6, after the joiners' addition, naming a block above `h_1`,
-  with their receipts: twenty entries from R_1 to R_2, so snapshot 1 meets
+  R_1 (tally.md, Running set); and, also in segment 1 with its receipts, a
+  joiner's ballot at step M + 3, after the joiners' addition, naming a block
+  below `h_1`, whose step isn't final at `h_1`: it is pending at snapshot 1,
+  so it is held out of R_1 though admitted and fully receipted there, and
+  enters R_2;
+- in segment 2 the other eighteen opening members' ballots and the second
+  joiner's, at step M + 6, naming a block above `h_1`, with their receipts:
+  with the early joiner, twenty entries from R_1 to R_2, so snapshot 1 meets
   both the batch rule (twenty since R_0) and the lag (twenty after it);
 - in segment 3 each registered seat's running opening of R_1 (record type
   0x0018), the release's;
@@ -43,7 +47,8 @@ segment, L1 reference, step finality, receipts and votes, after this file
 checks every opening's bytes: the running openings open R_1's aggregate,
 under the running opening's tag, and the final tally's open the counted
 set's. The final tally against the release has `d = 20`: the twenty
-ballots that entered after it, none flagged.
+ballots that entered after it, none flagged. A verifier that read the early
+joiner's step as final at `h_1` would put 21 in R_1.
 
 It reuses this folder's independent Python implementations, which share no
 code with packages/crypto or packages/verifier: those
@@ -117,6 +122,7 @@ REGISTERED_AT = tau(M) - 100
 EPOCH = REGISTERED_AT - PERIOD
 OPENS_AT = REGISTERED_AT + 60
 CLOSES_AT = tau(M + 12)
+MID = M + 3  # an early joiner's step, half an hour after M
 LATER = M + 6  # the second batch's step, an hour after M
 
 G1 = r5.G1
@@ -124,12 +130,14 @@ ROOT_L2_BLOCK = 100
 OPENING = [f"v{i:02d}" for i in range(38)]
 JOINERS = ["j38", "j39"]
 FIRST = OPENING[:20]
-SECOND = OPENING[20:] + JOINERS
+EARLY = JOINERS[0]
+SECOND = OPENING[20:] + JOINERS[1:]
 
 # Each batch's L1 reference, a minute after its step's boundary; each
 # snapshot's head, the last block before its period ends (20 seconds before
 # it), which is ROOT_FINALITY or more after its batch's step.
 REF_1 = tau(M) + 60
+REF_MID = tau(MID) + 60
 HEAD_1 = EPOCH + 2 * PERIOD - 20
 REF_2 = tau(LATER) + 60
 HEAD_2 = EPOCH + 3 * PERIOD - 20
@@ -184,7 +192,7 @@ def build(constants):
     t = vc.transcript(LABEL + "/live", panel, SEATS, ctx)
     d = vc.definition_for(panel, H(ds(vc.TRANSCRIPT_TAG, t)), fields)
     assert vc.own_version(d) == 7 and d["electorate_mode"] == rv.ROLLING and d["results_mode"] == d6.LIVE
-    assert d["live_every"] == 1 and d["live_batch"] == d6.MIN_LIVE_BATCH == len(FIRST) == len(SECOND)
+    assert d["live_every"] == 1 and d["live_batch"] == d6.MIN_LIVE_BATCH == len(FIRST) == len(SECOND) + 1
     enc = vc.encode(d)
     e = dict(
         r5.rules(r5.QUESTIONS, d["threshold"], d["panel_size"], 0, 0),
@@ -202,13 +210,13 @@ def build(constants):
     # A header an hour and a block before opening, each batch's reference,
     # each snapshot's head, the block at closes_at (the first after
     # snapshot 2's end) and one an hour and a block after close.
-    headers = sv.run(sv.FIRST_BLOCK, [OPENS_AT - 3600 - 12, REF_1, HEAD_1, REF_2, HEAD_2, CLOSES_AT, CLOSES_AT + 3600 + 12])
+    headers = sv.run(sv.FIRST_BLOCK, [OPENS_AT - 3600 - 12, REF_1, REF_MID, HEAD_1, REF_2, HEAD_2, CLOSES_AT, CLOSES_AT + 3600 + 12])
     by_time = {h["timestamp"]: h for h in headers}
 
     ballots, proofs = [], {}
-    for n, who in enumerate(FIRST + SECOND):
-        first = who in FIRST
-        step, ref = (M, by_time[REF_1]) if first else (LATER, by_time[REF_2])
+    voters = [(who, 1, M, REF_1) for who in FIRST] + [(EARLY, 1, MID, REF_MID)] + [(who, 2, LATER, REF_2) for who in SECOND]
+    for n, (who, segment, step, ref_at) in enumerate(voters):
+        ref = by_time[ref_at]
         secret = r5.SECRETS[LABEL + "/" + who]
         bctx = {"definitionHash": defh, "cell": 0, "nullifier": pos(sc, secret)}
         votes = b3.flat(answers(n))
@@ -242,7 +250,7 @@ def build(constants):
             },
             "expect": {"root": str(st["root"]), "nullifier": str(b["nullifier"])},
         }
-        ballots.append({"who": who, "ballot": b, "votes": votes, "pairs": pairs, "segment": 1 if first else 2})
+        ballots.append({"who": who, "ballot": b, "votes": votes, "pairs": pairs, "segment": segment})
     # Step M's tree lacks the joiners and M + 6's has them.
     assert r5.step_of(e, 0, M)["memberCount"] == len(OPENING) and r5.step_of(e, 0, LATER)["memberCount"] == len(OPENING) + len(JOINERS)
     return {"panel": panel, "definition": d, "election": e, "transcript": t, "headers": headers, "ballots": ballots, "proofs": proofs}
@@ -353,8 +361,19 @@ def assemble(constants, proofs_path, out_dir):
         h = lv.l1_head(EPOCH, PERIOD, sigma, headers)
         assert h is not None
         snapshots.append({"segment": sigma, "head": h["number"], "hash": h["hash"]})
-    assert [(x["segment"], x["head"]) for x in snapshots] == [(1, first + 2), (2, first + 4)]
-    assert all(final_at(x["ballot"]["step"]) <= snapshots[x["segment"] - 1]["head"] for x in ballots)
+    assert [(x["segment"], x["head"]) for x in snapshots] == [(1, first + 3), (2, first + 5)]
+    for x in ballots:
+        # Each ballot's reference, judged with its first snapshot's head as
+        # the L1 head, is admitted there: only step finality can hold one out.
+        at = snapshots[x["segment"] - 1]["head"]
+        b = x["ballot"]
+        assert rev.check_reference(b["l1RefNumber"], b["l1RefHash"], chain, at, low, CLOSES_AT) == "admitted", x["who"]
+        # The early joiner's step is final at snapshot 2's head and not at
+        # snapshot 1's, so it is pending at snapshot 1 though boarded,
+        # receipted and admitted there; every other ballot's step is final
+        # at its first snapshot's head.
+        final = final_at(b["step"])
+        assert (final > snapshots[0]["head"] and final <= snapshots[1]["head"]) if x["who"] == EARLY else final <= at, x["who"]
     case = lv.base_case("live", "", {}, [{"segment": x["segment"], "head": x["head"]} for x in snapshots], [], batch=d["live_batch"])
     case.update(
         options=m,
@@ -372,6 +391,8 @@ def assemble(constants, proofs_path, out_dir):
                         id=x["entry"],
                         message=x["message"].hex(),
                         stepFinalAt=final_at(x["ballot"]["step"]),
+                        # The last segment holding one of its receipts.
+                        receipted=max(payloads[i][0] for i in x["receipts"]),
                     )
                 ],
             }
@@ -382,7 +403,7 @@ def assemble(constants, proofs_path, out_dir):
     picks = lv.choose(case, sets)
     assert picks[0] == ([1], [{"at": 2, "release": 1, "refused": {}}]), picks
     released = [x for x in ballots if x["entry"] in set(sets[0][1].values())]
-    assert released == [x for x in ballots if x["segment"] == 1]
+    assert released == [x for x in ballots if x["who"] in FIRST]
 
     def opening(signer, over, snapshot=None):
         """Seat `signer`'s honest opening of cell 0 over `over`: the release's running opening at `snapshot`, else the final tally's under tally-opening version 2."""
@@ -423,8 +444,8 @@ def assemble(constants, proofs_path, out_dir):
     (mcell,) = model["cells"]
     (rel,) = mcell["releases"]
     assert rel["counts"] == want_release and not rel["conflict"] and rel["size"] == rel["entered"] == len(FIRST)
-    second = sorted(x["entry"] for x in ballots if x["segment"] == 2)
-    assert mcell["finalBatch"] == {"cut": len(SECOND), "flagged": False, "side": {"kind": "unreleased", "release": None, "ballots": second}}, mcell["finalBatch"]
+    second = sorted(x["entry"] for x in ballots if x["who"] not in FIRST)
+    assert mcell["finalBatch"] == {"cut": len(SECOND) + 1, "flagged": False, "side": {"kind": "unreleased", "release": None, "ballots": second}}, mcell["finalBatch"]
     (mtier,) = model["tiers"]
 
     entries = [vc.entry(BOARD_VERSION, eid, n, seg, p) for n, (seg, p) in enumerate(payloads)]
@@ -467,10 +488,11 @@ def assemble(constants, proofs_path, out_dir):
         "description": (
             "A live rolling poll (live_every 1, live_batch 20) opening in period 1 and closing in period 3, so with scheduled snapshots at "
             "segments 1 and 2. Tier 0 is group 1: 38 members at opening, two added during the poll. Segment 0: the transcript. Segment 1: "
-            "twenty opening members' ballots at step M, naming a block before snapshot 1's head, at which M is final, each with every "
-            "registered seat's receipt. Segment 2: the other eighteen opening members' and the two joiners' ballots at step M + 6, naming a "
-            "block above snapshot 1's head, with their receipts. The decision at snapshot 2 releases snapshot 1 (twenty entries since "
-            "opening, twenty after); segment 3 holds each registered seat's running opening of it, segment 4 each registered seat's opening "
+            "twenty opening members' ballots at step M, naming a block before snapshot 1's head, at which M is final, and a joiner's at "
+            "step M + 3, naming a block before that head, at which M + 3 isn't final yet, each with every registered seat's receipt: the "
+            "joiner's is pending at snapshot 1, so held out of its running set. Segment 2: the other eighteen opening members' and the "
+            "second joiner's ballots at step M + 6, naming a block above snapshot 1's head, with their receipts. The decision at snapshot 2 releases snapshot 1 (twenty entries since "
+            "opening, twenty after, the early joiner among them); segment 3 holds each registered seat's running opening of it, segment 4 each registered seat's opening "
             "of the final tally over all forty. The final tally against the release has d = 20, the ballots that entered after it."
         ),
         "definition": vc.encode(d).hex(),

@@ -449,7 +449,10 @@ describe(
       liveRegistries,
     );
 
-    test("4.1, 4.2 and 2.9 pass", () => {
+    test("the live profile fits (2.3), and 4.1, 4.2 and 2.9 pass", () => {
+      // A rolling profile that fits, k seats ours: 2.3 doesn't fail
+      // `profile-combination`, and stays unverifiable as for every rolling one.
+      expect(row(r, "2.3")).toEqual({ status: "unverifiable", code: "not-implemented" });
       for (const id of ["4.1", "4.2", "2.9"]) expect(row(r, id), id).toEqual({ status: "pass" });
     });
 
@@ -468,6 +471,9 @@ describe(
       expect(r.releases).toEqual(live.releases);
       const tier = r.releases?.tiers[0];
       expect(tier?.decisions).toEqual([{ at: 2, release: 1, refused: [] }]);
+      // 20, not 21: the early joiner's ballot is boarded, receipted and
+      // admitted at snapshot 1, but its step isn't final at h_1, so it is
+      // pending there and enters at snapshot 2 (tally.md, Running set).
       const cell = r.releases?.cells[0];
       expect(cell?.releases.map((x) => [x.size, x.entered, x.signers])).toEqual([
         [20, 20, [1, 2, 3]],

@@ -317,6 +317,8 @@ export class ProvenRegistryAccumulator {
         hexToBytes(contract),
       ),
     );
+    // Every contract was read against the one header above, so the first's
+    // block and timestamp are every one's.
     const [first] = proven as [OutputRootAccumulator];
     if (first.block !== l2Block) throw new GameBlockError();
     return {

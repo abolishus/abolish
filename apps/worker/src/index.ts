@@ -207,6 +207,7 @@ export { type PollStubPins, pollStubDeployment } from "./poll-stub-chain.ts";
 export { POLL_STUB_ENV, type PollStubConfig, pollStubFromEnv } from "./poll-stub-env.ts";
 export {
   checkPinnedRegistries,
+  MAX_CLOCK_SKEW_SECONDS,
   ProvenRegistryRecordSource,
   REGISTRY_RECORDS_MAX_AGE_MS,
   type RegistryAccumulators,

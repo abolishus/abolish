@@ -13,6 +13,7 @@ import { definitionRegistered } from "../../../packages/verifier/tests/registrat
 import { release, rolling, rollingTree } from "../../../packages/verifier/tests/registry-logs.ts";
 import {
   checkPinnedRegistries,
+  MAX_CLOCK_SKEW_SECONDS,
   type ProvenAccumulators,
   ProvenRegistryRecordSource,
   type RegistryAccumulators,
@@ -92,6 +93,7 @@ function accumulators(
   return { source, asked };
 }
 
+/** The worker's clock at `AT`, in milliseconds, unless a test sets it. */
 const sourceOf = (
   a: RegistryAccumulators,
   options: { maxAgeMs?: number; now?: () => number } = {},
@@ -103,6 +105,7 @@ const sourceOf = (
     chainId: release.chainId,
     groupRegistry: release.registry,
     electionRegistry: d.value.election_registry,
+    now: () => Number(AT) * 1000,
     ...options,
   });
 
@@ -157,6 +160,33 @@ describe("the registries' proven records", () => {
     await expect(sourceOf(altered.source).read()).rejects.toMatchObject({ code: "accumulator" });
   });
 
+  test("records the index holds past the proven block are left for a later read", async () => {
+    // The index runs ahead of an output root posted about hourly: a group
+    // record after the block, which the accumulator doesn't count yet.
+    const later = { ...groupRecords[0]!, l2_block: BLOCK + 1n, l2_timestamp: AT + 1n };
+    await insert(later, groupRecords.length);
+    try {
+      const read = await sourceOf(accumulators().source).read();
+      expect(read.at).toBe(AT);
+      expect(read.records.every((r) => r.l2_timestamp <= AT)).toBe(true);
+      expect(read.records).toHaveLength(groupRecords.length + electionRecords.length);
+      const chain = await rollingChains({ read: async () => read }, pinned).read(d);
+      expect(chain.outcome).toEqual(rollingChain(d, [...groupRecords, ...electionRecords], pinned));
+    } finally {
+      await db.admin`DELETE FROM ${db.admin(index)}.contract_log
+        WHERE id = ${`${bytesToHex(release.registry)}-${String(groupRecords.length).padStart(6, "0")}`}`;
+    }
+  });
+
+  test("a block stamped ahead of the worker's clock by more than the drift bound is refused", async () => {
+    const { source } = accumulators();
+    const skew = Number(MAX_CLOCK_SKEW_SECONDS) * 1000;
+    expect((await sourceOf(source, { now: () => Number(AT) * 1000 - skew }).read()).at).toBe(AT);
+    await expect(
+      sourceOf(source, { now: () => Number(AT) * 1000 - skew - 1000 }).read(),
+    ).rejects.toThrow("ahead of this worker's clock");
+  });
+
   test("accumulators proven at different blocks are refused", async () => {
     const split: RegistryAccumulators = {
       async provenTogether(contracts) {
@@ -169,7 +199,7 @@ describe("the registries' proven records", () => {
   });
 
   test("a read is reused for its age, shared while in flight, and never reused once it fails", async () => {
-    let now = 0;
+    let now = Number(AT) * 1000;
     let fail = false;
     const { source, asked } = accumulators();
     const flaky: RegistryAccumulators = {
@@ -179,10 +209,10 @@ describe("the registries' proven records", () => {
     const records = sourceOf(flaky, { maxAgeMs: 1_000, now: () => now });
     const [a, b] = await Promise.all([records.read(), records.read()]);
     expect(b).toBe(a);
-    now = 999;
+    now += 999;
     expect(await records.read()).toBe(a);
     expect(asked).toHaveLength(1);
-    now = 1_000;
+    now += 1;
     fail = true;
     await expect(records.read()).rejects.toThrow("node down");
     fail = false;

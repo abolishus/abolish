@@ -30,6 +30,12 @@ import type { ProvenAccumulators } from "./output-roots.ts";
  */
 export const REGISTRY_RECORDS_MAX_AGE_MS = 60_000;
 
+/**
+ * How far, in seconds, a proven block's timestamp may be ahead of the
+ * worker's clock: the OP Stack's sequencer drift bound (1,800 s).
+ */
+export const MAX_CLOCK_SKEW_SECONDS = 1_800n;
+
 /** Where the accumulators come from: `ProvenRegistryAccumulator` in production. */
 export interface RegistryAccumulators {
   provenTogether(contracts: readonly Address[]): Promise<ProvenAccumulators>;
@@ -102,7 +108,8 @@ export class ProvenRegistryRecordSource implements RegistryRecordSource {
     )
       throw new Error("the registries' accumulators aren't proven at one block");
     const records = [];
-    // `provenGroupRecords` is the accumulator check for any one contract:
+    // `provenGroupRecords` is the accumulator check for any one contract,
+    // the election registry's too (its `GroupRecordsError` names no role):
     // its records up to the block, each naming that contract.
     for (const [contract, state] of [
       [groupRegistry, group],
@@ -111,6 +118,11 @@ export class ProvenRegistryRecordSource implements RegistryRecordSource {
       const indexed = await readContractEvents(index, indexSchema, toHex(contract));
       records.push(...provenGroupRecords(chainId, contract, indexed, state).records);
     }
+    // A block stamped ahead of our clock would settle steps whose boundary
+    // hasn't come: only a game's proposer can post one, and it fails here
+    // rather than wait for the game to be shown false (T-08).
+    if (proven.timestamp > BigInt(Math.floor(this.#now() / 1000)) + MAX_CLOCK_SKEW_SECONDS)
+      throw new Error("the output root's block is stamped ahead of this worker's clock");
     return { at: proven.timestamp, records };
   }
 }

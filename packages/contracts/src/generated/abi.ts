@@ -183,6 +183,13 @@ export const ballotRelayAbi = [
   {
     type: "function",
     inputs: [],
+    name: "MAX_ROLLING_RELAY_RECORD",
+    outputs: [{ name: "", internalType: "uint256", type: "uint256" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    inputs: [],
     name: "board",
     outputs: [{ name: "", internalType: "address", type: "address" }],
     stateMutability: "view",
@@ -225,6 +232,17 @@ export const ballotRelayAbi = [
       { name: "record", internalType: "bytes", type: "bytes" },
     ],
     name: "relayBallot",
+    outputs: [{ name: "index", internalType: "uint64", type: "uint64" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    inputs: [
+      { name: "gasLimit", internalType: "uint64", type: "uint64" },
+      { name: "root", internalType: "bytes32", type: "bytes32" },
+      { name: "record", internalType: "bytes", type: "bytes" },
+    ],
+    name: "relayRollingBallot",
     outputs: [{ name: "index", internalType: "uint64", type: "uint64" }],
     stateMutability: "nonpayable",
   },

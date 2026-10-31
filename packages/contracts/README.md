@@ -83,7 +83,9 @@ Abolish's contracts (the L2 contracts and the L1 board anchor), built with Found
 
 - It pins the portal (which must have code) and the board's L2 address; there is no admin, proxy or upgrade path, and it holds no funds.
 - `relayBallot(uint64 gasLimit, bytes record)` takes canonical calldata and a record of at most `MAX_RELAY_RECORD` bytes with a ballot header, stores call `i`'s hash `H(DS("abolish/v1/relay-call", u64(l1_chain_id) ‖ relay ‖ u64(i) ‖ u64(b) ‖ u64(τ) ‖ u64(gasLimit) ‖ record))` at the ERC-7201 namespace `abolish.ballot-relay`, emits `BallotRelayed` through the event accumulator, and only then deposits `submitRelayedBallot(i, b, τ, gasLimit, record)` to the board through the portal.
+- `relayRollingBallot(uint64 gasLimit, bytes32 root, bytes record)`, the rolling call ([[P2-17]] part 5d-2a), is `relayBallot` with the root beside the record: a record of at most `MAX_ROLLING_RELAY_RECORD` bytes, one word below, the call's hash under `abolish/v1/relay-rolling-call` binding the root, from the same count, and the deposit `submitRelayedRollingBallot(i, b, τ, gasLimit, root, record)`. The root is carried, never read. The board's side of that call is part 5d-2b.
 - `test/BallotRelay.t.sol` runs every call, framing, calldata, alias-slot and accumulator vector of `relay.json` at the vector's own address, chain, block and time.
+- `test/BallotRelayRolling.t.sol` runs every call, framing, calldata and sequence vector of `relay-rolling.json` the same way, the sequence interleaving both calls under one count and accumulator.
 
 ## Board
 

@@ -49,8 +49,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  ballotHashV5,
   checkChallengeOpening,
   checkChallengeOpeningV2,
+  checkShareReceiptV5,
   type Checkpoint,
   copyCheckpoints,
   decodeOpening,
@@ -61,6 +63,7 @@ import {
   encodeDisplayText,
   encodeDisplayTextV2,
   identityKey,
+  intakeBallotV5,
   MembershipProverError,
   POLL_CLASSES,
   isReceiptAlarm,
@@ -74,6 +77,7 @@ import {
   rootStepWindow,
   RollingTierTree,
   rollingTierSteps,
+  SEAT_PANELS,
 } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { startApi } from "./api.ts";
@@ -1040,6 +1044,113 @@ async function run(
       )
     )
       throw new Error("the board's rolling ballots aren't the ones submitted");
+    // Every seat takes each boarded ballot in, as its node does from the
+    // client's direct route (share-encryption.md, Ballot version 5): admitted
+    // against the root of the step it names, which the seat computes from the
+    // group registry's events and never takes from the board's log, its
+    // shares opened and a version-2 receipt signed over the version-5 ballot
+    // hash, which binds the step (T-08, T-25, T-38, T-52). The fixture runs
+    // it through @abolishus/crypto with the seats' keys: no trustee node
+    // takes version-5 ballots yet (P2-17 part 4f-2b).
+    const tauLate = rootClockBoundary(late);
+    // A control: while the safe chain holds no block later than the newer
+    // step's boundary, every seat refuses that step's ballots with
+    // step-unsettled, decrypting and storing nothing, and still takes the
+    // older step's (T-52, T-54).
+    const seatKeys = (s: (typeof c.secrets)[number]) => ({
+      panel: SEAT_PANELS.default,
+      seat: s.index,
+      kemSecret: s.kemSecret,
+      signingSecret: s.signingSecret,
+    });
+    for (const { ballot } of boarded)
+      for (const s of c.secrets) {
+        const got = intakeBallotV5(
+          casting.election,
+          seatKeys(s),
+          ballot.bytes,
+          ballot.ciphertexts[s.index - 1] ?? new Uint8Array(),
+          tauLate,
+        );
+        const settled = ballot.record.step < Number(late);
+        if (settled ? !got.ok : got.ok || got.code !== "step-unsettled")
+          throw new Error(
+            `seat ${s.index} judged a step-${ballot.record.step} ballot before step ${late} settled as ${got.ok ? "ok" : got.code}`,
+          );
+      }
+    if ((await latest(l2Anvil)) <= tauLate) {
+      await l2Anvil.call("evm_setNextBlockTimestamp", [Number(tauLate + 1n)]);
+      await l2Anvil.call("evm_mine", []);
+    }
+    const safeAt = await latest(l2Anvil);
+    if (safeAt > timing.closesAt) throw new Error("the L2 is past the rolling poll's close");
+    const signers = {
+      default: casting.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
+      author: [],
+    };
+    const taken = boarded.map(({ voter, ballot }) => {
+      const { record } = ballot;
+      const named = {
+        definitionHash: casting.election.definitionHash,
+        cell: record.cell,
+        nullifier: record.nullifier,
+      };
+      const receipts = c.secrets.map((s) => {
+        const r = intakeBallotV5(
+          casting.election,
+          seatKeys(s),
+          ballot.bytes,
+          ballot.ciphertexts[s.index - 1] ?? new Uint8Array(),
+          safeAt,
+        );
+        if (!r.ok) throw new Error(`seat ${s.index} refused an honest rolling ballot: ${r.code}`);
+        if (
+          r.step !== record.step ||
+          hex(r.ballotHash) !==
+            hex(ballotHashV5({ ...named, step: record.step }, record.committed_vote))
+        )
+          throw new Error(`seat ${s.index} took a rolling ballot in at another step or hash`);
+        // The receipt checks against the ballot as boarded, and not against
+        // the same vote relabelled to the other step (T-38).
+        const relabelled = record.step === Number(late) ? Number(early) : Number(late);
+        if (
+          !checkShareReceiptV5(
+            signers,
+            { ...named, step: record.step },
+            record.committed_vote,
+            SEAT_PANELS.default,
+            s.index,
+            r.receipt,
+          ) ||
+          checkShareReceiptV5(
+            signers,
+            { ...named, step: relabelled },
+            record.committed_vote,
+            SEAT_PANELS.default,
+            s.index,
+            r.receipt,
+          )
+        )
+          throw new Error(`seat ${s.index}'s receipt doesn't bind the rolling ballot's step`);
+        return r.receipt;
+      });
+      return { voter, ballot, receipts };
+    });
+    writeFileSync(
+      join(OUT, "rolling", "receipts.json"),
+      `${JSON.stringify(
+        {
+          safeAt: safeAt.toString(),
+          ballots: taken.map(({ voter, ballot, receipts }) => ({
+            voter,
+            step: ballot.record.step,
+            receipts: receipts.map((r, i) => ({ seat: c.secrets[i]?.index, receipt: hex(r) })),
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+    );
     writeFileSync(
       join(OUT, "rolling", "ballots.json"),
       `${JSON.stringify(
@@ -1062,7 +1173,7 @@ async function run(
       )}\n`,
     );
     log(
-      `stage 4 (rolling): ${boarded.length} version-5 ballots with real membership proofs under the rolling scope submitted straight to the board's rolling call, ${boarded.filter((b) => b.ballot.record.step === Number(early)).length} against step ${early} and ${boarded.filter((b) => b.ballot.record.step === Number(late)).length} against step ${late}, voter 3 (joined after registration) and voter 1 (removed and added again) among them, and voter 2 re-voting across the two steps under one nullifier; voter 3 refused before proving against the step before they joined, and an honest ballot with another step's root refused by the board`,
+      `stage 4 (rolling): ${boarded.length} version-5 ballots with real membership proofs under the rolling scope submitted straight to the board's rolling call, ${boarded.filter((b) => b.ballot.record.step === Number(early)).length} against step ${early} and ${boarded.filter((b) => b.ballot.record.step === Number(late)).length} against step ${late}, voter 3 (joined after registration) and voter 1 (removed and added again) among them, and voter 2 re-voting across the two steps under one nullifier; voter 3 refused before proving against the step before they joined, and an honest ballot with another step's root refused by the board; every seat took each ballot in against the step root it computed (${taken.length * c.secrets.length} version-2 receipts over the version-5 ballot hash, none checking for the other step), and refused step ${late}'s ballots with step-unsettled until the L2 held a block past its boundary`,
     );
   })();
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);

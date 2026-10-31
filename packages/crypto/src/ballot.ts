@@ -1396,14 +1396,14 @@ function admitStep<V extends ShareHashLists, X extends string = never>(
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
 ): Step<Admitted | Rejected<AdmitCode | X>>;
-function admitStep<V extends ShareHashLists>(
+function admitStep<V extends ShareHashLists, X extends string = never>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
-  target: Target,
+  target: Target | LateTarget<X>,
   fields: Fields<V>,
   proof: BallotRecord["membership_proof"],
   delivered: SeatCiphertext,
-): Step<Admitted | Rejected<AdmitCode | "share-hash">>;
+): Step<Admitted | Rejected<AdmitCode | "share-hash" | X>>;
 function admitStep<V extends ShareHashLists, X extends string = never>(
   election: AdmitPanels,
   checks: VoteChecks<V, { readonly definitionHash: Uint8Array }>,
@@ -1423,6 +1423,11 @@ function admitStep<V extends ShareHashLists, X extends string = never>(
           ? { ok: false, code: "share-hash-unqualified" }
           : { ok: false, code: "share-hash-unqualified", ...unqualified },
     };
+  // A late target's checks (version 5's step) are admission checks, so they
+  // come before `share-hash`, as every admission check before the membership
+  // proof does (docs/spec/share-encryption.md, Ballot version 5).
+  const target = typeof late === "function" ? late() : late;
+  if ("code" in target) return { done: { ok: false, code: target.code } };
   // The shape holds, so each list has exactly its panel's seat count, and
   // the delivered seat is a seat of its panel.
   const hashes =
@@ -1435,8 +1440,6 @@ function admitStep<V extends ShareHashLists, X extends string = never>(
     )
   )
     return { done: { ok: false, code: "share-hash" } };
-  const target = typeof late === "function" ? late() : late;
-  if ("code" in target) return { done: { ok: false, code: target.code } };
   const hash = checks.hash(vote);
   const derived = signalsOf(checks.ctx.definitionHash, target, fields, hash);
   return {
@@ -1883,6 +1886,12 @@ function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTier
   throw new TypeError(`${caller}: chain.events[${at}].kind: expected "add" or "remove"`);
 }
 
+// Whether a step's boundary `tau` is inside the poll: after the definition's
+// registration and at or before its close. The clock alone decides it, so no
+// tree is computed for a step outside (membership.md, Accepted steps).
+const inPoll = (ctx: RollingTierContext, tau: bigint): boolean =>
+  tau > ctx.registeredAt && tau <= ctx.closesAt;
+
 /**
  * Step `step` of `cell`'s tier if the poll accepts it, else undefined
  * (docs/spec/membership.md, Root clock and steps, Accepted steps): a step
@@ -1893,8 +1902,7 @@ function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTier
 function acceptedStep(state: RollingState, cell: number, step: number): StepTree | undefined {
   const ctx = state.tiers[cell] as RollingTierContext;
   const trees = state.trees[cell] as readonly StepTree[];
-  const tau = rootClockBoundary(BigInt(step));
-  if (tau <= ctx.registeredAt || tau > ctx.closesAt) return undefined;
+  if (!inPoll(ctx, rootClockBoundary(BigInt(step)))) return undefined;
   // The newest distinct tree at or before `step`; the first is the first
   // step after registration, so one exists.
   let lo = 0;
@@ -2025,6 +2033,96 @@ export function stepBallotV5(
   };
   const result = admitStep(election, checks, target, fields, proof);
   return stepOf(mapStep(result, (r) => (r.ok ? { ...r, cell, step } : r)));
+}
+
+/** A trustee's intake admission of a version-5 ballot: version 4's, with the step it names. */
+export type IntakeAdmissionV5 =
+  | (Admitted & {
+      /** What the trustee's decryption runs under: version 4's, which version 5 keeps. */
+      readonly ctx: ValidityContextV4;
+      readonly vote: CommittedVoteV4;
+      readonly cell: number;
+      readonly panel: SeatPanel;
+      readonly step: number;
+    })
+  | Rejected<
+      "delivery-malformed" | BallotV2Code | "root-step-range" | "step-unsettled" | "share-hash"
+    >;
+
+/**
+ * Internal: `admitForIntakeV4` for ballot version 5 (docs/spec/share-encryption.md,
+ * Ballot version 5): strict decoding under version 5, then version 5's
+ * admission checks in order with `ballot-cell` over the rolling partition,
+ * `share-hash` (against the seat's own panel's list) after the step's checks
+ * and before the membership proof, and the proof against the root of the
+ * step the ballot names, which this package computed from the context's
+ * events, never a root the delivery names (T-08, T-25, T-52).
+ *
+ * `safeAt` is the timestamp of the newest block of the safe L2 chain whose
+ * group events the context was made from: a step is settled once that chain
+ * holds a block later than its boundary (docs/spec/membership.md, Root clock
+ * and steps). A step inside the poll that isn't settled yet is refused with
+ * `step-unsettled`, before `share-hash` and with no pairing check, so naming
+ * a future step makes no node hold anything (T-52, T-54); the client delivers
+ * the same record again later. A step the clock alone puts outside the poll
+ * is `root-step-range` whatever the node has seen, since no later block
+ * changes that. The caller must make the context from every group event
+ * through the block at `safeAt`, and remake it as that block moves on.
+ */
+export function admitForIntakeV5(
+  election: RollingBallotElection,
+  record: Uint8Array,
+  panel: SeatPanel,
+  seat: number,
+  shareHash: Uint8Array,
+  safeAt: bigint,
+): IntakeAdmissionV5 {
+  const definitionHash = madeHashOf(election, 5);
+  const state = ROLLING.get(election) as RollingState;
+  if (panel !== SEAT_PANELS.default && panel !== SEAT_PANELS.author)
+    throw new RangeError("admitForIntakeV5: panel must be 1 (default) or 2 (author)");
+  const qualified = panel === SEAT_PANELS.author ? election.authorQualified : election.qualified;
+  if (!Number.isSafeInteger(seat) || !qualified.includes(seat))
+    throw new RangeError("admitForIntakeV5: seat must be a seat of its panel's registered key set");
+  if (!(shareHash instanceof Uint8Array) || shareHash.length !== 32)
+    throw new RangeError("admitForIntakeV5: shareHash must be 32 bytes");
+  if (typeof safeAt !== "bigint" || safeAt < 0n)
+    throw new RangeError("admitForIntakeV5: safeAt must be a non-negative bigint");
+  const delivered = { panel, seat, shareHash: Uint8Array.from(shareHash) };
+  let ballot: BallotRecordV5;
+  try {
+    ballot = decodeBallot(record, 5);
+  } catch {
+    return { ok: false, code: "delivery-malformed" };
+  }
+  const fields = fieldsOf(ballot);
+  const { cell, step } = ballot;
+  if (!equalBytes(fields.definitionHash, definitionHash))
+    return { ok: false, code: "ballot-stray" };
+  const c = rollingCellOf(election, cell);
+  if (c === undefined) return { ok: false, code: "ballot-cell" };
+  const named = { definitionHash, cell, nullifier: fields.nullifier };
+  const ctx = contextOfV4(election, named);
+  const checks: VoteChecks<CommittedVoteV4, ValidityContextV4> = {
+    ctx,
+    shape: (vote) => shapeOkV4(ctx, vote),
+    hash: (vote) => ballotHashV5({ ...named, step }, vote),
+    validity: (vote) => checkValidityV5(ctx, vote),
+  };
+  const target = (): Target | { readonly code: "root-step-range" | "step-unsettled" } => {
+    const tier = state.tiers[cell] as RollingTierContext;
+    const tau = rootClockBoundary(BigInt(step));
+    if (!inPoll(tier, tau)) return { code: "root-step-range" };
+    if (tau >= safeAt) return { code: "step-unsettled" };
+    const at = acceptedStep(state, cell, step);
+    if (at === undefined) return { code: "root-step-range" };
+    return { tier: c.tier, root: at.root, scope: c.scope };
+  };
+  const result = runStep(
+    admitStep(election, checks, target, fields, ballot.membership_proof, delivered),
+  );
+  if (!result.ok) return result;
+  return { ...result, ctx, vote: fields.vote, cell, panel, step };
 }
 
 /** A version-5 ballot's membership check alone, with the step it names. */

@@ -4,6 +4,7 @@ import { describe, expect, test } from "vite-plus/test";
 import type { PartitionCell, PollView } from "../src/poll.ts";
 import {
   cellResultsView,
+  isCounted,
   leadersOf,
   resultsView,
   type ServedResults,
@@ -477,6 +478,54 @@ describe("leadersOf", () => {
         const expected = most === 0n ? [] : xs.flatMap((x, i) => (x === most ? [i] : []));
         expect(leaders).toEqual(expected);
       }),
+      runs,
+    );
+  });
+});
+
+describe("isCounted", () => {
+  const counts = ["1", "0", "0"];
+
+  test("is counted only once every tier the electorate names has every question read", () => {
+    const both = resultsView(
+      one,
+      read([
+        { tier: 0, counted: 1, counts },
+        { tier: 2, counted: 1, counts },
+      ]),
+    );
+    expect(isCounted(one, both)).toBe(true);
+    // A tier with a cell unopened, or not served at all, leaves the poll uncounted.
+    const partial = resultsView(
+      one,
+      read([
+        { tier: 0, counted: 1, counts },
+        { tier: 2, counted: 1 },
+      ]),
+    );
+    expect(isCounted(one, partial)).toBe(false);
+    expect(isCounted(one, resultsView(one, read([{ tier: 0, counted: 1, counts }])))).toBe(false);
+  });
+
+  test("is never counted without results read", () => {
+    for (const kind of ["unopened", "not-counted", "not-ready", "unavailable"] as const)
+      expect(isCounted(one, { kind })).toBe(false);
+  });
+
+  test("agrees with whether every tier was served with counts that fit", () => {
+    fc.assert(
+      fc.property(
+        fc.subarray([0, 2] as const),
+        fc.array(fc.boolean(), { minLength: 2, maxLength: 2 }),
+        (served, opened) => {
+          const tiers = served.map((tier, i) =>
+            opened[i] === true ? { tier, counted: 1, counts } : { tier, counted: 1 },
+          );
+          expect(isCounted(one, resultsView(one, read(tiers)))).toBe(
+            [0, 2].every((tier) => served.some((t, i) => t === tier && opened[i] === true)),
+          );
+        },
+      ),
       runs,
     );
   });

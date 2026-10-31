@@ -1,17 +1,16 @@
 import { buttonVariants, cn, Count, Fingerprint, Hash, useTranslate } from "@abolishus/ui";
-import { ArrowRight, ChevronDown, CircleCheck, EyeOff, type LucideIcon } from "lucide-react";
+import { ArrowRight, ChevronDown, CircleCheck, EyeOff } from "lucide-react";
 import type { ReactNode } from "react";
 
 import type { FollowsClient } from "../account/follows.ts";
 import type { ReactionsClient } from "../account/reactions.ts";
-import { catalogs, type Messages, tierMessage } from "../messages.ts";
+import { catalogs, tierMessage } from "../messages.ts";
 import type { ReportPoll } from "../poll-report.ts";
 import {
   type AskedBy as Asker,
   type Instant,
   instructionOf,
   pollStatus,
-  type PollStatus,
   type PollTags,
   type PollView,
 } from "../poll.ts";
@@ -21,11 +20,12 @@ import type { CardAnswered, CardText, PollWords } from "../stream.ts";
 import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
+import { PollFacts, StatusMark } from "./poll-facts.tsx";
 import { PollFollow } from "./poll-follow.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollResults, useResultsWords } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
-import { COUNTING_LABEL, instructionMessage, STATUS_MARK } from "./poll-status.ts";
+import { COUNTING_LABEL, instructionMessage, STATUS_MARK, STATUS_TEXT } from "./poll-status.ts";
 import { ReportSection, type ReportWords } from "./report-section.tsx";
 import { When } from "./when.tsx";
 
@@ -71,25 +71,6 @@ const POLL_WORDS = {
   gone: "pollReportGone",
 } as const satisfies ReportWords;
 
-const TERM = "font-mono text-xs tracking-wide text-muted-foreground uppercase";
-
-/** A row of facts under a heavy rule, like the head of a printed notice. */
-function FactStrip({ facts }: { facts: readonly { term: string; value: ReactNode }[] }) {
-  return (
-    <dl className="m-0 grid grid-cols-1 border-t-2 border-foreground sm:grid-cols-2 lg:grid-cols-4">
-      {facts.map((fact) => (
-        <div
-          key={fact.term}
-          className="grid content-start gap-1 border-b border-border py-4 sm:pe-6 lg:border-b-0"
-        >
-          <dt className={TERM}>{fact.term}</dt>
-          <dd className="m-0 text-base text-pretty">{fact.value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
-}
-
 function Fact({ term, children }: { term: string; children: ReactNode }) {
   return (
     <div className="grid gap-1 border-t border-border py-3 sm:grid-cols-[16rem_1fr] sm:gap-4">
@@ -98,30 +79,6 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
     </div>
   );
 }
-
-/** The poll's status, in words with its own icon; colour only on the icon. */
-function StatusMark({
-  icon: Icon,
-  tone,
-  children,
-}: {
-  icon: LucideIcon;
-  tone: string;
-  children: ReactNode;
-}) {
-  return (
-    <span className="inline-flex min-h-8 items-center gap-2 border border-foreground px-3 font-mono text-xs tracking-widest uppercase">
-      <Icon aria-hidden="true" className={cn("size-4", tone)} strokeWidth={2.5} />
-      {children}
-    </span>
-  );
-}
-
-const STATUS_TEXT = {
-  open: "pollStatus_open",
-  scheduled: "pollStatus_scheduled",
-  closed: "pollStatus_closed",
-} as const satisfies Record<PollStatus, keyof Messages>;
 
 /**
  * What the poll asks, in its own words (`everyday-poll-page.tsx`'s Hero):
@@ -324,14 +281,6 @@ export function PollSummary({
   // its results are (docs/moderation-policy.md).
   const final = status === "closed" && results !== undefined ? finalOf(poll, results) : undefined;
 
-  const tiers = (
-    <ul className="m-0 grid list-none gap-1 p-0">
-      {/* By position: an ill-formed definition can repeat a tier. */}
-      {poll.electorate.map((group, i) => (
-        <li key={i}>{t(tierMessage(group.tier, phoneVerification))}</li>
-      ))}
-    </ul>
-  );
   return (
     <article className="grid gap-16">
       <header className="grid gap-6 pt-2 md:pt-10">
@@ -402,26 +351,7 @@ export function PollSummary({
           </p>
         ) : null}
 
-        <FactStrip
-          facts={[
-            { term: t("factElectorate"), value: tiers },
-            { term: t("factOpens"), value: <When instant={poll.opensAt} /> },
-            { term: t("factCloses"), value: <When instant={poll.closesAt} /> },
-            {
-              term: t("factType"),
-              value: (
-                <>
-                  {counting}
-                  <span className="block text-sm text-muted-foreground">
-                    {poll.version === 5
-                      ? `${t("questionCount", { count: poll.questions.length })}, ${t("optionCount", { count: options })}`
-                      : t("optionCount", { count: options })}
-                  </span>
-                </>
-              ),
-            },
-          ]}
-        />
+        <PollFacts poll={poll} phoneVerification={phoneVerification} />
 
         {/* A hidden poll's tags are withheld with its text (T-68); a delisted
             one's stand, but the stream they'd link to doesn't list it. */}

@@ -193,3 +193,18 @@ export function finalOf(
     return undefined;
   return { ...tier, questions: tier.questions };
 }
+
+/**
+ * Whether every tier `poll`'s electorate names has its results read, every
+ * question counted: the poll is counted, as the register and its results
+ * page say once it has closed. A tier with a cell still unopened isn't
+ * counted yet, so neither is the poll.
+ */
+export function isCounted(poll: Pick<PollView, "electorate">, results: PollResults): boolean {
+  return (
+    results.kind === "read" &&
+    poll.electorate.every((g) =>
+      results.tiers.some((t) => t.tier === g.tier && t.questions !== undefined),
+    )
+  );
+}

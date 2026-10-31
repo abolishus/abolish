@@ -532,6 +532,9 @@ export const esUS: Messages = {
   resultsOpenedBy: "Abierta por",
   resultsSeats: { one: "Puesto {seats}", other: "Puestos {seats}" },
   resultsOpenedUnsigned: "Ninguna firma de un puesto la valida",
+  resultsStatusCounted: "Con recuento",
+  resultsFingerprints:
+    "Volver a contarla sin nosotros empieza por el ID de esta encuesta, y la definición que encuentre debe tener este hash, que fija las reglas de la encuesta antes de su primera respuesta.",
   resultsCheckTitle: "Compruébalo tú",
   resultsVerify: "Cómo contarlo tú",
   reactionsTitle: "Reacciones",

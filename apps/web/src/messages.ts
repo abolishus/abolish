@@ -520,6 +520,9 @@ const enUS = {
   resultsOpenedBy: "Opened by",
   resultsSeats: { one: "Seat {seats}", other: "Seats {seats}" },
   resultsOpenedUnsigned: "No seat's signature on it checks",
+  resultsStatusCounted: "Counted",
+  resultsFingerprints:
+    "Counting it again without us starts from this poll's ID, and the definition it finds must have this hash, which fixes the poll's rules before its first answer.",
   resultsCheckTitle: "Check it yourself",
   resultsVerify: "How to count it yourself",
   reactionsTitle: "Reactions",

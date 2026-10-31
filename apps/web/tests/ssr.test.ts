@@ -689,6 +689,18 @@ describe("results page", () => {
     expect(page).not.toContain("The groups side by side");
   });
 
+  test("is headed by the poll's facts and gives the ID and definition hash a recount starts from", async () => {
+    const page = await text(`/polls/${CELLS_ID}/results`);
+    expect(page).toContain("Who can vote");
+    expect(page).toContain("Opens");
+    expect(page).toContain("Closes");
+    expect(page).toContain("Counting");
+    expect(page).toContain("Check it yourself");
+    expect(page).toContain("Counting it again without us starts from this poll&#x27;s ID");
+    expect(page).toContain("Poll ID");
+    expect(page).toContain("Definition hash, to compare with the election registry on chain");
+  });
+
   test("a tier counted in several cells shows each cell's own results, with its regions and members", async () => {
     const page = await text(`/polls/${CELLS_ID}/results`);
     expect(page).toContain("Part by part");
@@ -2604,15 +2616,15 @@ const KB = 1024;
  * home the stream's cards beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 177, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 174, css: 40, fonts: 58 },
+  "/": { html: 10, js: 178, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 175, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 214, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 181, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 176, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 8, js: 184, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 169, css: 40, fonts: 58 },
   "/account": { html: 6, js: 198, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 253, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 173, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

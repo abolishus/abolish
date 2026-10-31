@@ -376,6 +376,9 @@ export class IntakeSeat {
       if (!again.ok) return { ok: false, code: "intake-definition" };
       this.#stubPassed.add(stubName);
     }
+    // A rolling stub never passes check 4 yet, so no seat approved one; its
+    // ballots (version 5, against step roots) are [[P2-17]] part 7c-3b's.
+    if (record.version === 7) return { ok: false, code: "intake-definition" };
     // Under definition version 5, ballot version 3: its questions' ranges
     // and the cell each ballot names (P2-14).
     const definition: Stub =

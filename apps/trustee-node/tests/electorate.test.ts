@@ -16,6 +16,8 @@ import {
   registry,
   release,
   removed,
+  rolling,
+  rollingTree,
   ROOT_BLOCK,
   tierOf,
   v1,
@@ -149,6 +151,25 @@ describe("l2ElectorateCheck", () => {
     };
     expect(await check(nodeOf(one.records))(v1([tier]))).toBe(true);
     expect(await check(nodeOf(one.records))(v1([{ ...tier, group_size: 1n }]))).toBe(false);
+  });
+
+  test("recounts a rolling stub's opening state at its rolling tiers' root block", async () => {
+    // chain-order's opening state is at ROOT_BLOCK, with events after it;
+    // its groups are created at block 1.
+    const t = rollingTree("chain-order");
+    expect(t.tier.root_l2_block).toBe(ROOT_BLOCK);
+    const stub = rolling([t.tier], t.closesAt);
+    const from = { fromBlock: 1n };
+    expect(await check(nodeOf(t.records), from)(stub)).toBe(true);
+    for (const tier of [
+      { ...t.tier, group_size: t.tier.group_size + 1n },
+      { ...t.tier, root: t.tier.root + 1n },
+    ])
+      expect(await check(nodeOf(t.records), from)(rolling([tier], t.closesAt))).toBe(false);
+    // Its root block, not its empty fixed list's, is the one that must be final.
+    const late = nodeOf(t.records, ROOT_BLOCK - 1n);
+    expect(await check(late, from)(stub)).toBe(false);
+    expect(late.asked).toEqual([]);
   });
 
   test("reads every log of the pinned registry from its deployment block to the proven block", async () => {

@@ -9,6 +9,7 @@ import {
   DecodeError,
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   forcedPathElectionOf,
   type ElectionDefinition,
   electionDefinitionHash,
@@ -16,8 +17,13 @@ import {
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
+  type ElectionDefinitionV7,
+  electionDefinitionV7Hash,
+  electionDefinitionV7Rule,
+  ELECTORATE_MODES,
   electionStubHash,
   electionStubV5Hash,
+  electionStubV7Hash,
   type FixedForcedPathElection,
   forcedPathDemand,
   type ForcedPathElection,
@@ -29,6 +35,7 @@ import {
   pinnedVersion,
   profileCombinationRule,
   RECORD_TYPES,
+  RESULTS_MODES,
 } from "@abolishus/crypto";
 
 /**
@@ -47,25 +54,29 @@ export const RELEASE_WINDOWS: ForcedPathWindows = Object.freeze({
 });
 
 /**
- * A stub of a definition version this release reads: version 1, and version
- * 5, the one the website creates (questions over regional cells,
- * `packages/core`'s poll stubs). Versions 3 and 4 have no creator, and
- * version 6's author panel and version 7's rolling tiers aren't read yet.
+ * A stub of a definition version this release reads: version 1, version 5,
+ * the one the website creates for a fixed poll (questions over regional
+ * cells, `packages/core`'s poll stubs), and version 7, a rolling poll's
+ * ([[0028-rolling-electorates]]). Versions 3 and 4 have no creator, and
+ * version 6's author panel isn't read yet.
  */
 export type Stub =
   | { readonly version: 1; readonly value: ElectionDefinition }
-  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 }
+  | { readonly version: 7; readonly value: ElectionDefinitionV7 };
 
 /**
  * Strictly decodes a stub of a version `Stub` holds, throwing `DecodeError`
  * otherwise (`unknown-version` for a definition version it doesn't hold).
  */
 export function decodeStub(bytes: Uint8Array): Stub {
-  // Version 5 isn't among the versions decodeElectionDefinitionRecord
-  // reads; its version byte is read here only to pick the decoder, which
-  // checks it again against the profile.
+  // Versions 5 and 7 aren't among the versions
+  // decodeElectionDefinitionRecord reads; the version byte is read here
+  // only to pick the decoder, which checks it again against the profile.
   if (bytes instanceof Uint8Array && bytes[2] === 5)
     return { version: 5, value: decodeElectionDefinitionV5(bytes) };
+  if (bytes instanceof Uint8Array && bytes[2] === 7)
+    return { version: 7, value: decodeElectionDefinitionV7(bytes) };
   const record = decodeElectionDefinitionRecord(bytes);
   if (record.version !== 1) throw new DecodeError("unknown-version", 2);
   return record;
@@ -73,24 +84,52 @@ export function decodeStub(bytes: Uint8Array): Stub {
 
 /** `stub_hash` under the stub's own version (docs/spec/election-definition.md, Stub hash and the ceremony). */
 export function stubHash(stub: Stub): Uint8Array {
-  return stub.version === 1 ? electionStubHash(stub.value) : electionStubV5Hash(stub.value);
+  switch (stub.version) {
+    case 1:
+      return electionStubHash(stub.value);
+    case 5:
+      return electionStubV5Hash(stub.value);
+    case 7:
+      return electionStubV7Hash(stub.value);
+  }
 }
 
 /** The hash of the definition a transcript registers: the stub with `ceremony_transcript_hash` set. */
 export function stubDefinitionHash(stub: Stub, transcriptHash: Uint8Array): Uint8Array {
-  return stub.version === 1
-    ? electionDefinitionHash({ ...stub.value, ceremony_transcript_hash: transcriptHash })
-    : electionDefinitionV5Hash({ ...stub.value, ceremony_transcript_hash: transcriptHash });
+  switch (stub.version) {
+    case 1:
+      return electionDefinitionHash({ ...stub.value, ceremony_transcript_hash: transcriptHash });
+    case 5:
+      return electionDefinitionV5Hash({ ...stub.value, ceremony_transcript_hash: transcriptHash });
+    case 7:
+      return electionDefinitionV7Hash({ ...stub.value, ceremony_transcript_hash: transcriptHash });
+  }
 }
 
-/** What the capacity check reads from a stub (versions 1 and 5: one panel, no author seats, a fixed electorate). */
-export function stubDemand(
-  stub: ElectionDefinition | ElectionDefinitionV5,
-): FixedForcedPathElection {
+/**
+ * The latest `root_l2_block` of the stub's tiers, fixed or rolling: the
+ * block the electorate check's recount must reach (check 3).
+ */
+export function stubRootBlock(stub: Stub): bigint {
+  const tiers: readonly { readonly root_l2_block: bigint }[] =
+    stub.version === 7 && stub.value.electorate_mode === ELECTORATE_MODES.rolling
+      ? stub.value.rolling_electorate
+      : stub.value.electorate;
+  return tiers.reduce((m, t) => (t.root_l2_block > m ? t.root_l2_block : m), 0n);
+}
+
+/**
+ * What the seat records of an election it approves, for check 4 of later
+ * stubs: a fixed election's demand, with its `M`. Only a stub that passed
+ * `checkStub` gets here, and check 4 refuses every rolling stub while roots
+ * can't be sent or read, so a rolling one throws: recording one needs the
+ * rolling flag in place of `M` in the served record ([[P1-12f]] parts 3b
+ * and 3c, then [[P2-17]]).
+ */
+export function stubDemand(stub: Stub["value"]): FixedForcedPathElection {
   const demand = forcedPathElectionOf(stub);
-  // Versions 1 and 5 have no `electorate_mode`, so they are always fixed.
   if (demand.rolling === true)
-    throw new Error("trustee node: a version 1 or 5 stub read as rolling");
+    throw new Error("trustee node: a rolling election can't be approved yet");
   return demand;
 }
 
@@ -118,6 +157,11 @@ export type ElectorateCheck = (stub: Stub) => Promise<boolean>;
 /** Why a node refuses a stub, in checking order. */
 export type StubRefusal =
   | "stub-decode"
+  /**
+   * A definition version the node doesn't read, or a version-7 stub using
+   * what it doesn't read under version 7: a fixed electorate, live results
+   * or an author panel.
+   */
   | "stub-version"
   | "stub-transcript-hash"
   | "stub-rule"
@@ -149,13 +193,16 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * Stub checks 1 to 4. Definition versions 1 and 5 are read (`Stub`); any
- * other is refused (`stub-version`), so no ceremony runs for an election the
- * node can't check: no author panel's (version 6), and no rolling one
- * (version 7), which commits roots whatever its size and so is refused while
- * roots can't be sent or read (docs/spec/delivery.md, Capacity; check 3's
- * rolling recount and the version-7 read are [[P2-17]] part 7c-3).
- * `served` holds the demand of every election the seat has approved, by stub
+ * Stub checks 1 to 4. Definition versions 1 and 5 are read, and version 7
+ * for a sealed rolling poll without an author panel (`Stub`); any other is
+ * refused (`stub-version`), so no ceremony runs for an election the node
+ * can't check: no author panel's (version 6, or 7 with one), and no fixed
+ * or live version 7, which nothing the node runs after the ceremony reads.
+ * A rolling stub runs checks 1 to 3, its electorate the opening state 2.4
+ * recounts, and is then refused at check 4 (`stub-capacity`): it commits
+ * roots whatever its size, and every election that does is refused while
+ * roots can't be sent or read (docs/spec/delivery.md, Capacity; [[P1-12f]]
+ * parts 3b and 3c). `served` holds the demand of every election the seat has approved, by stub
  * hash (hex); the stub's own entry, if any, is left out.
  */
 export async function checkStub(
@@ -174,16 +221,31 @@ export async function checkStub(
     }
     throw e;
   }
+  // A version-7 stub is read only as the rolling poll the everyday app
+  // makes. The profile combination below would pass a fixed or live one,
+  // but its ballots (version 4), live releases and author half are read by
+  // nothing this node runs after the ceremony.
+  if (
+    record.version === 7 &&
+    (record.value.electorate_mode !== ELECTORATE_MODES.rolling ||
+      record.value.results_mode !== RESULTS_MODES.sealed ||
+      record.value.author_threshold !== 0 ||
+      record.value.author_keys.length !== 0)
+  )
+    return { ok: false, code: "stub-version" };
   const stub = record.value;
   // 1: the stub as the creator fixed it, before any transcript exists; its
   // hash is recomputed here, never taken from the coordinator.
   if (!stub.ceremony_transcript_hash.every((b) => b === 0))
     return { ok: false, code: "stub-transcript-hash" };
-  // Version 5's rule includes the questions' and cells' own (T-28, T-34).
+  // Version 5's rule includes the questions' and cells' own (T-28, T-34),
+  // and version 7's its rolling tiers' and `rolling-class` (T-34, T-53).
   const rule =
     record.version === 1
       ? electionDefinitionRule(record.value)
-      : electionDefinitionV5Rule(record.value);
+      : record.version === 5
+        ? electionDefinitionV5Rule(record.value)
+        : electionDefinitionV7Rule(record.value);
   if (rule !== undefined) return { ok: false, code: "stub-rule" };
   // 2: the panel, the chain and the registry this node's release and
   // deployment pin.
@@ -198,28 +260,33 @@ export async function checkStub(
   // 3, [[verifier]] 2.3: every pinned version is one this release reads, in
   // a combination that fits. The well-formedness rule above makes the pins
   // exactly types 0x0001 to 0x0009: `profileCombinationRule` judges seven of
-  // them (the contract event's included), and the rest are judged here. Unlike the verifier, which leaves an election
-  // it can't read unverifiable, a node refuses: it can't check what it
-  // can't read.
+  // them (the contract event's included), and the rest are judged here.
+  // Unlike the verifier, which leaves an election it can't read
+  // unverifiable, a node refuses: it can't check what it can't read. A
+  // rolling profile is read (`readsRolling`): its ballots are judged against
+  // step roots the node computes from the registry ([[P2-17]] part 7c-3b),
+  // and check 4 refuses every rolling stub until that intake is in.
   if (
-    profileCombinationRule(stub) !== undefined ||
+    profileCombinationRule(stub, 0, record.version === 7) !== undefined ||
     stub.profile.pins.some((p) => {
       const read = READ_VERSIONS.get(p.record_type);
       return read !== undefined && !read.has(p.version);
     })
   )
     return { ok: false, code: "stub-profile" };
-  // 3, [[verifier]] 1.3: ballot versions 1 to 3 prove membership under the
+  // 3, [[verifier]] 1.3: ballot versions 1 to 5 prove membership under the
   // one key this release pins; a later version's key isn't known here. The
   // profile combination above already ties the ballot version to the
-  // definition's (1 under 1, 3 under 5).
+  // definition's (1 under 1, 3 under 5, 5 under a rolling 7).
   const ballot = pinnedVersion(stub, RECORD_TYPES.ballot);
   if (
-    (ballot !== 1 && ballot !== 2 && ballot !== 3) ||
+    (ballot !== 1 && ballot !== 2 && ballot !== 3 && ballot !== 5) ||
     !equal(stub.membership_vk_hash, membershipVkHash())
   )
     return { ok: false, code: "stub-membership-key" };
-  // 3, [[verifier]] 2.4: the electorate, against the chain.
+  // 3, [[verifier]] 2.4: the electorate, against the chain: a fixed tier's
+  // regions and cells, a rolling tier's opening state and its groups'
+  // strict replay.
   // The hash is of the stub as checked above; the deployment's check gets
   // its own decoded copy, so nothing it does can change what is hashed.
   const hash = stubHash(record);
@@ -227,8 +294,16 @@ export async function checkStub(
   // 4: the forced path, over the counts 2.4 just checked, with every election
   // this seat serves whose intervals can overlap this one's; the others never
   // share a moment with it (docs/spec/delivery.md, Capacity).
+  const demand = forcedPathElectionOf(stub);
+  // A rolling election commits roots whatever its size, counted with the
+  // root figure alone (docs/spec/delivery.md, Elections that commit roots):
+  // `forcedPathFits` never fits a set holding one while roots can't be sent
+  // or read, so it is refused here, before its intervals, which only the
+  // root figure gives, are needed. The refusal is the node's own, not only
+  // crypto's: approving one also needs the served record's rolling flag and
+  // version-5 intake ([[P2-17]] part 7c-3b), whatever `forcedPathFits` says.
+  if (demand.rolling === true) return { ok: false, code: "stub-capacity" };
   const own = Buffer.from(hash).toString("hex");
-  const demand = stubDemand(stub);
   const mine = forcedPathDemand(demand, RELEASE_WINDOWS);
   const others = [...served]
     .filter(([hash]) => hash !== own)

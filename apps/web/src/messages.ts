@@ -723,13 +723,13 @@ const enUS = {
   pollFailure_registrationTimeout:
     "Registering your poll took too long. Your question wasn't published. You can try again or discard it.",
   pollFailure_registrationMismatch:
-    "Something other than your poll was registered under its place on the public record, so we stopped before it opened. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
+    "Something other than your poll was registered under its place on the public record, so we stopped before it opened. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   pollFailure_openMismatch:
-    "What the public record holds for your poll isn't exactly what you wrote, so we didn't open it. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
+    "What the public record holds for your poll isn't exactly what you wrote, so we didn't open it. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   pollFailure_ceremonyTimeout:
     "Making the key that seals your poll's answers didn't finish after four tries. Your question wasn't published. You can try again or discard it.",
   pollFailure_openTimeout:
-    "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
+    "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   evidenceSummary: "How do we know this is real?",
   evidenceFingerprintTitle: "This poll's fingerprint",
   evidenceFingerprint:
@@ -1284,7 +1284,7 @@ const enUS = {
   pollsFollowSetup: "Follow its setup",
   pollsPage: "Go to its page",
   pollsResults: "See its results",
-  pollsStartNew: "Start a new poll",
+  pollsAskAgain: "Ask it again",
   pollsDelete: "Delete draft…",
   pollsDeleteQuestion: "Delete this draft? This can't be undone.",
   pollsDeleteConfirm: "Delete draft permanently",
@@ -1357,6 +1357,8 @@ const enUS = {
   pollFormEditTitle: "Edit your poll",
   pollFormLede:
     "Only you can see a draft, and you can change it as often as you like until you submit it.",
+  pollFormCopiedLede:
+    "Your words from the poll that didn't open are filled in. Choose when this one closes; only you can see it until you submit it.",
   pollFormBack: "Back to your polls",
   pollFormNeedsScript: "Saving a draft needs this page's script.",
   pollFormLoading: "Loading your draft…",

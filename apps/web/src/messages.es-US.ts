@@ -735,13 +735,13 @@ export const esUS: Messages = {
   pollFailure_registrationTimeout:
     "Registrar tu encuesta tomó demasiado tiempo. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_registrationMismatch:
-    "Algo distinto de tu encuesta quedó registrado en su lugar del registro público, así que nos detuvimos antes de que abriera. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+    "Algo distinto de tu encuesta quedó registrado en su lugar del registro público, así que nos detuvimos antes de que abriera. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   pollFailure_openMismatch:
-    "Lo que el registro público tiene de tu encuesta no es exactamente lo que escribiste, así que no la abrimos. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+    "Lo que el registro público tiene de tu encuesta no es exactamente lo que escribiste, así que no la abrimos. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   pollFailure_ceremonyTimeout:
     "La clave que sella las respuestas de tu encuesta no se terminó de crear tras cuatro intentos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_openTimeout:
-    "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
+    "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   evidenceSummary: "¿Cómo sabemos que esto es real?",
   evidenceFingerprintTitle: "La huella de esta encuesta",
   evidenceFingerprint:
@@ -1314,7 +1314,7 @@ export const esUS: Messages = {
   pollsFollowSetup: "Seguir la preparación",
   pollsPage: "Ir a su página",
   pollsResults: "Ver sus resultados",
-  pollsStartNew: "Crear una encuesta nueva",
+  pollsAskAgain: "Volver a hacerla",
   pollsDelete: "Eliminar borrador…",
   pollsDeleteQuestion: "¿Eliminar este borrador? No se puede deshacer.",
   pollsDeleteConfirm: "Eliminar el borrador para siempre",
@@ -1389,6 +1389,8 @@ export const esUS: Messages = {
   pollFormEditTitle: "Edita tu encuesta",
   pollFormLede:
     "Solo tú puedes ver un borrador, y puedes cambiarlo cuantas veces quieras hasta que lo envíes.",
+  pollFormCopiedLede:
+    "Ya están puestas tus palabras de la encuesta que no abrió. Elige cuándo cierra esta; solo tú puedes verla hasta que la envíes.",
   pollFormBack: "Volver a tus encuestas",
   pollFormNeedsScript: "Para guardar un borrador se necesita el script de esta página.",
   pollFormLoading: "Cargando tu borrador…",

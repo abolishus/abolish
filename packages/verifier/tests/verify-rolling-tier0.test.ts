@@ -19,6 +19,7 @@ import {
   type CheckResult,
   parseBundle,
   type PinnedPanel,
+  rollingElectorates,
   type Report,
   type RollingChainRelease,
   splitEntries,
@@ -469,6 +470,36 @@ describe(
       );
       const e = r.tiers?.[0]?.electorate;
       expect(e?.close?.members).toBeLessThan(e?.eligible ?? 0);
+    });
+
+    test("only the counted extent's copies in the tier's own cell name its smallest step", () => {
+      const chain = archivedChain(
+        d,
+        replayOf(file.events, { ...sealed, registeredAt: file.registeredAt }),
+        registries,
+      );
+      if (chain === undefined) throw new Error("fixture: no chain");
+      const [want] = electoratesOf("verifier-ballots-v5-tier0-sealed.json");
+      const close = want?.electorate.close;
+      const smallest = want?.electorate.smallestStep;
+      if (close == null || smallest == null) throw new Error("fixture: no close or smallest step");
+      expect(close.members).toBeGreaterThan(smallest.members);
+      const extent = 10;
+      const smallestOf = (steps: { entry: number; cell: number; step: number }[]) =>
+        rollingElectorates(d, chain, sealedBundle().clock, steps, extent)[0]?.smallestStep;
+      const atClose = { entry: 1, cell: 0, step: close.step };
+      expect(smallestOf([atClose])).toEqual({ step: close.step, members: close.members });
+      // A copy past the extent, or naming another cell, is none of the tier's.
+      expect(
+        smallestOf([
+          atClose,
+          { entry: extent, cell: 0, step: smallest.step },
+          { entry: 2, cell: 1, step: smallest.step },
+        ]),
+      ).toEqual({ step: close.step, members: close.members });
+      expect(smallestOf([atClose, { entry: extent - 1, cell: 0, step: smallest.step }])).toEqual(
+        smallest,
+      );
     });
 
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {

@@ -1023,6 +1023,7 @@ export function verifyBundle(
   let counted: CountedResult | undefined;
   let releases: ReleasesReport | undefined;
   let electorates: readonly RollingElectorateReport[] | undefined;
+  let rollingTiers: readonly number[] = [];
   let availability: AvailabilityReport | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
@@ -1233,7 +1234,7 @@ export function verifyBundle(
         counted.tiers !== undefined &&
         admission.steps !== undefined &&
         extent !== undefined
-      )
+      ) {
         electorates = rollingElectorates(
           definition.definition,
           definition.rolling,
@@ -1241,6 +1242,8 @@ export function verifyBundle(
           admission.steps,
           extent,
         );
+        rollingTiers = definition.definition.value.rolling_electorate.map((t) => t.tier);
+      }
       // Under a live definition pinning tally-opening version 2, the
       // releases are read once 7.1 passed: the board is then sealed and
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
@@ -1410,7 +1413,14 @@ export function verifyBundle(
       tiers:
         electorates === undefined
           ? counted.tiers
-          : counted.tiers.map((t, i) => ({ ...t, electorate: electorates[i] })),
+          : counted.tiers.map((t) => {
+              // Paired by tier, never by position: a rolling tier is its own cell.
+              const at = rollingTiers.indexOf(t.tier);
+              const electorate = electorates[at];
+              if (electorate === undefined)
+                throw new Error("verifyBundle: a rolling tier without its electorate");
+              return { ...t, electorate };
+            }),
     }),
     ...(counted?.questions !== undefined && { questions: counted.questions }),
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),

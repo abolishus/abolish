@@ -424,6 +424,19 @@ const enUS = {
     "Point a phone's camera at it to open this poll. It holds the same link, so it says nothing about who showed it.",
   askOthersFlyer: "Print a flyer",
   askOthersNewTab: "(opens the website in a new tab)",
+  // The "I answered" card (answered-card.tsx; docs/design/sharing.md).
+  answeredCardShow: "Make an “I answered” card",
+  answeredCardLead: "I answered this poll",
+  answeredCardInvite: "Answer it too",
+  answeredCardCheck: "Anyone can check the count.",
+  answeredCardLabel:
+    "Card: I answered this poll. {question} Answer it too at {link}. Anyone can check the count.",
+  answeredCardDrawing: "Drawing the card…",
+  answeredCardNote:
+    "The card says you answered, never how. It's made on this device and goes only where you send it. It holds no tracking code, so it proves nothing: anyone can make one.",
+  answeredCardShare: "Share the card…",
+  answeredCardSave: "Save the card",
+  answeredCardFailed: "This browser couldn't draw the card. Share the link instead.",
   revoteExplained:
     "You can change your answers until the poll closes. A new ballot from this device replaces this one.",
   sendRejectedTitle: "The board refused your ballot",

@@ -3,6 +3,7 @@ import { Input } from "@abolishus/ui/ui/input";
 import { Check, ChevronDown, Copy, ExternalLink, Mail, Printer, Share2 } from "lucide-react";
 import { useId, useState } from "react";
 
+import { AnsweredCard } from "./answered-card.tsx";
 import { ACTION } from "./frame.tsx";
 import { catalogs } from "./messages.ts";
 
@@ -30,18 +31,27 @@ const hasWebShare = () => typeof navigator !== "undefined" && typeof navigator.s
  * to the link does, and nothing else (T-11).
  */
 export function AskOthers({
-  share: { url, title },
+  share,
+  seal,
   canShare,
+  canShareCard,
 }: {
   share: Share;
+  /** The poll's definition hash, the seal the "I answered" card carries. */
+  seal: string;
   /** Whether the browser has the Web Share API; detected when left out. */
   canShare?: boolean | undefined;
+  /** Whether its share menu takes the card's picture; detected when left out. */
+  canShareCard?: boolean | undefined;
 }) {
+  const { url, title } = share;
   const t = useTranslate(catalogs);
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const [qr, setQr] = useState(false);
+  const [card, setCard] = useState(false);
   const linkId = useId();
   const qrId = useId();
+  const cardId = useId();
   const titleId = useId();
   const menu = canShare ?? hasWebShare();
   // Only `{ title, url }` (docs/design/sharing.md): nothing about the sharer.
@@ -139,6 +149,22 @@ export function AskOthers({
               />
             ) : null}
             <p className="m-0 text-sm text-pretty text-muted-foreground">{t("askOthersQrNote")}</p>
+          </div>
+        </li>
+        <li>
+          <button
+            type="button"
+            className={ROW}
+            aria-expanded={card}
+            aria-controls={cardId}
+            onClick={() => setCard(!card)}
+          >
+            <span className="flex-1">{t("answeredCardShow")}</span>
+            <ChevronDown aria-hidden="true" className={cn("size-5", card && "rotate-180")} />
+          </button>
+          <div id={cardId} hidden={!card} className="px-3 pt-2 pb-4">
+            {/* Drawn only when asked for, like the QR code. */}
+            {card ? <AnsweredCard share={share} seal={seal} canShare={canShareCard} /> : null}
           </div>
         </li>
         <li>

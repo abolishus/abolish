@@ -427,6 +427,19 @@ export const esUS: Messages = {
     "Apunta la cámara de un teléfono hacia él para abrir esta encuesta. Contiene el mismo enlace, así que no dice nada sobre quién lo mostró.",
   askOthersFlyer: "Imprimir un volante",
   askOthersNewTab: "(abre el sitio web en una pestaña nueva)",
+  // The "I answered" card (answered-card.tsx; docs/design/sharing.md).
+  answeredCardShow: "Crear una tarjeta “Ya respondí”",
+  answeredCardLead: "Ya respondí esta encuesta",
+  answeredCardInvite: "Respóndela tú también",
+  answeredCardCheck: "Cualquiera puede comprobar el conteo.",
+  answeredCardLabel:
+    "Tarjeta: Ya respondí esta encuesta. {question} Respóndela tú también en {link}. Cualquiera puede comprobar el conteo.",
+  answeredCardDrawing: "Dibujando la tarjeta…",
+  answeredCardNote:
+    "La tarjeta dice que respondiste, nunca cómo. Se crea en este dispositivo y solo va adonde la envíes. No lleva código de seguimiento, así que no prueba nada: cualquiera puede crear una.",
+  answeredCardShare: "Compartir la tarjeta…",
+  answeredCardSave: "Guardar la tarjeta",
+  answeredCardFailed: "Este navegador no pudo dibujar la tarjeta. Comparte el enlace en su lugar.",
   revoteExplained:
     "Puedes cambiar tus respuestas hasta que cierre la encuesta. Una boleta nueva desde este dispositivo reemplaza a esta.",
   sendRejectedTitle: "El tablero rechazó tu boleta",

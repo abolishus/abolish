@@ -438,6 +438,7 @@ export function AccountPolls({
                       client={client}
                       pollId={p.id}
                       titleId={`poll-${p.id}-title`}
+                      title={title}
                       {...(onSignedOut === undefined ? {} : { onSignedOut })}
                     />
                   )}

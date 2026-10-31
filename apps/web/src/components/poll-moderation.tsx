@@ -30,6 +30,8 @@ export interface PollModerationProps {
   readonly pollId: string;
   /** The ID of the element naming the poll, which describes the appeal's buttons. */
   readonly titleId: string;
+  /** The poll's title as the row shows it, which the appeal's question names. */
+  readonly title: string;
   /** Called when the session turns out to have ended. */
   readonly onSignedOut?: () => void;
 }
@@ -42,7 +44,13 @@ export interface PollModerationProps {
  * the public log's; the moderator and the reviewer are never shown, since
  * the handler never sends them (T-68).
  */
-export function PollModeration({ client, pollId, titleId, onSignedOut }: PollModerationProps) {
+export function PollModeration({
+  client,
+  pollId,
+  titleId,
+  title,
+  onSignedOut,
+}: PollModerationProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const [view, setView] = useState<PollModerationView | undefined>();
@@ -137,12 +145,12 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
       aria-busy={busy}
       className="grid gap-3 border-s-2 border-foreground ps-4 text-sm md:col-span-full"
     >
-      {/* The icon sits on the first line, as the account's checks do: centred on a heading that wraps, it fell between the lines. */}
+      {/* The icon sits on the first line, as the account's checks do: centred on a heading that wraps, it fell between the lines. Focus comes here only by script, after filing, so it draws no ring, as the list's heading and questions draw none: the browser's crossed the history's rule and the time under it. */}
       <p
         id={headingId}
         ref={heading}
         tabIndex={-1}
-        className="m-0 flex items-start gap-2 font-semibold"
+        className="m-0 flex items-start gap-2 font-semibold outline-none"
         suppressHydrationWarning
       >
         {Icon === undefined ? null : <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
@@ -208,7 +216,8 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
             tabIndex={-1}
             className="m-0 max-w-prose font-semibold text-pretty outline-none"
           >
-            {t("moderationAppealQuestion")}
+            {/* Focus lands here, away from the button its title described: the question names the poll, as the list's own questions do. */}
+            {t("moderationAppealQuestion")} <span className="sr-only">{title}</span>
           </p>
           <div className="flex flex-wrap gap-2">
             <Button disabled={busy} onClick={() => void appeal()}>

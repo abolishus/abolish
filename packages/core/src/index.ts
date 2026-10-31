@@ -370,6 +370,7 @@ export {
   REGISTRATION_PERIOD,
   selectUniformly,
   TIER0_BATCH_LOCK_MS,
+  TIER0_BOUNDARY_WITHIN,
   type Tier0BatchOptions,
   Tier0Batches,
   type Tier0Chain,

@@ -35,6 +35,19 @@ export const MIN_REGISTRATION_BATCH = 8;
 /** Boundaries in a row at which a group's short queue may be held. */
 export const MAX_REGISTRATION_HOLD = 6;
 /**
+ * Seconds into a period within which its boundary may still start
+ * (`BOUNDARY_WITHIN` in docs/spec/registration.md): four of the worker's
+ * ticks. A boundary forms its batches half a period before the
+ * root clock's next boundary (`ROOT_OFFSET`; docs/spec/registration.md,
+ * Timing against the root clock), so a batch sent then is in the next step
+ * of every rolling poll listing its group. A runner that was down, or whose
+ * tries all lost the lock, skips the period rather than start a boundary
+ * whose batch could land after that step's boundary: it would be in the same
+ * step as the next period's, and its time would sit off the boundaries
+ * (T-13). Its queue waits for the next boundary.
+ */
+export const TIER0_BOUNDARY_WITHIN = 120;
+/**
  * Milliseconds the batch job's lock lasts. Every write checks it in the same
  * script, so a runner whose lock lapsed (a stalled chain read) writes
  * nothing; the adapter's calls should time out well within it.
@@ -417,13 +430,16 @@ export class Tier0Batches {
   /**
    * The boundary that began the current period: every published group in
    * ascending `group_id`, each against the state the groups before it left.
-   * Resolves null if this period's boundary has already run. Throws
+   * Resolves null if this period's boundary has already run, or if the
+   * period began `TIER0_BOUNDARY_WITHIN` seconds ago or more. Throws
    * `Tier0LockError` if another runner holds the lock, which may be an index
    * refresh: the caller retries within the period.
    */
   async runBoundary(): Promise<Tier0GroupReport[] | null> {
     return this.#locked(async (token) => {
-      const period = Math.floor(this.#now() / REGISTRATION_PERIOD);
+      const now = Math.floor(this.#now());
+      if (now % REGISTRATION_PERIOD >= TIER0_BOUNDARY_WITHIN) return null;
+      const period = Math.floor(now / REGISTRATION_PERIOD);
       const marked = await this.#fenced(
         MARK_BOUNDARY,
         [this.#keys.boundary],

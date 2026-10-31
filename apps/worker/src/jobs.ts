@@ -317,9 +317,10 @@ async function tier0Index(ctx: JobContext, _data: JobData<"tier0Index">): Promis
 }
 
 /**
- * Runs the current period's boundary if it hasn't run, and logs what it did
- * to each group. A lock held by an index refresh is retried at the next
- * tick, still within the period.
+ * Runs the current period's boundary if it hasn't run and the period began
+ * less than `TIER0_BOUNDARY_WITHIN` ago, and logs what it did to each group.
+ * A lock held by an index refresh is retried at the next tick, still within
+ * that bound.
  */
 async function tier0Boundary(ctx: JobContext, _data: JobData<"tier0Boundary">): Promise<void> {
   let reports;

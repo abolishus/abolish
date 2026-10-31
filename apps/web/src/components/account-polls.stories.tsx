@@ -578,7 +578,11 @@ export const AppealADecision: Story = {
     await expect(moderation.getByRole("button", { name: "Appeal this decision…" })).toHaveFocus();
     await expect(calls(args.client)).toEqual([]);
     await userEvent.keyboard("{Enter}");
-    await expect(moderation.getByRole("group", { name: /^Appeal this decision\?/ })).toBeVisible();
+    // Focus left the button its poll described, so the question names the
+    // poll itself, as the list's own do (P2-29, the author's list's iteration 20).
+    await expect(
+      moderation.getByRole("group", { name: /^Appeal this decision\?.* Name the new ferry$/ }),
+    ).toBeVisible();
     await userEvent.click(moderation.getByRole("button", { name: "Send appeal" }));
     await expect(await moderation.findByRole("status")).toHaveTextContent(
       "Your appeal is filed. A different moderator will review it.",
@@ -591,7 +595,12 @@ export const AppealADecision: Story = {
     ).toBeVisible();
     // Once filed, the decision can't be appealed again.
     await expect(moderation.queryByRole("button", { name: /Appeal/ })).toBeNull();
-    await expect(moderation.getByText("Delisted: Spam").closest("p")).toHaveFocus();
+    const decision = moderation.getByText("Delisted: Spam").closest("p");
+    await expect(decision).toHaveFocus();
+    // Focused only by script, it draws no ring, as the list's heading and
+    // questions draw none: the browser's crossed the history's rule and the
+    // time under it (P2-29, the author's list's iteration 20).
+    await expect(decision && getComputedStyle(decision).outlineStyle).toBe("none");
     await expect(calls(args.client)).toEqual([`appeal ${OPEN.id}`]);
   },
 };

@@ -676,7 +676,17 @@ export function StreamPage({
           {t("streamQuestions")}
         </h2>
         {stream.kind === "sort-unavailable" ? (
-          <Empty title={t("streamSortUnavailableTitle")}>{t("streamSortUnavailable")}</Empty>
+          // Only `answered` can be unavailable (the API's board clock). The
+          // box said "the other orders still work" with no way to one, the
+          // stream's only dead end; its action now takes the newest, keeping
+          // the search, topic and place (P2-29, the stream's iteration 17).
+          <Empty
+            title={t("streamSortUnavailableTitle")}
+            href={streamHref("new", filter)}
+            action={t("streamSortUnavailableAction")}
+          >
+            {t("streamSortUnavailable")}
+          </Empty>
         ) : stream.kind === "search-refused" ? (
           <Empty
             title={t("streamSearchRefusedTitle")}

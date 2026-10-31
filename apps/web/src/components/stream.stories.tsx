@@ -455,13 +455,23 @@ export const Unreadable: Story = {
 };
 
 export const SortUnavailable: Story = {
-  args: { sort: "answered", stream: { kind: "sort-unavailable" } },
+  args: {
+    sort: "answered",
+    filter: { topic: "transport" },
+    stream: { kind: "sort-unavailable" },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
       canvas.getByRole("heading", { name: "This order isn't available just now" }),
     ).toBeVisible();
     await expect(canvas.queryByRole("link", { name: "More questions" })).toBeNull();
+    // A way on from the box itself, to an order that needs no count,
+    // keeping the topic (P2-29, the stream's iteration 17).
+    await expect(canvas.getByRole("link", { name: "Show the newest questions" })).toHaveAttribute(
+      "href",
+      "/discover?topic=transport",
+    );
   },
 };
 

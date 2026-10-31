@@ -402,8 +402,8 @@ const enUS = {
   streamEmptyLede: "When someone asks one, it shows up here.",
   streamMore: "More questions",
   streamSortUnavailableTitle: "This order isn't available just now",
-  streamSortUnavailable:
-    "The server can't count this week's answers at the moment. The other orders still work.",
+  streamSortUnavailable: "The server can't count this week's answers at the moment.",
+  streamSortUnavailableAction: "Show the newest questions",
   streamCursorLostTitle: "That page has moved on",
   streamCursorLost: "The question this page started after can't be placed in this order any more.",
   streamStart: "Start from the top",

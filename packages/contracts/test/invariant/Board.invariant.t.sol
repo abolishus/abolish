@@ -76,6 +76,19 @@ contract BoardChecks {
         (BallotCheckLib.Admitted memory a,) = BallotCheckLib.check(r, e, qualified, 0);
         return (a.definitionHash, a.ballotHash);
     }
+
+    function rolling(
+        bytes calldata r,
+        IBoardElections e,
+        bytes32 root,
+        uint256 qualified,
+        uint256 authorQualified
+    ) external view returns (bytes32, bytes32) {
+        (BallotCheckLib.Admitted memory a,) = BallotCheckLib.checkRolling(
+            r, e, uint256(root), qualified, authorQualified
+        );
+        return (a.definitionHash, a.ballotHash);
+    }
 }
 
 /// The honest records the handler submits: delivery.json's three receipts
@@ -85,7 +98,10 @@ contract BoardChecks {
 /// two entries, with its complaint batch whose `D` frames but isn't a point,
 /// which the board accepts (it frames, never decodes, T-53), and
 /// delivery-root.json's roots: seat 1's two receipt roots, seat 2's
-/// complaint root and its receipt root of 16,384 leaves.
+/// complaint root and its receipt root of 16,384 leaves; and
+/// ballot-v5-records.json's ok-newest-step, a rolling poll's ballot, with
+/// the root its proof holds against and contract-event-v10.json's
+/// front-run root, another step's.
 struct Honest {
     bytes[3] receipts;
     bytes posting;
@@ -95,6 +111,9 @@ struct Honest {
     bytes[2] receiptBatches;
     bytes[3] complaintBatches;
     bytes[4] roots;
+    bytes rolling;
+    bytes32 rollingRoot;
+    bytes32 frontRunRoot;
 }
 
 /// Submits delivery.json's honest records and ballot.json's honest ballot,
@@ -104,7 +123,8 @@ struct Honest {
 /// and receipt batches with one changed receipt among honest ones; both kinds
 /// of batch record, alone, repeated and with one byte changed; and obligation
 /// roots, alone, repeated, competing for one seat's slot and with one byte
-/// changed. Postings
+/// changed; and the rolling ballot with its own root, the front-run root or
+/// any other, with one byte changed, and on the ordinary path. Postings
 /// run with the pairing precompile mocked, as in Board.t.sol (no vector
 /// pairs a real membership proof with ciphertexts); ballots run unmocked,
 /// so their membership proof is real. Keeps a shadow of the accumulator
@@ -133,6 +153,10 @@ contract BoardHandler is TestBase {
     /// Refused calls, to submit again, and whether each needs the mock.
     bytes[] internal refusedCalls;
     bool[] internal refusedMocked;
+    /// For a refused rolling ballot, its record's key: once that record is
+    /// accepted (with its own root), the same bytes with any root are the
+    /// repeat's no-op on every ballot path, which emits nothing.
+    bytes32[] internal refusedRecords;
     /// The first broken rule, if any.
     string public failure;
 
@@ -186,6 +210,22 @@ contract BoardHandler is TestBase {
         );
     }
 
+    /// The rolling ballot with its own root (`which % 3 == 0`), the
+    /// front-run root (1) or `other` (2). Only its own root is accepted
+    /// until the record is: after that, every root is the no-op, since a
+    /// repeat is the record's bytes alone (T-25, T-38).
+    function submitRollingBallot(uint8 which, bytes32 other) external {
+        bytes32 root =
+            which % 3 == 0 ? honest.rollingRoot : which % 3 == 1 ? honest.frontRunRoot : other;
+        bytes memory data = abi.encodeCall(Board.submitRollingBallot, (root, honest.rolling));
+        if (root == honest.rollingRoot || accepted[keccak256(honest.rolling)]) {
+            _expectAccepted(data, honest.rolling, honest.rolling.length, "", false);
+        } else {
+            _expectRefused(data, false, type(uint256).max);
+            _refusedRolling(data);
+        }
+    }
+
     /// The honest posting, or one with another of four `m`s, which is
     /// another posting the board accepts beside it; carried by Alice's
     /// ballot record with any of four L1 references, which its ballot hash
@@ -200,7 +240,7 @@ contract BoardHandler is TestBase {
     /// only field the board can't check): refused with the board's errors.
     function submitChanged(uint8 kind, uint256 position, uint8 delta) external {
         if (delta == 0) delta = 1;
-        kind %= 4;
+        kind %= 6;
         bytes memory data;
         if (kind == 0) {
             bytes memory r = _changed(honest.receipts[position % 3], position >> 8, delta);
@@ -215,10 +255,34 @@ contract BoardHandler is TestBase {
             data = abi.encodeCall(
                 Board.submitPosting, (_changed(honest.posting, at, delta), honest.alice)
             );
-        } else {
+        } else if (kind == 3) {
             data = abi.encodeCall(Board.submitBallot, (_changed(honest.ballot, position, delta)));
+        } else if (kind == 4) {
+            data = abi.encodeCall(
+                Board.submitRollingBallot,
+                (honest.rollingRoot, _changed(honest.rolling, position, delta))
+            );
+        } else {
+            // A rolling poll's ballot on the ordinary path: `unknown-version`,
+            // or, once the rolling call accepted it, the repeat's no-op,
+            // which emits nothing.
+            data = abi.encodeCall(Board.submitBallot, (honest.rolling));
+            if (accepted[keccak256(honest.rolling)]) {
+                _expectAccepted(data, honest.rolling, honest.rolling.length, "", false);
+                return;
+            }
         }
         _expectRefused(data, kind == 2, type(uint256).max);
+        if (kind == 5) _refusedRolling(data);
+    }
+
+    /// Marks refused call `data`, if it was just stored, as carrying the
+    /// honest rolling ballot.
+    function _refusedRolling(bytes memory data) internal {
+        uint256 n = refusedCalls.length;
+        if (n != 0 && keccak256(refusedCalls[n - 1]) == keccak256(data)) {
+            refusedRecords[n - 1] = keccak256(honest.rolling);
+        }
     }
 
     /// A receipt batch (`kind` even) or complaint batch (odd), whole: one
@@ -316,7 +380,8 @@ contract BoardHandler is TestBase {
             (bytes32 acc, uint64 count) = board.eventAccumulator();
             (bool ok,,) = _call(refusedCalls[i], refusedMocked[i]);
             (bytes32 accAfter, uint64 countAfter) = board.eventAccumulator();
-            if (ok) _fail("a refused record was remembered");
+            bool repeat = refusedRecords[i] != 0 && accepted[refusedRecords[i]];
+            if (ok && !repeat) _fail("a refused record was remembered");
             if (acc != accAfter || count != countAfter) _fail("a refusal moved the accumulator");
         }
     }
@@ -352,7 +417,13 @@ contract BoardHandler is TestBase {
         acceptedCalls++;
         if (logs.length != expected) _fail("not one log per new record");
         for (uint256 i; i < logs.length; i++) {
-            bytes memory record = abi.decode(logs[i].data, (bytes));
+            bytes32 root;
+            bytes memory record;
+            if (logs[i].topics[0] == Board.RollingBallotSubmitted.selector) {
+                (root, record) = abi.decode(logs[i].data, (bytes32, bytes));
+            } else {
+                record = abi.decode(logs[i].data, (bytes));
+            }
             bytes32 key = keccak256(record);
             if (i < expected && key != fresh[i]) _fail("a log out of order");
             if (emitted[key]++ != 0) _fail("a record emitted twice");
@@ -361,7 +432,7 @@ contract BoardHandler is TestBase {
                 acceptedCount++;
             }
             if (logs[i].emitter != address(board)) _fail("another emitter");
-            _recheck(logs[i].topics[0], record, ballot, mocked);
+            _recheck(logs[i].topics[0], record, root, ballot, mocked);
             shadowAccumulator = EventAccumulatorLib.step(
                 shadowAccumulator,
                 shadowCount++,
@@ -408,14 +479,19 @@ contract BoardHandler is TestBase {
         if (refusedCalls.length < MAX_REFUSED) {
             refusedCalls.push(data);
             refusedMocked.push(mocked);
+            refusedRecords.push(0);
         }
     }
 
     /// An emitted record passes its stateless check against the registries
     /// the board pins (invariant 2).
-    function _recheck(bytes32 topic, bytes memory record, bytes memory ballot, bool mocked)
-        internal
-    {
+    function _recheck(
+        bytes32 topic,
+        bytes memory record,
+        bytes32 root,
+        bytes memory ballot,
+        bool mocked
+    ) internal {
         if (mocked) vm.mockCall(address(8), "", abi.encode(uint256(1)));
         bool ok;
         if (topic == Board.ObligationRootSubmitted.selector) {
@@ -444,6 +520,14 @@ contract BoardHandler is TestBase {
         } else if (topic == Board.BallotSubmitted.selector) {
             (ok,) = address(checks)
                 .call(abi.encodeCall(BoardChecks.ballot, (record, elections, _qualified(record))));
+        } else if (topic == Board.RollingBallotSubmitted.selector) {
+            (, uint256 author) = elections.authorKeySetOf(bytes32(_word(record, 3)));
+            (ok,) = address(checks)
+                .call(
+                    abi.encodeCall(
+                        BoardChecks.rolling, (record, elections, root, _qualified(record), author)
+                    )
+                );
         }
         if (mocked) vm.clearMockedCalls();
         if (!ok) _fail("an emitted record fails its check");
@@ -466,14 +550,20 @@ contract BoardHandler is TestBase {
         (, seats) = trustees.keySetOf(stub, panel);
     }
 
-    /// Honest record `which`: a receipt, the complaint, the ballot, or the
-    /// posting with one of its four `m`s.
+    /// Honest record `which`: a receipt, the complaint, the ballot, the
+    /// posting with one of its four `m`s, a batch, or the rolling ballot
+    /// with its own root.
     function _honestCall(uint8 which)
         internal
         view
         returns (bytes memory data, bytes memory record, bool mocked)
     {
-        which %= 14;
+        which %= 15;
+        if (which == 14) {
+            record = honest.rolling;
+            data = abi.encodeCall(Board.submitRollingBallot, (honest.rollingRoot, record));
+            return (data, record, false);
+        }
         if (which >= 9) {
             (data, record) = _batchCall(which - 9, (which - 9) / 2);
             return (data, record, false);
@@ -563,18 +653,27 @@ contract BoardHandler is TestBase {
 ///    board accepted, and its value equals the shadow's replay of the step
 ///    over exactly the logs the board emitted: a byte-identical repeat, by
 ///    any call and inside a batch or across batches, emits nothing and
-///    leaves the accumulator as it was.
+///    leaves the accumulator as it was. A repeat of an accepted rolling
+///    ballot is the no-op whatever root comes with it.
 /// 2. Every emitted record passes its stateless check against the
-///    registries the board pins, and no record is emitted twice.
+///    registries the board pins, and no record is emitted twice: a
+///    `RollingBallotSubmitted` passes the rolling check with the root it
+///    carries, and a rolling poll's ballot is never emitted by the
+///    ordinary path (refused there, or the repeat's no-op once the rolling
+///    call accepted it).
 /// All four hold for the two batch calls too: a receipt or complaint batch
 /// is one record, remembered by its bytes and emitted once as its own event
 /// (`ShareReceiptBatchSubmitted`, `ShareComplaintBatchSubmitted`); and the
 /// first three for obligation roots (`ObligationRootSubmitted`).
 /// 3. A record is remembered only if it was emitted: a refused call leaves
 ///    the accumulator unchanged, and submitting it again is refused again,
-///    never a silent no-op.
+///    never a silent no-op. A rolling ballot refused for its root (the
+///    front-run root, or any other but its proof's) or on the ordinary path
+///    isn't remembered: refused again until the rolling call accepts its
+///    bytes with its own root, and the repeat's no-op after.
 /// 4. Accepting a record never makes another passing record fail: an
-///    honest record not yet submitted is still accepted after any sequence.
+///    honest record not yet submitted is still accepted after any sequence,
+///    the rolling ballot with its own root after any copies with others.
 ///    The one exception is the obligation root, which fills its seat's slot
 ///    for its kind: after it, exactly the other roots of that seat and kind
 ///    are refused, as `root-repeat` (delivery.md, Obligation root), and
@@ -586,6 +685,9 @@ contract BoardInvariantTest is TestBase {
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant BATCHES = "../../docs/spec/vectors/delivery-batch.json";
     string internal constant ROOTS = "../../docs/spec/vectors/delivery-root.json";
+    string internal constant V5 = "../../docs/spec/vectors/ballot-v5-records.json";
+    string internal constant EVENTS_V10 = "../../docs/spec/vectors/contract-event-v10.json";
+    bytes32 internal constant STUB_V5 = keccak256("rolling stub");
     bytes32 internal constant STUB = keccak256("delivery stub");
     bytes32 internal constant STUB_V1 = keccak256("ballot stub");
     bytes32 internal constant PANEL = keccak256("panel");
@@ -598,6 +700,7 @@ contract BoardInvariantTest is TestBase {
         TrusteesStub trustees = new TrusteesStub();
         board = new Board(address(elections), address(trustees), address(0x4E1A));
         Honest memory honest;
+        _setRollingElection(elections, trustees, honest);
         string memory bj = vm.readFile(V1);
         honest.ballot = vm.parseBytes(vm.parseJsonString(bj, ".ballots[0].encoding"));
         _setBallotElection(bj, elections, trustees);
@@ -628,6 +731,76 @@ contract BoardInvariantTest is TestBase {
     }
 
     // --- setup -----------------------------------------------------------------
+
+    /// ballot-v5-records.json's rolling election, as BoardRollingBallot.t.sol
+    /// sets it (every cell with the root 0, a window holding every time),
+    /// its ok-newest-step ballot's key sets, and that ballot with its root
+    /// and the front-run root from contract-event-v10.json's records.
+    function _setRollingElection(
+        ElectionsStub elections,
+        TrusteesStub trustees,
+        Honest memory honest
+    ) internal {
+        string memory j = vm.readFile(V5);
+        string memory e = ".elections.rolling";
+        ElectionRegistry.Parameters memory p;
+        p.ballotVersion = 5;
+        p.threshold = uint8(vm.parseJsonUint(j, string.concat(e, ".threshold")));
+        p.panelSize = uint8(vm.parseJsonUint(j, string.concat(e, ".panelSize")));
+        p.authorThreshold = uint8(vm.parseJsonUint(j, string.concat(e, ".authorThreshold")));
+        p.authorPanelSize = uint8(vm.parseJsonUint(j, string.concat(e, ".authorPanelSize")));
+        p.closesAt = type(uint64).max;
+        uint256 n;
+        while (vm.keyExistsJson(j, _at(string.concat(e, ".questions"), n, ""))) n++;
+        p.questions = new ElectionRegistry.Question[](n);
+        for (uint256 q; q < n; q++) {
+            string memory jq = _at(string.concat(e, ".questions"), q, "");
+            p.questions[q] = ElectionRegistry.Question(
+                1,
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".optionCount"))),
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".minSelections"))),
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".maxSelections")))
+            );
+            p.optionCount += p.questions[q].optionCount;
+        }
+        n = 0;
+        while (vm.keyExistsJson(j, _at(string.concat(e, ".cells"), n, ""))) n++;
+        uint8[] memory tiers = new uint8[](n);
+        for (uint256 c; c < n; c++) {
+            tiers[c] = uint8(vm.parseJsonUint(j, _at(string.concat(e, ".cells"), c, ".tier")));
+        }
+        bytes32 h =
+            bytes32(vm.parseBytes(vm.parseJsonString(j, string.concat(e, ".definitionHash"))));
+        elections.set(h, p, tiers, new uint256[](n));
+        elections.setCeremony(h, STUB_V5, PANEL);
+        assertTrue(_is(j, ".ballots[0].id", "ok-newest-step"), "ok-newest-step");
+        uint256 seats = _mask(vm.parseJsonUintArray(j, ".ballots[0].registered"));
+        trustees.setKeySet(STUB_V5, PANEL, seats);
+        elections.setAuthorKeySet(
+            h, _mask(vm.parseJsonUintArray(j, ".ballots[0].authorRegistered"))
+        );
+        string memory ej = vm.readFile(EVENTS_V10);
+        assertTrue(_is(ej, ".records[2].id", "rolling-ballot-ok-newest-step"), "its event");
+        (honest.rollingRoot, honest.rolling) = abi.decode(
+            vm.parseBytes(vm.parseJsonString(ej, ".records[2].fields.data")), (bytes32, bytes)
+        );
+        assertEq(
+            keccak256(honest.rolling),
+            keccak256(vm.parseBytes(vm.parseJsonString(j, ".ballots[0].encoding"))),
+            "the file's ballot"
+        );
+        for (uint256 i; vm.keyExistsJson(ej, _at(".records", i, "")); i++) {
+            if (_is(ej, _at(".records", i, ".id"), "rolling-root-front-run")) {
+                (honest.frontRunRoot,) = abi.decode(
+                    vm.parseBytes(vm.parseJsonString(ej, _at(".records", i, ".fields.data"))),
+                    (bytes32, bytes)
+                );
+            }
+        }
+        assertTrue(
+            honest.frontRunRoot != 0 && honest.frontRunRoot != honest.rollingRoot, "front-run"
+        );
+    }
 
     /// ballot.json's plurality election, its first ballot's key set.
     function _setBallotElection(string memory bj, ElectionsStub elections, TrusteesStub trustees)

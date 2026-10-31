@@ -32,6 +32,8 @@ library MembershipProofLib {
 
     /// `u8(len(tag)) ‖ tag` for `abolish/v1/nullifier-scope` (0x1a = 26).
     bytes internal constant DS_SCOPE = "\x1aabolish/v1/nullifier-scope";
+    /// `u8(len(tag)) ‖ tag` for `abolish/v1/rolling-nullifier-scope` (0x22 = 34).
+    bytes internal constant DS_ROLLING_SCOPE = "\x22abolish/v1/rolling-nullifier-scope";
     /// `u8(len(tag)) ‖ tag` for `abolish/v1/membership-vk` (0x18 = 24).
     bytes internal constant DS_VK = "\x18abolish/v1/membership-vk";
     /// sha256 of `semaphore-32.zkey`, the proving key the reference-string
@@ -153,6 +155,16 @@ library MembershipProofLib {
         returns (uint256)
     {
         return field(scopeBytes(definitionHash, tier, root));
+    }
+
+    /// `ŝ_t = F(S_t)`, `S_t = H(DS("abolish/v1/rolling-nullifier-scope",
+    /// definition_hash ‖ u8(tier)))` (membership.md, Rolling scope): one
+    /// scope for every step of a rolling tier, with no root in it, so a
+    /// voter's nullifier is the same whichever step's root they prove
+    /// against (T-38). Reverts on a tier other than 0, 1 or 2.
+    function rollingScope(bytes32 definitionHash, uint8 tier) internal pure returns (uint256) {
+        if (tier > 2) revert UnknownTier(tier);
+        return field(sha256(abi.encodePacked(DS_ROLLING_SCOPE, definitionHash, tier)));
     }
 
     /// The 768-byte `vk`: `alpha`, `beta`, `gamma`, `delta`, then `IC_0` to `IC_4`.

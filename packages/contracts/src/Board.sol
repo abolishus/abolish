@@ -91,6 +91,14 @@ contract Board is EventAccumulator {
     event AvailabilityComplaintSubmitted(
         bytes32 indexed definitionHash, uint8 indexed seat, bytes record
     );
+    /// @notice A rolling poll's ballot (version 5) passed the ballot check
+    /// against `root`, the root its submitter supplied, archived under
+    /// contract-event version 10. The root is carried, never trusted: the
+    /// verifier compares it with the root of the step the ballot names
+    /// (`root-step-mismatch`; T-04, T-08).
+    event RollingBallotSubmitted(
+        bytes32 indexed definitionHash, bytes32 indexed ballotHash, bytes32 root, bytes record
+    );
 
     error InvalidDeployment();
     error ReceiptBatchLength(uint256 length);
@@ -183,6 +191,37 @@ contract Board is EventAccumulator {
             revert BallotWindow(block.timestamp, a.opensAt, a.closesAt);
         }
         _emit(BallotSubmitted.selector, key, a.definitionHash, a.ballotHash, record);
+    }
+
+    /// @notice Submits a rolling poll's ballot record with `root`, the root
+    /// of the step tree its membership proof was made against
+    /// (docs/spec/contracts.md, Board, Rolling ballots). Reverts unless the
+    /// calldata is canonical, the record passes the ballot check as version
+    /// 5 with its proof checked against `root` under the tier's rolling
+    /// scope, and the block's timestamp is inside the window, as
+    /// `submitBallot`'s. The proof fixes the root, so a repeat of an accepted
+    /// record is the no-op whatever root comes with it, and a copy carrying
+    /// another root fails the proof: no front-runner can keep an honest
+    /// submission off the board or attach another root to it (T-25, T-38).
+    /// Anyone can prove against a tree of their own, so spam control here is
+    /// gas only (T-52).
+    function submitRollingBallot(bytes32 root, bytes calldata record) external {
+        CanonicalCalldata.requireWordsThenBytes(1, record);
+        bytes32 key = keccak256(record);
+        if (_accepted[key]) return;
+        uint256[2] memory q = _qualified(record);
+        (BallotCheckLib.Admitted memory a,) =
+            ballotCheck.checkRolling(record, electionRegistry, uint256(root), q[0], q[1]);
+        if (block.timestamp < a.opensAt || block.timestamp > a.closesAt) {
+            revert BallotWindow(block.timestamp, a.opensAt, a.closesAt);
+        }
+        _accepted[key] = true;
+        _log3(
+            RollingBallotSubmitted.selector,
+            a.definitionHash,
+            a.ballotHash,
+            abi.encode(root, record)
+        );
     }
 
     /// @notice A ballot forced through the L1 relay: the deposit the relay

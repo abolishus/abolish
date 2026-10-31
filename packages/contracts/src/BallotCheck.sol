@@ -21,13 +21,14 @@ interface IElectionParameters {
 }
 
 /// @title The board's ballot check (docs/spec/contracts.md, Board, Ballots;
-/// Ballots (version 4)).
+/// Ballots (version 4); Rolling ballots).
 /// @notice Checks a direct-submitted ballot record (type 0x0002, versions 1
-/// to 4) against its registered definition's parameters, in the spec's
-/// order: the header and the election it names, the version the election
-/// pins, strict framing of every field, then `ballot-tier` (`ballot-cell`),
-/// `validity-shape`, `share-hash-unqualified` and the membership proof over
-/// `M`, which it recomputes from the record. It runs everything that needs
+/// to 4, and version 5 on the rolling call alone) against its registered
+/// definition's parameters, in the spec's order: the header and the election
+/// it names, the version the election pins, strict framing of every field,
+/// then `ballot-tier` (`ballot-cell`), `validity-shape`,
+/// `share-hash-unqualified` and the membership proof over `M`, which it
+/// recomputes from the record. It runs everything that needs
 /// no ristretto255 arithmetic (ADR 0028, 3B): an element's encoding is
 /// checked below `2²⁵⁵ − 19`, even and non-zero, the cheap part of RFC 9496's
 /// `Decode`, and the validity proofs are framed but not verified. So it
@@ -98,6 +99,10 @@ library BallotCheckLib {
     uint256 internal constant L1_HASH_AT = 76;
     uint256 internal constant PROOF_AT = 108;
     uint256 internal constant VOTE_AT = 364;
+    /// Version 5's `step`, a `u32` where versions 1 to 4's committed vote
+    /// starts; its committed vote starts 4 bytes later.
+    uint256 internal constant STEP_AT = 364;
+    uint256 internal constant ROLLING_VERSION = 5;
     uint256 internal constant MAX_OPTIONS = 64;
     uint256 internal constant MAX_TRUSTEES = 16;
     uint256 internal constant MAX_QUESTIONS = 32;
@@ -131,12 +136,47 @@ library BallotCheckLib {
         uint256 qualified,
         uint256 authorQualified
     ) internal view returns (Admitted memory a, Layout memory l) {
+        uint256 root;
+        (a, l, root) = _admit(record, registry, false, qualified, authorQualified);
+        _membership(record, a, root, false);
+    }
+
+    /// `check` as the rolling call runs it (docs/spec/contracts.md, Board,
+    /// Rolling ballots): the record must be version 5, which its election
+    /// must pin, and its membership proof is checked against `root`, the
+    /// root its submitter supplies, under the tier's rolling scope. The
+    /// registry records no root for a rolling cell, and the contract can't
+    /// compute a step's, so `root` is never trusted: the verifier rejects a
+    /// ballot whose root isn't the one of the step it names
+    /// (`root-step-mismatch`; T-04, T-08). A root of 0 or at or above `r` is
+    /// `membership-proof`.
+    function checkRolling(
+        bytes calldata record,
+        IElectionParameters registry,
+        uint256 root,
+        uint256 qualified,
+        uint256 authorQualified
+    ) internal view returns (Admitted memory a, Layout memory l) {
+        // A rolling cell's recorded root is 0 and never read (contracts.md,
+        // Election registry, Parameters).
+        (a, l,) = _admit(record, registry, true, qualified, authorQualified);
+        _membership(record, a, root, true);
+    }
+
+    /// Every step of the check but the membership proof, which comes last:
+    /// returns what it fills and the cell's recorded root.
+    function _admit(
+        bytes calldata record,
+        IElectionParameters registry,
+        bool rolling,
+        uint256 qualified,
+        uint256 authorQualified
+    ) private view returns (Admitted memory a, Layout memory l, uint256 root) {
         ElectionRegistry.Parameters memory p;
-        (p, l) = frame(record, registry, a);
+        (p, l) = frame(record, registry, a, rolling);
         (a.opensAt, a.closesAt) = (p.opensAt, p.closesAt);
         uint256 named = _uint(record, TIER_AT, 1);
 
-        uint256 root;
         (a.cell, a.tier, root) =
             _cell(registry, a.definitionHash, a.version, uint8(named), p.cellCount);
         if (!shapeOk(record, l, p, a.version)) revert BallotRefused(Code.ValidityShape);
@@ -153,20 +193,22 @@ library BallotCheckLib {
                 DS_MESSAGE, a.definitionHash, a.tier, a.ballotHash, record[L1_NUMBER_AT:PROOF_AT]
             )
         );
-        _membership(record, a, root);
     }
 
     /// Steps 1 to 5 of the check: the header, the election `record` names,
     /// the version it pins, the fixed fields and the committed vote, framed
-    /// strictly. Fills `a`'s definition hash, version and nullifier and
-    /// returns the election's parameters and the vote's layout; reverts with
-    /// `BallotMalformed`, or `BallotRefused(BallotStray)`, on the first
-    /// failure.
-    function frame(bytes calldata record, IElectionParameters registry, Admitted memory a)
-        internal
-        view
-        returns (ElectionRegistry.Parameters memory p, Layout memory l)
-    {
+    /// strictly. On the rolling call (`rolling`) the election must pin
+    /// version 5, whose `step` follows the proof; on every other path it
+    /// must pin version 1 to 4. Fills `a`'s definition hash, version and
+    /// nullifier and returns the election's parameters and the vote's
+    /// layout; reverts with `BallotMalformed`, or
+    /// `BallotRefused(BallotStray)`, on the first failure.
+    function frame(
+        bytes calldata record,
+        IElectionParameters registry,
+        Admitted memory a,
+        bool rolling
+    ) internal view returns (ElectionRegistry.Parameters memory p, Layout memory l) {
         uint256 v = _uint(record, 0, 2);
         if (v != RECORD_TYPE) {
             _malformed(
@@ -190,8 +232,10 @@ library BallotCheckLib {
         }
         // The registry doesn't yet refuse every profile combination
         // (contracts.md, Registration): a pin this library doesn't know
-        // admits no ballot.
-        if (version > 4) {
+        // admits no ballot. A rolling poll's ballot comes only by the rolling
+        // call, and that call takes nothing else, since a fixed poll's root
+        // is registered and must never be replaced by a submitter's (T-04).
+        if (rolling ? version != ROLLING_VERSION : version > 4) {
             _malformed(ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
         }
         a.version = version;
@@ -211,14 +255,23 @@ library BallotCheckLib {
         if (record.length < VOTE_AT) {
             _malformed(ElectionDefinitionLib.DecodeError.Truncated, PROOF_AT);
         }
-        l = frameVote(record, VOTE_AT, version, p.threshold, p.authorThreshold);
+        // Any `u32` step frames: the contract never compares it with the
+        // root clock, which the verifier judges (`root-step-range`).
+        uint256 voteAt = VOTE_AT;
+        if (rolling) {
+            _uint(record, STEP_AT, 4);
+            voteAt = STEP_AT + 4;
+        }
+        l = frameVote(record, voteAt, version, p.threshold, p.authorThreshold);
     }
 
     /// `ballot_hash = H(DS("abolish/v1/ballot", definition_hash ‖ u16(0x0002)
     /// ‖ u8(version) ‖ u8(tier or cell) ‖ encode(nullifier) ‖
     /// encode(committed_vote)))` (docs/spec/ballot-validity.md, Ballot hash;
-    /// Hashes (versions 3 and 4)), from a framed record: every field but the
-    /// membership proof and the L1 reference, which `M` binds.
+    /// Hashes (versions 3 to 5)), from a framed record: every field but the
+    /// membership proof and the L1 reference, which `M` binds. Version 5's
+    /// `u32(step)` comes before its committed vote, where the record has it,
+    /// so the same slices bind it (T-38).
     function ballotHash(bytes calldata record) internal pure returns (bytes32) {
         return sha256(
             abi.encodePacked(
@@ -278,8 +331,8 @@ library BallotCheckLib {
     /// encoding framed, every scalar below `ℓ`, and nothing after the last
     /// field. Version 4's author half, between the share hashes and the
     /// option proofs, is framed as the default half is, its rows counted
-    /// against `kA`. Reverts with `BallotMalformed` at the first failure,
-    /// left to right.
+    /// against `kA`; version 5's committed vote is version 4's. Reverts with
+    /// `BallotMalformed` at the first failure, left to right.
     function frameVote(bytes calldata r, uint256 o, uint8 version, uint256 k, uint256 kA)
         internal
         pure
@@ -395,11 +448,17 @@ library BallotCheckLib {
     /// none of them from the submitter (membership.md, Owned elsewhere;
     /// T-12, T-38). A broken point is the record's decode error at its
     /// offset; a root the registry recorded as 0 is refused as the proof,
-    /// since anyone can prove membership of it (T-04).
-    function _membership(bytes calldata record, Admitted memory a, uint256 root) private view {
+    /// since anyone can prove membership of it (T-04). On the rolling call
+    /// the root is the submitter's and the scope the tier's rolling scope,
+    /// computed here, never the fixed one, which would name the root.
+    function _membership(bytes calldata record, Admitted memory a, uint256 root, bool rolling)
+        private
+        view
+    {
         // The registry records only canonical roots of tiers 0 to 2; the
         // tier and `r` bounds keep `scope` from reverting with an error of
-        // its own if that ever changed.
+        // its own if that ever changed. A supplied root of 0 or at or above
+        // `r` is refused the same way.
         if (root == 0 || root >= MembershipProofLib.R || a.tier > 2) {
             revert BallotRefused(Code.MembershipProof);
         }
@@ -409,7 +468,9 @@ library BallotCheckLib {
                 root: root,
                 nullifier: a.nullifier,
                 message: MembershipProofLib.field(a.message),
-                scope: MembershipProofLib.scope(a.definitionHash, a.tier, root)
+                scope: rolling
+                    ? MembershipProofLib.rollingScope(a.definitionHash, a.tier)
+                    : MembershipProofLib.scope(a.definitionHash, a.tier, root)
             })
         );
         if (verdict == MembershipProofLib.Verdict.NonCanonical) {
@@ -504,5 +565,16 @@ contract BallotCheck {
         uint256 authorQualified
     ) external view returns (BallotCheckLib.Admitted memory, BallotCheckLib.Layout memory) {
         return BallotCheckLib.check(record, registry, qualified, authorQualified);
+    }
+
+    /// `BallotCheckLib.checkRolling`, its reverts passed through unchanged.
+    function checkRolling(
+        bytes calldata record,
+        IElectionParameters registry,
+        uint256 root,
+        uint256 qualified,
+        uint256 authorQualified
+    ) external view returns (BallotCheckLib.Admitted memory, BallotCheckLib.Layout memory) {
+        return BallotCheckLib.checkRolling(record, registry, root, qualified, authorQualified);
     }
 }

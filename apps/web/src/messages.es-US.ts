@@ -581,6 +581,11 @@ export const esUS: Messages = {
     "Los resultados de esta encuesta se cuentan a partir de su tablero público. Las entradas solo se agregan al final, y ninguna muestra cómo votó nadie.",
   resultsBoardUnavailable: "No se pudo leer el tablero en este momento.",
   resultsVerify: "Cómo contarlo tú",
+  resultsReceiptTitle: "Tu comprobante",
+  resultsReceiptBody:
+    "Si respondiste, tu comprobante lo guarda la app de votación del dispositivo con el que respondiste. Muestra que tu boleta está en el tablero de esta encuesta, no cómo respondiste.",
+  resultsReceiptCheck:
+    "Esta página no busca comprobantes: pedirle a nuestro servidor tu entrada le diría cuál es la tuya. Para revisar el tuyo, copia el tablero completo, como explica Cómo contarlo tú, y busca tu entrada en tu copia.",
   resultsRecountTitle: "Cuenta esta encuesta de nuevo",
   resultsRecountBody:
     "Cuando el nodo comunitario haya copiado y verificado los tableros, como explica Cómo contarlo tú, el verificador revisa esta encuesta por separado con este comando. Su código de salida es el veredicto.",

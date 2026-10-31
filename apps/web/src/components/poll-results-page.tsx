@@ -650,6 +650,17 @@ export function PollResultsPage({
               </div>
             </div>
           </div>
+          {/* The mockup's first step. Receipts stay on the voter's device,
+              and, as on the board page, this page never looks one up: a
+              lookup would tell our server which entry is the asker's, tied
+              to their address (T-11), so it points to a whole copy instead. */}
+          <div className="grid min-w-0 gap-3">
+            <h3 className="m-0 font-heading text-lg font-semibold">{t("resultsReceiptTitle")}</h3>
+            <p className="m-0 max-w-prose text-pretty">{t("resultsReceiptBody")}</p>
+            <p className="m-0 max-w-prose text-pretty text-muted-foreground">
+              {t("resultsReceiptCheck")}
+            </p>
+          </div>
           <div className="grid min-w-0 gap-3">
             <h3 className="m-0 font-heading text-lg font-semibold">{t("resultsRecountTitle")}</h3>
             <p className="m-0 max-w-prose text-pretty">{t("resultsRecountBody")}</p>

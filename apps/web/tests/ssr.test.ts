@@ -727,6 +727,11 @@ describe("results page", () => {
     expect(page).toContain("Counting it again without us starts from this poll&#x27;s ID");
     expect(page).toContain("Poll ID");
     expect(page).toContain("Definition hash, to compare with the election registry on chain");
+    // Where a receipt is, before the recount, and no lookup of one (T-11).
+    const receipt = page.indexOf("Your receipt");
+    expect(receipt).toBeGreaterThan(page.indexOf("Check it yourself"));
+    expect(receipt).toBeLessThan(page.indexOf("Count this poll again"));
+    expect(page).toContain("This page doesn&#x27;t look a receipt up");
   });
 
   test("a tier counted in several cells shows each cell's own results, with its regions and members", async () => {

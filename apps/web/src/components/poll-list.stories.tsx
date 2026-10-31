@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import type { PollView } from "../poll.ts";
+import { NO_TAGS, type PollView } from "../poll.ts";
 import { PollRows } from "./poll-list.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
@@ -41,11 +41,13 @@ const meta = {
           { tier: 0, answered: "1" },
           { tier: 2, answered: "1204" },
         ],
+        tags: { topic: "community", place: "Riverside" },
       },
       {
         kind: "poll",
         text: undefined,
         answered: undefined,
+        tags: NO_TAGS,
         poll: poll(SECOND, {
           counting: "approval",
           illFormed: { rule: "timing", question: undefined },
@@ -71,18 +73,34 @@ const play: Story["play"] = async ({ canvasElement }) => {
     .filter((item) => item.parentElement === list);
   await expect(items).toHaveLength(3);
   // A poll in its own words, in their language, with its ID under them.
-  const first = within(items[0]!).getByRole("link");
+  const first = within(items[0]!).getByRole("link", {
+    name: "Should the library open on Sundays?",
+  });
   await expect(first).toHaveAttribute("href", `/polls/${FIRST}`);
   await expect(first).toHaveTextContent("Should the library open on Sundays?");
   await expect(first.closest("h3")).toHaveAttribute("lang", "en");
   await expect(within(items[0]!).getByText("1010101010101010…")).toBeVisible();
   // One with no words to show goes by its ID.
   await expect(within(items[1]!).getByRole("link")).toHaveTextContent("2020202020202020…");
+  // Where each is listed, each tag a link into the stream narrowed to it,
+  // and nothing for a poll listed under neither.
+  const listed = within(items[0]!).getByRole("list", { name: "Where it's listed" });
+  await expect(
+    within(listed)
+      .getAllByRole("link")
+      .map((link) => [link.textContent, link.getAttribute("href")]),
+  ).toEqual([
+    ["Community", "/discover?topic=community"],
+    ["Riverside", "/discover?place=Riverside"],
+  ]);
+  await expect(within(items[1]!).queryByRole("list", { name: "Where it's listed" })).toBeNull();
   await expect(within(items[0]!).getByText("One choice")).toBeVisible();
   await expect(within(items[0]!).getByText("Open")).toBeVisible();
   await expect(within(items[0]!).getByText(/January 8, 2026/)).toBeVisible();
   // How many have answered, each tier on its own line, never summed (T-01).
-  const answered = within(items[0]!).getAllByRole("listitem");
+  const answered = within(
+    within(items[0]!).getByText("Answered so far").nextElementSibling as HTMLElement,
+  ).getAllByRole("listitem");
   await expect(answered.map((item) => item.textContent)).toEqual([
     "1 personTier 0 (verified e-mail)",
     "1,204 peopleTier 2 (document-verified)",

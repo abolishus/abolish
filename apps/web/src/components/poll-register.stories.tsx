@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
-import type { PollView } from "../poll.ts";
+import { NO_TAGS, type PollView } from "../poll.ts";
 import type { PollList } from "../server/load.ts";
 import { PollRegister, registerHref } from "./poll-register.tsx";
 
@@ -35,11 +35,13 @@ const LIST: PollList = {
       poll: poll(OPEN),
       text: undefined,
       answered: [{ tier: 0, answered: "1204" }],
+      tags: NO_TAGS,
     },
     {
       kind: "poll",
       text: undefined,
       answered: undefined,
+      tags: NO_TAGS,
       poll: poll(SCHEDULED, {
         counting: "approval",
         opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
@@ -50,6 +52,7 @@ const LIST: PollList = {
       kind: "poll",
       text: undefined,
       answered: undefined,
+      tags: NO_TAGS,
       poll: poll(CLOSED, {
         closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
       }),
@@ -177,6 +180,7 @@ export const QuestionByQuestion: Story = {
             options: ["Yes", "No", "Not sure"],
           },
           answered: undefined,
+          tags: NO_TAGS,
           poll: poll(QUESTIONS, {
             version: 5,
             counting: "questions",

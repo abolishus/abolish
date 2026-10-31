@@ -1585,6 +1585,7 @@ describe("poll list", () => {
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(20);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(20);
     expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(20);
+    expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(20);
   });
 
   // P2-19 part 17: how many have answered each poll on the register.
@@ -1607,6 +1608,39 @@ describe("poll list", () => {
     expect(row(STREAM_V1)).not.toContain("Answered so far");
     // A definition that names another election shows nothing from it, no count included (T-34).
     expect(row(SWAPPED_ID)).not.toContain("Answered so far");
+  });
+
+  // P2-19 part 19: where each poll on the register is listed.
+  test("shows where each poll is listed, each tag a link into the stream, and no place a draft couldn't hold", async () => {
+    /** The tags' links in each row of `html` that has any, by the row's poll. */
+    const tagsOf = (html: string) =>
+      Object.fromEntries(
+        html
+          .split(/<article\b/)
+          .slice(1)
+          .flatMap((row) => {
+            const id = /href="\/polls\/([0-9a-f]{64})"/.exec(row)?.[1];
+            const list = /<ul aria-label="Where it&#x27;s listed"[^>]*>([\s\S]*?)<\/ul>/.exec(row);
+            if (id === undefined || list === null) return [];
+            return [[id, [...(list[1] ?? "").matchAll(/href="([^"]*)"/g)].map((h) => h[1])]];
+          }),
+      );
+    const second = await (await get(`/polls?after=${LOST_ID}`)).text();
+    // The version-5 poll's topic and place, the version-1 poll's topic alone,
+    // and nothing on a row the API files under neither.
+    expect(tagsOf(second)).toEqual({
+      [STREAM_V5]: ["/discover?topic=community", "/discover?place=Riverside%20Park"],
+      [STREAM_V1]: ["/discover?topic=transport"],
+    });
+    expect(second).toContain("<bdi>Riverside Park</bdi>");
+    // A place with a bidi override, which no draft could hold, isn't shown;
+    // its topic still is (T-67, T-68).
+    const first = await (await get("/polls")).text();
+    expect(tagsOf(first)).toEqual({
+      [ID]: ["/discover?topic=housing", "/discover?place=Old%20Town"],
+      [OVERRIDE_ID]: ["/discover?topic=food"],
+    });
+    expect(first).not.toContain("\u202e");
   });
 
   // P2-19 part 18: searching the register by the polls' words.

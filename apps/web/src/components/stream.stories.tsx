@@ -105,6 +105,18 @@ const placeForm = (root: HTMLElement) => within(root).getByRole("search", { name
 const questions = (root: HTMLElement) =>
   within(within(root).getByRole("list", { name: "Questions" }));
 
+const sortsOnOneRow = (root: HTMLElement, name = "Order") => {
+  const links = within(within(root).getByRole("navigation", { name })).getAllByRole("link");
+  const tops = new Set(links.map((a) => Math.round(a.getBoundingClientRect().top)));
+  const fits = links.every((a) => a.scrollWidth <= a.clientWidth);
+  return links.length === 3 && tops.size === 1 && fits;
+};
+
+const countBoxes = (root: HTMLElement) =>
+  questions(root)
+    .getAllByRole("list", { name: "Answered so far" })
+    .map((l) => l.parentElement!);
+
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent(
@@ -184,8 +196,31 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "/discover?place=Riverside%20Park",
   );
 
-  // A poll whose text failed its checks shows none, and can't be answered from here.
-  await expect(list.getByText(/text can't be shown here/)).toBeVisible();
+  // A poll whose text failed its checks shows none, and can't be answered
+  // from here. It says so in everyday words, with no "server", and the ID only as a small note.
+  const unreadable = list.getByRole("heading", { name: "This poll can't be shown here" });
+  await expect(within(unreadable).getByRole("link")).toHaveAttribute(
+    "href",
+    `/polls/${UNREADABLE}`,
+  );
+  await expect(list.getByText(/couldn't read its question/)).toBeVisible();
+  // The ID's start, small, is all that tells two such cards' links apart.
+  await expect(within(unreadable).getByRole("link")).toHaveAccessibleDescription(
+    "Poll 4040404040404040…",
+  );
+  await expect(list.queryByText(/server/)).toBeNull();
+
+  // The three orders share one row at every width; on a phone each label
+  // wraps within its own box rather than the third taking a row alone.
+  await expect(sortsOnOneRow(canvasElement)).toBe(true);
+
+  // At desktop width the answers and the count stay a readable width, not
+  // the card's whole width with the arrow 1,000px from its answer.
+  for (const box of [
+    list.getByRole("list", { name: "When should the main library open on Sundays?" }),
+    countBoxes(canvasElement)[0]!,
+  ])
+    await expect(box.getBoundingClientRect().width).toBeLessThanOrEqual(576);
 
   // The order is a link like the others; more comes only when asked for.
   const order = canvas.getByRole("navigation", { name: "Order" });
@@ -317,6 +352,49 @@ export const MostAnswered: Story = {
       "href",
       streamHref("answered", {}, NEXT),
     );
+  },
+};
+
+/** In Spanish, whose labels are longer, the orders still share one row. */
+export const SpanishOrders: Story = {
+  parameters: { locale: "es-US" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("link", { name: "Más respondidas esta semana" })).toBeVisible();
+    await expect(sortsOnOneRow(canvasElement, "Orden")).toBe(true);
+    await expect(
+      canvas.getByRole("heading", { name: "Esta encuesta no se puede mostrar aquí" }),
+    ).toBeVisible();
+    await expect(canvas.queryByText(/servidor/)).toBeNull();
+  },
+};
+
+/** A poll whose definition failed its checks: why, in everyday words, and a way to its page. */
+export const Unreadable: Story = {
+  args: {
+    stream: {
+      kind: "stream",
+      cards: [
+        { kind: "unavailable", electionId: UNREADABLE, problem: "undecodable" },
+        { kind: "unavailable", electionId: NEXT, problem: "another-election" },
+      ],
+      next: undefined,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const list = questions(canvasElement);
+    const headings = list.getAllByRole("heading", { name: "This poll can't be shown here" });
+    await expect(headings.map((h) => within(h).getByRole("link").getAttribute("href"))).toEqual([
+      `/polls/${UNREADABLE}`,
+      `/polls/${NEXT}`,
+    ]);
+    // Two such links share their words, so each is described by its own ID.
+    await expect(
+      headings.map((h) => within(h).getByRole("link").getAttribute("aria-describedby")),
+    ).toSatisfy((ids: (string | null)[]) => new Set(ids).size === 2 && !ids.includes(null));
+    await expect(list.getByText(/came through damaged/)).toBeVisible();
+    await expect(list.getByText(/belong to a different poll/)).toBeVisible();
+    await expect(list.queryByText(/definition|server/)).toBeNull();
   },
 };
 

@@ -666,7 +666,7 @@ export async function loadModerationLog(api: Api, before: string): Promise<Moder
 /**
  * The log's counts, or `undefined` when the read fails or its figures don't
  * add up to its total: the counts are optional on the page, as a poll's tags
- * are, and a total the parts contradict is shown nowhere (T-34).
+ * are, and a total the parts contradict is shown nowhere (T-68).
  */
 async function countsOf(api: Api): Promise<LogCounts | undefined> {
   let served;

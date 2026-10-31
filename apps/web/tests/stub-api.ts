@@ -492,8 +492,7 @@ const RESULTS = new Map<string, unknown>([
   ],
 ]);
 
-/** The stub's state: while `down`, it drops every connection unanswered, as a dead API would. */
-/** The log's counts the stub serves, as the API does; `undefined` fails the read. */
+/** The log's counts the stub serves, as the API does. */
 export const LOG_COUNTS = {
   delist: "4",
   hide: "2",
@@ -503,6 +502,10 @@ export const LOG_COUNTS = {
   total: "11",
 };
 
+/**
+ * The stub's state: while `down`, it drops every connection unanswered, as a
+ * dead API would; with `logCounts` unset, its read of the log's counts fails.
+ */
 export const stub: { down: boolean; logCounts: Record<string, string> | undefined } = {
   down: false,
   logCounts: LOG_COUNTS,

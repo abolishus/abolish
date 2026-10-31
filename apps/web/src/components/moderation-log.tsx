@@ -361,8 +361,9 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
             </ol>
           </div>
         )}
-        {/* Only where the counts were read with as many decisions as the
-            page holds: one made between the two reads can leave them behind. */}
+        {/* Not where the page holds more than the counts: the two are read
+            apart, so a decision made between them can leave the counts a
+            little behind the page, which this hides only at its extreme. */}
         {log.counts === undefined ||
         log.entries.length === 0 ||
         log.entries.length > log.counts.total ? null : (

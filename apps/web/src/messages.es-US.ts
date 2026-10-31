@@ -1009,7 +1009,7 @@ export const esUS: Messages = {
     other: "Todo el registro: {count} decisiones, por acción",
   },
   moderationPageOfLog: {
-    one: "Esta página contiene {shown} de la {count} decisión del registro.",
+    one: "Esta página contiene {shown} de {count} decisión del registro.",
     other: "Esta página contiene {shown} de las {count} decisiones del registro.",
   },
   moderationGroundsMark: "Motivos",

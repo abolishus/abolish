@@ -704,6 +704,60 @@ contract ElectionRegistryTest is TestBase {
         );
     }
 
+    /// Rule 2 still reads definition versions 1 and 3 to 6, though the
+    /// library decodes version 7 (P2-17 part 5d-4a): a version-7 definition
+    /// that would otherwise pass every rule, fixed or rolling, is
+    /// `unknown-version` at its version byte, before its profile or anything
+    /// else is read, as is every encoding labelled 7 in the version-7 vectors.
+    function test_RefusesDefinitionVersion7AtItsVersionByte() public {
+        bytes memory unknown = abi.encodeWithSelector(
+            ElectionDefinitionLib.DefinitionMalformed.selector,
+            ElectionDefinitionLib.DecodeError.UnknownVersion,
+            2
+        );
+        (bytes32 id,) = _created();
+        ElectionDefinitionLib.Definition memory d = RegistryFixture.templateV(registry, id, 6);
+        d.version = 7;
+        d.pinVersions[0] = 7;
+        d.pinVersions[7] = 13;
+        d.electorateMode = 1;
+        bytes memory fixedEnc = RegistryFixture.approve(lib, trustees, d);
+        assertTrue(lib.rule(fixedEnc) == ElectionDefinitionLib.Rule.None, "fixed well formed");
+        _expectRefused(CREATOR, fixedEnc, unknown);
+
+        d.electorateMode = 2;
+        d.pinVersions[1] = 5;
+        d.tiers = new ElectionDefinitionLib.TierElectorate[](0);
+        d.rolling = new ElectionDefinitionLib.RollingTier[](1);
+        d.rolling[0].rootL2Block = RegistryFixture.ROOT_BLOCK;
+        d.rolling[0].groups = new uint64[](2);
+        (d.rolling[0].groups[0], d.rolling[0].groups[1]) = (1, 2);
+        d.rolling[0].root = 0x1234;
+        d.rolling[0].groupSize = 5000;
+        bytes memory rollingEnc = RegistryFixture.approve(lib, trustees, d);
+        assertTrue(lib.rule(rollingEnc) == ElectionDefinitionLib.Rule.None, "rolling well formed");
+        _expectRefused(CREATOR, rollingEnc, unknown);
+
+        // A profile the decoder would refuse is still refused at the version.
+        d.pinVersions[0] = 6;
+        _expectRefused(CREATOR, DefinitionEncoder.encode(d), unknown);
+
+        string memory json = vm.readFile("../../docs/spec/vectors/election-definition-v7.json");
+        uint256 labelled;
+        for (uint256 i; vm.keyExistsJson(json, _vectorKey(i, "")); i++) {
+            bytes memory b = vm.parseBytes(vm.parseJsonString(json, _vectorKey(i, ".encoding")));
+            if (b.length < 3 || uint8(b[2]) != 7) continue;
+            labelled++;
+            _expectRefused(CREATOR, b, unknown);
+        }
+        assertTrue(labelled > 30, "version-7 vector coverage");
+        assertEq(registry.definitionHashOf(id), bytes32(0), "nothing registered");
+    }
+
+    function _vectorKey(uint256 i, string memory field) internal pure returns (string memory) {
+        return string.concat(".vectors[", vm.toString(i), "]", field);
+    }
+
     function test_RefusesAnIllFormedDefinition() public {
         (bytes32 id,) = _created();
         ElectionDefinitionLib.Definition memory d = RegistryFixture.template(registry, id);

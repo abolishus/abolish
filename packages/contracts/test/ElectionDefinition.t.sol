@@ -19,6 +19,7 @@ contract ElectionDefinitionVectorsTest is TestBase {
     string internal constant DEFINITIONS_V4 = "../../docs/spec/vectors/election-definition-v4.json";
     string internal constant DEFINITIONS_V5 = "../../docs/spec/vectors/election-definition-v5.json";
     string internal constant DEFINITIONS_V6 = "../../docs/spec/vectors/election-definition-v6.json";
+    string internal constant DEFINITIONS_V7 = "../../docs/spec/vectors/election-definition-v7.json";
     string internal constant REGISTRY = "../../docs/spec/vectors/election-registry.json";
 
     DefinitionHarness internal lib;
@@ -67,13 +68,58 @@ contract ElectionDefinitionVectorsTest is TestBase {
         _checkFile(DEFINITIONS_V6, 6);
     }
 
+    /// Fixed and rolling electorates, each version-7 rule and its order after
+    /// version 6's, and version 6's and 7's bytes under each other's labels.
+    function test_DefinitionV7Vectors() public view {
+        _checkFile(DEFINITIONS_V7, 7);
+    }
+
+    /// `rolling-tier`'s search for a group in two tiers, against a naive
+    /// reference: three rolling tiers whose groups are the set bits of three
+    /// masks over 0 to 15, so repeats land anywhere in an earlier tier (first,
+    /// middle or last, found from either later tier). The definition is well
+    /// formed exactly when no two masks share a bit (T-01, T-16).
+    function testFuzz_RollingTierFindsEveryCrossTierRepeat(uint16[3] memory masks) public view {
+        string memory json = vm.readFile(DEFINITIONS_V7);
+        ElectionDefinitionLib.Definition memory d = lib.decode(_bytes(json, _key(0, ".encoding")));
+        assertEq(d.electorateMode, 2, "a rolling vector");
+        d.rolling = new ElectionDefinitionLib.RollingTier[](3);
+        bool shared;
+        for (uint256 t; t < 3; t++) {
+            // Each tier needs a group, or `rolling-tier` fails for that.
+            if (masks[t] == 0) masks[t] = uint16(1 << t);
+            for (uint256 u; u < t; u++) {
+                if (masks[t] & masks[u] != 0) shared = true;
+            }
+            d.rolling[t].tier = uint8(t);
+            uint256 n;
+            for (uint256 b; b < 16; b++) {
+                if (masks[t] & (1 << b) != 0) n++;
+            }
+            d.rolling[t].groups = new uint64[](n);
+            n = 0;
+            for (uint256 b; b < 16; b++) {
+                if (masks[t] & (1 << b) != 0) d.rolling[t].groups[n++] = uint64(b);
+            }
+        }
+        ElectionDefinitionLib.Rule expected =
+            shared ? ElectionDefinitionLib.Rule.RollingTier : ElectionDefinitionLib.Rule.None;
+        assertTrue(lib.rule(DefinitionEncoder.encode(d)) == expected, "rolling-tier");
+    }
+
     /// The rules each file exercises, so a vector file that stopped covering
     /// one (or a mapping that stopped reading it) fails here.
     function test_VectorsCoverEveryRule() public view {
-        bool[17] memory seen;
-        string[5] memory files =
-            [DEFINITIONS, DEFINITIONS_V3, DEFINITIONS_V4, DEFINITIONS_V5, DEFINITIONS_V6];
-        for (uint256 f; f < 5; f++) {
+        bool[19] memory seen;
+        string[6] memory files = [
+            DEFINITIONS,
+            DEFINITIONS_V3,
+            DEFINITIONS_V4,
+            DEFINITIONS_V5,
+            DEFINITIONS_V6,
+            DEFINITIONS_V7
+        ];
+        for (uint256 f; f < 6; f++) {
             string memory json = vm.readFile(files[f]);
             for (uint256 i; vm.keyExistsJson(json, _key(i, "")); i++) {
                 if (vm.keyExistsJson(json, _key(i, ".illFormed"))) {
@@ -81,7 +127,7 @@ contract ElectionDefinitionVectorsTest is TestBase {
                 }
             }
         }
-        for (uint256 r = 1; r < 17; r++) {
+        for (uint256 r = 1; r < 19; r++) {
             assertTrue(seen[r], string.concat("no vector for rule ", vm.toString(r)));
         }
     }
@@ -116,7 +162,7 @@ contract ElectionDefinitionVectorsTest is TestBase {
             assertEq(lib.decode(b).version, version, id);
             assertEq(lib.hash(b), _bytes32(json, _key(i, ".hash")), id);
             assertEq(lib.stubHash(b), _bytes32(json, _key(i, ".stubHash")), id);
-            if (version == 6) {
+            if (version >= 6) {
                 assertEq(lib.authorStubHash(b), _bytes32(json, _key(i, ".authorStubHash")), id);
                 if (vm.keyExistsJson(json, _key(i, ".authorPanelId"))) {
                     assertEq(lib.authorPanelId(b), _bytes32(json, _key(i, ".authorPanelId")), id);
@@ -190,7 +236,7 @@ contract ElectionDefinitionVectorsTest is TestBase {
     }
 
     function _known(uint8 version) internal pure returns (bool) {
-        return version == 1 || (version >= 3 && version <= 6);
+        return version == 1 || (version >= 3 && version <= 7);
     }
 
     function test_ElectionIdVectors() public view {
@@ -332,6 +378,8 @@ contract ElectionDefinitionVectorsTest is TestBase {
         if (c == keccak256("results")) return ElectionDefinitionLib.Rule.Results;
         if (c == keccak256("civic-sealed")) return ElectionDefinitionLib.Rule.CivicSealed;
         if (c == keccak256("author-panel")) return ElectionDefinitionLib.Rule.AuthorPanel;
+        if (c == keccak256("rolling-class")) return ElectionDefinitionLib.Rule.RollingClass;
+        if (c == keccak256("rolling-tier")) return ElectionDefinitionLib.Rule.RollingTier;
         revert(string.concat("unknown rule ", code));
     }
 

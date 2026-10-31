@@ -157,6 +157,39 @@ contract BoardRollingPostingTest is BoardRollingFixture {
         }
     }
 
+    /// Each offset word is checked on its own: with one argument's length
+    /// word overlapping the other's, Solidity's decoder takes a layout whose
+    /// total length is canonical but which frees a 32-byte gap, and only the
+    /// offset checks refuse it, before anything is read. Both posting calls,
+    /// so `submitPosting`'s zero-word case is covered too (Calls; T-17).
+    function test_EachOffsetIsCheckedAlone() public {
+        bytes memory nonCanonical =
+            abi.encodeWithSelector(CanonicalCalldata.NonCanonicalCalldata.selector);
+        bytes32 gap = bytes32(uint256(0xabcd));
+        bytes32 one = bytes32(uint256(32));
+        bytes[2] memory heads = [
+            abi.encodePacked(Board.submitRollingPosting.selector, bytes32(uint256(1))),
+            abi.encodePacked(Board.submitPosting.selector)
+        ];
+        for (uint256 i; i < 2; i++) {
+            uint256 h = heads[i].length - 4 + 64;
+            // The first argument's offset one word late: its length word is
+            // where its data would be, and its data is the second's length.
+            _refuse(
+                bytes.concat(heads[i], abi.encode(h + 32, h + 64, gap, one, one, gap)),
+                nonCanonical,
+                "the first offset alone"
+            );
+            // The second argument's offset one word early, onto the first's
+            // data, leaving a trailing gap of canonical length.
+            _refuse(
+                bytes.concat(heads[i], abi.encode(h, h + 32, one, one, gap, gap)),
+                nonCanonical,
+                "the second offset alone"
+            );
+        }
+    }
+
     /// The canonical call is the one `abi.encodeCall` writes for the file's
     /// first case, so the board takes exactly the call a client builds.
     function test_CanonicalCallIsTheStandardEncoding() public view {
@@ -339,7 +372,7 @@ contract BoardRollingPostingTest is BoardRollingFixture {
         uint256 before = gasleft();
         _accept(call);
         uint256 used = before - gasleft();
-        assertTrue(used < 800_000, "a rolling posting's gas");
+        assertTrue(used < 600_000, "a rolling posting's gas");
     }
 
     // ---- helpers ----

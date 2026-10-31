@@ -66,9 +66,11 @@ const meta = {
         total: 48,
         since: "2026-09-01",
       },
+      latest: true,
     },
-    before: undefined,
+    place: undefined,
     next: undefined,
+    later: undefined,
     action: undefined,
   },
 } satisfies Meta<typeof ModerationLog>;
@@ -161,11 +163,12 @@ export const WithMore: Story = {
     await expect(
       within(canvasElement).queryByRole("link", { name: "Latest decisions" }),
     ).toBeNull();
+    await expect(within(canvasElement).queryByRole("link", { name: "Later decisions" })).toBeNull();
   },
 };
 
 export const Filtered: Story = {
-  args: { before: "30", next: "1", action: "hide" },
+  args: { place: { before: "30" }, next: "1", later: "28", action: "hide" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const log = canvas.getByRole("list", { name: "Decisions, newest first" });
@@ -190,7 +193,11 @@ export const Filtered: Story = {
       "href",
       "/moderation?before=1&action=hide",
     );
-    // An earlier page leads back to the latest, keeping the filter.
+    // An earlier page leads to later decisions and back to the latest, keeping the filter.
+    await expect(canvas.getByRole("link", { name: "Later decisions" })).toHaveAttribute(
+      "href",
+      "/moderation?after=28&action=hide",
+    );
     await expect(canvas.getByRole("link", { name: "Latest decisions" })).toHaveAttribute(
       "href",
       "/moderation?action=hide",
@@ -198,10 +205,39 @@ export const Filtered: Story = {
   },
 };
 
+export const Later: Story = {
+  args: { place: { after: "9" }, next: "1", later: "28", action: "hide" },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // A page read forward from a number keeps it, in the form and the clear link.
+    await expect(canvasElement.querySelector('input[type="hidden"][name="after"]')).toHaveValue(
+      "9",
+    );
+    await expect(canvasElement.querySelector('input[name="before"]')).toBeNull();
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      "/moderation?after=9",
+    );
+    const links = within(canvasElement)
+      .getAllByRole("link")
+      .filter((link) => (link.textContent ?? "").endsWith("decisions"));
+    // Latest, later, then earlier, as the log runs from newest to oldest.
+    await expect(links.map((link) => link.textContent)).toEqual([
+      "Latest decisions",
+      "Later decisions",
+      "Earlier decisions",
+    ]);
+    await expect(canvas.getByRole("link", { name: "Earlier decisions" })).toHaveAttribute(
+      "href",
+      "/moderation?before=1&action=hide",
+    );
+  },
+};
+
 export const FilteredToNone: Story = {
   args: {
     action: "delist",
-    log: { entries: [meta.args.log.entries[2]!], counts: meta.args.log.counts },
+    log: { entries: [meta.args.log.entries[2]!], counts: meta.args.log.counts, latest: true },
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
@@ -244,6 +280,7 @@ export const Empty: Story = {
         total: 0,
         since: undefined,
       },
+      latest: true,
     },
   },
   play: async ({ canvasElement }) => {
@@ -257,7 +294,7 @@ export const Empty: Story = {
 };
 
 export const CountsUnread: Story = {
-  args: { log: { entries: meta.args.log.entries, counts: undefined } },
+  args: { log: { entries: meta.args.log.entries, counts: undefined, latest: true } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     // The log still shows, with no figure across it.

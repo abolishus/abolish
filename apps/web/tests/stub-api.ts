@@ -503,13 +503,34 @@ export const LOG_COUNTS = {
   since: "2026-09-01T08:30:00.000Z",
 };
 
+/** The moderation log the stub serves by default, oldest first. */
+export const LOG_ENTRIES: readonly Record<string, string>[] = [
+  { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
+  { ...LATEST, electionId: HIDDEN_ID },
+  {
+    seq: "8",
+    electionId: HIDDEN_ID,
+    action: "refile",
+    reason: "misfiled",
+    decidedAt: LATEST.decidedAt,
+    topic: "transport",
+    place: "cleared",
+  },
+];
+
 /**
  * The stub's state: while `down`, it drops every connection unanswered, as a
- * dead API would; with `logCounts` unset, its read of the log's counts fails.
+ * dead API would; with `logCounts` unset, its read of the log's counts fails;
+ * `log` is the moderation log it serves, oldest first.
  */
-export const stub: { down: boolean; logCounts: Record<string, string> | undefined } = {
+export const stub: {
+  down: boolean;
+  logCounts: Record<string, string> | undefined;
+  log: readonly Record<string, string>[];
+} = {
   down: false,
   logCounts: LOG_COUNTS,
+  log: LOG_ENTRIES,
 };
 
 /** Every request the stub API received, with its headers. */
@@ -557,25 +578,16 @@ export function stubApi(): Server {
       return json(200, stub.logCounts);
     }
     if (url.pathname === "/moderation/log") {
-      // The website reads the log only back from a number, newest first.
-      const before = BigInt(url.searchParams.get("before") ?? "0");
+      // As the API pages it: below `before`, newest first, or above `after`
+      // (from the first without it), oldest first.
+      const limit = Number(url.searchParams.get("limit"));
+      const before = url.searchParams.get("before");
+      const after = BigInt(url.searchParams.get("after") ?? "0");
       const entries =
-        before > 8n
-          ? [
-              {
-                seq: "8",
-                electionId: HIDDEN_ID,
-                action: "refile",
-                reason: "misfiled",
-                decidedAt: LATEST.decidedAt,
-                topic: "transport",
-                place: "cleared",
-              },
-              { ...LATEST, electionId: HIDDEN_ID },
-              { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
-            ]
-          : [];
-      return json(200, { entries });
+        before === null
+          ? stub.log.filter((entry) => BigInt(entry["seq"]!) > after)
+          : stub.log.filter((entry) => BigInt(entry["seq"]!) < BigInt(before)).toReversed();
+      return json(200, { entries: entries.slice(0, limit) });
     }
     if (url.pathname === "/elections/by-code") {
       // The API's answer for a code it is given in any form; this stub knows only canonical ones.

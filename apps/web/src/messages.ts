@@ -990,6 +990,7 @@ const enUS = {
   moderationDecided: "Time",
   moderationMore: "Earlier decisions",
   moderationLatest: "Latest decisions",
+  moderationLater: "Later decisions",
   moderationActionApply: "Show these decisions",
   moderationActionMatches: "{shown} of the {total} decisions on this page took this action.",
   moderationActionNone: "No decision on this page took this action.",

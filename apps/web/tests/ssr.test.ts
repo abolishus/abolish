@@ -45,7 +45,9 @@ import {
   HEAD_FAILS_ID,
   HIDDEN_CODE,
   HIDDEN_ID,
+  LATEST,
   LOG_COUNTS,
+  LOG_ENTRIES,
   ID,
   listed,
   LOST_ID,
@@ -2186,7 +2188,9 @@ describe("moderation log", () => {
     "?before=99999999999999999999",
     "?before=1&before=2",
     "?before=-1",
-    "?after=3",
+    "?after=abc",
+    "?after=3&after=4",
+    "?after=-1",
   ])("%s starts from the latest, quoting no error", async (search) => {
     seen.length = 0;
     const response = await follow(`/moderation${search}`);
@@ -2205,6 +2209,81 @@ describe("moderation log", () => {
     expect(seen.find((r) => r.path === "/moderation/log")?.query.get("before")).toBe("5");
     expect(html).toContain("No decisions yet.");
     expect(html).toMatch(/href="\/moderation"[^>]*>(<[^>]+>)*Latest decisions/);
+  });
+
+  describe("a log longer than a page", () => {
+    // Decisions 1 to 120, each delisting the hidden poll.
+    const long = Array.from({ length: 120 }, (_, i) => ({
+      ...LATEST,
+      seq: String(i + 1),
+      action: "delist",
+      reason: "spam",
+      electionId: HIDDEN_ID,
+    }));
+    const logReads = () =>
+      seen.filter((r) => r.path === "/moderation/log").map((r) => `${r.query}`);
+    const pageLinks = (html: string) =>
+      [...html.matchAll(/href="(\/moderation\?[^"]*)"[^>]*>(?:<[^>]+>)*(\w+) decisions</g)].map(
+        (m) => `${m[2]} ${m[1]!.replaceAll("&amp;", "&")}`,
+      );
+    beforeAll(() => {
+      stub.log = long;
+    });
+    afterAll(() => {
+      stub.log = LOG_ENTRIES;
+    });
+
+    test("an earlier page links to later decisions, above its newest", async () => {
+      seen.length = 0;
+      const html = await (await get("/moderation?before=60")).text();
+      expect(logReads()).toEqual(["before=60&limit=50"]);
+      expect(html).toContain(">59<");
+      expect(html).not.toContain(">60<");
+      expect(pageLinks(html)).toEqual([
+        "Later /moderation?after=59",
+        "Earlier /moderation?before=10",
+      ]);
+      expect(html).toMatch(/href="\/moderation"[^>]*>(<[^>]+>)*Latest decisions/);
+    });
+
+    test("reads later decisions forward and shows them newest first", async () => {
+      seen.length = 0;
+      const html = await (await get("/moderation?after=10&action=delist")).text();
+      expect(logReads()).toEqual(["after=10&limit=50"]);
+      const rows = html.slice(html.indexOf('<ol aria-labelledby="log-title"'));
+      expect(rows.indexOf(">60<")).toBeGreaterThan(0);
+      expect(rows.indexOf(">60<")).toBeLessThan(rows.indexOf(">11<"));
+      expect(rows).not.toContain(">10<");
+      expect(rows).not.toContain(">61<");
+      // Every link keeps the filter; the form and the clear link keep the page.
+      expect(pageLinks(html)).toEqual([
+        "Latest /moderation?action=delist",
+        "Later /moderation?after=60&action=delist",
+        "Earlier /moderation?before=11&action=delist",
+      ]);
+      expect(html).toMatch(/<input type="hidden" name="after" value="10"\/>/);
+      expect(html).toContain('href="/moderation?after=10"');
+    });
+
+    test("reads the latest page when fewer than a page of decisions are later", async () => {
+      seen.length = 0;
+      const html = await (await get("/moderation?after=100")).text();
+      expect(logReads()).toEqual(["after=100&limit=50", "before=18446744073709551615&limit=50"]);
+      const rows = html.slice(html.indexOf('<ol aria-labelledby="log-title"'));
+      expect(rows.indexOf(">120<")).toBeGreaterThan(0);
+      expect(rows).toContain(">71<");
+      expect(rows).not.toContain(">70<");
+      // The latest page offers nothing later and doesn't hold its place.
+      expect(pageLinks(html)).toEqual(["Earlier /moderation?before=71"]);
+      expect(html).not.toContain("Latest decisions");
+      expect(html).not.toMatch(/<input type="hidden" name="(after|before)"/);
+    });
+
+    test("prefers before when both are given", async () => {
+      seen.length = 0;
+      await follow("/moderation?before=60&after=10");
+      expect(logReads()).toEqual(["before=60&limit=50"]);
+    });
   });
 
   test("filters the page in hand by action, asking the API for the same page (T-10)", async () => {
@@ -2760,7 +2839,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 179, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 176, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 215, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 173, css: 40, fonts: 58 },

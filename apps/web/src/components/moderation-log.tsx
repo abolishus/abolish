@@ -1,6 +1,7 @@
 import { buttonVariants, Fingerprint, useI18n, useTranslate } from "@abolishus/ui";
 import {
   ArrowLeft,
+  ArrowLeftToLine,
   ArrowRight,
   Ban,
   EyeOff,
@@ -14,7 +15,7 @@ import type { ReactNode } from "react";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
-import type { LogCounts, ModerationLogPage as Log } from "../server/load.ts";
+import type { LogCounts, LogPlace, ModerationLogPage as Log } from "../server/load.ts";
 import { formatUtc, formatUtcDay } from "./format.ts";
 import { Bar } from "./poll-results.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
@@ -257,10 +258,12 @@ function LogTally({
 
 export interface ModerationLogProps {
   log: Log;
-  /** The number this page reads below, if not from the latest decision. */
-  before: string | undefined;
-  /** The number the earlier page reads below, if this one was full. */
+  /** Where this page starts, if it isn't the latest. */
+  place: LogPlace | undefined;
+  /** The number the earlier page reads below, if there may be earlier decisions. */
   next: string | undefined;
+  /** The number the later page reads above, if this page isn't the latest. */
+  later: string | undefined;
   /** The action the page shows, or every action with `"all"` or `undefined`. */
   action: LogAction | "all" | undefined;
 }
@@ -273,15 +276,15 @@ export interface ModerationLogProps {
  * what moderation did last is what a reader meets first, filtered by action
  * over the page in hand, beneath the whole log's counts by action.
  */
-export function ModerationLog({ log, before, next, action }: ModerationLogProps) {
+export function ModerationLog({ log, place, next, later, action }: ModerationLogProps) {
   const t = useTranslate(catalogs);
   const only = action === "all" ? undefined : action;
   const shown =
     only === undefined ? log.entries : log.entries.filter((entry) => logAction(entry) === only);
   // Values are canonical decimals and actions from a fixed list: nothing needs escaping.
-  const pageHref = (from: string | undefined, of: LogAction | undefined) => {
+  const pageHref = (at: LogPlace | undefined, of: LogAction | undefined) => {
     const query = [
-      ...(from === undefined ? [] : [`before=${from}`]),
+      ...(at === undefined ? [] : "after" in at ? [`after=${at.after}`] : [`before=${at.before}`]),
       ...(of === undefined ? [] : [`action=${of}`]),
     ].join("&");
     return query === "" ? "/moderation" : `/moderation?${query}`;
@@ -320,7 +323,11 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
           <p className="m-0 text-lg">{t("moderationEmpty")}</p>
         ) : (
           <form method="get" action="/moderation" className="grid gap-4">
-            {before === undefined ? null : <input type="hidden" name="before" value={before} />}
+            {place === undefined ? null : "after" in place ? (
+              <input type="hidden" name="after" value={place.after} />
+            ) : (
+              <input type="hidden" name="before" value={place.before} />
+            )}
             <FilterGroup
               name="action"
               legend={t("moderationAction")}
@@ -341,7 +348,7 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
                 {t("moderationActionApply")}
               </button>
               {only === undefined ? null : (
-                <a className="underline underline-offset-4" href={pageHref(before, undefined)}>
+                <a className="underline underline-offset-4" href={pageHref(place, undefined)}>
                   {t("filterClear")}
                 </a>
               )}
@@ -391,24 +398,30 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
             {t("moderationPageOfLog", { shown: log.entries.length, count: log.counts.total })}
           </p>
         )}
-        {next === undefined && before === undefined ? null : (
+        {next === undefined && place === undefined ? null : (
           <div className="flex flex-wrap items-center gap-x-6">
-            {/* Back to the latest page rather than one page later: the API
-                pages back from a number, and the latest is where a reader of
-                an earlier page is likeliest to want to return. */}
-            {before === undefined ? null : (
+            {place === undefined ? null : (
               <a
                 className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
                 href={pageHref(undefined, only)}
               >
-                <ArrowLeft aria-hidden="true" className="size-4" />
+                <ArrowLeftToLine aria-hidden="true" className="size-4" />
                 {t("moderationLatest")}
+              </a>
+            )}
+            {later === undefined ? null : (
+              <a
+                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
+                href={pageHref({ after: later }, only)}
+              >
+                <ArrowLeft aria-hidden="true" className="size-4" />
+                {t("moderationLater")}
               </a>
             )}
             {next === undefined ? null : (
               <a
                 className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
-                href={pageHref(next, only)}
+                href={pageHref({ before: next }, only)}
               >
                 {t("moderationMore")}
                 <ArrowRight aria-hidden="true" className="size-4" />

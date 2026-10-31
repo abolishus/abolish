@@ -17,6 +17,7 @@ import {
   loadStream,
   reportPoll,
   resolveShortLink,
+  type LogPlace,
   STREAM_PAGE,
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
@@ -77,9 +78,13 @@ export const fetchBoardPage = createServerFn({ method: "GET" })
   .handler(({ data }) => opaque(() => loadBoardPage(api(), data.electionId, data.from)));
 
 export const fetchModerationLog = createServerFn({ method: "GET" })
-  .inputValidator((before: unknown) => {
-    if (!isCanonicalU64(before)) throw new TypeError("expected a canonical decimal u64");
-    return before;
+  .inputValidator((place: unknown): LogPlace => {
+    // Exactly one of the two, as the API takes them.
+    if (typeof place === "object" && place !== null && Object.keys(place).length === 1) {
+      if ("before" in place && isCanonicalU64(place.before)) return { before: place.before };
+      if ("after" in place && isCanonicalU64(place.after)) return { after: place.after };
+    }
+    throw new TypeError("expected a canonical decimal u64, before or after alone");
   })
   .handler(({ data }) => opaque(() => loadModerationLog(api(), data)));
 

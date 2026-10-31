@@ -123,8 +123,8 @@ function Share({ count, counted, lead }: { count: string; counted: number; lead:
 
 /**
  * Each question's results, a table per question with one row per option and
- * one column per tier, and no total column: the tiers are never added
- * together (ADR 0026; T-16).
+ * one column per tier, headed by how many answered it and its turnout, and
+ * no total column: the tiers are never added together (ADR 0026; T-16).
  */
 function SideBySide({
   poll,
@@ -138,6 +138,9 @@ function SideBySide({
   phoneVerification: boolean;
 }) {
   const t = useTranslate(catalogs);
+  const turnoutText = useTurnoutText();
+  // Each tier's own, beside how many answered it; never one across tiers (T-16).
+  const turnouts = tiers.map((tier) => turnoutText(poll, tier));
   const several = poll.questions.length > 1;
   return (
     <Section id="results-side-title" title={t("resultsSideBySide")}>
@@ -159,12 +162,17 @@ function SideBySide({
                   <TableHead scope="col" className={WRAP}>
                     {t("resultsAnswer")}
                   </TableHead>
-                  {tiers.map((tier) => (
+                  {tiers.map((tier, j) => (
                     <TableHead key={tier.tier} scope="col" className={cn(WRAP, "text-end")}>
                       <span className="block">{t(tierMessage(tier.tier, phoneVerification))}</span>
                       <span className="block text-xs font-normal text-muted-foreground">
                         {t("resultsAnswered", { count: tier.counted })}
                       </span>
+                      {turnouts[j] === undefined ? null : (
+                        <span className="block text-xs font-normal text-muted-foreground">
+                          {t("resultsTurnoutIs", { turnout: turnouts[j].text })}
+                        </span>
+                      )}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -321,26 +329,46 @@ function Cells({
 }
 
 /**
- * How many of the tier's members answered, as the results page's mockup
- * puts it above the tier's result: a share of the members the definition
- * names for it, with its bar. Said only for a tier the definition names once,
- * so the members are that tier's alone, and only where the figure can be a
- * share (`turnoutOf`). The tiers' turnouts are never added up (T-16).
+ * How many of the tier's members answered: a share of the members the
+ * definition names for it. Only for a tier the definition names once, so the
+ * members are that tier's alone, and only where the figure can be a share
+ * (`turnoutOf`). The tiers' turnouts are never added up (T-16).
  */
-function Turnout({ poll, tier }: { poll: PollResultsPageProps["poll"]; tier: TierResults }) {
-  const t = useTranslate(catalogs);
-  const percent = usePercent();
+function turnout(poll: PollResultsPageProps["poll"], tier: TierResults) {
   const groups = poll.electorate.filter((g) => g.tier === tier.tier);
   const members = groups.length === 1 ? groups[0]?.groupSize : undefined;
   const share = members === undefined ? undefined : turnoutOf(tier.counted, members);
-  if (members === undefined || share === undefined) return null;
+  return members === undefined || share === undefined ? undefined : { members, share };
+}
+
+/** The tier's turnout in words, "17.1% of 7,220 members", or nothing where there is none. */
+function useTurnoutText() {
+  const t = useTranslate(catalogs);
+  const percent = usePercent();
+  return (poll: PollResultsPageProps["poll"], tier: TierResults) => {
+    const of = turnout(poll, tier);
+    return of === undefined
+      ? undefined
+      : {
+          share: of.share,
+          text: t("resultsTurnoutOf", {
+            share: percent.format(of.share),
+            count: BigInt(of.members),
+          }),
+        };
+  };
+}
+
+/** The tier's turnout with its bar, as the results page's mockup puts it above the tier's result. */
+function Turnout({ poll, tier }: { poll: PollResultsPageProps["poll"]; tier: TierResults }) {
+  const t = useTranslate(catalogs);
+  const of = useTurnoutText()(poll, tier);
+  if (of === undefined) return null;
   return (
     <p className="m-0 grid max-w-xl grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-2">
       <span className="text-sm">{t("resultsTurnout")}</span>
-      <span className="text-end font-mono text-sm tabular-nums">
-        {t("resultsTurnoutOf", { share: percent.format(share), count: BigInt(members) })}
-      </span>
-      <Bar share={share} lead={false} />
+      <span className="text-end font-mono text-sm tabular-nums">{of.text}</span>
+      <Bar share={of.share} lead={false} />
     </p>
   );
 }
@@ -475,7 +503,7 @@ const STATE_TEXT = {
 /**
  * A poll's results page of its own: tier by tier behind a tier switcher,
  * question by question, each in a sentence and then each option's share and
- * count; the tiers side by side with no total row; and, where a tier is
+ * count; the tiers side by side with no total column; and, where a tier is
  * counted in several cells, each cell's own results. As on the poll page,
  * these are the results our server reads from the openings on the board,
  * not the verifier's verdict, so the page says so and links to checking

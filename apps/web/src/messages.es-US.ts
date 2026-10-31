@@ -495,7 +495,11 @@ export const esUS: Messages = {
   pollAnswerOpenNote:
     "Abre la app de votación. No se envía nada hasta que emitas tus respuestas ahí.",
   pollAnswerScheduled: "Podrás responder aquí en cuanto abra la encuesta.",
+  pollScheduledLede:
+    "No se puede responder nada hasta que abra. Abajo se indica quién puede responder, cuándo y cómo se cuenta.",
   pollQuestionsTitle: "Lo que pregunta",
+  pollQuestionsFixed:
+    "La definición de la encuesta fija estas palabras, así que no se pueden editar antes de que abra ni mientras está abierta.",
   pollPickFrom: "{instruction} entre {options}",
   pollFinal: {
     one: "Resultados finales. Respondió {count} persona; esto es lo que dijo.",

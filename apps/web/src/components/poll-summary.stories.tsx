@@ -135,13 +135,14 @@ export const PhoneVerification: Story = {
   },
 };
 
-/** Before `opens_at`: not open yet, with its opening time on the surface. */
+/** Before `opens_at`: not open yet, saying so under the heading, with its opening time on the surface. */
 export const Scheduled: Story = {
   args: { asOf: { seconds: "1767225599", iso: "2025-12-31T23:59:59.000Z" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Not open yet")).toBeVisible();
     await expect(canvas.queryByText("Open for answers")).toBeNull();
+    await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
   },
 };
 
@@ -565,6 +566,9 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
       .slice(1)
       .map((li) => li.textContent),
   ).toEqual(["Yes", "No", "Abstain"]);
+  // Said only before it opens, as the scheduled poll's mockup says it.
+  await expect(within(asks).queryByText(/^The poll's definition fixes these words/)).toBeNull();
+  await expect(canvas.queryByText(/^Nothing can be answered until it opens/)).toBeNull();
   // One way into the ballot client, with the poll in the fragment alone (T-10, T-11).
   await expect(canvas.getByRole("link", { name: "Answer the question" })).toHaveAttribute(
     "href",
@@ -661,7 +665,10 @@ export const WordedScheduled: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("region", { name: "What it asks" })).toBeVisible();
+    const asks = canvas.getByRole("region", { name: "What it asks" });
+    await expect(asks).toBeVisible();
+    await expect(within(asks).getByText(/^The poll's definition fixes these words/)).toBeVisible();
+    await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
     await expect(canvas.getByText("You can answer here once the poll opens.")).toBeVisible();
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
   },

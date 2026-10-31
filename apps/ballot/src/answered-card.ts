@@ -34,10 +34,18 @@ export type Measure = (text: string) => number;
 
 const ELLIPSIS = "…";
 
-const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+let segmenter: Intl.Segmenter | undefined;
 
-/** `text`'s user-perceived characters, so a cut never splits an accent from its letter or an emoji in two. */
+/**
+ * `text`'s user-perceived characters, so a cut never splits an accent from
+ * its letter or an emoji in two. Made when first needed, and code points
+ * where the browser has no `Intl.Segmenter`: this module loads with every
+ * screen after answering, so it must not stop an older browser loading the
+ * client for the sake of the card.
+ */
 function graphemes(text: string): string[] {
+  if (typeof Intl.Segmenter !== "function") return Array.from(text);
+  segmenter ??= new Intl.Segmenter(undefined, { granularity: "grapheme" });
   return Array.from(segmenter.segment(text), ({ segment }) => segment);
 }
 
@@ -71,7 +79,7 @@ function ellipsize(line: string, width: number, measure: Measure): string {
  * spaces where it can and between characters where a word alone is too
  * wide. Text that doesn't fit ends its last line with an ellipsis. A
  * character wider than the line on its own still takes a line, the one case
- * a line overflows.
+ * a line overflows, as does an ellipsis alone wider than the line.
  */
 export function wrap(text: string, width: number, maxLines: number, measure: Measure): string[] {
   const words = text.split(/\s+/u).filter((word) => word !== "");
@@ -106,6 +114,22 @@ const MONO = `"JetBrains Mono Variable", ui-monospace, monospace`;
 
 /** The fonts the card is drawn in, so a caller can wait for them to load first. */
 export const CARD_FONTS = [`600 44px ${SANS}`, `700 64px ${SANS}`, `600 48px ${MONO}`] as const;
+
+/** The link's largest and smallest size in pixels: it shrinks to stay whole on one line. */
+const LINK_MAX = 48;
+const LINK_MIN = 16;
+
+/**
+ * The link's font size: the largest up to `LINK_MAX` at which it fits
+ * `width` on one line, never under `LINK_MIN`. The link is never cut: a
+ * shortened link would be a wrong one. `measureAt` measures at a size;
+ * monospace widths scale with it.
+ */
+export function linkSize(width: number, measureAt: (size: number) => number): number {
+  const at = measureAt(LINK_MAX);
+  if (at <= width) return LINK_MAX;
+  return Math.max(LINK_MIN, Math.floor((LINK_MAX * width) / at));
+}
 
 const MARGIN = 96;
 const TEXT_WIDTH = CARD_SIZE - 2 * MARGIN;
@@ -158,9 +182,23 @@ export function drawCard(ctx: CanvasRenderingContext2D, text: CardText, seal: st
     foot + 52,
   );
   ctx.fillStyle = EMERALD;
-  ctx.font = CARD_FONTS[2];
-  wrap(text.link, width, 2, (s) => ctx.measureText(s).width).forEach((line, i) =>
-    ctx.fillText(line, left, foot + 120 + i * 56),
+  const size = linkSize(width, (px) => {
+    ctx.font = `600 ${px}px ${MONO}`;
+    return ctx.measureText(text.link).width;
+  });
+  ctx.font = `600 ${size}px ${MONO}`;
+  // Whole, on one line; past the smallest size (an origin far longer than
+  // ours) it breaks between characters, every character kept, in the space
+  // between the invitation and the last line.
+  const linkLines = wrap(
+    text.link,
+    width,
+    Number.POSITIVE_INFINITY,
+    (s) => ctx.measureText(s).width,
+  );
+  const step = Math.min(size + 4, 100 / Math.max(1, linkLines.length));
+  linkLines.forEach((line, i) =>
+    ctx.fillText(line, left, foot + 120 - (linkLines.length - 1) * step + i * step),
   );
   ctx.fillStyle = MUTED;
   ctx.font = `500 32px ${SANS}`;

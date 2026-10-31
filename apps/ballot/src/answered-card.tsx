@@ -79,8 +79,9 @@ export function AnsweredCard({
     anchor.href = href;
     anchor.download = file.name;
     anchor.click();
-    // The download has its own copy once started; the URL isn't needed after.
-    setTimeout(() => URL.revokeObjectURL(href), 0);
+    // Revoked a minute later, not at once: some browsers drop a download whose
+    // URL is revoked before they have read it.
+    setTimeout(() => URL.revokeObjectURL(href), 60_000);
   };
   const menu = file !== undefined && (canShare ?? canShareFile(file));
 
@@ -97,11 +98,11 @@ export function AnsweredCard({
       <p className="m-0 text-sm text-pretty text-muted-foreground" data-testid="card-note">
         {t("answeredCardNote")}
       </p>
-      {failed ? (
-        <p role="status" className="m-0 text-sm">
-          {t("answeredCardFailed")}
-        </p>
-      ) : (
+      {/* Mounted empty first, so a screen reader announces what fills it. */}
+      <p role="status" className="m-0 min-h-5 text-sm">
+        {failed ? t("answeredCardFailed") : file === undefined ? t("answeredCardDrawing") : ""}
+      </p>
+      {failed ? null : (
         <div className="flex w-full flex-col gap-3 sm:flex-row">
           {menu ? (
             <Button

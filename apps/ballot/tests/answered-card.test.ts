@@ -7,7 +7,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { cardFileName, wrap, type Measure } from "../src/answered-card.ts";
+import { cardFileName, linkSize, wrap, type Measure } from "../src/answered-card.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 
@@ -85,6 +85,29 @@ describe("wrap", () => {
   test("treats any run of whitespace as one space, and an empty question as no lines", () => {
     expect(wrap("  a \n\t b  ", 10, 6, measure)).toEqual(["a b"]);
     expect(wrap(" \n ", 10, 6, measure)).toEqual([]);
+  });
+});
+
+describe("linkSize", () => {
+  /** A monospace face: 0.6 of the size a character. */
+  const mono = (link: string) => (size: number) => 0.6 * size * link.length;
+
+  test("keeps the largest size for a link that fits", () => {
+    expect(linkSize(640, mono("abolish.us/p/3j55dw1"))).toBe(48);
+  });
+
+  test("shrinks a longer link until it fits whole, down to the smallest size", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 120 }), fc.integer({ min: 100, max: 1000 }), (n, w) => {
+        const link = "x".repeat(n);
+        const size = linkSize(w, mono(link));
+        expect(size).toBeLessThanOrEqual(48);
+        expect(size).toBeGreaterThanOrEqual(16);
+        if (size > 16) expect(mono(link)(size)).toBeLessThanOrEqual(w);
+        if (size < 48) expect(mono(link)(size + 1)).toBeGreaterThan(w);
+      }),
+      { numRuns },
+    );
   });
 });
 

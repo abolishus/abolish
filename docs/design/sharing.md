@@ -46,10 +46,10 @@ A card for local news and community pages: who asked, the question, each option 
 A square picture (1080 × 1080, always the light palette, as the link preview) that a voter can make after answering, from the ballot client's "Ask others" (P2-24 part 5b): **Make an "I answered" card** opens it under the link, like the QR code, with **Share the card…** where the system's share menu takes a picture and **Save the card** everywhere.
 
 - **What it says:** "I answered this poll", the poll's first question in the reader's language (six lines at most, cut with an ellipsis), the poll's seal (its definition hash's fingerprint, as the board draws it), "Answer it too", the short link and "Anyone can check the count." The flyer's emerald band and ruled frame make it ours at a glance.
-- **What it never says:** the voter's answer, their tracking code, when they answered, or anything about their device or account. The card is the same for everyone who makes it in one poll and language.
+- **What it never says:** the voter's answer, their tracking code, when they answered, or anything about their device or account. Its words and picture are the same for everyone who makes it in one poll and language; the PNG's bytes can differ with the browser's rendering, which a recipient could read as a hint of the sender's browser or system, never of their answer (T-10, residual).
 - **Made on the device, sent only by the voter.** It is drawn on a canvas in the ballot client from what the client already holds; drawing, sharing and saving make no request, so no server, ours included, learns that a card was made (T-10, T-67). The share menu gets the picture, the question and the link, nothing else.
 - **It proves nothing.** It carries no tracking code or signature and anyone can draw it without answering, so it can't serve a coercer or a buyer as proof of participation, let alone of a choice (T-45, T-46). The card's note says so, and that it tells whoever sees it that the sender answered.
-- **Accessible:** the canvas is an image named with the card's whole text, the question uncut.
+- **Accessible:** the canvas is an image named with the card's words, the question uncut; a status line says while it is drawn or if it can't be.
 
 ## The embed decision
 

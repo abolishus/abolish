@@ -429,7 +429,9 @@ const enUS = {
   answeredCardLead: "I answered this poll",
   answeredCardInvite: "Answer it too",
   answeredCardCheck: "Anyone can check the count.",
-  answeredCardLabel: "Card: I answered this poll. {question} Answer it too at {link}.",
+  answeredCardLabel:
+    "Card: I answered this poll. {question} Answer it too at {link}. Anyone can check the count.",
+  answeredCardDrawing: "Drawing the card…",
   answeredCardNote:
     "The card says you answered, never how. It's made on this device and goes only where you send it. It holds no tracking code, so it proves nothing: anyone can make one.",
   answeredCardShare: "Share the card…",

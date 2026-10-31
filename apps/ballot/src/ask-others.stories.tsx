@@ -10,6 +10,10 @@ const URL = "https://abolish.us/p/3j55dw1";
 const TITLE = "Which improvement matters most to you?";
 const SEAL = "3f8a0c51d2e4b69788a1c0d3e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718";
 
+// Drawing waits for the fonts and encodes a 1080-pixel PNG, which can take
+// longer than `waitFor`'s default second on a busy runner.
+const DRAWN = { timeout: 10_000 };
+
 const meta = {
   title: "Ballot/Ask others",
   component: AskOthers,
@@ -126,10 +130,13 @@ export const Card: Story = {
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(
       part.getByRole("img", {
-        name: `Card: I answered this poll. ${TITLE} Answer it too at abolish.us/p/3j55dw1.`,
+        name: `Card: I answered this poll. ${TITLE} Answer it too at abolish.us/p/3j55dw1. Anyone can check the count.`,
       }),
     ).toBeVisible();
-    await waitFor(() => expect(part.getByRole("button", { name: "Save the card" })).toBeEnabled());
+    await waitFor(
+      () => expect(part.getByRole("button", { name: "Save the card" })).toBeEnabled(),
+      DRAWN,
+    );
     await userEvent.click(toggle);
     await expect(part.queryByRole("img")).toBeNull();
   },

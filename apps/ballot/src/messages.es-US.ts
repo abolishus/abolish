@@ -433,7 +433,8 @@ export const esUS: Messages = {
   answeredCardInvite: "Respóndela tú también",
   answeredCardCheck: "Cualquiera puede comprobar el conteo.",
   answeredCardLabel:
-    "Tarjeta: Ya respondí esta encuesta. {question} Respóndela tú también en {link}.",
+    "Tarjeta: Ya respondí esta encuesta. {question} Respóndela tú también en {link}. Cualquiera puede comprobar el conteo.",
+  answeredCardDrawing: "Dibujando la tarjeta…",
   answeredCardNote:
     "La tarjeta dice que respondiste, nunca cómo. Se crea en este dispositivo y solo va adonde la envíes. No lleva código de seguimiento, así que no prueba nada: cualquiera puede crear una.",
   answeredCardShare: "Compartir la tarjeta…",

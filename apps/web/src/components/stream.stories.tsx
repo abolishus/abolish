@@ -441,6 +441,16 @@ export const Unreadable: Story = {
     await expect(list.getByText(/came through damaged/)).toBeVisible();
     await expect(list.getByText(/belong to a different poll/)).toBeVisible();
     await expect(list.queryByText(/definition|server/)).toBeNull();
+    // No card here offers an answer, so nothing above them says to choose one.
+    await expect(within(canvasElement).queryByText(/Choose an answer/)).toBeNull();
+    // Each heading's lines are balanced: at 360px "here" wrapped alone.
+    for (const heading of headings) {
+      const lines = Array.from(heading.querySelector("a")!.getClientRects());
+      if (lines.length > 1)
+        await expect(Math.min(...lines.map((r) => r.width))).toBeGreaterThan(
+          Math.max(...lines.map((r) => r.width)) / 2,
+        );
+    }
   },
 };
 

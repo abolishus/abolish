@@ -361,7 +361,8 @@ export function StreamCard({
             here came for questions, and the poll's page has the detail. The
             ID's start, small below, is all that tells two such cards apart,
             so it describes the link. */}
-        <h3 id={titleId} className="m-0 text-lg font-medium">
+        {/* Balanced: at 360px "here" wrapped alone under the rest. */}
+        <h3 id={titleId} className="m-0 text-lg font-medium text-balance">
           <a
             className="underline underline-offset-4"
             href={`/polls/${card.electionId}`}
@@ -669,8 +670,11 @@ export function StreamPage({
           <Empty title={t("streamEmpty")}>{t("streamEmptyLede")}</Empty>
         ) : (
           <>
-            {/* Said once here rather than on every card (`explained`). */}
-            {ballot === null ? null : (
+            {/* Said once here rather than on every card (`explained`), and
+                only over a card that offers answers: over unreadable cards
+                alone it promised answers none of them has, as home already
+                knew (P2-29, the stream's iteration 11). */}
+            {ballot === null || !stream.cards.some((c) => c.kind === "poll") ? null : (
               <p className="m-0 text-base text-pretty text-muted-foreground">
                 {t("homeStreamPick")}
               </p>

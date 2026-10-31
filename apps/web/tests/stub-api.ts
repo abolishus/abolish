@@ -384,6 +384,8 @@ export const RESULTS_FAILS_ID = FILLER[6]!;
 export const CELLS_MISFIT_ID = FILLER[7]!;
 /** A closed poll counted in both its tiers, which the register says is counted. */
 export const COUNTED_ID = FILLER[8]!;
+/** A poll whose board head the stub fails to answer, which the results page shows its results without. */
+export const HEAD_FAILS_ID = FILLER[9]!;
 const counted = (tiers: unknown[], cells: unknown[] = []) => ({
   state: "read",
   openings: 3,
@@ -638,7 +640,7 @@ export function stubApi(): Server {
           : json(200, { displayText });
       }
       case "/board/head":
-        return json(200, HEAD);
+        return electionId === HEAD_FAILS_ID ? json(500, {}) : json(200, HEAD);
       case "/board/entries": {
         const start = Number(url.searchParams.get("start"));
         if (start > BOARD.length)

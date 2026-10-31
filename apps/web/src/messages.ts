@@ -524,6 +524,10 @@ const enUS = {
   resultsFingerprints:
     "Counting it again without us starts from this poll's ID, and the definition it finds must have this hash, which fixes the poll's rules before its first answer.",
   resultsCheckTitle: "Check it yourself",
+  resultsBoardTitle: "What the board holds",
+  resultsBoardLede:
+    "This poll's results are counted from its public board. Entries are only ever added at the end, and none shows how anyone voted.",
+  resultsBoardUnavailable: "The board couldn't be read just now.",
   resultsVerify: "How to count it yourself",
   reactionsTitle: "Reactions",
   reactionsLede:

@@ -19,6 +19,7 @@ import type { BoardHead, ModerationState } from "../server/load.ts";
 import type { CardAnswered, CardText, PollWords } from "../stream.ts";
 import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
+import { BoardHeadFacts } from "./board-head.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PollFacts, StatusMark } from "./poll-facts.tsx";
 import { PollFollow } from "./poll-follow.tsx";
@@ -549,18 +550,7 @@ export function PollSummary({
             <h3 id="board-title" className="m-0 font-heading text-xl font-semibold">
               {t("boardTitle")}
             </h3>
-            {board.treeSize === "0" ? (
-              <p className="m-0">{t("boardEmpty")}</p>
-            ) : (
-              <>
-                <p className="m-0">
-                  {t("boardEntries")}: <Count value={BigInt(board.treeSize)} />
-                </p>
-                <Hash value={board.chainHead} label={t("boardHead")} />
-                <Hash value={board.root} label={t("boardRoot")} />
-                <p className="m-0 max-w-prose text-muted-foreground">{t("boardUnanchored")}</p>
-              </>
-            )}
+            <BoardHeadFacts head={board} />
             <a
               className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
               href={`/polls/${poll.electionId}/board`}

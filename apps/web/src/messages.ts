@@ -506,6 +506,15 @@ const enUS = {
     "Each question is counted on its own. Answers to different questions are never matched up: only each question's totals are opened, so no result shows how anyone answered the set.",
   resultsSealed:
     "Answers stay sealed while the poll is open. The results appear here once they're counted.",
+  resultsSealedTitle: "Results appear when it closes",
+  resultsSealedUntil:
+    "The answers stay sealed until the poll closes on {when}. The results appear here once they're counted.",
+  resultsSealedUntilClose:
+    "The answers stay sealed until the poll closes. The results appear here once they're counted.",
+  resultsSealedAsker:
+    "Until then whoever asked it can't see them either: only the poll's trustee seats can open the count, and during launch Abolish runs every seat.",
+  resultsSealedBoard:
+    "Anyone can count the sealed answers on the poll's public board; what they say stays locked.",
   resultsCounting: "This poll has closed. The results appear here once its answers are counted.",
   resultsNotCounted:
     "This server doesn't publish this poll's results. Anyone can still count them from its public board.",

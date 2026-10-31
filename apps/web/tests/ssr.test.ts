@@ -619,7 +619,7 @@ describe("results", () => {
 
   test.each([
     ["unopened and closed", ID, "The results appear here once its answers are counted."],
-    ["unopened and open", OPEN_ONE, "Answers stay sealed while the poll is open."],
+    ["unopened and open", OPEN_ONE, "The answers stay sealed until the poll closes on"],
     ["not counted here", FILLER[1]!, "This server doesn&#x27;t publish this poll&#x27;s results."],
     ["not ready", RESULTS_NOT_READY_ID, "The results couldn&#x27;t be loaded just now."],
     ["a failed read", RESULTS_FAILS_ID, "The results couldn&#x27;t be loaded just now."],
@@ -635,6 +635,26 @@ describe("results", () => {
     const html = (await section(`/polls/${id}`)) ?? "";
     expect(html).toContain(says);
     expect(html).not.toContain("answered</p>");
+  });
+
+  // P2-19 part 40: an open poll's sealed results in its mockup's words.
+  test("an open poll's results say when they appear, who can't see them and who can open them", async () => {
+    const html = (await section(`/polls/${OPEN_ONE}`)) ?? "";
+    expect(html).toMatch(/^<h2 id="results-title"[^>]*>Results appear when it closes<\/h2>/);
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(page).toMatch(
+      /The answers stay sealed until the poll closes on January 1, 2100 at 12:00\s?AM\u00a0UTC\./,
+    );
+    // T-14: the asker holds no seat, and the page says whose the launch seats are.
+    expect(page).toContain(
+      "Until then whoever asked it can&#x27;t see them either: only the poll&#x27;s trustee seats can open the count, and during launch Abolish runs every seat.",
+    );
+    expect(page).toContain("Anyone can count the sealed answers on the poll&#x27;s public board");
+    const es = (
+      await (await get(`/polls/${OPEN_ONE}`, { "accept-language": "es-MX" })).text()
+    ).replace(/<[^>]+>/g, "");
+    expect(es).toContain("Los resultados aparecen cuando cierre");
+    expect(es).toContain("Las respuestas siguen selladas hasta que la encuesta cierre el ");
   });
 
   test("a closed poll counted in its one tier is summed up under its heading, question by question", async () => {

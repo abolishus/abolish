@@ -340,6 +340,16 @@ export function PollSummary({
           <p className="m-0 max-w-prose text-lg text-pretty">{t("pollScheduledLede")}</p>
         ) : null}
 
+        {/* The open poll's mockup opens on how answering works: the set is
+            answered together and can be answered again until it closes, the
+            last ballot counting (G-11, T-45). Said only where this page links
+            answering, so it never promises what a visitor can't do here. */}
+        {answering === null ? null : (
+          <p className="m-0 max-w-prose text-lg text-pretty">
+            {t("pollOpenLede", { count: poll.questions.length })}
+          </p>
+        )}
+
         {final === undefined ? null : (
           <>
             <InShort final={final} words={moderation.state === "hidden" ? undefined : words} />

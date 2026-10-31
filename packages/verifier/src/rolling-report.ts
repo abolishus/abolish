@@ -81,7 +81,11 @@ export function rollingElectorates(
   const d = definition.value;
   return d.rolling_electorate.map((tier, cell) => {
     const own = steps.filter((s) => s.cell === cell && s.entry < extent);
-    const chosen = releases === undefined ? undefined : (releases.get(tier.tier) ?? []);
+    const chosen = releases?.get(tier.tier);
+    // The releases report lists every tier of the same definition, so a
+    // missing one is the caller's error, never a tier that chose none.
+    if (releases !== undefined && chosen === undefined)
+      throw new Error(`rollingElectorates: no releases for tier ${tier.tier}`);
     const r = rollingTierReport(
       chain.events,
       {
@@ -119,7 +123,8 @@ export function rollingElectorates(
       ...(chosen !== undefined && {
         releases: chosen.map((c, i) => {
           // One per release given, in order.
-          const got = r.releases[i] as { readonly step: bigint | null; readonly count: number };
+          const got = r.releases[i];
+          if (got === undefined) throw new Error("rollingElectorates: a release without its count");
           return {
             snapshot: c.snapshot,
             step: got.step === null ? null : Number(got.step),

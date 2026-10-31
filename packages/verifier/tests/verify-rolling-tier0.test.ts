@@ -649,7 +649,8 @@ describe(
       // A copy boarded after the snapshot's segment isn't in it.
       expect(releaseOf([early, { entry: 2, segment: 2, step: close.step }], first)).toEqual([at]);
       // A tier that chose no release reports none; without the releases read, no member.
-      expect(releaseOf([early], new Map())).toEqual([]);
+      expect(releaseOf([early], new Map([[0, []]]))).toEqual([]);
+      expect(() => releaseOf([early], new Map())).toThrow(/no releases for tier 0/);
       expect(releaseOf([early], undefined)).toBeUndefined();
     });
 

@@ -413,6 +413,7 @@ export const esUS: Messages = {
   streamCursorLost:
     "La pregunta tras la que empezaba esta página ya no se puede ubicar en este orden.",
   streamStart: "Empezar desde arriba",
+  streamLater: "Estas vienen después de la primera página.",
   streamEndTitle: "Esas eran todas",
   streamEnd: "Todas las preguntas abiertas en este orden estaban en las páginas anteriores.",
   streamSearchLabel: "Buscar en las preguntas",

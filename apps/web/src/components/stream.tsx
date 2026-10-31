@@ -806,6 +806,21 @@ export function StreamPage({
           <Empty title={t("streamEmpty")}>{t("streamEmptyLede")}</Empty>
         ) : (
           <>
+            {/* A later page drew the first page's header, orders and topics
+                unchanged, so nothing said a visitor had paged on, and the
+                only way back was the chosen order's link (P2-29, the
+                stream's iteration 21). */}
+            {later ? (
+              <p className="m-0 flex flex-wrap items-center gap-x-3 text-sm">
+                <span>{t("streamLater")}</span>
+                <a
+                  className="inline-flex min-h-6 items-center underline underline-offset-4"
+                  href={streamHref(sort, filter)}
+                >
+                  {t("streamStart")}
+                </a>
+              </p>
+            ) : null}
             {/* Said once here rather than on every card (`explained`), and
                 only over a card that offers answers: over unreadable cards
                 alone it promised answers none of them has, as home already

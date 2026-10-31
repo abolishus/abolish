@@ -124,6 +124,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   );
   const list = questions(canvasElement);
   await expect(list.getAllByRole("article")).toHaveLength(4);
+  // Only a later page says it follows the first (the stream's iteration 21).
+  await expect(canvas.queryByText("These come after the first page.")).toBeNull();
 
   // Each card's heading names the poll's page; the asker's words keep their own language.
   const library = list.getByRole("heading", { name: "Library hours" });
@@ -556,6 +558,16 @@ export const LaterPage: Story = {
       "true",
     );
     await expect(canvasElement.querySelector('[aria-current="page"]')).toBeNull();
+    // It says it is a later page, with a way to the first above the cards
+    // (P2-29, the stream's iteration 21).
+    const note = canvas.getByText("These come after the first page.");
+    await expect(note).toBeVisible();
+    const start = canvas.getByRole("link", { name: "Start from the top" });
+    await expect(start).toHaveAttribute("href", "/discover");
+    await expect(
+      note.compareDocumentPosition(canvas.getByRole("list", { name: "Questions" })) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   },
 };
 

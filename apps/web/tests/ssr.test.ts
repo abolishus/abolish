@@ -1951,6 +1951,7 @@ describe("stream", () => {
     // The order is marked, and the next page keeps it.
     expect(html).toMatch(/<a href="\/discover" aria-current="page"[^>]*>New</);
     expect(html).toContain(`href="/discover?after=${streamed[9]}"`);
+    expect(html).not.toContain("These come after the first page.");
   });
 
   test("shows where each card's poll is listed, each tag a link into the stream", async () => {
@@ -1977,6 +1978,10 @@ describe("stream", () => {
     // leads back to the first (P2-29, the stream's iteration 20).
     expect(second).toMatch(/<a href="\/discover" aria-current="true"[^>]*>New</);
     expect(second).toMatch(/<a href="\/discover" aria-current="true"[^>]*>All topics</);
+    // And says it is a later page, with a way back to the first (the
+    // stream's iteration 21); the first page says neither.
+    expect(second).toContain("These come after the first page.");
+    expect(second).toMatch(/<a [^>]*href="\/discover">Start from the top</);
     const third = await (await get(`/discover?after=${streamed[19]}`)).text();
     expect(cards(third)).toEqual(streamed.slice(20));
     expect(third).not.toContain("More questions");
@@ -2956,7 +2961,7 @@ const KB = 1024;
  * home the stream's cards beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 179, css: 40, fonts: 58 },
+  "/": { html: 10, js: 180, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 177, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 217, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },

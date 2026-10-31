@@ -407,6 +407,7 @@ const enUS = {
   streamCursorLostTitle: "That page has moved on",
   streamCursorLost: "The question this page started after can't be placed in this order any more.",
   streamStart: "Start from the top",
+  streamLater: "These come after the first page.",
   streamEndTitle: "That was the last of them",
   streamEnd: "Every open question in this order was on the pages before this one.",
   streamSearchLabel: "Search the questions",

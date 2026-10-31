@@ -364,24 +364,6 @@ describe("cellResultsView", () => {
       "a seat on a cell with nothing boarded",
       withCells(honest.tiers, [...cells.slice(0, 3), { ...cells[3]!, signers: [1] }]),
     ],
-    // A seat the poll's panel doesn't have, or one named twice or out of order (T-34).
-    ["seat 0", withCells(honest.tiers, [{ ...cells[0]!, signers: [0] }, ...cells.slice(1)])],
-    [
-      "a seat past the panel",
-      withCells(honest.tiers, [{ ...cells[0]!, signers: [4] }, ...cells.slice(1)]),
-    ],
-    [
-      "seats out of order",
-      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 1] }, ...cells.slice(1)]),
-    ],
-    [
-      "a seat named twice",
-      withCells(honest.tiers, [{ ...cells[0]!, signers: [2, 2] }, ...cells.slice(1)]),
-    ],
-    [
-      "a seat on a cell with nothing boarded",
-      withCells(honest.tiers, [...cells.slice(0, 3), { ...cells[3]!, signers: [1] }]),
-    ],
   ])("refuses %s", (_, served) => {
     expect(cellResultsView(v1, partition, served)).toBeUndefined();
   });

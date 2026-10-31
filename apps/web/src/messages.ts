@@ -463,6 +463,7 @@ const enUS = {
   pollAnswerScheduled: "You can answer here once the poll opens.",
   pollQuestionsTitle: "What it asks",
   pollPickFrom: "{instruction} from {options}",
+  pollAnsweredClosed: "Answered before it closed",
   pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
   resultsTitle: "Results",
   resultsSealed:

@@ -159,6 +159,55 @@ export const Closed: Story = {
   },
 };
 
+/** How many have answered so far, tier by tier as the definition names them, never summed (T-01). */
+export const Answered: Story = {
+  args: {
+    answered: [
+      { tier: 0, answered: "1204" },
+      { tier: 2, answered: "1" },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const counts = canvas.getByRole("list", { name: "Answered so far" });
+    await expect(
+      within(counts)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["1,204 people · Tier 0 (verified e-mail)", "1 person · Tier 2 (document-verified)"]);
+    await expect(canvas.queryByText("1,205 people")).toBeNull();
+  },
+};
+
+/** Past `closes_at`, the same count says it was before it closed. */
+export const AnsweredClosed: Story = {
+  args: {
+    ...Closed.args,
+    answered: [
+      { tier: 0, answered: "12" },
+      { tier: 2, answered: "0" },
+    ],
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const counts = canvas.getByRole("list", { name: "Answered before it closed" });
+    await expect(within(counts).getByText("12 people")).toBeVisible();
+    await expect(within(counts).getByText("0 people")).toBeVisible();
+    await expect(canvas.queryByText("Answered so far")).toBeNull();
+  },
+};
+
+/** Before `opens_at`, no count is shown: nobody can have answered yet. */
+export const AnsweredScheduled: Story = {
+  args: { ...Scheduled.args, answered: [{ tier: 0, answered: "0" }] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Not open yet")).toBeVisible();
+    await expect(canvas.queryByText("Answered so far")).toBeNull();
+    await expect(canvas.queryByText("0 people")).toBeNull();
+  },
+};
+
 /** No registration recorded yet: no code resolves, so none is printed. */
 export const NoShortCode: Story = {
   // The route offers no share sheet without a short link.

@@ -68,6 +68,8 @@ export type PollPage =
       readonly words: PollWords | undefined;
       /** Its results so far, as `resultsOf` reads them. */
       readonly results: PollResults;
+      /** How many have answered it so far, as a stream card's (`cardAnswered`); `undefined` if the read failed. */
+      readonly answered: CardAnswered | undefined;
     }
   | { readonly kind: "not-found" }
   | { readonly kind: "unavailable"; readonly problem: DefinitionProblem };
@@ -97,12 +99,14 @@ export async function loadPoll(
       askedByOf(readAskedBy, electionId),
       wordsOf(api, electionId),
       resultsOf(api, electionId),
+      answeredOf(api, electionId),
     ]);
   } catch (error) {
     if (notFound(error)) return { kind: "not-found" };
     throw error;
   }
-  const [{ definition }, board, moderation, claimed, tags, askedBy, displayText, served] = answers;
+  const [{ definition }, board, moderation, claimed, tags, askedBy, displayText, served, answered] =
+    answers;
   const view = definitionView(electionId, definition);
   if (!view.ok) return { kind: "unavailable", problem: view.problem };
   // The API withholds a hidden poll's text; dropped here too, should its
@@ -138,6 +142,9 @@ export async function loadPoll(
     // Moderation never withholds a result: a hidden poll's is shown by
     // option number (docs/moderation-policy.md).
     results: "state" in served ? resultsView(view.poll, served) : served,
+    // The board's count, not a result, so shown on a hidden poll as its
+    // results are; never one figure across tiers (T-01).
+    answered: answered === undefined ? undefined : cardAnswered(view.poll, answered),
   };
 }
 

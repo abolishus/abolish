@@ -171,7 +171,9 @@ export const Failed: Story = {
       /Making the key that seals your poll's answers didn't finish after four tries/,
     );
     await expect(
-      within(alert).getByRole("link", { name: "Back to your polls, to try again or discard it" }),
+      within(alert).getByRole("link", {
+        name: "Back to your polls, to submit it again or discard it",
+      }),
     ).toHaveAttribute("href", "/account");
     await expect(canvas.queryByRole("list")).toBeNull();
     const done = reads(args.client);

@@ -720,33 +720,33 @@ export const esUS: Messages = {
   pollFailure_closesTooSoon:
     "La preparación tardó más de lo previsto, y tu encuesta habría cerrado muy poco después de abrir. Elige una hora de cierre más tarde y vuelve a enviarla.",
   pollFailure_creationReverted:
-    "No se pudo crear tu encuesta en el registro público. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "No se pudo crear tu encuesta en el registro público. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_creationReplaced:
-    "Algo salió mal de nuestro lado mientras se creaba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Algo salió mal de nuestro lado mientras se creaba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_creationTimeout:
-    "Crear tu encuesta en el registro público tomó demasiado tiempo. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Crear tu encuesta en el registro público tomó demasiado tiempo. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_creationAnchored:
-    "Tu encuesta no pudo empezar limpiamente en el registro público tras tres intentos, así que sus respuestas no se podían proteger. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Tu encuesta no pudo empezar limpiamente en el registro público tras tres intentos, así que sus respuestas no se podían proteger. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_tierUnavailable:
     "Todavía no se pueden preparar encuestas para los votantes que elegiste. Tu pregunta no se publicó. Cambia quién puede responder y vuelve a enviarla.",
   pollFailure_electorateEmpty:
-    "Nadie habría podido responder: cuando se preparó tu encuesta, todavía no había nadie en el grupo de votantes que elegiste. Tu pregunta no se publicó. Puedes intentarlo más tarde o descartarla.",
+    "Nadie habría podido responder: cuando se preparó tu encuesta, todavía no había nadie en el grupo de votantes que elegiste. Tu pregunta no se publicó. Puedes volver a enviarla más tarde o descartarla.",
   pollFailure_stubRefused:
-    "Algo salió mal de nuestro lado mientras se preparaba tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Algo salió mal de nuestro lado mientras se preparaba tu encuesta. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_registrationRefused:
-    "La preparación de tu encuesta no pasó nuestras comprobaciones, así que no la registramos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "La preparación de tu encuesta no pasó nuestras comprobaciones, así que no la registramos. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_registrationReverted:
-    "El registro público rechazó registrar tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "El registro público rechazó registrar tu encuesta. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_registrationReplaced:
-    "Algo salió mal de nuestro lado mientras se registraba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Algo salió mal de nuestro lado mientras se registraba tu encuesta, así que nos detuvimos. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_registrationTimeout:
-    "Registrar tu encuesta tomó demasiado tiempo. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "Registrar tu encuesta tomó demasiado tiempo. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_registrationMismatch:
     "Algo distinto de tu encuesta quedó registrado en su lugar del registro público, así que nos detuvimos antes de que abriera. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   pollFailure_openMismatch:
     "Lo que el registro público tiene de tu encuesta no es exactamente lo que escribiste, así que no la abrimos. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   pollFailure_ceremonyTimeout:
-    "La clave que sella las respuestas de tu encuesta no se terminó de crear tras cuatro intentos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "La clave que sella las respuestas de tu encuesta no se terminó de crear tras cuatro intentos. Tu pregunta no se publicó. Puedes volver a enviarla o descartarla.",
   pollFailure_openTimeout:
     "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   evidenceSummary: "¿Cómo sabemos que esto es real?",
@@ -1329,13 +1329,12 @@ export const esUS: Messages = {
   pollsProfileIs: "Tu perfil es",
   pollsProfileHelp:
     "Al marcar “Mostrar en tu perfil” bajo una encuesta, tu perfil la lista, y su página dice que tu perfil la hizo, mientras la encuesta esté listada. Una encuesta que aún no se ha abierto se lista cuando se abra. Desmarca una casilla cuando quieras.",
-  pollsRetry: "Intentar de nuevo",
+  pollsRetry: "Editar y volver a enviar",
   pollsDiscard: "Descartar…",
   pollsDiscardQuestion: "¿Descartar esta encuesta y su borrador? No se puede deshacer.",
   pollsDiscardConfirm: "Descartar para siempre",
   pollsKeep: "Conservarla",
   pollsRemoved: "El borrador se eliminó.",
-  pollsRetried: "Tu encuesta vuelve a ser un borrador, tal como la escribiste.",
   pollsDiscarded: "La encuesta se descartó.",
   pollsFailure_signedOut: "Se cerró tu sesión. Vuelve a iniciar sesión para ver tus encuestas.",
   pollsFailure_gone: "Esa encuesta ya no está aquí. La lista ya está actualizada.",
@@ -1439,7 +1438,7 @@ export const esUS: Messages = {
   setupPollPage: "Ir a la página de tu encuesta",
   setupDraft: "Esta encuesta no se ha enviado, así que no se está preparando nada.",
   setupFailed: "Tu encuesta no se abrió.",
-  setupFailedNext: "Volver a tus encuestas para intentarlo de nuevo o descartarla",
+  setupFailedNext: "Volver a tus encuestas para volver a enviarla o descartarla",
   pollFormAboutTitle: "¿De qué trata?",
   pollFormTitleLabel: "Título",
   pollFormTitleHelp: "Lo primero que se ve, en las listas y en la página de la encuesta.",

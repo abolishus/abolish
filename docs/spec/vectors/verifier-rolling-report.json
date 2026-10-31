@@ -1,0 +1,65 @@
+{
+  "format": "abolish-verifier-rolling-report-vectors/1",
+  "title": "What each rolling tier of the Tier-0-only rolling polls through verifyBundle reports about its electorate",
+  "spec": "docs/spec/verifier.md",
+  "generator": "Printed by packages/crypto/scripts/verifier-rolling-report-vectors.py: each poll rebuilt by its own generator's build (verifier-ballots-v5-tier0-sealed-vectors.py, verifier-ballots-v5-tier0-live-vectors.py), its counts by rolling-report-vectors.py's report under the bundle's anchoring clock, independently of packages/crypto and packages/verifier.",
+  "description": "For each vector file, its report's `tiers` electorate counts, as strings: every ballot on its board names its step with a membership proof that verifies, so every one counts toward the smallest step used.",
+  "polls": {
+    "verifier-ballots-v5-tier0-sealed.json": [
+      {
+        "tier": 0,
+        "electorate": {
+          "opening": {
+            "members": "2"
+          },
+          "eligible": "5",
+          "close": {
+            "step": "2966403",
+            "members": "4",
+            "accepted": true
+          },
+          "smallestStep": {
+            "step": "2966399",
+            "members": "3"
+          },
+          "growth": [
+            {
+              "period": "1",
+              "added": "3",
+              "removed": "1",
+              "members": "4"
+            }
+          ]
+        }
+      }
+    ],
+    "verifier-ballots-v5-tier0-live.json": [
+      {
+        "tier": 0,
+        "electorate": {
+          "opening": {
+            "members": "38"
+          },
+          "eligible": "40",
+          "close": {
+            "step": "2967420",
+            "members": "40",
+            "accepted": true
+          },
+          "smallestStep": {
+            "step": "2967408",
+            "members": "38"
+          },
+          "growth": [
+            {
+              "period": "1",
+              "added": "2",
+              "removed": "0",
+              "members": "40"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

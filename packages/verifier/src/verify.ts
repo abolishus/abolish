@@ -127,6 +127,7 @@ import { tallyChecks, type TallyCode, type TallyReport } from "./tallies.ts";
 import { releaseChecks, type ReleasesReport } from "./live.ts";
 import { PINNED_PANELS, type PinnedPanel, pinnedOurs } from "./panels.ts";
 import { archivedChain, PINNED_REGISTRIES, type RollingChainRelease } from "./rolling-chain.ts";
+import { type RollingElectorateReport, rollingElectorates } from "./rolling-report.ts";
 import type { ReleaseRowCode } from "./releases.ts";
 import {
   anchorsFromState,
@@ -235,8 +236,11 @@ export interface Report {
   readonly delivery?: DeliveryReport | DeliveryReportV2;
   /** A format-5 bundle's cells, each with its counted ballots and counts, once 7.1 passed. */
   readonly cells?: readonly CellReport[];
-  /** A format-5 bundle's per-tier results, derived from the cells, once 7.1 passed. */
-  readonly tiers?: readonly TierReport[];
+  /**
+   * A format-5 bundle's per-tier results, derived from the cells, once 7.1
+   * passed; under a rolling definition each with its electorate's counts (8.1).
+   */
+  readonly tiers?: readonly (TierReport & { readonly electorate?: RollingElectorateReport })[];
   /** Under definition versions 5 to 7, beside `cells`, each question's limits and method (8.1). */
   readonly questions?: readonly QuestionReport[];
   /** A format-5 bundle's destruction report, once 8.5 ran. */
@@ -1018,6 +1022,8 @@ export function verifyBundle(
   let tallies: readonly TallyReport[] | undefined;
   let counted: CountedResult | undefined;
   let releases: ReleasesReport | undefined;
+  let electorates: readonly RollingElectorateReport[] | undefined;
+  let rollingTiers: readonly number[] = [];
   let availability: AvailabilityReport | undefined;
   if ("rows" in definition) implemented = definition.rows;
   else {
@@ -1216,6 +1222,28 @@ export function verifyBundle(
         });
       }
       implemented = new Map<string, Outcome>([...implemented, ...counted.rows]);
+      // A rolling tier's result carries its electorate's counts, from the
+      // same chain its ballots were judged against and the steps their
+      // verifying proofs named, admitted or not, once 7.1 passed: the board
+      // is then sealed and its counted extent fixed (docs/spec/verifier.md,
+      // Counted set and tally, step 8; T-16, T-13).
+      if (
+        definition.definition.version === 7 &&
+        definition.rolling !== undefined &&
+        implemented.get("7.1")?.status === "pass" &&
+        counted.tiers !== undefined &&
+        admission.steps !== undefined &&
+        extent !== undefined
+      ) {
+        electorates = rollingElectorates(
+          definition.definition,
+          definition.rolling,
+          bundle.clock,
+          admission.steps,
+          extent,
+        );
+        rollingTiers = definition.definition.value.rolling_electorate.map((t) => t.tier);
+      }
       // Under a live definition pinning tally-opening version 2, the
       // releases are read once 7.1 passed: the board is then sealed and
       // authenticated, and every snapshot fixed (docs/spec/verifier.md,
@@ -1381,7 +1409,19 @@ export function verifyBundle(
     ...(tallies !== undefined && { tallies }),
     ...(counted?.delivery !== undefined && { delivery: counted.delivery }),
     ...(counted?.cells !== undefined && { cells: counted.cells }),
-    ...(counted?.tiers !== undefined && { tiers: counted.tiers }),
+    ...(counted?.tiers !== undefined && {
+      tiers:
+        electorates === undefined
+          ? counted.tiers
+          : counted.tiers.map((t) => {
+              // Paired by tier, never by position: a rolling tier is its own cell.
+              const at = rollingTiers.indexOf(t.tier);
+              const electorate = electorates[at];
+              if (electorate === undefined)
+                throw new Error("verifyBundle: a rolling tier without its electorate");
+              return { ...t, electorate };
+            }),
+    }),
     ...(counted?.questions !== undefined && { questions: counted.questions }),
     ...(counted?.destruction !== undefined && { destruction: counted.destruction }),
     ...(counted?.close !== undefined && { close: counted.close }),

@@ -81,6 +81,7 @@ export {
   type RollingChainOutcome,
   type RollingChainRelease,
 } from "./rolling-chain.ts";
+export { type RollingElectorateReport, rollingElectorates } from "./rolling-report.ts";
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {

@@ -19,6 +19,7 @@ import {
   type CheckResult,
   parseBundle,
   type PinnedPanel,
+  rollingElectorates,
   type Report,
   type RollingChainRelease,
   splitEntries,
@@ -186,6 +187,60 @@ function bundleOf(events = file.events): Bundle {
   };
 }
 
+// Each poll's tiers' electorate counts (verifier-rolling-report.json, from
+// packages/crypto/scripts/verifier-rolling-report-vectors.py: each poll
+// rebuilt by its own generator, its counts by rolling-report-vectors.py's
+// model of membership.md, Reported counts), as strings there.
+const reported = read("verifier-rolling-report.json") as {
+  readonly polls: Readonly<
+    Record<
+      string,
+      readonly {
+        readonly tier: number;
+        readonly electorate: {
+          readonly opening: { readonly members: string };
+          readonly eligible: string;
+          readonly close: {
+            readonly step: string;
+            readonly members: string;
+            readonly accepted: boolean;
+          } | null;
+          readonly smallestStep: { readonly step: string; readonly members: string } | null;
+          readonly growth: readonly Readonly<
+            Record<"period" | "added" | "removed" | "members", string>
+          >[];
+        };
+      }[]
+    >
+  >;
+};
+const electoratesOf = (file: string) =>
+  (reported.polls[file] ?? []).map(({ tier, electorate: e }) => ({
+    tier,
+    electorate: {
+      opening: { members: Number(e.opening.members) },
+      eligible: Number(e.eligible),
+      close:
+        e.close === null
+          ? null
+          : {
+              step: Number(e.close.step),
+              members: Number(e.close.members),
+              accepted: e.close.accepted,
+            },
+      smallestStep:
+        e.smallestStep === null
+          ? null
+          : { step: Number(e.smallestStep.step), members: Number(e.smallestStep.members) },
+      growth: e.growth.map((g) => ({
+        period: g.period,
+        added: Number(g.added),
+        removed: Number(g.removed),
+        members: Number(g.members),
+      })),
+    },
+  }));
+
 const row = (r: Report, id: string) => {
   const { status, code, at } = r.checks.find((x) => x.id === id) as CheckResult;
   return { status, ...(code !== undefined && { code }), ...(at !== undefined && { at }) };
@@ -259,6 +314,16 @@ describe("a live Tier-0-only rolling poll through verifyBundle", { timeout: 60_0
             id,
           ).toEqual(want.expected[id]);
       expect(r.report).toEqual(want.ballots);
+      // Every copy whose proof verifies against its step's root names a step
+      // the smallest-step count reads, a repeat's too: only a membership
+      // rejection leaves a copy out (membership.md, Reported counts).
+      const unproven = new Set(["root-step-range", "root-step-mismatch", "membership-proof"]);
+      expect(r.steps?.map((x) => x.entry)).toEqual(
+        [
+          ...(r.candidates ?? []).map((x) => x.entry),
+          ...want.ballots.rejected.filter((x) => !unproven.has(x.code)).map((x) => x.entry),
+        ].sort((a, b) => a - b),
+      );
     }
   });
 
@@ -399,6 +464,44 @@ describe(
       expect(r.releases).toEqual(sealed.releases);
     });
 
+    test("its tier reports its electorate's counts, a removal leaving its close below its eligible count", () => {
+      expect(r.tiers?.map(({ tier, electorate }) => ({ tier, electorate }))).toEqual(
+        electoratesOf("verifier-ballots-v5-tier0-sealed.json"),
+      );
+      const e = r.tiers?.[0]?.electorate;
+      expect(e?.close?.members).toBeLessThan(e?.eligible ?? 0);
+    });
+
+    test("only the counted extent's copies in the tier's own cell name its smallest step", () => {
+      const chain = archivedChain(
+        d,
+        replayOf(file.events, { ...sealed, registeredAt: file.registeredAt }),
+        registries,
+      );
+      if (chain === undefined) throw new Error("fixture: no chain");
+      const [want] = electoratesOf("verifier-ballots-v5-tier0-sealed.json");
+      const close = want?.electorate.close;
+      const smallest = want?.electorate.smallestStep;
+      if (close == null || smallest == null) throw new Error("fixture: no close or smallest step");
+      expect(close.members).toBeGreaterThan(smallest.members);
+      const extent = 10;
+      const smallestOf = (steps: { entry: number; cell: number; step: number }[]) =>
+        rollingElectorates(d, chain, sealedBundle().clock, steps, extent)[0]?.smallestStep;
+      const atClose = { entry: 1, cell: 0, step: close.step };
+      expect(smallestOf([atClose])).toEqual({ step: close.step, members: close.members });
+      // A copy past the extent, or naming another cell, is none of the tier's.
+      expect(
+        smallestOf([
+          atClose,
+          { entry: extent, cell: 0, step: smallest.step },
+          { entry: 2, cell: 1, step: smallest.step },
+        ]),
+      ).toEqual({ step: close.step, members: close.members });
+      expect(smallestOf([atClose, { entry: extent - 1, cell: 0, step: smallest.step }])).toEqual(
+        smallest,
+      );
+    });
+
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {
       expect(r.verdictAgainstInputs).toBe("unverifiable");
     });
@@ -483,6 +586,12 @@ describe(
         flagged: false,
         side: { kind: "unreleased" },
       });
+    });
+
+    test("its tier reports its electorate's counts: the joiners grow it after opening", () => {
+      expect(r.tiers?.map(({ tier, electorate }) => ({ tier, electorate }))).toEqual(
+        electoratesOf("verifier-ballots-v5-tier0-live.json"),
+      );
     });
 
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {

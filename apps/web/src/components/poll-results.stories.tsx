@@ -4,12 +4,14 @@ import { expect, within } from "storybook/test";
 import { PollResults } from "./poll-results.tsx";
 
 const electionId = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f";
+const closesAt = { seconds: "1794830400", iso: "2026-11-15T12:00:00.000Z" };
 
 const meta = {
   component: PollResults,
   args: {
     poll: {
       electionId,
+      closesAt,
       questions: [
         { optionCount: 3, minSelections: 0, maxSelections: 1 },
         { optionCount: 2, minSelections: 0, maxSelections: 2 },
@@ -87,7 +89,11 @@ export const Dark: Story = { parameters: { theme: "dark" }, play };
 /** A hidden poll's results, by number: its words are withheld, its count never is. */
 export const ByNumber: Story = {
   args: {
-    poll: { electionId, questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }] },
+    poll: {
+      electionId,
+      closesAt,
+      questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
+    },
     results: { kind: "read", tiers: [{ tier: 0, counted: 3, questions: [["0", "3", "0"]] }] },
     words: undefined,
   },
@@ -107,7 +113,11 @@ export const ByNumber: Story = {
 /** Answered, but nothing picked; and a tier where nobody answered shows no bars. */
 export const NothingPicked: Story = {
   args: {
-    poll: { electionId, questions: [{ optionCount: 2, minSelections: 0, maxSelections: 1 }] },
+    poll: {
+      electionId,
+      closesAt,
+      questions: [{ optionCount: 2, minSelections: 0, maxSelections: 1 }],
+    },
     results: {
       kind: "read",
       tiers: [
@@ -125,16 +135,43 @@ export const NothingPicked: Story = {
   },
 };
 
-/** Open, nothing counted yet: answers stay sealed until the poll closes. */
+/** Open, nothing counted yet: answers stay sealed until the poll closes, and the section says when. */
 export const Sealed: Story = {
   args: { results: { kind: "unopened" }, status: "open" },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { level: 2, name: "Results appear when it closes" }),
+    ).toBeVisible();
     await expect(canvas.getByRole("status")).toHaveTextContent(
-      "Answers stay sealed while the poll is open.",
+      /^The answers stay sealed until the poll closes on November 15, 2026 at 12:00\sPM\sUTC\./,
     );
+    // T-14: the asker can't open them, and the launch panel's seats are ours.
+    await expect(
+      canvas.getByText(/^Until then whoever asked it can't see them either/),
+    ).toHaveTextContent(/during launch Abolish runs every seat\.$/);
+    await expect(canvas.getByText(/^Anyone can count the sealed answers/)).toBeVisible();
     // How the questions will be counted holds before any count does.
     await expect(canvas.getByText(/^Each question is counted on its own\./)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Check the count on the board" })).toBeVisible();
+  },
+};
+
+/** Open, closing past the dates `Date` holds: the sentence leaves the date out. */
+export const SealedPastDates: Story = {
+  args: {
+    poll: {
+      electionId,
+      closesAt: { seconds: "18446744073709551615", iso: undefined },
+      questions: [{ optionCount: 2, minSelections: 0, maxSelections: 1 }],
+    },
+    results: { kind: "unopened" },
+    status: "open",
+  },
+  play: async ({ canvasElement }) => {
+    await expect(within(canvasElement).getByRole("status")).toHaveTextContent(
+      "The answers stay sealed until the poll closes. The results appear here once they're counted.",
+    );
   },
 };
 

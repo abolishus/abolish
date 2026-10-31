@@ -1952,6 +1952,12 @@ describe("stream", () => {
     expect(html).toMatch(/<a href="\/discover" aria-current="page"[^>]*>New</);
     expect(html).toContain(`href="/discover?after=${streamed[9]}"`);
     expect(html).not.toContain("These come after the first page.");
+    // The server doesn't know the visitor's zone, so each card's closing time
+    // is served in UTC; the browser redraws it on the visitor's own clock
+    // (P2-29, the stream's iteration 22).
+    expect(html).toMatch(
+      /Closes(?:<!-- -->)? <time datetime="[^"]+Z"[^>]*>[^<]*\u00a0UTC<\/time>/i,
+    );
   });
 
   test("shows where each card's poll is listed, each tag a link into the stream", async () => {
@@ -3027,8 +3033,8 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/": { html: 10, js: 180, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 177, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 217, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 178, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 179, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
   "/account": { html: 6, js: 200, css: 40, fonts: 58 },

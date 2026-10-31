@@ -502,7 +502,7 @@ export function StreamCard({
       <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
         {card.askedBy === undefined ? null : <AskedBy askedBy={card.askedBy} />}
         <span>
-          {t("streamCloses")} <When instant={poll.closesAt} short />
+          {t("streamCloses")} <When instant={poll.closesAt} short local />
         </span>
         {/* Where answers are offered, the note above them already says
             "question 1 of 3": said here too, it took a phone's fourth line

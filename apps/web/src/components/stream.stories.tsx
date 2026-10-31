@@ -5,6 +5,7 @@ import { NO_TAGS, type PollView } from "../poll.ts";
 import type { StreamCard } from "../stream.ts";
 import { streamHref } from "../stream.ts";
 import { StreamPage } from "./stream.tsx";
+import { ViewerTimeZone } from "./when.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
@@ -93,6 +94,15 @@ const meta = {
     ballot: BALLOT,
     phoneVerification: false,
   },
+  // A visitor on New York's clock, so the cards' closing times don't depend
+  // on the machine drawing the story; a story sets `timeZone` for another.
+  decorators: [
+    (Story, { parameters }) => (
+      <ViewerTimeZone.Provider value={(parameters["timeZone"] as string) ?? "America/New_York"}>
+        <Story />
+      </ViewerTimeZone.Provider>
+    ),
+  ],
 } satisfies Meta<typeof StreamPage>;
 
 export default meta;
@@ -193,8 +203,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(list.queryByText("3 questions")).toBeNull();
   // The month abbreviated, so "Closes", the date and its clock keep one line
   // even at a small phone's width, where the long date wrapped its clock.
+  // On the visitor's own clock: midnight UTC is the evening before in New
+  // York, where "Jan 8, 12:00 AM UTC" named a day the poll was already closed.
   const closes = list.getAllByText(/^Closes/);
-  await expect(closes[0]!.textContent).toBe("Closes Jan 8, 2026, 12:00\u00a0AM\u00a0UTC");
+  await expect(closes[0]!.textContent).toBe("Closes Jan 7, 2026, 7:00\u00a0PM\u00a0EST");
+  await expect(within(closes[0]!).getByRole("time")).toHaveAttribute(
+    "datetime",
+    "2026-01-08T00:00:00.000Z",
+  );
   for (const line of closes) await expect(line.getClientRects()).toHaveLength(1);
 
   // Where each poll is listed, each tag a way into the stream narrowed to it;
@@ -350,9 +366,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const top = within(riversideCard).getByText(/^Closes/).parentElement!;
   await expect(getComputedStyle(top).justifyContent).not.toBe("space-between");
 
-  // A closing time's clock and "UTC" wrap whole, never "UTC" alone on a line.
+  // A closing time's clock and its zone wrap whole, never the zone alone on a line.
   await expect(within(riversideCard).getByRole("time").textContent).toMatch(
-    /12:00\u00a0AM\u00a0UTC$/,
+    /7:00\u00a0PM\u00a0EST$/,
   );
 
   // The lede leaves what choosing an answer does to the one line above the cards.
@@ -362,6 +378,29 @@ const play: Story["play"] = async ({ canvasElement }) => {
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/** A visitor whose clock is UTC sees UTC, named as such. */
+export const UtcVisitor: Story = {
+  parameters: { timeZone: "UTC" },
+  play: async ({ canvasElement }) => {
+    const list = questions(canvasElement);
+    const closes = list.getAllByText(/^Closes/);
+    await expect(closes[0]!.textContent).toBe("Closes Jan 8, 2026, 12:00\u00a0AM\u00a0UTC");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 15, 2026, 12:00\u00a0AM\u00a0UTC");
+  },
+};
+
+/** East of UTC the day is the same and the zone is named by its offset. */
+export const SpanishClock: Story = {
+  parameters: { locale: "es-US", timeZone: "Europe/Berlin" },
+  play: async ({ canvasElement }) => {
+    const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
+    const closes = list.getAllByText(/^Cierra/);
+    await expect(closes[0]!.textContent).toMatch(
+      /^Cierra 8 ene 2026, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
+    );
+  },
+};
 
 /** Where Tier 0 asks for a phone, each count names it so (P2-31 part 6a). */
 export const PhoneVerification: Story = {

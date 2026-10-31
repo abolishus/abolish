@@ -28,6 +28,27 @@ export function formatUtcWhole(
   return formatUtc(locale, date, dateStyle).replace(/\s(?=\S+$)/, "\u00a0");
 }
 
+/**
+ * `formatUtcWhole` on `timeZone`'s clock, with that zone's short name as
+ * `locale` says it ("EST", "GMT+1"), for what only the browser shows: the
+ * server doesn't know a visitor's zone (P2-29, the stream's iteration 22).
+ */
+export function formatZonedWhole(
+  locale: string,
+  timeZone: string,
+  date: Date,
+  dateStyle: "long" | "medium" = "long",
+): { time: string; zone: string } {
+  const time = new Intl.DateTimeFormat(locale, { dateStyle, timeStyle: "short", timeZone })
+    .format(date)
+    .replace(/\s(?=\S+$)/, "\u00a0");
+  const zone =
+    new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "short" })
+      .formatToParts(date)
+      .find((p) => p.type === "timeZoneName")?.value ?? timeZone.replaceAll("_", " ");
+  return { time, zone };
+}
+
 /** A UTC day, `YYYY-MM-DD`, for `locale`. */
 export function formatUtcDay(locale: string, day: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(

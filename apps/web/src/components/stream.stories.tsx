@@ -472,6 +472,14 @@ export const SortUnavailable: Story = {
       "href",
       "/discover?topic=transport",
     );
+    // The chosen order stays marked, but its note, how this week's answers
+    // are counted, is gone from above a box saying they can't be (P2-29,
+    // the stream's iteration 18).
+    await expect(canvas.getByRole("link", { name: "Most answered this week" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    await expect(canvas.queryByText(/by how many people answered/)).toBeNull();
   },
 };
 

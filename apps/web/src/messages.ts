@@ -430,9 +430,10 @@ const enUS = {
   streamPlaceClear: "Clear the place",
   streamTopicClear: "Show every topic",
   streamFilterEmpty: "No open question is filed here",
-  streamFilterEmptyLede:
-    "Only polls whose askers chose this topic or place are listed. Try without one of them.",
-  streamShowEverything: "Show everything",
+  streamTopicEmptyLede: "Only questions filed under this topic are listed.",
+  streamPlaceEmptyLede: "Only questions filed at this place are listed.",
+  streamTopicPlaceEmptyLede:
+    "Only questions filed under this topic and at this place are listed. This topic may have more elsewhere.",
   streamPlaceRefusedTitle: "That place can't be looked up",
   streamPlaceRefused: "A place is one to {characters} characters, as an asker would write it.",
   listTitle: "Listed polls",

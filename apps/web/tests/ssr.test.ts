@@ -2030,7 +2030,9 @@ describe("stream", () => {
     html = await (await get("/discover?topic=transport&place=riverside+park")).text();
     expect(cards(html)).toEqual([]);
     expect(html).toContain("No open question is filed here");
-    expect(html).toContain('href="/discover">Show everything');
+    expect(html).toContain("under this topic and at this place");
+    expect(html).not.toContain("Show everything");
+    expect(html).toContain('href="/discover?topic=transport">Clear the place');
     // A blank place is no place.
     html = await (await get("/discover?place=%20")).text();
     expect(cards(html)).toEqual(streamed.slice(0, 10));

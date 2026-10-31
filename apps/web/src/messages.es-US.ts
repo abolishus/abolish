@@ -1000,8 +1000,8 @@ export const esUS: Messages = {
   moderationLatest: "Decisiones más recientes",
   moderationActionApply: "Mostrar estas decisiones",
   moderationActionMatches: "{shown} de las {total} decisiones de esta página tomaron esta acción.",
-  moderationActionNone:
-    "Ninguna decisión de esta página tomó esta acción. Las decisiones anteriores pueden tener alguna.",
+  moderationActionNone: "Ninguna decisión de esta página tomó esta acción.",
+  moderationActionEarlier: "Las decisiones anteriores pueden tener alguna.",
   moderationGroundsMark: "Motivos",
   moderationGroundsTitle: "Los únicos siete motivos",
   moderationGroundsLede:

@@ -294,6 +294,8 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
         {log.entries.length === 0 ? null : shown.length === 0 ? (
           <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
             {t("moderationActionNone")}
+            {/* Only where there are earlier decisions to look through. */}
+            {next === undefined ? null : ` ${t("moderationActionEarlier")}`}
           </p>
         ) : (
           <div className="grid gap-0">

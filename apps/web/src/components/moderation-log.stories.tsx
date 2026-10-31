@@ -177,11 +177,9 @@ export const FilteredToNone: Story = {
   args: { action: "delist", log: { entries: [meta.args.log.entries[2]!] } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(
-      canvas.getByText(
-        "No decision on this page took this action. Earlier decisions may have some.",
-      ),
-    ).toBeVisible();
+    await expect(canvas.getByText("No decision on this page took this action.")).toBeVisible();
+    // The log's earliest page has no earlier decisions to point to.
+    await expect(canvas.queryByText(/Earlier decisions may have some/)).toBeNull();
     await expect(canvas.queryByRole("list", { name: "Decisions, newest first" })).toBeNull();
     // The chosen action stays offered, so it can be seen and cleared.
     const filter = canvas.getByRole("radiogroup", { name: "Action" });

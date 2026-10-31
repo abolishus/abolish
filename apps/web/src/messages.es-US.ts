@@ -1327,7 +1327,7 @@ export const esUS: Messages = {
   pollsCloses: "Cierra el {when}\u00a0UTC",
   pollsClosed: "El {when}\u00a0UTC",
   pollsSetupHelp:
-    "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. Puedes salir de esta página, o seguir la preparación paso a paso.",
+    "La preparación tarda un rato, sobre todo esperando a que el registro público se asiente. No necesitas hacer nada más: se abre sola, y esta lista muestra cuándo se abre, o por qué no se abrió. También puedes seguirla paso a paso.",
   pollsFollowSetup: "Seguir la preparación",
   pollsPage: "Ir a su página",
   pollsResults: "Ver sus resultados",

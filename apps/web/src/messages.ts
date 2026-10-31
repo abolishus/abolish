@@ -1297,7 +1297,7 @@ const enUS = {
   pollsCloses: "Closes {when}\u00a0UTC",
   pollsClosed: "On {when}\u00a0UTC",
   pollsSetupHelp:
-    "Setting up takes a while, mostly waiting for the public record to settle. You can leave this page, or follow its setup step by step.",
+    "Setting up takes a while, mostly waiting for the public record to settle. Nothing more is needed from you: it opens on its own, and this list shows when it does, or why it didn't. You can also follow it step by step.",
   pollsFollowSetup: "Follow its setup",
   pollsPage: "Go to its page",
   pollsResults: "See its results",

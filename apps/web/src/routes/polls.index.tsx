@@ -40,7 +40,15 @@ export const Route = createFileRoute("/polls/")({
   },
   component: function Polls() {
     const { id, after, status, counting } = Route.useSearch();
-    const list = Route.useLoaderData();
-    return <PollRegister list={list} after={after} filters={{ status, counting }} invalid={id} />;
+    const { phoneVerification, ...list } = Route.useLoaderData();
+    return (
+      <PollRegister
+        list={list}
+        after={after}
+        filters={{ status, counting }}
+        invalid={id}
+        phoneVerification={phoneVerification}
+      />
+    );
   },
 });

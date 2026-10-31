@@ -109,7 +109,13 @@ export const fetchPollList = createServerFn({ method: "GET" })
     if (!isLocale(locale)) throw new TypeError("expected a locale");
     return { after, locale };
   })
-  .handler(({ data }) => opaque(() => loadPollList(api(), data.after, data.locale)));
+  .handler(({ data }) =>
+    opaque(async () => ({
+      ...(await loadPollList(api(), data.after, data.locale)),
+      // Names Tier 0 on each row's count, as the stream's cards name it.
+      phoneVerification: process.env["PHONE_VERIFICATION"] === "on",
+    })),
+  );
 
 /**
  * A page of the stream, with the ballot client's address (`BALLOT_URL`)

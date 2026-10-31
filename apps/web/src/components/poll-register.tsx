@@ -61,6 +61,8 @@ export interface PollRegisterProps {
   filters: RegisterFilters;
   /** What was entered in the lookup form, if it wasn't a poll ID. */
   invalid: string | undefined;
+  /** Whether Tier 0 asks for a phone here, which names it on each row's count. */
+  phoneVerification: boolean;
 }
 
 /**
@@ -71,7 +73,13 @@ export interface PollRegisterProps {
  * page in hand, never to a search our server runs, and a poll's status is
  * read from its claimed definition's times against the server's clock.
  */
-export function PollRegister({ list, after, filters, invalid }: PollRegisterProps) {
+export function PollRegister({
+  list,
+  after,
+  filters,
+  invalid,
+  phoneVerification,
+}: PollRegisterProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const asOf = list.asOf;
@@ -166,7 +174,12 @@ export function PollRegister({ list, after, filters, invalid }: PollRegisterProp
                   </a>
                 </div>
               ) : (
-                <PollRows polls={rows} asOf={asOf} label={t("listTitle")} />
+                <PollRows
+                  polls={rows}
+                  asOf={asOf}
+                  label={t("listTitle")}
+                  phoneVerification={phoneVerification}
+                />
               )}
             </div>
           </>

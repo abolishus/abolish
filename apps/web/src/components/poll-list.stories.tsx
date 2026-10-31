@@ -37,10 +37,15 @@ const meta = {
           question: undefined,
           options: ["Yes", "No", "Only in winter"],
         },
+        answered: [
+          { tier: 0, answered: "1" },
+          { tier: 2, answered: "1204" },
+        ],
       },
       {
         kind: "poll",
         text: undefined,
+        answered: undefined,
         poll: poll(SECOND, {
           counting: "approval",
           illFormed: { rule: "timing", question: undefined },
@@ -50,6 +55,7 @@ const meta = {
       { kind: "unavailable", electionId: THIRD, problem: "undecodable" },
     ],
     asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
+    phoneVerification: false,
   },
 } satisfies Meta<typeof PollRows>;
 
@@ -58,7 +64,11 @@ type Story = StoryObj<typeof meta>;
 
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
-  const items = within(canvas.getByRole("list", { name: "Listed polls" })).getAllByRole("listitem");
+  const list = canvas.getByRole("list", { name: "Listed polls" });
+  // The rows, not the lines of each row's count.
+  const items = within(list)
+    .getAllByRole("listitem")
+    .filter((item) => item.parentElement === list);
   await expect(items).toHaveLength(3);
   // A poll in its own words, in their language, with its ID under them.
   const first = within(items[0]!).getByRole("link");
@@ -71,6 +81,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(items[0]!).getByText("One choice")).toBeVisible();
   await expect(within(items[0]!).getByText("Open")).toBeVisible();
   await expect(within(items[0]!).getByText(/January 8, 2026/)).toBeVisible();
+  // How many have answered, each tier on its own line, never summed (T-01).
+  const answered = within(items[0]!).getAllByRole("listitem");
+  await expect(answered.map((item) => item.textContent)).toEqual([
+    "1 personTier 0 (verified e-mail)",
+    "1,204 peopleTier 2 (document-verified)",
+  ]);
+  // A count the page couldn't read is left out.
+  await expect(within(items[1]!).queryByText("Answered so far")).toBeNull();
   await expect(
     within(items[0]!).getByRole("img", { name: "Fingerprint of poll 10101010" }),
   ).toBeVisible();
@@ -85,3 +103,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/** Where Tier 0 asks for a phone, its count says so. */
+export const PhoneVerification: Story = {
+  args: { phoneVerification: true },
+  play: async ({ canvasElement }) => {
+    const [first] = within(canvasElement).getAllByRole("article");
+    await expect(within(first!).getByText("Tier 0 (verified e-mail and phone)")).toBeVisible();
+  },
+};

@@ -19,7 +19,6 @@ try {
   process.exit(2);
 }
 const relay = await serveRelay(config, { log: out });
-out({ event: "relay-listening", resources: config.resources.length });
 const timer = setInterval(
   () => out({ event: "relay-counts", counts: relay.takeCounts() }),
   COUNT_INTERVAL_MS,
@@ -29,3 +28,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const)
     clearInterval(timer);
     void relay.close();
   });
+// Announced only once the handlers are in place: a signal sent on seeing it
+// would otherwise meet Node's default action and end the process uncleanly.
+out({ event: "relay-listening", resources: config.resources.length });

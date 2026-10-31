@@ -511,6 +511,8 @@ const enUS = {
   resultsUnavailable: "The results couldn't be loaded just now. Try again in a little while.",
   resultsAnswered: { one: "{count} person answered", other: "{count} people answered" },
   resultsNoneAnswered: "No one answered.",
+  resultsTurnout: "Turnout",
+  resultsTurnoutOf: { one: "{share} of {count} member", other: "{share} of {count} members" },
   resultsTierPending:
     "Part of this group's count isn't published yet. Its results appear here once it all is.",
   resultsLeader: "Most picked: {option}, by {share} of those who answered.",

@@ -24,6 +24,7 @@ import {
   type PollResults,
   shareOf,
   type TierResults,
+  turnoutOf,
 } from "../results.ts";
 import type { BoardHead } from "../server/load.ts";
 import { recountOne } from "../recount.ts";
@@ -31,7 +32,7 @@ import type { PollWords } from "../stream.ts";
 import { BoardHeadFacts } from "./board-head.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollFacts, StatusMark } from "./poll-facts.tsx";
-import { ResultsQuestion } from "./poll-results.tsx";
+import { Bar, ResultsQuestion } from "./poll-results.tsx";
 import { STATUS_MARK, STATUS_TEXT } from "./poll-status.ts";
 
 export interface PollResultsPageProps {
@@ -319,6 +320,31 @@ function Cells({
   );
 }
 
+/**
+ * How many of the tier's members answered, as the results page's mockup
+ * puts it above the tier's result: a share of the members the definition
+ * names for it, with its bar. Said only for a tier the definition names once,
+ * so the members are that tier's alone, and only where the figure can be a
+ * share (`turnoutOf`). The tiers' turnouts are never added up (T-16).
+ */
+function Turnout({ poll, tier }: { poll: PollResultsPageProps["poll"]; tier: TierResults }) {
+  const t = useTranslate(catalogs);
+  const percent = usePercent();
+  const groups = poll.electorate.filter((g) => g.tier === tier.tier);
+  const members = groups.length === 1 ? groups[0]?.groupSize : undefined;
+  const share = members === undefined ? undefined : turnoutOf(tier.counted, members);
+  if (members === undefined || share === undefined) return null;
+  return (
+    <p className="m-0 grid max-w-xl grid-cols-[1fr_auto] items-baseline gap-x-4 gap-y-2">
+      <span className="text-sm">{t("resultsTurnout")}</span>
+      <span className="text-end font-mono text-sm tabular-nums">
+        {t("resultsTurnoutOf", { share: percent.format(share), count: BigInt(members) })}
+      </span>
+      <Bar share={share} lead={false} />
+    </p>
+  );
+}
+
 /** One tier's panel: each question's sentence and bars, then its cells if it has several. */
 function TierPanel({
   poll,
@@ -336,6 +362,7 @@ function TierPanel({
   const own = cells?.filter((c) => c.cell.tier === tier.tier);
   return (
     <div className="grid gap-10">
+      <Turnout poll={poll} tier={tier} />
       {tier.questions === undefined ? (
         <p role="status" className="m-0 max-w-prose text-base">
           {t("resultsTierPending")}

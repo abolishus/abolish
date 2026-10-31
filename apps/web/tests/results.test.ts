@@ -9,6 +9,7 @@ import {
   resultsView,
   type ServedResults,
   shareOf,
+  turnoutOf,
 } from "../src/results.ts";
 
 const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
@@ -456,6 +457,38 @@ describe("shareOf", () => {
           expect(Math.abs(share - count / counted)).toBeLessThanOrEqual(1e-6);
         },
       ),
+      runs,
+    );
+  });
+});
+
+describe("turnoutOf", () => {
+  test("is the share of the members who answered", () => {
+    expect(turnoutOf(0, "50")).toBe(0);
+    expect(turnoutOf(3, "50")).toBe(0.06);
+    expect(turnoutOf(50, "50")).toBe(1);
+  });
+
+  test("isn't said of a tier with no members, or with more ballots than members", () => {
+    expect(turnoutOf(0, "0")).toBeUndefined();
+    expect(turnoutOf(51, "50")).toBeUndefined();
+  });
+
+  test("keeps its precision for a group past a double's integers", () => {
+    expect(turnoutOf(2 ** 52, "9007199254740992")).toBeCloseTo(0.5, 6);
+  });
+
+  test("lies in [0, 1] and agrees with the ratio, wherever it is said", () => {
+    fc.assert(
+      fc.property(fc.nat({ max: 2 ** 31 }), fc.integer({ min: 0, max: 2 ** 31 }), (c, m) => {
+        const share = turnoutOf(c, String(m));
+        if (m === 0 || c > m) expect(share).toBeUndefined();
+        else {
+          expect(share).toBeGreaterThanOrEqual(0);
+          expect(share).toBeLessThanOrEqual(1);
+          expect(Math.abs((share ?? -1) - c / m)).toBeLessThanOrEqual(1e-6);
+        }
+      }),
       runs,
     );
   });

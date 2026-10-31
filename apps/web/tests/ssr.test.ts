@@ -698,6 +698,10 @@ describe("results page", () => {
     const page = html.replace(/<[^>]+>/g, "");
     expect(page).toContain("Tier 0 (verified e-mail)");
     expect(page).toContain("8 people answered");
+    // How many of the tier's 7,220 members answered, before what they picked.
+    const turnout = page.indexOf("Turnout0.1% of 7,220 members");
+    expect(turnout).toBeGreaterThan(page.indexOf("Results by group"));
+    expect(turnout).toBeLessThan(page.indexOf("Tied for most picked"));
     expect(page).toContain(
       "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
     );

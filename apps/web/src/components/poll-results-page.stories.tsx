@@ -133,6 +133,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(tier0).toHaveAttribute("aria-selected", "true");
   await expect(tier0).toHaveTextContent("1,234 people answered");
   const panel = within(canvas.getByRole("tabpanel"));
+  // How many of the tier's own members answered, never a figure across tiers (T-16).
+  await expect(panel.getByText("Turnout")).toBeVisible();
+  await expect(panel.getByText("17.1% of 7,220 members")).toBeVisible();
   await expect(panel.getByText("Most picked: ⁨Yes⁩, by 56.7% of those who answered.")).toBeVisible();
   // Each cell on its own, with its regions and members.
   await expect(panel.getByRole("heading", { name: "Part by part" })).toBeVisible();
@@ -152,6 +155,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
     ),
   );
   await expect(within(canvas.getByRole("tabpanel")).queryByText("Part by part")).toBeNull();
+  // Its turnout stands while its counts wait: how many answered is already known.
+  await expect(
+    within(canvas.getByRole("tabpanel")).getByText("33.3% of 120 members"),
+  ).toBeVisible();
 
   // Who opened each part, by seat, out of the panel's three; one not opened yet.
   const openings = within(canvas.getByRole("region", { name: "Who opened the count" }));
@@ -242,12 +249,33 @@ export const ByNumber: Story = {
     await expect(
       canvas.getByText("Most picked: ⁨Answer 2⁩, by 100% of those who answered."),
     ).toBeVisible();
+    await expect(canvas.getByText("6% of 50 members")).toBeVisible();
     // Closed with its one tier read: counted.
     await expect(canvas.getByText("Counted")).toBeVisible();
     await expect(canvas.getAllByRole("definition")[3]).toHaveTextContent("One choice3 options");
     // One tier: nothing to set side by side; one cell: no parts.
     await expect(canvas.queryByRole("region", { name: "The groups side by side" })).toBeNull();
     await expect(canvas.queryByText("Part by part")).toBeNull();
+  },
+};
+
+/** More ballots claimed than the tier has members: no share past 100% is printed (T-34). */
+export const TurnoutUnstated: Story = {
+  args: {
+    poll: {
+      ...meta.args.poll,
+      electorate: [
+        { tier: 0, groupSize: "1000" },
+        { tier: 2, groupSize: "120" },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const panel = within(within(canvasElement).getByRole("tabpanel"));
+    await expect(panel.queryByText("Turnout")).toBeNull();
+    await expect(
+      panel.getByText("Most picked: ⁨Yes⁩, by 56.7% of those who answered."),
+    ).toBeVisible();
   },
 };
 

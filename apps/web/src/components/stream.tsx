@@ -236,9 +236,9 @@ function PlaceForm({
 
 /**
  * The topics and the place, folded under one line until a visitor opens it
- * or the page is narrowed by either: fifteen topics and a second box put a
- * phone's first question two screens down. A native disclosure, so it opens
- * before the page's script loads.
+ * or the page is narrowed by a place, which only its box shows (T-67):
+ * fifteen topics and a second box put a phone's first question two screens
+ * down. A native disclosure, so it opens before the page's script loads.
  */
 function Narrowing({
   sort,
@@ -466,12 +466,14 @@ function Empty({
 
 /**
  * What a narrowed page is narrowed by, each with a way to drop it alone:
- * the search and the place in words of our own, quoting neither (T-67).
+ * the search and the place in words of our own, quoting neither (T-67). A
+ * topic needs no words, as the page's title names it: only the way back to
+ * every topic, so its page needn't open the fifteen topics to offer one.
  */
 function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
   const t = useTranslate(catalogs);
-  const { q, place, ...rest } = filter;
-  const lines = [
+  const { q, place, topic } = filter;
+  const lines: { key: string; note?: string; clear: string; href: string }[] = [
     ...(q === undefined
       ? []
       : [
@@ -479,7 +481,7 @@ function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) 
             key: "q",
             note: t("streamSearching"),
             clear: t("streamSearchClear"),
-            href: streamHref(sort, { ...rest, place }),
+            href: streamHref(sort, { topic, place }),
           },
         ]),
     ...(place === undefined
@@ -489,16 +491,19 @@ function Narrowed({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) 
             key: "place",
             note: t("streamPlaceFiltering"),
             clear: t("streamPlaceClear"),
-            href: streamHref(sort, { ...rest, q }),
+            href: streamHref(sort, { q, topic }),
           },
         ]),
+    ...(topic === undefined
+      ? []
+      : [{ key: "topic", clear: t("streamTopicClear"), href: streamHref(sort, { q, place }) }]),
   ];
   if (lines.length === 0) return null;
   return (
     <ul className="m-0 grid list-none gap-1 p-0">
       {lines.map(({ key, note, clear, href }) => (
         <li key={key} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-          <span>{note}</span>
+          {note === undefined ? null : <span>{note}</span>}
           <a className="underline underline-offset-4" href={href}>
             {clear}
           </a>
@@ -562,7 +567,10 @@ export function StreamPage({
           sort={sort}
           filter={filter}
           typedPlace={typedPlace}
-          open={topic !== undefined || place !== undefined || stream.kind === "place-refused"}
+          // A topic's page keeps it closed: its title names the topic and
+          // the line below drops it, where opening it put fifteen topics
+          // above a phone's first question (P2-29, the stream's iteration 3).
+          open={place !== undefined || stream.kind === "place-refused"}
         />
         {stream.kind === "search-refused" || stream.kind === "place-refused" ? null : (
           <Narrowed sort={sort} filter={filter} />

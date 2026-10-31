@@ -270,6 +270,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const top = within(riversideCard).getByText(/^Closes/).parentElement!;
   await expect(getComputedStyle(top).justifyContent).not.toBe("space-between");
 
+  // A closing time's clock and "UTC" wrap whole, never "UTC" alone on a line.
+  await expect(within(riversideCard).getByRole("time").textContent).toMatch(
+    /12:00\u00a0AM\u00a0UTC$/,
+  );
+
   // The lede leaves what choosing an answer does to the one line above the cards.
   await expect(canvas.getAllByText(/in the ballot app/)).toHaveLength(1);
 };
@@ -426,8 +431,15 @@ export const Topic: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Transport");
-    // A topic's page opens the topics, so the topic it's narrowed by shows.
-    await expect(canvasElement.querySelector("details")).toHaveAttribute("open");
+    // A topic's page keeps the topics folded, as its title names the topic:
+    // the narrowed-by line offers the way back to every topic, keeping the
+    // order, rather than fifteen topics above a phone's first question.
+    await expect(canvasElement.querySelector("details")).not.toHaveAttribute("open");
+    await expect(canvas.getByRole("link", { name: "Show every topic" })).toHaveAttribute(
+      "href",
+      "/discover?sort=closing",
+    );
+    await userEvent.click(canvas.getByText("Topic and place"));
     const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
     await expect(topics.getByRole("link", { name: "Transport" })).toHaveAttribute(
       "aria-current",

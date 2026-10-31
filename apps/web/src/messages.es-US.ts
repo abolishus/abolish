@@ -412,6 +412,7 @@ export const esUS: Messages = {
     "Un pueblo, barrio o escuela, tal como lo escriben quienes preguntan. No importan las mayúsculas ni los espacios, pero el nombre completo debe coincidir.",
   streamPlaceFiltering: "Solo las preguntas clasificadas en el lugar que escribiste.",
   streamPlaceClear: "Borrar el lugar",
+  streamTopicClear: "Ver todos los temas",
   streamFilterEmpty: "No hay preguntas abiertas clasificadas aquí",
   streamFilterEmptyLede:
     "Solo aparecen las encuestas cuyos autores eligieron este tema o lugar. Prueba sin uno de ellos.",
@@ -924,7 +925,7 @@ export const esUS: Messages = {
   rule_chain: "cadenas y contratos",
   rule_timing: "horas de apertura y cierre",
   "rule_receipt-keys": "claves de comprobante",
-  utcTime: "{time} UTC",
+  utcTime: "{time}\u00a0UTC",
   shortId: "{prefix}…",
   moderationDelisted:
     "Esta encuesta queda fuera de Descubrir y de la búsqueda ({reason}). Su tablero y su resultado no se ven afectados.",

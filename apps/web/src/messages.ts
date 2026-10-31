@@ -405,6 +405,7 @@ const enUS = {
     "A town, neighbourhood or school, as askers write it. Capitals and spacing don't matter, but the whole name must match.",
   streamPlaceFiltering: "Only the questions filed at the place you entered.",
   streamPlaceClear: "Clear the place",
+  streamTopicClear: "Show every topic",
   streamFilterEmpty: "No open question is filed here",
   streamFilterEmptyLede:
     "Only polls whose askers chose this topic or place are listed. Try without one of them.",
@@ -910,7 +911,7 @@ const enUS = {
   rule_chain: "chains and contracts",
   rule_timing: "opening and closing times",
   "rule_receipt-keys": "receipt keys",
-  utcTime: "{time} UTC",
+  utcTime: "{time}\u00a0UTC",
   shortId: "{prefix}…",
   moderationDelisted:
     "This poll is left out of discovery and search ({reason}). Its board and result are unaffected.",

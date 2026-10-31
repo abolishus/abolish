@@ -19,13 +19,33 @@
 // registered trustee's signature nonce (T-17, T-52). A seat's node and the
 // voter's client both send it, so a receipted ballot is delivered whichever
 // of them the operator hears from (Client rules 3; T-25).
+//
+// A rolling poll's ballots (definition version 7 under `electorate_mode` 2,
+// ballot version 5) are judged against the root of the step each names,
+// which the verifier's admission computes from the chain `rollingChain`
+// builds out of the registries' records as the caller proved them, never
+// from a root the ballot, a relay or the submitter gives (docs/spec/
+// membership.md, Rolling checks; P2-17 part 7; T-08, T-25). A step whose
+// boundary the proven records don't pass yet isn't judged at all: its tree
+// may still gain events, so a root computed now could admit a ballot the
+// verifier later rejects or turn away an honest one (T-17, T-52).
 
 import {
+  type ContractEventRecord,
+  decodeBallot,
+  decodeElectionDefinitionV7,
+  DecodeError,
   deliverySegments,
+  encodeElectionDefinitionV7,
+  type ElectionDefinitionV7Record,
+  ELECTORATE_MODES,
   MAX_BOARD_PAYLOAD,
   type Panel,
   panelId,
   type PeriodClock,
+  RECORD_TYPES,
+  type RollingBallotChain,
+  rootClockBoundary,
 } from "@abolishus/crypto";
 import {
   type AdmissionCode,
@@ -33,6 +53,9 @@ import {
   electionAdmission,
   type L1RefCode,
   type ReceiptAdmissionCode,
+  rollingChain,
+  type RollingChainOutcome,
+  type RollingChainRelease,
 } from "@abolishus/verifier";
 import type { Sql } from "postgres";
 import {
@@ -55,7 +78,9 @@ export type SubmitErrorCode =
    * The election takes no ballots now: before `opens_at` or after
    * `closes_at` by this server's clock, or no ballot of it can be admitted
    * (no pinned panel, no transcript at the board's start, a ceremony or
-   * definition the verifier refuses).
+   * definition the verifier refuses). In a rolling poll, also a ballot
+   * naming a step the server's proven view of L2 hasn't settled yet
+   * (`step-unsettled`), which the same bytes may pass once it has.
    */
   | "not-open"
   /**
@@ -65,13 +90,20 @@ export type SubmitErrorCode =
    */
   | "rejected";
 
-/** Why a ballot was rejected: the verifier's code for the check it failed. */
-export type RejectionCode = AdmissionCode | L1RefCode | "decode" | "repeat";
+/**
+ * Why a ballot was rejected: the verifier's code for the check it failed.
+ * `step-unsettled` comes only with `not-open`: nothing judged the ballot.
+ */
+export type RejectionCode = AdmissionCode | L1RefCode | "decode" | "repeat" | "step-unsettled";
 
 export class SubmitError extends Error {
   override readonly name = "SubmitError";
   readonly code: SubmitErrorCode;
-  /** Under `rejected`: the verifier's code (`decode` for strict decoding, `repeat` for 5.7, 5.8's `l1-ref-*`). */
+  /**
+   * Under `rejected`: the verifier's code (`decode` for strict decoding,
+   * `repeat` for 5.7, 5.8's `l1-ref-*`); under `not-open`, `step-unsettled`
+   * when that is why.
+   */
   readonly admission?: RejectionCode;
   constructor(code: SubmitErrorCode, admission?: RejectionCode) {
     super(`ballot refused: ${code}${admission === undefined ? "" : ` (${admission})`}`);
@@ -146,10 +178,102 @@ export interface BallotAdmissionOptions {
    * read, every reference is left to the verifier, as before.
    */
   readonly l1?: L1References;
+  /**
+   * Where a rolling poll's chain comes from (`rollingChains`). Without it a
+   * rolling poll's ballots are all refused, as the verifier's admission
+   * refuses them without a chain.
+   */
+  readonly rolling?: RollingChains;
+}
+
+/**
+ * A rolling poll's chain as the caller's proven records give it: the
+ * outcome of the verifier's `rollingChain` over them, and the timestamp of
+ * the newest L2 block they run through. Every step whose boundary is
+ * earlier than `settledAt` is settled under them ([[membership]], Settled
+ * and final), and no other step is judged.
+ */
+export interface RollingChainRead {
+  readonly settledAt: bigint;
+  readonly outcome: RollingChainOutcome;
+}
+
+/** A rolling poll's chain, read again for each submission; `rollingChains` in production. */
+export interface RollingChains {
+  read(definition: ElectionDefinitionV7Record): Promise<RollingChainRead>;
+}
+
+/**
+ * The group registry's and the election registry's records through one L2
+ * block, each contract's in order of `n` and its whole sequence there, as
+ * the caller proved them (the worker's index checked against each
+ * registry's event accumulator under an L2 output root on L1, as for
+ * `provenGroupRecords`; T-71), with that block's timestamp. The block must
+ * be finalized, so its records never change while `at` stays the same:
+ * `rollingChains` keeps a chain for as long as `at` does.
+ */
+export interface ProvenRegistryRecords {
+  readonly at: bigint;
+  readonly records: readonly ContractEventRecord[];
+}
+
+/** Where `rollingChains` reads the registries; the caller keeps its own read fresh and cheap. */
+export interface RegistryRecordSource {
+  read(): Promise<ProvenRegistryRecords>;
+}
+
+/**
+ * The `RollingChains` over `source` under `release`, the registries this
+ * release pins (`PINNED_REGISTRIES`): each poll's chain is the verifier's
+ * `rollingChain` over the records as read, computed again only once the
+ * read moves to a later block, for at most `cacheSize` polls at once
+ * (default 1,024).
+ */
+export function rollingChains(
+  source: RegistryRecordSource,
+  release: RollingChainRelease,
+  cacheSize = 1024,
+): RollingChains {
+  if (!Number.isSafeInteger(cacheSize) || cacheSize < 1)
+    throw new RangeError("cacheSize must be at least 1");
+  const known = new Map<string, RollingChainRead>();
+  return {
+    async read(definition) {
+      const { at, records } = await source.read();
+      if (typeof at !== "bigint" || at < 0n) throw new RangeError("at must be a bigint ≥ 0");
+      // By the definition's bytes, not its election_id: `rollingChain`
+      // checks that these very bytes were registered, which a hit skips.
+      const key = Buffer.from(encodeElectionDefinitionV7(definition.value)).toString("hex");
+      const held = known.get(key);
+      if (held !== undefined && held.settledAt === at) {
+        known.delete(key);
+        known.set(key, held);
+        return held;
+      }
+      // A record after `at` means `at` isn't the block the records run
+      // through: a step it calls settled could still gain events (T-08).
+      if (records.some((r) => r.l2_timestamp > at))
+        throw new RangeError("the registries' records run past their block's timestamp");
+      const read = { settledAt: at, outcome: rollingChain(definition, records, release) };
+      remember(known, key, read, cacheSize);
+      return read;
+    },
+  };
 }
 
 /** What an election's ballots are judged by, once it can be decided. */
-type Decided = ElectionAdmission | { readonly ok: false };
+type Decided =
+  | (ElectionAdmission & {
+      /** A rolling poll's: the chain's `settledAt`, after which no step is judged. */
+      readonly settledAt?: bigint;
+    })
+  | { readonly ok: false };
+
+/** A rolling poll's decision, valid while its chain's `settledAt` is the one it was made at. */
+interface RollingDecided {
+  readonly settledAt: bigint;
+  readonly decided: Decided;
+}
 
 /**
  * Admits and boards ballots. One per process: it keeps each election's
@@ -164,10 +288,14 @@ export class BallotAdmissions {
   readonly #clock: PeriodClock;
   readonly #cacheSize: number;
   readonly #l1: L1References | undefined;
+  readonly #chains: RollingChains | undefined;
   readonly #admitted = new Map<string, Decided>();
   readonly #refused = new Map<string, Decided>();
+  // Rolling polls apart: their decisions hold only for the chain they were
+  // made under, so they are never kept as a fixed poll's are.
+  readonly #rolling = new Map<string, RollingDecided>();
 
-  constructor({ panels, clock, cacheSize = 1024, l1 }: BallotAdmissionOptions) {
+  constructor({ panels, clock, cacheSize = 1024, l1, rolling }: BallotAdmissionOptions) {
     if (panels.length === 0) throw new RangeError("panels must name at least one panel");
     // A malformed panel throws PanelError here, at start, not on a ballot.
     for (const panel of panels) panelId(panel);
@@ -181,6 +309,7 @@ export class BallotAdmissions {
     this.#clock = { epoch: clock.epoch, period: clock.period };
     this.#cacheSize = cacheSize;
     this.#l1 = l1;
+    this.#chains = rolling;
   }
 
   /**
@@ -242,13 +371,23 @@ export class BallotAdmissions {
       return refuseAll(new SubmitError("not-open"));
     const segment = (now - this.#clock.epoch) / this.#clock.period;
     if (segment > 0xffffffffn) return refuseAll(new SubmitError("not-open"));
-    const verdicts = admission.admitAll(own);
+    const { settledAt } = admission;
+    const unsettled = own.map(
+      (b) => settledAt !== undefined && isUnsettled(b, settledAt, admission.closesAt),
+    );
+    const judged = admission.admitAll(own.filter((_, i) => !unsettled[i]));
     // One budget for the whole batch: ballots naming many distinct blocks,
     // or a slow node, delay it by one budget at most, then go unchecked (T-52).
     const l1Deadline = this.#l1?.deadline();
     const outcomes: SubmitOutcome[] = [];
-    for (const [i, verdict] of verdicts.entries()) {
-      const ballot = own[i] as Uint8Array;
+    let next = 0;
+    for (const [i, ballot] of own.entries()) {
+      if (unsettled[i]) {
+        outcomes.push({ ok: false, error: new SubmitError("not-open", "step-unsettled") });
+        continue;
+      }
+      const verdict = judged[next++];
+      if (verdict === undefined) throw new Error("admitAll answered too few ballots");
       if (!verdict.ok) {
         outcomes.push({ ok: false, error: new SubmitError("rejected", verdict.code) });
         continue;
@@ -417,30 +556,126 @@ export class BallotAdmissions {
     }
     const definition = await readDefinition(client, id);
     if (definition === undefined) throw new SubmitError("unknown-election");
+    const rolling = this.#chains === undefined ? undefined : rollingDefinition(definition);
+    if (rolling !== undefined) return this.#rollingAdmission(client, id, key, definition, rolling);
+    const { decided, keep } = await this.#decide(client, id, definition);
+    // Admissions and refusals are kept apart, so refusals (cheap to cause
+    // with definitions naming no pinned panel) never evict an admission.
+    if (keep) remember(decided.ok ? this.#admitted : this.#refused, key, decided, this.#cacheSize);
+    return decided;
+  }
+
+  /**
+   * A rolling poll's admission under the chain its source gives now, kept
+   * only while the source gives the chain at the same `settledAt`: a later
+   * block can settle more steps, and it can complete a registration or an
+   * electorate check that couldn't be decided before.
+   */
+  async #rollingAdmission(
+    client: Sql,
+    id: Uint8Array,
+    key: string,
+    definitionBytes: Uint8Array,
+    definition: ElectionDefinitionV7Record,
+  ): Promise<Decided> {
+    const chains = this.#chains as RollingChains; // the caller checked it
+    const { settledAt, outcome } = await chains.read(definition);
+    const known = this.#rolling.get(key);
+    if (known !== undefined && known.settledAt === settledAt) {
+      this.#rolling.delete(key);
+      this.#rolling.set(key, known);
+      return known.decided;
+    }
+    // 2.4's recount or the registration stops the chain: nothing is judged
+    // against records the verifier's own checks don't pass (T-08, T-71).
+    if (!("status" in outcome)) {
+      const refused: Decided = { ok: false };
+      remember(this.#rolling, key, { settledAt, decided: refused }, this.#cacheSize);
+      return refused;
+    }
+    const { decided, keep } = await this.#decide(client, id, definitionBytes, outcome.chain);
+    const withAt: Decided = decided.ok ? { ...decided, settledAt } : decided;
+    if (keep) remember(this.#rolling, key, { settledAt, decided: withAt }, this.#cacheSize);
+    return withAt;
+  }
+
+  /**
+   * The verifier's admission of the election under the panel the
+   * definition names, and whether to keep it: a missing transcript is never
+   * kept, since costing only the definition, the first entry and its hash,
+   * it is decided again on the next ballot.
+   */
+  async #decide(
+    client: Sql,
+    id: Uint8Array,
+    definition: Uint8Array,
+    chain?: RollingBallotChain,
+  ): Promise<{ readonly decided: Decided; readonly keep: boolean }> {
     // The operator boards the transcript as the board's first entry (as the
     // reference election does), so only that entry is read: a ballot never
     // costs a scan of the board (T-52).
     const first = await readEntries(client, id, 0n, 1, BOARD_ENTRY_OVERHEAD + MAX_BOARD_PAYLOAD);
     for (const panel of this.#panels) {
-      const r = electionAdmission(definition, panel, first);
+      let r;
+      try {
+        r = electionAdmission(definition, panel, first, undefined, chain);
+      } catch (e) {
+        // The chain's opening state isn't the definition's: crypto refuses
+        // to judge against it. `rollingChain`'s recount already compares
+        // them, so only a source that skipped it gets here (T-08).
+        if (chain !== undefined && e instanceof RangeError)
+          return { decided: { ok: false }, keep: true };
+        throw e;
+      }
       if (!r.ok && r.code === "panel-unpinned") continue;
-      // A missing transcript is never kept: costing only the definition, the
-      // first entry and its hash, it is decided again on the next ballot.
-      if (!r.ok && r.code === "ceremony-transcript-missing") return r;
-      // Admissions and refusals are kept apart, so refusals (cheap to cause
-      // with definitions naming no pinned panel) never evict an admission.
-      if (r.ok) remember(this.#admitted, key, r, this.#cacheSize);
-      else remember(this.#refused, key, r, this.#cacheSize);
-      return r;
+      return { decided: r, keep: r.ok || r.code !== "ceremony-transcript-missing" };
     }
-    const refused: Decided = { ok: false };
-    remember(this.#refused, key, refused, this.#cacheSize);
-    return refused;
+    return { decided: { ok: false }, keep: true };
   }
 }
 
+/**
+ * The definition's record when it is a rolling one (version 7 under
+ * `electorate_mode` 2), decoded strictly; `undefined` otherwise, a
+ * definition that doesn't decode among them, which the verifier's
+ * admission then refuses as it would any.
+ */
+function rollingDefinition(bytes: Uint8Array): ElectionDefinitionV7Record | undefined {
+  if (bytes.length < 3 || bytes[0] !== 0 || bytes[1] !== RECORD_TYPES.electionDefinition)
+    return undefined;
+  if (bytes[2] !== 7) return undefined;
+  let value;
+  try {
+    value = decodeElectionDefinitionV7(bytes);
+  } catch (e) {
+    if (e instanceof DecodeError) return undefined;
+    throw e;
+  }
+  return value.electorate_mode === ELECTORATE_MODES.rolling ? { version: 7, value } : undefined;
+}
+
+/**
+ * Whether `ballot` names a step the poll may accept (its boundary at most
+ * `closesAt`) that isn't settled at `settledAt`: its tree may still gain
+ * events, so it can't be judged yet ([[membership]], Settled and final).
+ * A ballot that doesn't decode as version 5, and a step whose boundary is
+ * past the close, are left to the verifier's admission, which rejects them
+ * (`decode`, `root-step-range`) whatever has settled.
+ */
+function isUnsettled(ballot: Uint8Array, settledAt: bigint, closesAt: bigint): boolean {
+  let step;
+  try {
+    step = decodeBallot(ballot, 5).step;
+  } catch (e) {
+    if (e instanceof DecodeError) return false;
+    throw e;
+  }
+  const boundary = rootClockBoundary(BigInt(step));
+  return boundary >= settledAt && boundary <= closesAt;
+}
+
 /** Keeps `value` under `key`, dropping the least recently used beyond `size`. */
-function remember(cache: Map<string, Decided>, key: string, value: Decided, size: number) {
+function remember<T>(cache: Map<string, T>, key: string, value: T, size: number) {
   if (cache.size >= size) {
     const oldest = cache.keys().next();
     if (!oldest.done) cache.delete(oldest.value);

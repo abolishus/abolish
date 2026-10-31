@@ -708,13 +708,27 @@ export function StreamPage({
           >
             {t("streamSearchEmptyLede")}
           </Empty>
-        ) : stream.cards.length === 0 && (topic !== undefined || place !== undefined) ? (
+        ) : stream.cards.length === 0 && place !== undefined ? (
+          // The place goes first: a place matches only by its whole name, as
+          // an asker wrote it, so it is the likelier miss, and dropping it
+          // keeps a topic's titled page. Its one action drops exactly what
+          // its words name; "Try without one of them" over a button that
+          // dropped both said one thing and did another (P2-29, the
+          // stream's iteration 16).
+          <Empty
+            title={t("streamFilterEmpty")}
+            href={streamHref(sort, { topic })}
+            action={t("streamPlaceClear")}
+          >
+            {t(topic === undefined ? "streamPlaceEmptyLede" : "streamTopicPlaceEmptyLede")}
+          </Empty>
+        ) : stream.cards.length === 0 && topic !== undefined ? (
           <Empty
             title={t("streamFilterEmpty")}
             href={streamHref(sort)}
-            action={t("streamShowEverything")}
+            action={t("streamTopicClear")}
           >
-            {t("streamFilterEmptyLede")}
+            {t("streamTopicEmptyLede")}
           </Empty>
         ) : stream.cards.length === 0 ? (
           <Empty title={t("streamEmpty")}>{t("streamEmptyLede")}</Empty>

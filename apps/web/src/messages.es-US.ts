@@ -436,9 +436,10 @@ export const esUS: Messages = {
   streamPlaceClear: "Borrar el lugar",
   streamTopicClear: "Ver todos los temas",
   streamFilterEmpty: "No hay preguntas abiertas clasificadas aquí",
-  streamFilterEmptyLede:
-    "Solo aparecen las encuestas cuyos autores eligieron este tema o lugar. Prueba sin uno de ellos.",
-  streamShowEverything: "Mostrar todo",
+  streamTopicEmptyLede: "Solo aparecen las preguntas clasificadas en este tema.",
+  streamPlaceEmptyLede: "Solo aparecen las preguntas clasificadas en este lugar.",
+  streamTopicPlaceEmptyLede:
+    "Solo aparecen las preguntas clasificadas en este tema y en este lugar. Este tema puede tener más en otros lugares.",
   streamPlaceRefusedTitle: "No se puede buscar ese lugar",
   streamPlaceRefused:
     "Un lugar tiene de uno a {characters} caracteres, tal como lo escribiría quien pregunta.",

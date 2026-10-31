@@ -709,6 +709,8 @@ export const Place: Story = {
 
 export const FilteredToNothing: Story = {
   args: {
+    sort: "closing",
+    typedPlace: "Riverside",
     filter: { topic: "transport", place: "Riverside" },
     stream: { kind: "stream", cards: [], next: undefined },
   },
@@ -717,10 +719,45 @@ export const FilteredToNothing: Story = {
     await expect(
       canvas.getByRole("heading", { name: "No open question is filed here" }),
     ).toBeVisible();
-    await expect(canvas.getByRole("link", { name: "Show everything" })).toHaveAttribute(
-      "href",
-      "/discover",
-    );
+    await expect(canvas.getByText(/under this topic and at this place/)).toBeVisible();
+    // Its one action drops what its words name, the place, keeping the
+    // topic's page and the order; nothing offers to drop both at once.
+    const clear = canvas.getAllByRole("link", { name: "Clear the place" });
+    await expect(clear).toHaveLength(2);
+    for (const link of clear)
+      await expect(link).toHaveAttribute("href", "/discover?sort=closing&topic=transport");
+    await expect(canvas.queryByRole("link", { name: "Show everything" })).toBeNull();
+  },
+};
+
+export const TopicFiledNothing: Story = {
+  args: {
+    filter: { topic: "transport" },
+    stream: { kind: "stream", cards: [], next: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText("Only questions filed under this topic are listed."),
+    ).toBeVisible();
+    const every = canvas.getAllByRole("link", { name: "Show every topic" });
+    await expect(every).toHaveLength(2);
+    for (const link of every) await expect(link).toHaveAttribute("href", "/discover");
+  },
+};
+
+export const PlaceFiledNothing: Story = {
+  args: {
+    typedPlace: "Riverside",
+    filter: { place: "Riverside" },
+    stream: { kind: "stream", cards: [], next: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText("Only questions filed at this place are listed.")).toBeVisible();
+    const clear = canvas.getAllByRole("link", { name: "Clear the place" });
+    await expect(clear).toHaveLength(2);
+    for (const link of clear) await expect(link).toHaveAttribute("href", "/discover");
   },
 };
 

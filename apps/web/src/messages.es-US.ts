@@ -823,6 +823,8 @@ export const esUS: Messages = {
   evidenceSummary: "¿Cómo sabemos que esto es real?",
   evidenceLede:
     "Cada respuesta se sella en el dispositivo que la envía y se publica en el tablero público, que cualquiera puede descargar y volver a contar.",
+  evidenceKey:
+    "Quien la hizo no puede ver las respuestas de nadie. Durante el lanzamiento, solo Abolish tiene la clave de esta encuesta.",
   evidenceShow: "Mostrar la evidencia",
   evidenceHide: "Ocultar la evidencia",
   evidenceFingerprintTitle: "La huella de esta encuesta",

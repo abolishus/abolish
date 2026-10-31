@@ -307,7 +307,8 @@ describe("poll page", () => {
     )?.[1];
     expect(section?.replace(/<[^>]+>/g, "")).toBe(
       "How do we know this is real?" +
-        "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again.",
+        "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again." +
+        "Whoever asked it can&#x27;t see anyone&#x27;s answers. During launch, Abolish alone holds the key for this poll.",
     );
     const summary = /<summary[^>]*>([\s\S]*?)<\/summary>/.exec(html)?.[1] ?? "";
     expect(summary).toMatch(/<span class="group-open:hidden">Show the evidence<\/span>/);

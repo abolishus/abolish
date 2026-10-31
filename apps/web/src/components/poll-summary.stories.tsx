@@ -77,6 +77,12 @@ async function openEvidence(canvasElement: HTMLElement) {
   await expect(
     within(section).getByText(/^Every answer is sealed on the device that sends it/),
   ).toBeVisible();
+  // Who can open the answers, in the brief's words for the launch panel.
+  await expect(
+    within(section).getByText(
+      "Whoever asked it can't see anyone's answers. During launch, Abolish alone holds the key for this poll.",
+    ),
+  ).toBeVisible();
   // Closed, the evidence is in the page but not shown.
   const details = canvasElement.querySelector("details");
   await expect(details).not.toHaveAttribute("open");

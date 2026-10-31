@@ -810,6 +810,8 @@ const enUS = {
   evidenceSummary: "How do we know this is real?",
   evidenceLede:
     "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again.",
+  evidenceKey:
+    "Whoever asked it can't see anyone's answers. During launch, Abolish alone holds the key for this poll.",
   evidenceShow: "Show the evidence",
   evidenceHide: "Hide the evidence",
   evidenceFingerprintTitle: "This poll's fingerprint",

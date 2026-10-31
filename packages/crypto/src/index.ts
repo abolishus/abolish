@@ -455,6 +455,9 @@ export {
   type MembershipProverInput,
   type MembershipStatement,
   type MembershipWitness,
+  rollingMembershipNullifier,
+  rollingMembershipProverInput,
+  type RollingMembershipStatement,
 } from "./membership-prover.ts";
 export { poseidon2 } from "./poseidon.ts";
 export {

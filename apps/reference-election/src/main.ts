@@ -11,7 +11,8 @@
 // definition version 5 (P2-14), which must verify as the honest one does.
 // A rolling poll under definition version 7 (P2-17) is registered over a
 // group the run creates and changes in the group registry, its opening state
-// and steps derived from the registry's events; its ballots come later.
+// and steps derived from the registry's events; its ballots, against a step
+// before a voter joins and the next, go straight to the board's rolling call.
 // Its ballots get receipts signed by the fixture as board operator, among
 // them one for a forked board and one for a ballot it never boards, which
 // the voter's later checks must find from L1, and the verifier's drop rule
@@ -60,6 +61,7 @@ import {
   encodeDisplayText,
   encodeDisplayTextV2,
   identityKey,
+  MembershipProverError,
   POLL_CLASSES,
   isReceiptAlarm,
   objectCid,
@@ -69,6 +71,7 @@ import {
   type RollingTier,
   rootClockBoundary,
   rootClockStepAtOrBefore,
+  rootStepWindow,
   RollingTierTree,
   rollingTierSteps,
 } from "@abolishus/crypto";
@@ -81,6 +84,8 @@ import { type LocalArweave, startArweave } from "./arweave.ts";
 import {
   castingFor,
   castQuestions,
+  castRolling,
+  type CastRollingBallot,
   castVote,
   challengeQuestions,
   challengeVote,
@@ -88,6 +93,9 @@ import {
   newVoters,
   proverArtifacts,
   questionCastingFor,
+  rollingCastingFor,
+  type StepTree,
+  stepTree,
 } from "./casting.ts";
 import {
   boardEntry,
@@ -138,6 +146,8 @@ import {
   registerCeremony,
   registerDefinition,
   registrationCheck,
+  rollingBallotLogs,
+  submitRollingBallot,
 } from "./l2.ts";
 import { nodeVerify, startNode } from "./node.ts";
 import {
@@ -463,8 +473,8 @@ async function run(
   // joining (voter 3) and a member removed and added again (voter 1), whose
   // two leaves are one commitment, so one member (T-16). It lists the poll of
   // questions' receipt key, already registered with the anchor. Its ballots
-  // are part 4f-2's; until then it has no board.
-  await (async () => {
+  // are cast in the voting window, below.
+  const rolling = await (async () => {
     const group = await createGroup(l2, anvil);
     const [v0, v1, v2, v3] = voters;
     if (v0 === undefined || v1 === undefined || v2 === undefined || v3 === undefined)
@@ -515,7 +525,17 @@ async function run(
     if (civic.failure?.rule !== "rolling-class")
       throw new Error(`a civic rolling poll breaks ${civic.failure?.rule ?? "no rule"}`);
     await registerDefinition(l2, anvil, civic.ceremony.definition, "DefinitionIllFormed(uint8)");
-    // After the registration: voter 3 joins, and voter 1 is removed and added again.
+    // After the registration: voter 3 joins, and voter 1 is removed and added
+    // again, all in L2 blocks after the first boundary past the registration,
+    // so that step's tree is the opening one and the next step's holds every
+    // change: a ballot proving against either is a ballot of an accepted step.
+    const before = (rootClockStepAtOrBefore(registeredAt) ?? -1n) + 1n;
+    const latest = BigInt(
+      (await l2Anvil.call<{ timestamp: string }>("eth_getBlockByNumber", ["latest", false]))
+        .timestamp,
+    );
+    const after = rootClockBoundary(before) + 1n;
+    await l2Anvil.call("evm_setNextBlockTimestamp", [Number(after > latest ? after : latest + 1n)]);
     await addMembers(l2, anvil, group, 3n, [v3.commitment]);
     await removeMembers(l2, anvil, group, 4n, [1n]);
     await addMembers(l2, anvil, group, 4n, [v1.commitment]);
@@ -544,6 +564,12 @@ async function run(
       throw new Error("the rolling tier's opening state isn't the one its definition names");
     const steps = derived.steps.filter((s) => s.accepted);
     const last = steps.at(-1);
+    const early = steps.find((s) => s.step === before);
+    const next = steps.find((s) => s.step === before + 1n);
+    if (early === undefined || early.size !== 3 || early.memberCount !== 3)
+      throw new Error("the rolling tier's step before voter 3 joined isn't the opening tree");
+    if (next === undefined || next.size !== 5 || next.memberCount !== 4)
+      throw new Error("the rolling tier's step after voter 3 joined doesn't hold every change");
     if (last === undefined || last.size !== 5 || last.memberCount !== 4)
       throw new Error(
         `the rolling tier's newest step by the close holds ${last?.size ?? 0} leaves and ${last?.memberCount ?? 0} members, not 5 and 4`,
@@ -576,8 +602,9 @@ async function run(
       )}\n`,
     );
     log(
-      `stage 3 (rolling): group ${group} created in the group registry and filled by both registrars' records; the poll's version-7 definition, opening with ${tier.group_size} members at L2 block ${rootL2Block}, registered on L2 after a ceremony of ${c.seats.length} seats, and a civic one refused with rolling-class; then voter 3 added and voter 1 removed and added again, so ${steps.length} accepted steps, the newest with ${last.size} leaves and ${last.memberCount} members`,
+      `stage 3 (rolling): group ${group} created in the group registry and filled by both registrars' records; the poll's version-7 definition, opening with ${tier.group_size} members at L2 block ${rootL2Block}, registered on L2 after a ceremony of ${c.seats.length} seats, and a civic one refused with rolling-class; then, after step ${before}'s boundary, voter 3 added and voter 1 removed and added again, so ${steps.length} accepted steps, the newest with ${last.size} leaves and ${last.memberCount} members`,
     );
+    return { ceremony: c, group, registeredAt, events, early: before, late: before + 1n };
   })();
 
   // Stage 7: each period's checkpoints anchored in one call, inside its
@@ -927,6 +954,117 @@ async function run(
   } finally {
     await api.close();
   }
+
+  // Stage 4 and 5 (rolling): the rolling poll's ballots, each made against
+  // a step's tree the client rebuilt from the group registry's events and
+  // sent straight to the board's rolling call with the root it proved
+  // against, no server of ours in the path ([[0028-rolling-electorates]],
+  // Direct submission; T-25). Voter 0 proves against the step before voter 3
+  // joined; voter 3, who joined after the poll was registered, and voter 1,
+  // removed and added again, against the next, voter 1 from its live leaf;
+  // voter 2 against the first, then again against the next under a later L1
+  // block, a re-vote across steps under one nullifier (T-01, T-02, T-08,
+  // T-16). Every L1 reference is in the window of the step it names, inside
+  // the voting window, and every submission lands in an L2 block inside it.
+  await (async () => {
+    const { ceremony: c, group, registeredAt, events, early, late } = rolling;
+    const [v0, v1, v2, v3] = voters;
+    if (v0 === undefined || v1 === undefined || v2 === undefined || v3 === undefined)
+      throw new Error("too few voters");
+    const chain = { events, registeredAt };
+    const casting = rollingCastingFor(c.definition.value, c.panel, c.transcript, chain, artifacts);
+    const trees = [early, late].map((n) =>
+      stepTree(chain, [group], Number(n), rootClockBoundary(n)),
+    ) as [StepTree, StepTree];
+    const [before, after] = trees;
+    const latest = async (rpc: typeof anvil) =>
+      BigInt(
+        (await rpc.call<{ timestamp: string }>("eth_getBlockByNumber", ["latest", false]))
+          .timestamp,
+      );
+    const max = (...xs: bigint[]) => xs.reduce((a, b) => (a > b ? a : b));
+    const at = max((await latest(anvil)) + 1n, rootClockBoundary(late), timing.opensAt);
+    const refs = [await l1RefAt(anvil, at), await l1RefAt(anvil, at + 60n)] as const;
+    for (const [n, t] of [
+      [early, at],
+      [late, at],
+      [late, at + 60n],
+    ] as const)
+      if (rootStepWindow(n, t) !== "in" || t > timing.closesAt)
+        throw new Error(`step ${n} isn't in the window of an L1 reference at ${t}`);
+    // The board takes a ballot only in an L2 block inside the voting window.
+    const l2At = max((await latest(l2Anvil)) + 1n, timing.opensAt);
+    if (l2At > timing.closesAt) throw new Error("the L2 is past the rolling poll's close");
+    await l2Anvil.call("evm_setNextBlockTimestamp", [Number(l2At)]);
+    // A control: voter 3 joined after the earlier step, so its tree has no
+    // leaf of theirs, and the client refuses before proving (T-08).
+    try {
+      await castRolling(casting, v3, [1, 0, 0], refs[0], before);
+      throw new Error("voter 3 proved against a step from before they joined");
+    } catch (e) {
+      if (!(e instanceof MembershipProverError) || e.code !== "not-a-member") throw e;
+    }
+    const boarded: { readonly voter: number; readonly ballot: CastRollingBallot }[] = [];
+    for (const [i, voter, votes, ref, tree] of [
+      [0, v0, [1, 0, 0], refs[0], before],
+      [3, v3, [0, 1, 0], refs[0], after],
+      [1, v1, [0, 0, 1], refs[0], after],
+      [2, v2, [1, 0, 0], refs[0], before],
+      [2, v2, [0, 1, 0], refs[1], after],
+    ] as const) {
+      const ballot = await castRolling(casting, voter, [...votes], ref, tree);
+      await submitRollingBallot(l2, anvil, ballot.root, ballot.bytes);
+      boarded.push({ voter: i, ballot });
+    }
+    const [first0, , , revoted, revote] = boarded;
+    if (revoted === undefined || revote === undefined || first0 === undefined)
+      throw new Error("a rolling ballot is missing");
+    if (revoted.ballot.record.nullifier !== revote.ballot.record.nullifier)
+      throw new Error("voter 2's two ballots carry two nullifiers");
+    // A control: an honest ballot with another step's root beside it fails
+    // its proof on chain, so nobody can attach another root to it (T-25, T-38).
+    const other = await castRolling(casting, v0, [0, 0, 1], refs[1], after);
+    await submitRollingBallot(l2, anvil, before.root, other.bytes, "BallotRefused(uint8)");
+    // The board's log holds each ballot with the root it proved against.
+    const logged = (await rollingBallotLogs(l2)).filter(
+      (l) => hex(l.definitionHash) === hex(casting.election.definitionHash),
+    );
+    if (
+      logged.length !== boarded.length ||
+      logged.some(
+        (l, i) =>
+          hex(l.record) !== hex(boarded[i]?.ballot.bytes ?? new Uint8Array()) ||
+          l.root !== boarded[i]?.ballot.root ||
+          l.timestamp < timing.opensAt ||
+          l.timestamp > timing.closesAt,
+      )
+    )
+      throw new Error("the board's rolling ballots aren't the ones submitted");
+    writeFileSync(
+      join(OUT, "rolling", "ballots.json"),
+      `${JSON.stringify(
+        {
+          steps: trees.map((t) => ({
+            step: t.step,
+            root: t.root.toString(),
+            leaves: t.leaves.length,
+          })),
+          ballots: boarded.map(({ voter, ballot }) => ({
+            voter,
+            step: ballot.record.step,
+            root: ballot.root.toString(),
+            l1RefNumber: ballot.record.l1_ref_number.toString(),
+            record: hex(ballot.bytes),
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    log(
+      `stage 4 (rolling): ${boarded.length} version-5 ballots with real membership proofs under the rolling scope submitted straight to the board's rolling call, ${boarded.filter((b) => b.ballot.record.step === Number(early)).length} against step ${early} and ${boarded.filter((b) => b.ballot.record.step === Number(late)).length} against step ${late}, voter 3 (joined after registration) and voter 1 (removed and added again) among them, and voter 2 re-voting across the two steps under one nullifier; voter 3 refused before proving against the step before they joined, and an honest ballot with another step's root refused by the board`,
+    );
+  })();
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);
   await anchorAt(anvil, anchor, checkpointsAt(closed), end(closed) + ANCHOR_DELAY);
 

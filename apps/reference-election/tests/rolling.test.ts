@@ -14,9 +14,12 @@ import {
   pinnedVersion,
   POLL_CLASSES,
   RECORD_TYPES,
+  rootClockBoundary,
+  rollingTierSteps,
+  type RollingTierEvent,
 } from "@abolishus/crypto";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { encodeAbiParameters } from "viem";
+import { encodeAbiParameters, encodeFunctionData, parseAbi } from "viem";
 import { expect, test } from "vite-plus/test";
 import {
   definitionBytes,
@@ -29,7 +32,8 @@ import {
   stubHash,
 } from "../src/election.ts";
 import { additionRecord, eventBytes, removalRecord } from "../src/groups.ts";
-import { ethAddress, newRegistrars } from "../src/l2.ts";
+import { stepTree } from "../src/casting.ts";
+import { ethAddress, newRegistrars, rollingBallotCalldata } from "../src/l2.ts";
 
 const numRuns = Number(process.env["FC_NUM_RUNS"] ?? 100);
 const hex = (b: Uint8Array) => bytesToHex(b);
@@ -170,4 +174,60 @@ test("an event's record is the bytes its data ABI-encodes", () => {
   const data = Buffer.from(encodeAbiParameters([{ type: "bytes" }], ["0x0102"]).slice(2), "hex");
   expect(() => eventBytes(data.subarray(0, 64))).toThrow();
   expect(() => eventBytes(data.subarray(0, 40))).toThrow();
+});
+
+test("the rolling call's calldata is the ABI's one encoding of (root, record)", () => {
+  const abi = parseAbi(["function submitRollingBallot(bytes32 root, bytes record)"]);
+  fc.assert(
+    fc.property(
+      fc.bigInt({ min: 0n, max: (1n << 256n) - 1n }),
+      fc.uint8Array({ maxLength: 200 }),
+      (root, record) => {
+        const want = encodeFunctionData({
+          abi,
+          functionName: "submitRollingBallot",
+          args: [`0x${root.toString(16).padStart(64, "0")}`, `0x${hex(record)}`],
+        });
+        expect(`0x${hex(rollingBallotCalldata(root, record))}`).toBe(want);
+      },
+    ),
+    { numRuns },
+  );
+});
+
+test("a step's tree holds exactly the events at or before its boundary, as the library's steps do", () => {
+  // Voters 1 to 3 before step 10's boundary; then voter 4 added and voter 2
+  // removed and added again after it, before step 11's.
+  const tau = rootClockBoundary(10n);
+  const events: RollingTierEvent[] = [
+    {
+      kind: "add",
+      groupId: 5n,
+      commitments: [11n, 22n, 33n],
+      blockNumber: 1n,
+      timestamp: tau - 9n,
+    },
+    { kind: "add", groupId: 5n, commitments: [44n], blockNumber: 2n, timestamp: tau + 1n },
+    { kind: "remove", groupId: 5n, indices: [1n], blockNumber: 3n, timestamp: tau + 2n },
+    { kind: "add", groupId: 5n, commitments: [22n], blockNumber: 4n, timestamp: tau + 3n },
+  ];
+  const chain = { events, registeredAt: tau - 5n };
+  const early = stepTree(chain, [5n], 10, rootClockBoundary(10n));
+  const late = stepTree(chain, [5n], 11, rootClockBoundary(11n));
+  expect(early.leaves).toEqual([11n, 22n, 33n]);
+  expect(late.leaves).toEqual([11n, 0n, 33n, 44n, 22n]);
+  const steps = rollingTierSteps(
+    events,
+    {
+      groups: [5n],
+      rootL2Block: 1n,
+      registeredAt: chain.registeredAt,
+      closesAt: rootClockBoundary(12n),
+    },
+    [10n, 11n],
+  ).steps;
+  expect(steps.map((s) => s.root)).toEqual([early.root, late.root]);
+  // Another group's events are never the tier's.
+  const other = stepTree(chain, [6n], 11, rootClockBoundary(11n));
+  expect(other.leaves).toEqual([]);
 });

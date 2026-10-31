@@ -67,7 +67,7 @@ import { run, toHex } from "./headers.ts";
 // membership proof (packages/crypto/scripts/verifier-ballots-v5-vectors.py),
 // under their own sealed definition: what `LiveCopies` reads doesn't depend
 // on the mode. No vector reaches a sealed live rolling board with ballots
-// (P2-17 part 4d-2b-2b-2b-2b-2b-2), so `releaseChecks` runs on an election
+// (P2-17 part 4d-2b-2b-2b-2b-2b-2b), so `releaseChecks` runs on an election
 // cast here, as live-election.ts casts one for live.test.ts: the `board`
 // case's definition, kept to its Tier 0 rolling tier and made live, with
 // @abolishus/crypto's client and trustee paths, never with the checks under

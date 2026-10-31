@@ -9,6 +9,9 @@
 //
 // Beside the honest election runs a poll of three questions under
 // definition version 5 (P2-14), which must verify as the honest one does.
+// A rolling poll under definition version 7 (P2-17) is registered over a
+// group the run creates and changes in the group registry, its opening state
+// and steps derived from the registry's events; its ballots come later.
 // Its ballots get receipts signed by the fixture as board operator, among
 // them one for a forked board and one for a ballot it never boards, which
 // the voter's later checks must find from L1, and the verifier's drop rule
@@ -57,11 +60,17 @@ import {
   encodeDisplayText,
   encodeDisplayTextV2,
   identityKey,
+  POLL_CLASSES,
   isReceiptAlarm,
   objectCid,
   type Panel,
   receiptKeysCastCheck,
   type RegisteredKeys,
+  type RollingTier,
+  rootClockBoundary,
+  rootClockStepAtOrBefore,
+  RollingTierTree,
+  rollingTierSteps,
 } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { startApi } from "./api.ts";
@@ -90,7 +99,9 @@ import {
   newTrustees,
   PANEL,
   questionsDisplayText,
+  rollingDisplayText,
   runQuestionCeremony,
+  runRollingCeremony,
   singleStub,
   STUBS,
 } from "./election.ts";
@@ -103,6 +114,7 @@ import {
   checkTallied,
 } from "./expectations.ts";
 import { blocksCar, segmentObjects } from "./blocks.ts";
+import { addMembers, createGroup, groupEvents, removeMembers } from "./groups.ts";
 import {
   allAnchorLogs,
   anchorAt,
@@ -442,6 +454,131 @@ async function run(
   );
   const questions = firstEntry("questions", poll, first);
   const elections: Election[] = [...singles, questions];
+
+  // The rolling poll (P2-17 part 4f; [[0028-rolling-electorates]]): its Tier 0
+  // group created in the group registry and filled by the registrars' signed
+  // records, so the tier's opening state is the tree through the L2 block of
+  // its first batch; then the definition naming that state, registered after
+  // it (rule 7), and the group changed after the registration: a voter
+  // joining (voter 3) and a member removed and added again (voter 1), whose
+  // two leaves are one commitment, so one member (T-16). It lists the poll of
+  // questions' receipt key, already registered with the anchor. Its ballots
+  // are part 4f-2's; until then it has no board.
+  await (async () => {
+    const group = await createGroup(l2, anvil);
+    const [v0, v1, v2, v3] = voters;
+    if (v0 === undefined || v1 === undefined || v2 === undefined || v3 === undefined)
+      throw new Error("too few voters");
+    await addMembers(
+      l2,
+      anvil,
+      group,
+      0n,
+      [v0, v1, v2].map((v) => v.commitment),
+    );
+    const rootL2Block = BigInt(await l2Anvil.call<string>("eth_blockNumber"));
+    const openingTree = new RollingTierTree([group]);
+    for (const event of await groupEvents(l2)) openingTree.apply(event);
+    const tier: RollingTier = {
+      tier: 0,
+      root_l2_block: rootL2Block,
+      groups: [group],
+      root: openingTree.root(),
+      group_size: BigInt(openingTree.memberCount),
+    };
+    const text = rollingDisplayText();
+    const ran = runRollingCeremony(timing, l2, trustees, text, {
+      counter: await createElection(l2, anvil),
+      pollClass: POLL_CLASSES.everyday,
+      tier,
+      receiptKeys: [receiptKey],
+    });
+    if (ran.failure !== undefined)
+      throw new Error(`the rolling poll's definition breaks ${ran.failure.rule}`);
+    const c = ran.ceremony;
+    await registerCeremony(l2, anvil, ceremonyRegistration(l2, trustees, c));
+    await registerDefinition(l2, anvil, c.definition);
+    const registeredAt = BigInt(
+      (await l2Anvil.call<{ timestamp: string }>("eth_getBlockByNumber", ["latest", false]))
+        .timestamp,
+    );
+    writeRecords("rolling", c, encodeDisplayTextV2(text));
+    // A control: the same tier on the civic record, which must keep a fixed
+    // electorate. The library's rules and the registry both refuse it with
+    // `rolling-class`, before any ceremony is asked for (rule 3; T-01, T-16).
+    const civic = runRollingCeremony(timing, l2, trustees, rollingDisplayText(), {
+      counter: await createElection(l2, anvil),
+      pollClass: POLL_CLASSES.civicReferendum,
+      tier,
+      receiptKeys: [receiptKey],
+    });
+    if (civic.failure?.rule !== "rolling-class")
+      throw new Error(`a civic rolling poll breaks ${civic.failure?.rule ?? "no rule"}`);
+    await registerDefinition(l2, anvil, civic.ceremony.definition, "DefinitionIllFormed(uint8)");
+    // After the registration: voter 3 joins, and voter 1 is removed and added again.
+    await addMembers(l2, anvil, group, 3n, [v3.commitment]);
+    await removeMembers(l2, anvil, group, 4n, [1n]);
+    await addMembers(l2, anvil, group, 4n, [v1.commitment]);
+    // The tier's opening state and its accepted steps, as a verifier derives
+    // them from the registry's events alone (membership.md, Root clock and
+    // steps): the opening state must be the one the registry took, and the
+    // newest step by the close must hold every change, with voter 1 once.
+    const events = await groupEvents(l2);
+    const { closes_at: closesAt } = c.definition.value;
+    const boundaries: bigint[] = [];
+    for (
+      let n = (rootClockStepAtOrBefore(registeredAt) ?? 0n) + 1n;
+      rootClockBoundary(n) <= closesAt;
+      n++
+    )
+      boundaries.push(n);
+    const derived = rollingTierSteps(
+      events,
+      { groups: [group], rootL2Block, registeredAt, closesAt },
+      boundaries,
+    );
+    if (
+      derived.opening.root !== tier.root ||
+      BigInt(derived.opening.memberCount) !== tier.group_size
+    )
+      throw new Error("the rolling tier's opening state isn't the one its definition names");
+    const steps = derived.steps.filter((s) => s.accepted);
+    const last = steps.at(-1);
+    if (last === undefined || last.size !== 5 || last.memberCount !== 4)
+      throw new Error(
+        `the rolling tier's newest step by the close holds ${last?.size ?? 0} leaves and ${last?.memberCount ?? 0} members, not 5 and 4`,
+      );
+    writeFileSync(
+      join(OUT, "rolling", "electorate.json"),
+      `${JSON.stringify(
+        {
+          group: group.toString(),
+          rootL2Block: rootL2Block.toString(),
+          registeredAt: registeredAt.toString(),
+          events: events.map((e) => ({
+            blockNumber: e.blockNumber.toString(),
+            timestamp: e.timestamp.toString(),
+            groupId: e.groupId.toString(),
+            ...(e.kind === "add"
+              ? { kind: e.kind, commitments: e.commitments.map(String) }
+              : { kind: e.kind, indices: e.indices.map(String) }),
+          })),
+          opening: { root: derived.opening.root.toString(), members: derived.opening.memberCount },
+          steps: steps.map((s) => ({
+            step: s.step.toString(),
+            root: s.root.toString(),
+            leaves: s.size,
+            members: s.memberCount,
+          })),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    log(
+      `stage 3 (rolling): group ${group} created in the group registry and filled by both registrars' records; the poll's version-7 definition, opening with ${tier.group_size} members at L2 block ${rootL2Block}, registered on L2 after a ceremony of ${c.seats.length} seats, and a civic one refused with rolling-class; then voter 3 added and voter 1 removed and added again, so ${steps.length} accepted steps, the newest with ${last.size} leaves and ${last.memberCount} members`,
+    );
+  })();
 
   // Stage 7: each period's checkpoints anchored in one call, inside its
   // window. A segment with nothing appended in it repeats the board's state

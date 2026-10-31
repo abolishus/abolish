@@ -821,7 +821,12 @@ describe("anchorBoards", () => {
   );
 });
 
-describe("the archive's locator", () => {
+// Each run reads every election in the schema, and by this block the
+// property tests above have made hundreds; the tests that run eight or so
+// archives' worth of runs outlast the default 5 s on a loaded CI runner. A
+// test that times out leaves its run holding the anchoring lock, so every
+// later one met `anchor-busy` and the file's \`afterAll\` waited on it too.
+describe("the archive's locator", { timeout: 60_000 }, () => {
   test("every call with checkpoints carries it, and none goes alone", async () => {
     const chain = new ModelAnchor();
     const e = await boardFor(chain, 0, 11);

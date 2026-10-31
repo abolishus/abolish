@@ -1006,6 +1006,7 @@ export const esUS: Messages = {
   moderationDecided: "Hora",
   moderationMore: "Decisiones anteriores",
   moderationLatest: "Decisiones más recientes",
+  moderationLater: "Decisiones posteriores",
   moderationActionApply: "Mostrar estas decisiones",
   moderationActionMatches: "{shown} de las {total} decisiones de esta página tomaron esta acción.",
   moderationActionNone: "Ninguna decisión de esta página tomó esta acción.",

@@ -13,7 +13,14 @@ import {
   oneHistory,
   type TreeClaim,
 } from "../board.ts";
-import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import {
+  ACTIVITY_PAGE,
+  ANCHOR_PAGE,
+  BOARD_PAGE,
+  LIST_PAGE,
+  LOG_LATEST,
+  LOG_PAGE,
+} from "../page-sizes.ts";
 import type { LogAction } from "../log-actions.ts";
 import type { FollowedPoll } from "../account/follow-results.ts";
 import {
@@ -652,18 +659,45 @@ export type LogCounts = Readonly<Record<LogAction, number>> & {
   readonly since: string | undefined;
 };
 
-/** A page of the moderation log, with the whole log's counts when they could be read. */
-export type ModerationLogPage = ModerationLog & { readonly counts: LogCounts | undefined };
+/**
+ * Where a page of the moderation log starts: below a sequence number, newest
+ * first (`LOG_LATEST` for the latest decisions), or above one, the page a
+ * reader of an earlier page turns to for later decisions.
+ */
+export type LogPlace = { readonly before: string } | { readonly after: string };
 
 /**
- * The moderation log below sequence number `before` (a canonical decimal
- * `u64`, `LOG_LATEST` for the latest decisions), newest first: a reader meets
- * what moderation did last, not its first decisions (T-68). The whole log's
- * counts come beside it, a request that names no visitor (T-10).
+ * A page of the moderation log, newest first, with the whole log's counts
+ * when they could be read, and whether it is the latest page, so that nothing
+ * later is offered from it.
  */
-export async function loadModerationLog(api: Api, before: string): Promise<ModerationLogPage> {
+export type ModerationLogPage = ModerationLog & {
+  readonly counts: LogCounts | undefined;
+  readonly latest: boolean;
+};
+
+/**
+ * The moderation log at `place`, newest first: a reader meets what
+ * moderation did last, not its first decisions (T-68). The API serves the
+ * decisions above a number oldest first, so they are turned round; fewer than
+ * a page of them means none later, so the latest page is read instead, which
+ * holds every one of them and a full page where the log has one. The whole
+ * log's counts come beside it, a request that names no visitor (T-10).
+ */
+export async function loadModerationLog(api: Api, place: LogPlace): Promise<ModerationLogPage> {
+  const limit = String(LOG_PAGE);
   const [log, counts] = await Promise.all([
-    api.moderation.getLog({ before, limit: String(LOG_PAGE) }),
+    "after" in place
+      ? api.moderation
+          .getLog({ after: place.after, limit })
+          .then(async (later) =>
+            later.entries.length < LOG_PAGE
+              ? { ...(await api.moderation.getLog({ before: LOG_LATEST, limit })), latest: true }
+              : { ...later, entries: later.entries.toReversed(), latest: false },
+          )
+      : api.moderation
+          .getLog({ before: place.before, limit })
+          .then((page) => ({ ...page, latest: place.before === LOG_LATEST })),
     countsOf(api),
   ]);
   return { ...log, counts };

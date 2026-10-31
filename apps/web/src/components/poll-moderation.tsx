@@ -277,9 +277,16 @@ export function PollModeration({
             {t("moderationAppeal")}
           </Button>
         ) : null}
-        <a href="/moderation" className={LINK}>
-          {t("moderationLogLink")}
-        </a>
+        {/* The log opens at the decision the heading names, its first row: from its start, a decision past the first page's 50 was a page or more away, with nothing saying which. */}
+        {latest === undefined ? (
+          <a href="/moderation" className={LINK}>
+            {t("moderationLogLink")}
+          </a>
+        ) : (
+          <a href={`/moderation?after=${latest.seq - 1n}`} className={LINK}>
+            {t("moderationLogAt")}
+          </a>
+        )}
       </p>
     </div>
   );

@@ -127,8 +127,10 @@ export async function removeMembers(
 
 /** The `bytes` an event's data ABI-encodes alone: its offset, its length, the bytes. */
 export function eventBytes(data: Uint8Array): Uint8Array {
-  const length = Number(BigInt(hex(data.slice(32, 64))));
-  return data.slice(64, 64 + length);
+  const length = data.length >= 64 ? BigInt(hex(data.slice(32, 64))) : -1n;
+  if (length < 0n || 64n + length > BigInt(data.length))
+    throw new Error("a group registry log whose data isn't one ABI-encoded bytes");
+  return data.slice(64, 64 + Number(length));
 }
 
 interface RawLog {

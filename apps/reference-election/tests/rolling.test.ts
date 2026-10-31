@@ -97,58 +97,66 @@ test("registrars are seated in ascending order of their addresses", () => {
   }
 });
 
-test("the group records carry what they add or remove, approved by every registrar in seat order", () => {
-  const registrarSecrets = newRegistrars(2);
-  const registrars = registrarSecrets.map(ethAddress);
-  const signers = { l2ChainId: l2.l2ChainId, groupRegistry: l2.groupRegistry, registrarSecrets };
-  const separator = groupRegistryDomainSeparator(l2.l2ChainId, l2.groupRegistry);
-  // Field elements well inside the field, so none is a forbidden commitment.
-  const commitment = fc.bigInt({ min: 2n, max: 1n << 250n });
-  fc.assert(
-    fc.property(
-      fc.bigInt({ min: 0n, max: 1000n }),
-      fc.bigInt({ min: 0n, max: 1000n }),
-      fc.array(commitment, { minLength: 1, maxLength: 8 }),
-      fc.uniqueArray(fc.bigInt({ min: 0n, max: 99n }), { minLength: 1, maxLength: 8 }),
-      (groupId, firstIndex, commitments, unsorted) => {
-        const added = decodeGroupAddition(
-          additionRecord(signers, groupId, firstIndex, commitments),
-        );
-        if (!added.ok) throw new Error(added.error);
-        expect(added.value).toMatchObject({ groupId, firstIndex, commitments });
-        const addDigest = groupAdditionDigest(separator, {
-          groupId,
-          tier: 0,
-          firstIndex,
-          commitments,
-        });
-        expect(checkGroupApprovals(addDigest, added.value.approvals, registrars, 2)).toEqual({
-          ok: true,
-        });
+// Each run signs four approvals and recovers three: at CI's 1000 runs that
+// takes about 30 seconds.
+test(
+  "the group records carry what they add or remove, approved by every registrar in seat order",
+  { timeout: 300_000 },
+  () => {
+    const registrarSecrets = newRegistrars(2);
+    const registrars = registrarSecrets.map(ethAddress);
+    const signers = { l2ChainId: l2.l2ChainId, groupRegistry: l2.groupRegistry, registrarSecrets };
+    const separator = groupRegistryDomainSeparator(l2.l2ChainId, l2.groupRegistry);
+    // Field elements well inside the field, so none is a forbidden commitment.
+    const commitment = fc.bigInt({ min: 2n, max: 1n << 250n });
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 1000n }),
+        fc.bigInt({ min: 0n, max: 1000n }),
+        fc.array(commitment, { minLength: 1, maxLength: 8 }),
+        fc.uniqueArray(fc.bigInt({ min: 0n, max: 99n }), { minLength: 1, maxLength: 8 }),
+        (groupId, firstIndex, commitments, unsorted) => {
+          const added = decodeGroupAddition(
+            additionRecord(signers, groupId, firstIndex, commitments),
+          );
+          if (!added.ok) throw new Error(added.error);
+          expect(added.value).toMatchObject({ groupId, firstIndex, commitments });
+          const addDigest = groupAdditionDigest(separator, {
+            groupId,
+            tier: 0,
+            firstIndex,
+            commitments,
+          });
+          expect(checkGroupApprovals(addDigest, added.value.approvals, registrars, 2)).toEqual({
+            ok: true,
+          });
 
-        const indices = [...unsorted].sort((a, b) => (a < b ? -1 : 1));
-        const size = 100n;
-        const removed = decodeGroupRemoval(removalRecord(signers, groupId, size, indices));
-        if (!removed.ok) throw new Error(removed.error);
-        expect(removed.value).toMatchObject({ groupId, size, indices });
-        const removeDigest = groupRemovalDigest(separator, { groupId, tier: 0, size, indices });
-        expect(checkGroupApprovals(removeDigest, removed.value.approvals, registrars, 2)).toEqual({
-          ok: true,
-        });
-        // Signed for another tier, the same approvals recover other keys.
-        expect(
-          checkGroupApprovals(
-            groupAdditionDigest(separator, { groupId, tier: 1, firstIndex, commitments }),
-            added.value.approvals,
-            registrars,
-            2,
-          ).ok,
-        ).toBe(false);
-      },
-    ),
-    { numRuns },
-  );
-});
+          const indices = [...unsorted].sort((a, b) => (a < b ? -1 : 1));
+          const size = 100n;
+          const removed = decodeGroupRemoval(removalRecord(signers, groupId, size, indices));
+          if (!removed.ok) throw new Error(removed.error);
+          expect(removed.value).toMatchObject({ groupId, size, indices });
+          const removeDigest = groupRemovalDigest(separator, { groupId, tier: 0, size, indices });
+          expect(checkGroupApprovals(removeDigest, removed.value.approvals, registrars, 2)).toEqual(
+            {
+              ok: true,
+            },
+          );
+          // Signed for another tier, the same approvals recover other keys.
+          expect(
+            checkGroupApprovals(
+              groupAdditionDigest(separator, { groupId, tier: 1, firstIndex, commitments }),
+              added.value.approvals,
+              registrars,
+              2,
+            ).ok,
+          ).toBe(false);
+        },
+      ),
+      { numRuns },
+    );
+  },
+);
 
 test("an event's record is the bytes its data ABI-encodes", () => {
   fc.assert(
@@ -158,4 +166,8 @@ test("an event's record is the bytes its data ABI-encodes", () => {
     }),
     { numRuns },
   );
+  // A length past the data, or data too short to hold one, is refused, never truncated.
+  const data = Buffer.from(encodeAbiParameters([{ type: "bytes" }], ["0x0102"]).slice(2), "hex");
+  expect(() => eventBytes(data.subarray(0, 64))).toThrow();
+  expect(() => eventBytes(data.subarray(0, 40))).toThrow();
 });

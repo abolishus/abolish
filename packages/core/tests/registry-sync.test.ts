@@ -2,8 +2,12 @@ import {
   type ContractEventRecord,
   contractEventLog,
   decodeElectionDefinition,
+  decodeElectionDefinitionV7,
   electionDefinitionHash,
+  electionDefinitionV7Hash,
+  ELECTORATE_MODES,
   encodeElectionDefinition,
+  encodeElectionDefinitionV7,
   type EventContracts,
   RECORD_TYPES,
   replayEventAccumulator,
@@ -90,16 +94,39 @@ function created(electionId: Uint8Array, block: bigint): Emitted {
 
 function registered(definition: Uint8Array, block: bigint, electionId?: Uint8Array): Emitted {
   const decoded = decodeElectionDefinition(definition);
+  return registeredAs(
+    definition,
+    electionDefinitionHash(decoded),
+    block,
+    electionId ?? decoded.election_id,
+  );
+}
+
+function registeredAs(
+  definition: Uint8Array,
+  hash: Uint8Array,
+  block: bigint,
+  electionId: Uint8Array,
+): Emitted {
   const padded = concat(definition, new Uint8Array((32 - (definition.length % 32)) % 32));
   return {
-    topics: [
-      DEFINITION_REGISTERED,
-      electionId ?? decoded.election_id,
-      electionDefinitionHash(decoded),
-    ],
+    topics: [DEFINITION_REGISTERED, electionId, hash],
     data: concat(...l1Words(block), word(0x80n), word(BigInt(definition.length)), padded),
   };
 }
+
+// A rolling version-7 definition under a profile 2.3 passes, from an
+// independent implementation (verifier-ballots-v5.json's board).
+const rollingV7 = decodeElectionDefinitionV7(
+  Uint8Array.from(
+    Buffer.from(
+      (
+        vectors("verifier-ballots-v5.json") as { cases: { id: string; definition: string }[] }
+      ).cases.find((c) => c.id === "board")!.definition,
+      "hex",
+    ),
+  ),
+);
 
 const definition = (changes: Partial<typeof typical> = {}) =>
   encodeElectionDefinition({ ...typical, election_id: b(32), ...changes });
@@ -182,6 +209,24 @@ const recordedSince = async (block: bigint) =>
 const hex = (x: Uint8Array) => Buffer.from(x).toString("hex");
 
 describe("records what the accumulator vouches for", () => {
+  test("under contract-event version 13, a rolling version-7 definition is stored with its registration", async () => {
+    expect(rollingV7.electorate_mode).toBe(ELECTORATE_MODES.rolling);
+    const d: RegistryDeployment = { ...deployment(), version: 13 };
+    const id = b(32);
+    const bytes = encodeElectionDefinitionV7({ ...rollingV7, election_id: id });
+    const hash = electionDefinitionV7Hash(decodeElectionDefinitionV7(bytes));
+    const start = nextBlock;
+    const logs = logsOf(d, [created(id, 1n), registeredAs(bytes, hash, 2n, id)]);
+    expect(await syncRegistrations(app, d, logs, provenAll(d, logs))).toEqual({
+      recorded: 1,
+      unstored: [],
+    });
+    expect(await readDefinition(app, id)).toEqual(bytes);
+    expect(await recordedSince(start)).toEqual([
+      { electionId: hex(id), position: `${start + 1n}/1` },
+    ]);
+  });
+
   test("each finalized registration in chain order, its definition stored; a rerun records nothing", async () => {
     const d = deployment();
     const defs = [definition(), definition(), definition()];

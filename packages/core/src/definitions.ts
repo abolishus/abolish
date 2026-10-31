@@ -1,10 +1,9 @@
 // Storing and reading election definitions (docs/spec/election-definition.md).
 // A definition is decoded and checked by @abolishus/crypto before it is
-// stored, under version 1 (one question) or version 5 (several questions,
-// P2-14), the versions a client checks before showing a poll
-// (`checkElectionRecordToShow`; T-34, T-41), so the server never serves
-// bytes the verifier would reject on decoding, well-formedness or 2.3's
-// profile combination. Its registration on L2 is what makes it the
+// stored, under version 1 (one question), version 5 (several questions,
+// P2-14) or version 7 (an electorate mode, so a rolling one, P2-17), so the
+// server never serves bytes the verifier would reject on decoding,
+// well-formedness or 2.3's profile combination (T-34, T-41). Its registration on L2 is what makes it the
 // election's definition: the API is never a source of truth, and every caller
 // compares the hash of what it is served with the registry (T-34).
 
@@ -12,6 +11,7 @@ import {
   DecodeError,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionRule,
@@ -20,6 +20,11 @@ import {
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
   type ElectionDefinitionV5Rule,
+  type ElectionDefinitionV7,
+  electionDefinitionV7Hash,
+  electionDefinitionV7Rule,
+  type ElectionDefinitionV7Rule,
+  ELECTORATE_MODES,
   profileCombinationRule,
   type ProfileCombinationRule,
   RECORD_TYPES,
@@ -41,6 +46,11 @@ export type DefinitionErrorCode =
    * cause).
    */
   | "profile"
+  /**
+   * The definition is well formed and 2.3 passes it, but it names an author
+   * panel, which this server's openings and tally don't carry yet.
+   */
+  | "unsupported"
   /** The election already has a different definition: the registry is write-once. */
   | "conflict";
 
@@ -54,6 +64,7 @@ export class DefinitionError extends Error {
         | DecodeError
         | ElectionDefinitionRule
         | ElectionDefinitionV5Rule
+        | ElectionDefinitionV7Rule
         | ProfileCombinationRule;
     },
   ) {
@@ -73,42 +84,71 @@ const equal = (a: Uint8Array, b: Uint8Array) =>
 /** A definition of a version `storeDefinition` takes, decoded. */
 export type StoredDefinitionRecord =
   | { readonly version: 1; readonly value: ElectionDefinition }
-  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 }
+  | { readonly version: 7; readonly value: ElectionDefinitionV7 };
 
 /**
- * Strictly decodes a definition of version 1 or 5, each under its own layout
- * and self-pin. Any other version, versions 3 and 4 among them, is
- * `unknown-version` at its version byte: no client shows those yet, so the
- * server stores none (T-34). Only the version byte routes the record, as in
- * the verifier's reader, and each decoder checks the self-pin again.
+ * Strictly decodes a definition of version 1, 5 or 7, each under its own
+ * layout and self-pin. Any other version, versions 3, 4 and 6 among them, is
+ * `unknown-version` at its version byte: nothing the operator creates or
+ * reads uses them, so the server stores none (T-34). Only the version byte
+ * routes the record, as in the verifier's reader, and each decoder checks
+ * the self-pin again.
  */
 export function decodeStoredDefinition(bytes: Uint8Array): StoredDefinitionRecord {
-  if (
-    bytes.length >= 3 &&
-    bytes[0] === 0 &&
-    bytes[1] === RECORD_TYPES.electionDefinition &&
-    bytes[2] === 5
-  )
-    return { version: 5, value: decodeElectionDefinitionV5(bytes) };
+  const version =
+    bytes.length >= 3 && bytes[0] === 0 && bytes[1] === RECORD_TYPES.electionDefinition
+      ? bytes[2]
+      : undefined;
+  if (version === 5) return { version, value: decodeElectionDefinitionV5(bytes) };
+  if (version === 7) return { version, value: decodeElectionDefinitionV7(bytes) };
   return { version: 1, value: decodeElectionDefinition(bytes) };
 }
 
 /** The definition's hash under its own version, the one the election registry holds. */
 export function storedDefinitionHash(record: StoredDefinitionRecord): Uint8Array {
-  return record.version === 5
-    ? electionDefinitionV5Hash(record.value)
-    : electionDefinitionHash(record.value);
+  switch (record.version) {
+    case 7:
+      return electionDefinitionV7Hash(record.value);
+    case 5:
+      return electionDefinitionV5Hash(record.value);
+    case 1:
+      return electionDefinitionHash(record.value);
+  }
+}
+
+/** Whether a stored definition's electorate is rolling (version 7 under `electorate_mode` 2). */
+export const isRollingDefinition = (record: StoredDefinitionRecord): boolean =>
+  record.version === 7 && record.value.electorate_mode === ELECTORATE_MODES.rolling;
+
+function wellFormedRule(record: StoredDefinitionRecord) {
+  switch (record.version) {
+    case 7:
+      return electionDefinitionV7Rule(record.value)?.rule;
+    case 5:
+      return electionDefinitionV5Rule(record.value)?.rule;
+    case 1:
+      return electionDefinitionRule(record.value);
+  }
 }
 
 /**
- * Stores an election definition of version 1 or 5 under the `election_id` it
- * carries, after strict decoding, its version's well-formedness rules and
- * 2.3's profile combination.
+ * Stores an election definition of version 1, 5 or 7 under the
+ * `election_id` it carries, after strict decoding, its version's
+ * well-formedness rules and 2.3's profile combination.
  * A profile 2.3 fails is refused: no ballot cast under it can be verified,
  * and the client refuses it, so the server never serves it as an election
  * (T-34, T-42). So is one 2.3 finds only unsupported here
  * (`unsupported-version`): the board store and admission can't read its
- * records either (T-36). Its `opens_at` and `closes_at` go beside it, for
+ * records either (T-36). 2.3 is read with no seats pinned as ours, so a live
+ * poll is refused (the live restriction, which this server's releases don't
+ * carry yet; T-16, T-45), and as reading a rolling electorate, which
+ * admission judges against the registries' step roots (P2-17 part 7a; T-08).
+ * A deployment that passes admission no chain source stores a rolling poll
+ * but admits none of its ballots (`not-open`), which fails closed.
+ * A version-7 definition naming an author panel is `unsupported`: no
+ * opening or tally here sums its half, so its poll could never be counted
+ * (P2-16; T-17). Its `opens_at` and `closes_at` go beside it, for
  * discovery's sorts (src/listing.ts). Storing the same bytes again
  * is a no-op, but for writing those times if they are missing; different
  * bytes for a stored election are a `conflict`. The
@@ -129,13 +169,12 @@ export async function storeDefinition(
     if (e instanceof DecodeError) throw new DefinitionError("decode", { cause: e });
     throw e;
   }
-  const rule =
-    record.version === 5
-      ? electionDefinitionV5Rule(record.value)?.rule
-      : electionDefinitionRule(record.value);
+  const rule = wellFormedRule(record);
   if (rule !== undefined) throw new DefinitionError("ill-formed", { cause: rule });
-  const profile = profileCombinationRule(record.value);
+  const profile = profileCombinationRule(record.value, 0, isRollingDefinition(record));
   if (profile !== undefined) throw new DefinitionError("profile", { cause: profile });
+  if (record.version === 7 && record.value.author_keys.length > 0)
+    throw new DefinitionError("unsupported");
   const electionId = new Uint8Array(record.value.election_id);
   const definitionHash = storedDefinitionHash(record);
   const db = drizzle({ client });

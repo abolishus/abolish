@@ -13,13 +13,11 @@ import {
   rootClockBoundary,
 } from "@abolishus/crypto";
 import { rollingChain, type RollingChainRelease, splitEntries } from "@abolishus/verifier";
-import { drizzle } from "drizzle-orm/postgres-js";
 import { readFileSync } from "node:fs";
 import type { Sql } from "postgres";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 import { definitionRegistered } from "../../verifier/tests/registration-logs.ts";
 import { release, rolling, rollingTree } from "../../verifier/tests/registry-logs.ts";
-import { electionDefinitions } from "../src/db/schema/index.ts";
 import {
   appendEntry,
   BallotAdmissions,
@@ -27,6 +25,7 @@ import {
   type RollingChainRead,
   type RollingChains,
   rollingChains,
+  storeDefinition,
   SubmitError,
 } from "../src/index.ts";
 import { type TestDb, testDb } from "./db.ts";
@@ -39,8 +38,8 @@ import { type TestDb, testDb } from "./db.ts";
 // records haven't settled yet judged not at all (P2-17 part 7a; T-08, T-17,
 // T-25, T-52). The fixtures are docs/spec/vectors/verifier-ballots-v5.json,
 // whose verdicts and step roots come from an independent implementation.
-// storeDefinition doesn't take version 7 yet (no client shows one), so the
-// definition row is written directly, as the registry sync will once it does.
+// The definition is stored through storeDefinition, as the registry sync
+// stores it (part 7b).
 
 interface Case {
   readonly id: string;
@@ -134,9 +133,7 @@ async function election(): Promise<Sql> {
   const db = await testDb();
   dbs.push(db);
   const app = await db.as("abolish_app");
-  await drizzle({ client: app })
-    .insert(electionDefinitions)
-    .values({ electionId, definition: definitionBytes });
+  await storeDefinition(app, definitionBytes);
   const transcript = entries[0]!;
   await appendEntry(app, electionId, transcript.segment, transcript.payload);
   return app;

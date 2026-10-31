@@ -164,15 +164,6 @@ export function printable(text: string): string {
 }
 
 /**
- * The summary's results: each tier on its own line, and its cells under it
- * where it has more than one. No line sums two tiers, so Tier 0's figures
- * never join a Sybil-resistant tier's (T-01), and the header says the
- * figures aren't verified unless `verdict` is, so a crafted bundle's counts
- * never read as the election's result (T-53). Under definition versions 5
- * and 6 a tier's or cell's counts follow one question per line, with the
- * method its limits give, and no line joins two questions (8.1; T-29).
- */
-/**
  * A rolling tier's turnout: its counted ballots among the people who could
  * answer during the poll, never a share of a fixed population, rounded down
  * so it never reads as a share it didn't reach, and no ratio over none (8.1;
@@ -187,6 +178,15 @@ function among(counted: number, electorate: RollingElectorateReport | undefined)
   return `${text} (${tenths / 10n}.${tenths % 10n}%)`;
 }
 
+/**
+ * The summary's results: each tier on its own line, and its cells under it
+ * where it has more than one. No line sums two tiers, so Tier 0's figures
+ * never join a Sybil-resistant tier's (T-01), and the header says the
+ * figures aren't verified unless `verdict` is, so a crafted bundle's counts
+ * never read as the election's result (T-53). Under definition versions 5
+ * and 6 a tier's or cell's counts follow one question per line, with the
+ * method its limits give, and no line joins two questions (8.1; T-29).
+ */
 function resultLines(report: Report): string[] {
   if (report.tiers === undefined) return [];
   const lines = [

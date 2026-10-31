@@ -106,14 +106,23 @@ export const PROVER_ARTIFACTS: Readonly<Record<string, string>> = {
  * voting window by chain time (docs/spec/revoting.md, Client rules). All are
  * untrusted: the client checks every answer against the registry or the chain
  * before acting on it, so a hostile one can refuse service but not change a
- * ballot. These are staging's. A release names its own, and a release build
- * naming a staging origin is a policy failure (owner review, rule B).
+ * ballot. Last, the intake relay (apps/intake-relay), an RFC 9458 relay the
+ * client sends a sealed delivery through to a seat's node when the
+ * operator's route fails (docs/spec/sealed-delivery.md; T-25, T-11): the
+ * request and its answer are sealed between the client and the node, so the
+ * relay can refuse service or see the client's address beside the seat, not
+ * read or forge a share. On its own Railway domain (`up.railway.app` is a
+ * public suffix), never an endpoint's origin or under the backup's RP ID, as
+ * the deployment record requires (`relay-endpoint`, `relay-rp`). These are
+ * staging's. A release names its own, and a release build naming a staging
+ * origin is a policy failure (owner review, rule B).
  */
 export const CONNECT_ORIGINS: readonly string[] = [
   "https://api-staging.abolish.us",
   "https://sepolia.base.org",
   "https://base-sepolia-rpc.publicnode.com",
   "https://ethereum-sepolia-rpc.publicnode.com",
+  "https://intake-relay-staging.up.railway.app",
 ];
 
 /**

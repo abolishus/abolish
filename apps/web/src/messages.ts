@@ -689,6 +689,8 @@ const enUS = {
   // Why a poll couldn't be set up, one per failure code core writes
   // (@abolishus/core, POLL_FAILURES; ADR 0032, rule 14). A poll that can be
   // retried comes back as a draft; one whose election was registered stays.
+  // Trustees are invisible in an everyday poll (PROJECT_BRIEF, Non-negotiable
+  // properties): a reason names what failed, never who.
   pollFailure_closesTooSoon:
     "Setting up took longer than expected, and your poll would have closed too soon after opening. Choose a later closing time and submit it again.",
   pollFailure_creationReverted:
@@ -706,7 +708,7 @@ const enUS = {
   pollFailure_stubRefused:
     "Something went wrong on our side while your poll was being prepared. Your question wasn't published. You can try again or discard it.",
   pollFailure_registrationRefused:
-    "The trustees' work on your poll didn't pass our checks, so we didn't register it. Your question wasn't published. You can try again or discard it.",
+    "Your poll's setup didn't pass our checks, so we didn't register it. Your question wasn't published. You can try again or discard it.",
   pollFailure_registrationReverted:
     "The public record refused to register your poll. Your question wasn't published. You can try again or discard it.",
   pollFailure_registrationReplaced:
@@ -718,7 +720,7 @@ const enUS = {
   pollFailure_openMismatch:
     "What the public record holds for your poll isn't exactly what you wrote, so we didn't open it. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
   pollFailure_ceremonyTimeout:
-    "The poll's trustees couldn't finish preparing its keys after four tries. Your question wasn't published. You can try again or discard it.",
+    "Making the key that seals your poll's answers didn't finish after four tries. Your question wasn't published. You can try again or discard it.",
   pollFailure_openTimeout:
     "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. To ask your question, start a new poll.",
   evidenceSummary: "How do we know this is real?",

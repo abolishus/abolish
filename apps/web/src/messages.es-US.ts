@@ -369,6 +369,7 @@ export const esUS: Messages = {
   sortNote_answered:
     "Abiertas ahora, según cuántas personas respondieron en los últimos siete días, cada persona una vez sin importar cuántas veces cambió su respuesta. Cualquiera puede volver a contarlo desde el tablero público.",
   streamQuestions: "Preguntas",
+  streamAnsweredSoFar: "Han respondido hasta ahora",
   streamCloses: "Cierra",
   streamPick: {
     one: "Elige una respuesta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",

@@ -365,6 +365,7 @@ const enUS = {
   sortNote_answered:
     "Open now, by how many people answered in the last seven days, each person once however often they changed their answer. Anyone can count it again from the public board.",
   streamQuestions: "Questions",
+  streamAnsweredSoFar: "Answered so far",
   streamCloses: "Closes",
   streamPick: {
     one: "Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",

@@ -36,6 +36,7 @@ const cards: StreamCard[] = [
       options: ["At 10", "At noon", "Stay closed"],
     },
     tags: { topic: "culture", place: "Eastside" },
+    answered: [{ tier: 0, answered: "86" }],
   },
   {
     kind: "poll",
@@ -78,7 +79,7 @@ const meta = {
       </SiteLayout>
     ),
   ],
-  args: { newest: { cards, ballot: "https://ballot.example/" } },
+  args: { newest: { cards, ballot: "https://ballot.example/", phoneVerification: false } },
 } satisfies Meta<typeof HomePage>;
 
 export default meta;
@@ -117,6 +118,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(main.getAllByText(/Nothing is sent until you cast your ballot/)).toHaveLength(1);
   await expect(main.getByText(/The newest open questions\. Choose an answer/)).toBeVisible();
   await expect(newest.getByText("These answers are for question 1 of 2.")).toBeVisible();
+  // A card says how many have answered so far, by tier, as in the stream.
+  const counts = newest.getAllByRole("list", { name: "Answered so far" });
+  await expect(counts).toHaveLength(1);
+  await expect(within(counts[0]!).getByRole("listitem")).toHaveTextContent(
+    "86 people · Tier 0 (verified e-mail)",
+  );
   // The lede and the trust scene name the app that seals an answer one way,
   // where two names read as two apps.
   await expect(canvas.getByRole("main")).toHaveTextContent(/open it in the ballot app\./);
@@ -210,7 +217,7 @@ export const Phone: Story = {
  * "See all questions" to a page that says there are none either.
  */
 export const Empty: Story = {
-  args: { newest: { cards: [], ballot: "https://ballot.example/" } },
+  args: { newest: { cards: [], ballot: "https://ballot.example/", phoneVerification: false } },
   play: async ({ canvasElement }) => {
     const main = within(within(canvasElement).getByRole("main"));
     await expect(main.getByText(/No questions are open just now/)).toBeVisible();

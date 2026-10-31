@@ -39,6 +39,7 @@ const cards: StreamCard[] = [
       options: ["At 10", "At noon", "Stay closed"],
     },
     tags: { topic: "culture", place: "Eastside" },
+    answered: [{ tier: 0, answered: "1204" }],
   },
   {
     kind: "poll",
@@ -47,6 +48,10 @@ const cards: StreamCard[] = [
         { optionCount: 4, minSelections: 0, maxSelections: 1 },
         { optionCount: 4, minSelections: 0, maxSelections: 4 },
         { optionCount: 5, minSelections: 0, maxSelections: 1 },
+      ],
+      electorate: [
+        { tier: 0, groupSize: "5000" },
+        { tier: 2, groupSize: "800" },
       ],
       closesAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
     }),
@@ -58,6 +63,10 @@ const cards: StreamCard[] = [
     },
     tags: { topic: undefined, place: "Riverside Park" },
     askedBy: { handle: "k7qa2mzr5xw3bn4d", name: "Riverside Neighbours" },
+    answered: [
+      { tier: 0, answered: "38" },
+      { tier: 2, answered: "1" },
+    ],
   },
   {
     kind: "poll",
@@ -82,6 +91,7 @@ const meta = {
     typedPlace: "",
     filter: {},
     ballot: BALLOT,
+    phoneVerification: false,
   },
 } satisfies Meta<typeof StreamPage>;
 
@@ -213,11 +223,36 @@ const play: Story["play"] = async ({ canvasElement }) => {
   );
   await expect(topics.getAllByRole("link")).toHaveLength(15);
   await expect(canvas.getByText(/moderation can change them/)).toBeVisible();
+
+  // How many have answered so far, each of a poll's tiers on its own line,
+  // never one figure across them (T-01); a card without a count shows none.
+  const counts = list.getAllByRole("list", { name: "Answered so far" });
+  await expect(counts).toHaveLength(2);
+  await expect(
+    within(counts[0]!)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["1,204 people · Tier 0 (verified e-mail)"]);
+  await expect(
+    within(counts[1]!)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent),
+  ).toEqual(["38 people · Tier 0 (verified e-mail)", "1 person · Tier 2 (document-verified)"]);
 };
 
 export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
+
+/** Where Tier 0 asks for a phone, each count names it so (P2-31 part 6a). */
+export const PhoneVerification: Story = {
+  args: { phoneVerification: true },
+  play: async ({ canvasElement }) => {
+    const list = questions(canvasElement);
+    await expect(list.getAllByText("Tier 0 (verified e-mail and phone)")).toHaveLength(2);
+    await expect(list.queryByText("Tier 0 (verified e-mail)")).toBeNull();
+  },
+};
 
 /** Without a ballot client configured, a card says so and links only to the poll's page. */
 export const NoBallotClient: Story = {

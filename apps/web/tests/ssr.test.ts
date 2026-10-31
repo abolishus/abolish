@@ -1753,6 +1753,22 @@ describe("stream", () => {
     }
   });
 
+  test("says how many have answered each card's poll so far, tier by tier, or nothing when the read fails", async () => {
+    const html = await (await get("/discover?topic=community")).text();
+    expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
+    const [v5, v1] = html.split(/<article\b/).slice(1);
+    const text = (part: string | undefined) => (part ?? "").replace(/<[^>]+>/g, "|");
+    // Each tier the definition names on its own line, one with none served
+    // at 0; the API's count for a tier it doesn't name is left out (T-01).
+    expect(text(v5)).toMatch(
+      /Answered so far\|+1,204 people[|\s]+·[|\s]+Tier 0 \(verified e-mail\)\|+0 people[|\s]+·[|\s]+Tier 2 \(document-verified\)\|/,
+    );
+    expect(text(v5)).not.toContain("Tier 1");
+    expect(text(v5)).not.toMatch(/\b7 people/);
+    // A failed read shows no count, and the card stays.
+    expect(text(v1)).not.toContain("Answered so far");
+  });
+
   test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {
     seen.length = 0;
     await get("/discover", { cookie: "session=secret", "x-forwarded-for": "203.0.113.9" });
@@ -1760,6 +1776,7 @@ describe("stream", () => {
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(10);
+    expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(10);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
@@ -2094,12 +2111,13 @@ describe("home", () => {
   test("asks the API for one short page of the stream (T-52)", async () => {
     seen.length = 0;
     await get("/");
-    // The listing, newest first, then each card's definition, text and tags: three, not ten.
+    // The listing, newest first, then each card's definition, text, tags and
+    // count: three, not ten.
     const listings = seen.filter((r) => r.path === "/elections");
     expect(listings).toHaveLength(1);
     expect(listings[0]?.query.get("sort")).toBe("new");
     expect(listings[0]?.query.get("limit")).toBe("3");
-    expect(seen).toHaveLength(1 + 3 * 3);
+    expect(seen).toHaveLength(1 + 3 * 4);
   });
 
   test("stays up without the API, leaving out only the questions and quoting nothing", async () => {

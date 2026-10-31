@@ -172,6 +172,28 @@ describe("Tier 0 registration (docs/spec/registration.md, Request)", () => {
   });
 });
 
+describe("a poll's count so far (P2-23 part 2c; T-01)", () => {
+  const output = contract.elections.getAnswered["~orpc"].outputSchema;
+  const issues = async (value: unknown) => (await output?.["~standard"].validate(value))?.issues;
+  const at = (tier: number, answered = "1") => ({ tier, answered });
+
+  test("holds at most one count a tier, in ascending order", async () => {
+    for (const good of [[], [at(0)], [at(0), at(2)], [at(0), at(1), at(2, "18446744073709551615")]])
+      expect(await issues({ tiers: good }), JSON.stringify(good)).toBeUndefined();
+    for (const bad of [
+      [at(0), at(0)],
+      [at(2), at(0)],
+      [at(0), at(2), at(1)],
+      [at(3)],
+      [at(-1)],
+      [at(0, "01")],
+      [at(0, "18446744073709551616")],
+      [{ ...at(0), voters: "1" }],
+    ])
+      expect(await issues({ tiers: bad }), JSON.stringify(bad)).toBeDefined();
+  });
+});
+
 describe("the Tier 1 relay (docs/spec/tier1-relay.md, Request)", () => {
   const input = contract.registrations.tier1["~orpc"].inputSchema;
   const valid = { record: "0a".repeat(1919), turnstile: "tok.en-1_" };
@@ -246,6 +268,7 @@ describe("the generated OpenAPI document", () => {
       "GET /board/proofs/consistency",
       "GET /board/proofs/inclusion",
       "GET /elections",
+      "GET /elections/answered",
       "GET /elections/by-code",
       "GET /elections/code",
       "GET /elections/definition",

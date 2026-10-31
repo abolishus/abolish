@@ -342,3 +342,51 @@ export async function listPolls(
     .limit(limit);
   return rows.map((r) => new Uint8Array(r.electionId));
 }
+
+/** How many voters a poll's board holds in one tier. */
+export interface TierAnswered {
+  readonly tier: number;
+  readonly voters: bigint;
+}
+
+/**
+ * How many voters have answered `electionId`'s poll so far, tier by tier
+ * (ascending, only tiers with a voter): the distinct (tier, nullifier)
+ * pairs of the ballots our board holds, so a re-vote never counts twice, as
+ * `answered`'s order counts them. Tiers are never added together, since one
+ * figure would mostly report whoever opened the most accounts (T-01). The
+ * count is of the public board, which anyone can recount, and says nothing
+ * a reader of the board can't already see (T-10, T-11). `undefined` for an
+ * election with no stored definition. Delisting and hiding withhold
+ * nothing here, as they withhold nothing of the board (T-68).
+ */
+export async function answeredByTier(
+  client: Sql,
+  electionId: Uint8Array,
+): Promise<readonly TierAnswered[] | undefined> {
+  if (!isBytes(electionId) || electionId.length !== 32)
+    throw new TypeError("electionId must be 32 bytes");
+  const id = new Uint8Array(electionId);
+  return drizzle({ client }).transaction(
+    async (tx) => {
+      const [stored] = await tx
+        .select({ id: electionDefinitions.electionId })
+        .from(electionDefinitions)
+        .where(eq(electionDefinitions.electionId, id));
+      if (stored === undefined) return undefined;
+      // The keys' primary key leads with (election, tier, nullifier), so
+      // this reads the poll's own keys by range.
+      const rows = await tx
+        .select({
+          tier: boardBallotKeys.tier,
+          voters: q<string>`count(DISTINCT ${boardBallotKeys.nullifier})::text`,
+        })
+        .from(boardBallotKeys)
+        .where(eq(boardBallotKeys.electionId, id))
+        .groupBy(boardBallotKeys.tier)
+        .orderBy(asc(boardBallotKeys.tier));
+      return rows.map((r) => ({ tier: r.tier, voters: BigInt(r.voters) }));
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+}

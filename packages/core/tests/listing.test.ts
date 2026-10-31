@@ -6,6 +6,7 @@ import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   ANSWERED_WINDOW_SECONDS,
+  answeredByTier,
   answeredWindow,
   appendEntry,
   ListingError,
@@ -565,5 +566,88 @@ describe("listPolls, answered", () => {
     await expect(
       listPolls(app, undefined, 1, { sort: "answered", now } as unknown as ListingOrder),
     ).rejects.toThrow(TypeError);
+  });
+});
+
+// A card's count (P2-23 part 2c): how many have answered a poll so far, tier
+// by tier, never summed across tiers (T-01), of the public board alone.
+describe("answeredByTier", () => {
+  async function cast(electionId: Uint8Array, nullifier: bigint, tier = 0, segment = 0) {
+    await appendEntry(app, electionId, segment, Uint8Array.of(0x00, 0x02, 1, ...randomBytes(8)), {
+      ballot: {
+        tier,
+        nullifier,
+        message: new Uint8Array(randomBytes(32)),
+        ballotHash: new Uint8Array(randomBytes(32)),
+      },
+    });
+  }
+
+  test("counts each tier's distinct voters, a re-vote once, in tier order", async () => {
+    const id = await election();
+    expect(await answeredByTier(app, id)).toEqual([]);
+    await cast(id, 7n, 2);
+    for (const v of [1n, 2n, 3n]) await cast(id, v, 0);
+    // The same nullifier in another tier is another voter there.
+    await cast(id, 1n, 1);
+    // The same voter again, in a later period: a re-vote.
+    await cast(id, 2n, 0, 3);
+    expect(await answeredByTier(app, id)).toEqual([
+      { tier: 0, voters: 3n },
+      { tier: 1, voters: 1n },
+      { tier: 2, voters: 1n },
+    ]);
+    // Another poll's ballots never count here.
+    const other = await election();
+    await cast(other, 9n, 0);
+    expect(await answeredByTier(app, id)).toEqual([
+      { tier: 0, voters: 3n },
+      { tier: 1, voters: 1n },
+      { tier: 2, voters: 1n },
+    ]);
+  });
+
+  test("matches a model of the cast ballots", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.tuple(fc.integer({ min: 0, max: 2 }), fc.integer({ min: 1, max: 4 })), {
+          maxLength: 12,
+        }),
+        async (ballots) => {
+          const id = await election();
+          const voters = new Map<number, Set<number>>();
+          for (const [tier, nullifier] of ballots) {
+            await cast(id, BigInt(nullifier), tier);
+            voters.set(tier, (voters.get(tier) ?? new Set()).add(nullifier));
+          }
+          const expected = [...voters.entries()]
+            .sort(([a], [b]) => a - b)
+            .map(([tier, set]) => ({ tier, voters: BigInt(set.size) }));
+          expect(await answeredByTier(app, id)).toEqual(expected);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+  }, 120_000);
+
+  test("counts a delisted or hidden poll's voters, as its board stays served", async () => {
+    const id = await election();
+    await cast(id, 1n);
+    await moderate(app, id, { action: "hide", reason: "spam", moderator: "mod-1" });
+    expect(await answeredByTier(app, id)).toEqual([{ tier: 0, voters: 1n }]);
+  });
+
+  test("is undefined for an election with no stored definition, and refuses a malformed ID", async () => {
+    expect(await answeredByTier(app, new Uint8Array(randomBytes(32)))).toBeUndefined();
+    await expect(answeredByTier(app, new Uint8Array(31))).rejects.toThrow(TypeError);
+    await expect(answeredByTier(app, "00" as unknown as Uint8Array)).rejects.toThrow(TypeError);
+  });
+
+  test("reads in a read-only session", async () => {
+    const readOnly = await db.as("abolish_app");
+    await readOnly`SET default_transaction_read_only = on`;
+    const id = await election();
+    await cast(id, 1n);
+    expect(await answeredByTier(readOnly, id)).toEqual([{ tier: 0, voters: 1n }]);
   });
 });

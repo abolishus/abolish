@@ -7,6 +7,7 @@ import {
   IdentityBackupStoreError,
   ListingError,
   type ListingOrder,
+  answeredByTier,
   listPolls,
   lookupShortCode,
   ModerationError,
@@ -180,6 +181,13 @@ export const router = os.router({
       if (view === undefined) throw errors.ELECTION_NOT_FOUND();
       if (view.tags === undefined) throw errors.TAGS_WITHHELD();
       return view.tags;
+    }),
+    // A count of the public board, tier by tier, which moderation never
+    // withholds, as it never withholds the board (T-01, T-68).
+    getAnswered: os.elections.getAnswered.handler(async ({ input, context, errors }) => {
+      const tiers = await answeredByTier(context.sql, fromHex(input.electionId));
+      if (tiers === undefined) throw errors.ELECTION_NOT_FOUND();
+      return { tiers: tiers.map(({ tier, voters }) => ({ tier, answered: String(voters) })) };
     }),
     // The results the boarded openings give, read in the worker by core's
     // OpeningBoardings over the counted tally it judges them against, which

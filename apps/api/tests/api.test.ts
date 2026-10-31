@@ -807,6 +807,40 @@ describe("elections.list (T-68)", () => {
   });
 });
 
+describe("elections.getAnswered (P2-23 part 2c; T-01, T-68)", () => {
+  test("a poll's voters are counted tier by tier, a re-vote once, and never withheld", async () => {
+    const answered = (e: { idHex: string }) => get("/elections/answered", { electionId: e.idHex });
+    const e = await election();
+    expect(await json(await answered(e))).toEqual({ tiers: [] });
+    const cast = (tier: number, nullifier: bigint) =>
+      appendEntry(app, e.id, 0, Uint8Array.of(0, 2, 1, ...randomBytes(8)), {
+        ballot: { tier, nullifier, message: b32(), ballotHash: b32() },
+      });
+    for (const [tier, nullifier] of [
+      [2, 5n],
+      [0, 1n],
+      [0, 2n],
+      [0, 1n],
+    ] as const)
+      await cast(tier, nullifier);
+    const counted = {
+      tiers: [
+        { tier: 0, answered: "2" },
+        { tier: 2, answered: "1" },
+      ],
+    };
+    const r = await answered(e);
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual(counted);
+    await moderate(app, e.id, { action: "hide", reason: "threat", moderator: "mod-1" });
+    expect(await json(await answered(e))).toEqual(counted);
+    const unknown = await get("/elections/answered", { electionId: hex(b32()) });
+    expect(unknown.status).toBe(404);
+    expect((await json(unknown))["code"]).toBe("ELECTION_NOT_FOUND");
+    expect((await get("/elections/answered", { electionId: "00" })).status).toBe(400);
+  });
+});
+
 describe("elections.resolveCode and elections.getCode (P2-18; T-49, T-53, T-67)", () => {
   /** Registration positions in increasing order, as the indexer records them. */
   let block = 1n;

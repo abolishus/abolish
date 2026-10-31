@@ -5,9 +5,10 @@ import { POLL_TOPICS } from "@abolishus/core/poll-topics";
 import { ArrowRight, Search } from "lucide-react";
 import { useId } from "react";
 
-import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
+import { catalogs, type Messages, POLL_TOPIC_MESSAGES, tierMessage } from "../messages.ts";
 import type { Stream, StreamFilter } from "../server/load.ts";
 import {
+  type CardAnswered,
   type StreamCard as Card,
   MAX_STREAM_PLACE,
   MAX_STREAM_QUERY,
@@ -175,21 +176,56 @@ function SearchForm({
 }
 
 /**
+ * How many have answered so far, one line per tier: the board's count of
+ * distinct voters, never a result and never one figure across tiers (T-01).
+ */
+function Answered({
+  answered,
+  phoneVerification,
+}: {
+  answered: CardAnswered;
+  phoneVerification: boolean;
+}) {
+  const t = useTranslate(catalogs);
+  const titleId = useId();
+  return (
+    <div className="grid gap-1 bg-muted/60 px-4 py-3 text-sm">
+      <p id={titleId} className="m-0 font-medium">
+        {t("streamAnsweredSoFar")}
+      </p>
+      <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
+        {answered.map(({ tier, answered: count }) => (
+          <li key={tier} className="flex flex-wrap gap-x-2">
+            <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>{" "}
+            <span aria-hidden="true">·</span>{" "}
+            <span className="text-foreground/80">{t(tierMessage(tier, phoneVerification))}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * One question in the stream: who asked it, where its author chose to say,
  * its words, when it closes, where it's listed,
  * and its first question's answers, each a way into the ballot client, which
  * opens the poll with that answer chosen from the link's fragment. Text an
  * asker wrote carries its own language and direction. `explained` is for a
  * page that says once, above its cards, what choosing an answer does: the
- * card then says only which question a poll of several answers.
+ * card then says only which question a poll of several answers. How many
+ * have answered so far is shown tier by tier, each named as the poll page
+ * names it (`phoneVerification`), never summed (T-01).
  */
 export function StreamCard({
   card,
   ballot,
+  phoneVerification = false,
   explained = false,
 }: {
   card: Card;
   ballot: string | null;
+  phoneVerification?: boolean;
   explained?: boolean;
 }) {
   const t = useTranslate(catalogs);
@@ -260,6 +296,9 @@ export function StreamCard({
       </div>
       {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
       <ListedUnder tags={card.tags} linked />
+      {card.answered === undefined ? null : (
+        <Answered answered={card.answered} phoneVerification={phoneVerification} />
+      )}
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
@@ -386,6 +425,8 @@ export interface StreamPageProps {
   filter: StreamFilter;
   /** The ballot client's address, or `null` where this site has none. */
   ballot: string | null;
+  /** Whether Tier 0 asks for a phone here, which names it on each card's count. */
+  phoneVerification: boolean;
 }
 
 /**
@@ -398,7 +439,15 @@ export interface StreamPageProps {
  * which a link's author writes, is never quoted but in its box (T-67). More
  * comes only when asked for, by a link.
  */
-export function StreamPage({ stream, sort, typed, typedPlace, filter, ballot }: StreamPageProps) {
+export function StreamPage({
+  stream,
+  sort,
+  typed,
+  typedPlace,
+  filter,
+  ballot,
+  phoneVerification,
+}: StreamPageProps) {
   const t = useTranslate(catalogs);
   const { q, topic, place } = filter;
   return (
@@ -467,7 +516,7 @@ export function StreamPage({ stream, sort, typed, typedPlace, filter, ballot }: 
           <ol aria-label={t("streamQuestions")} className="m-0 grid list-none gap-6 p-0">
             {stream.cards.map((card) => (
               <li key={card.kind === "poll" ? card.poll.electionId : card.electionId}>
-                <StreamCard card={card} ballot={ballot} />
+                <StreamCard card={card} ballot={ballot} phoneVerification={phoneVerification} />
               </li>
             ))}
           </ol>

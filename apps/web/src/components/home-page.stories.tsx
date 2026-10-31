@@ -122,7 +122,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const counts = newest.getAllByRole("list", { name: "Answered so far" });
   await expect(counts).toHaveLength(1);
   await expect(within(counts[0]!).getByRole("listitem")).toHaveTextContent(
-    "86 people · Tier 0 (verified e-mail)",
+    "86 people with a verified e-mail",
   );
   // The lede and the trust scene name the app that seals an answer one way,
   // where two names read as two apps.

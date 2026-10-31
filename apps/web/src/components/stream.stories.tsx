@@ -314,24 +314,21 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await userEvent.click(narrowing);
 
   // How many have answered so far, each of a poll's tiers on its own line,
-  // never one figure across them (T-01); a card without a count shows none.
+  // never one figure across them (T-01), and each tier said in words, never
+  // as a code ([[language]]); a card without a count shows none.
   const counts = list.getAllByRole("list", { name: "Answered so far" });
   await expect(counts).toHaveLength(2);
   await expect(
     within(counts[0]!)
       .getAllByRole("listitem")
       .map((li) => li.textContent),
-  ).toEqual(["1,204 people · Tier 0 (verified e-mail)"]);
+  ).toEqual(["1,204 people with a verified e-mail"]);
   await expect(
     within(counts[1]!)
       .getAllByRole("listitem")
       .map((li) => li.textContent),
-  ).toEqual(["38 people · Tier 0 (verified e-mail)", "1 person · Tier 2 (document-verified)"]);
-  // Narrower than `sm` the count and its tier take a line each, with no dot
-  // left ending the first; wider, one line with the dot between.
-  const dot = within(counts[0]!).getByText("·");
-  if (window.matchMedia("(min-width: 40rem)").matches) await expect(dot).toBeVisible();
-  else await expect(dot).not.toBeVisible();
+  ).toEqual(["38 people with a verified e-mail", "1 person verified with a passport or ID"]);
+  await expect(within(counts[1]!).queryByText(/Tier \d/)).toBeNull();
 
   // The card's top line keeps its facts together rather than spread to the
   // card's two edges and middle at desktop width.
@@ -357,8 +354,9 @@ export const PhoneVerification: Story = {
   args: { phoneVerification: true },
   play: async ({ canvasElement }) => {
     const list = questions(canvasElement);
-    await expect(list.getAllByText("Tier 0 (verified e-mail and phone)")).toHaveLength(2);
-    await expect(list.queryByText("Tier 0 (verified e-mail)")).toBeNull();
+    await expect(list.getByText("1,204 people with a verified e-mail and phone")).toBeVisible();
+    await expect(list.getByText("38 people with a verified e-mail and phone")).toBeVisible();
+    await expect(list.queryByText(/with a verified e-mail$/)).toBeNull();
   },
 };
 

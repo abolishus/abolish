@@ -164,6 +164,35 @@ describe("the moderation log's page", () => {
   });
 });
 
+describe("the moderation log's counts", () => {
+  const input = contract.moderation.getCounts["~orpc"].inputSchema;
+  const output = contract.moderation.getCounts["~orpc"].outputSchema;
+  const issues = async (schema: typeof input | typeof output, value: unknown) =>
+    (await schema?.["~standard"].validate(value))?.issues;
+  const counts = {
+    delist: "1",
+    hide: "0",
+    hideProfile: "2",
+    restore: "1",
+    refile: "0",
+    total: "4",
+  };
+
+  test("take nothing, and serve each action's count as a decimal", async () => {
+    expect(await issues(input, {})).toBeUndefined();
+    expect(await issues(input, { limit: "1" })).toBeDefined();
+    expect(await issues(output, counts)).toBeUndefined();
+    for (const bad of [
+      { ...counts, total: "04" },
+      { ...counts, hide: "-1" },
+      { ...counts, hide: 0 },
+      { ...counts, moderator: "mod-1" },
+      Object.fromEntries(Object.entries(counts).filter(([key]) => key !== "refile")),
+    ])
+      expect(await issues(output, bad)).toBeDefined();
+  });
+});
+
 describe("Tier 0 registration (docs/spec/registration.md, Request)", () => {
   const input = contract.registrations.tier0["~orpc"].inputSchema;
   const valid = { commitment: "0a".repeat(32), region: "0", turnstile: "tok.en-1_" };
@@ -299,6 +328,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/results",
       "GET /elections/tags",
       "GET /moderation/log",
+      "GET /moderation/log/counts",
       "GET /moderation/status",
       "POST /backups",
       "POST /backups/delete",

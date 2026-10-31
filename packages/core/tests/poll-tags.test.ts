@@ -30,6 +30,7 @@ import {
   readModerationLog,
   readPollTags,
   readProfileModerationLog,
+  readPublicModerationCounts,
   readPublicModerationLog,
   readPublicModerationLogBefore,
   MAX_MODERATION_PAGE,
@@ -817,6 +818,7 @@ describe("the public log", () => {
   test("shows each refiling in its place among decisions, with its topic and what it did to the place, never the place or the moderator", async () => {
     const place = `14 Elm Street ${hex(randomBytes(4))}`;
     const id = await poll({ topic: "food", place });
+    const counted = await readPublicModerationCounts(app);
     const a = await moderate(app, id, { action: "delist", reason: "spam", moderator: "mod-1" });
     const b = await refilePoll(app, id, {
       tags: { topic: "housing", place: `Ward ${hex(randomBytes(4))}` },
@@ -830,6 +832,14 @@ describe("the public log", () => {
     });
     const d = await refilePoll(app, id, { tags: {}, reason: "misfiled", moderator: "mod-2" });
     const e = await moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" });
+    // The log's counts take each refiling as one, beside the decisions.
+    expect(await readPublicModerationCounts(app)).toEqual({
+      ...counted,
+      delist: counted.delist + 1,
+      restore: counted.restore + 1,
+      refile: counted.refile + 3,
+      total: counted.total + 5,
+    });
     const log = await readPublicModerationLog(app, a.seq - 1n, MAX_MODERATION_PAGE);
     const at = (seq: bigint) => log.find((x) => x.seq === seq)?.decidedAt;
     expect(log.map((x) => x.seq)).toEqual([a.seq, b.seq, c.seq, d.seq, e.seq]);

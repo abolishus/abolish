@@ -56,6 +56,8 @@ const meta = {
           decidedAt: "2026-09-30T08:15:00.000Z",
         },
       ],
+      // The whole log's, beyond this page.
+      counts: { delist: 21, hide: 9, "hide-profile": 3, restore: 7, refile: 8, total: 48 },
     },
     before: undefined,
     next: undefined,
@@ -112,6 +114,17 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(filter).getByRole("radio", { name: "All 6" })).toBeChecked();
   await expect(within(filter).getByRole("radio", { name: "Refiled 2" })).toBeInTheDocument();
   await expect(canvas.queryByText(/decisions on this page took this action/)).toBeNull();
+  // The whole log's counts by action, beyond the page, and the page's place in it.
+  const tally = canvas.getByRole("figure", { name: "The whole log: 48 decisions, by action" });
+  const counted = within(tally).getAllByRole("listitem");
+  await expect(counted.map((row) => row.textContent)).toEqual([
+    "Delisted21",
+    "Text hidden9",
+    "Profile hidden3",
+    "Restored7",
+    "Refiled8",
+  ]);
+  await expect(canvas.getByText("This page holds 6 of the log's 48 decisions.")).toBeVisible();
   const grounds = canvas.getByRole("region", { name: "The only seven grounds" });
   await expect(within(grounds).getAllByRole("heading", { level: 3 })).toHaveLength(9);
   await expect(within(grounds).getByText("personal-data")).toBeVisible();
@@ -174,7 +187,10 @@ export const Filtered: Story = {
 };
 
 export const FilteredToNone: Story = {
-  args: { action: "delist", log: { entries: [meta.args.log.entries[2]!] } },
+  args: {
+    action: "delist",
+    log: { entries: [meta.args.log.entries[2]!], counts: meta.args.log.counts },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No decision on this page took this action.")).toBeVisible();
@@ -192,10 +208,33 @@ export const FilteredToNone: Story = {
 };
 
 export const Empty: Story = {
-  args: { log: { entries: [] } },
+  args: {
+    log: {
+      entries: [],
+      counts: { delist: 0, hide: 0, "hide-profile": 0, restore: 0, refile: 0, total: 0 },
+    },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No decisions yet.")).toBeVisible();
+    // No counts of an empty log, and no page of it.
+    await expect(canvas.queryByRole("figure")).toBeNull();
+    await expect(canvas.queryByText(/This page holds/)).toBeNull();
     await expect(canvas.queryByRole("list", { name: "Decisions, newest first" })).toBeNull();
+  },
+};
+
+export const CountsUnread: Story = {
+  args: { log: { entries: meta.args.log.entries, counts: undefined } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The log still shows, with no figure across it.
+    await expect(
+      within(canvas.getByRole("list", { name: "Decisions, newest first" })).getAllByRole(
+        "listitem",
+      ),
+    ).toHaveLength(6);
+    await expect(canvas.queryByRole("figure")).toBeNull();
+    await expect(canvas.queryByText(/of the log's/)).toBeNull();
   },
 };

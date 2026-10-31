@@ -14,6 +14,7 @@ import {
   type TreeClaim,
 } from "../board.ts";
 import { ACTIVITY_PAGE, ANCHOR_PAGE, BOARD_PAGE, LIST_PAGE, LOG_PAGE } from "../page-sizes.ts";
+import type { LogAction } from "../log-actions.ts";
 import type { FollowedPoll } from "../account/follow-results.ts";
 import {
   type CellResults,
@@ -642,13 +643,48 @@ export async function loadBoardPage(
 
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;
 
+/** How many decisions the whole log holds, by what the log page's filter calls them. */
+export type LogCounts = Readonly<Record<LogAction, number>> & { readonly total: number };
+
+/** A page of the moderation log, with the whole log's counts when they could be read. */
+export type ModerationLogPage = ModerationLog & { readonly counts: LogCounts | undefined };
+
 /**
  * The moderation log below sequence number `before` (a canonical decimal
  * `u64`, `LOG_LATEST` for the latest decisions), newest first: a reader meets
- * what moderation did last, not its first decisions (T-68).
+ * what moderation did last, not its first decisions (T-68). The whole log's
+ * counts come beside it, a request that names no visitor (T-10).
  */
-export async function loadModerationLog(api: Api, before: string): Promise<ModerationLog> {
-  return api.moderation.getLog({ before, limit: String(LOG_PAGE) });
+export async function loadModerationLog(api: Api, before: string): Promise<ModerationLogPage> {
+  const [log, counts] = await Promise.all([
+    api.moderation.getLog({ before, limit: String(LOG_PAGE) }),
+    countsOf(api),
+  ]);
+  return { ...log, counts };
+}
+
+/**
+ * The log's counts, or `undefined` when the read fails or its figures don't
+ * add up to its total: the counts are optional on the page, as a poll's tags
+ * are, and a total the parts contradict is shown nowhere (T-34).
+ */
+async function countsOf(api: Api): Promise<LogCounts | undefined> {
+  let served;
+  try {
+    served = await api.moderation.getCounts({});
+  } catch {
+    return undefined;
+  }
+  const counts = {
+    delist: Number(served.delist),
+    hide: Number(served.hide),
+    "hide-profile": Number(served.hideProfile),
+    restore: Number(served.restore),
+    refile: Number(served.refile),
+  };
+  const total = Number(served.total);
+  const sum = Object.values(counts).reduce((a, b) => a + b, 0);
+  return Number.isSafeInteger(sum) && sum === total ? { ...counts, total } : undefined;
 }
 
 /**

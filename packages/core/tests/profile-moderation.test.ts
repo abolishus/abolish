@@ -32,6 +32,7 @@ import {
   readProfileModeration,
   readProfileModerationLog,
   readProfileReportQueue,
+  readPublicModerationCounts,
   readPublicModerationLog,
   readPublicModerationLogBefore,
   REMOVAL_REASONS,
@@ -575,6 +576,76 @@ describe("the public log", () => {
       ),
       { numRuns: Math.min(numRuns, 20) },
     );
+  });
+});
+
+describe("the public log's counts", () => {
+  /** The counts by reading the whole log, page by page, as a copier would. */
+  async function tallied() {
+    const counts = { delist: 0, hide: 0, hideProfile: 0, restore: 0, refile: 0, total: 0 };
+    for (let after = 0n; ;) {
+      const page = await readPublicModerationLog(app, after, MAX_MODERATION_PAGE);
+      for (const e of page) {
+        counts.total++;
+        if (e.target === "refiling") counts.refile++;
+        else if (e.action === "restore") counts.restore++;
+        else if (e.target === "profile") counts.hideProfile++;
+        else counts[e.action]++;
+      }
+      if (page.length < MAX_MODERATION_PAGE) return counts;
+      after = page.at(-1)!.seq;
+    }
+  }
+
+  test("count the whole log by action, as reading it through counts it, whatever is decided (fast-check)", async () => {
+    const { user, handle } = await profiled();
+    const poll = await shownPoll(user);
+    expect(await readPublicModerationCounts(app)).toEqual(await tallied());
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(fc.constantFrom("delist", "hide", "restore", "hide-profile", "restore-profile"), {
+          minLength: 1,
+          maxLength: 4,
+        }),
+        async (steps) => {
+          const before = await readPublicModerationCounts(app);
+          let made = 0;
+          for (const step of steps) {
+            // A decision the rules refuse (one that changes nothing, say)
+            // writes nothing, so only those made are counted.
+            const outcome = await code(
+              step === "hide-profile"
+                ? moderateProfile(app, handle, hide("spam"))
+                : step === "restore-profile"
+                  ? moderateProfile(app, handle, restore())
+                  : moderate(
+                      app,
+                      poll.electionId,
+                      step === "restore"
+                        ? { action: "restore", reason: "error", moderator: "mod-2" }
+                        : // The poll is open, so it is hidden only on these grounds.
+                          { action: step, reason: "illegal", moderator: "mod-2" },
+                    ),
+            );
+            if (outcome === "ok") made++;
+          }
+          const after = await readPublicModerationCounts(app);
+          expect(after).toEqual(await tallied());
+          expect(after.total - before.total).toBe(made);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+    // Twenty runs of up to four decisions, each with two whole reads of the
+    // log, can outlast the default timeout on a shared CI runner.
+  }, 60_000);
+
+  test("name no moderator, account or handle", async () => {
+    const served = JSON.stringify(await readPublicModerationCounts(app));
+    expect(Object.keys(JSON.parse(served)).sort()).toEqual(
+      ["delist", "hide", "hideProfile", "refile", "restore", "total"].sort(),
+    );
+    expect(served).not.toContain("mod-");
   });
 });
 

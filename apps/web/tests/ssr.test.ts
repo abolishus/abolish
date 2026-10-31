@@ -45,6 +45,7 @@ import {
   HEAD_FAILS_ID,
   HIDDEN_CODE,
   HIDDEN_ID,
+  LOG_COUNTS,
   ID,
   listed,
   LOST_ID,
@@ -2241,6 +2242,49 @@ describe("moderation log", () => {
       expect(html).not.toContain("decisions on this page took this action");
     },
   );
+
+  test("counts the whole log by action beside the page, asking for nothing about the visitor (T-10)", async () => {
+    seen.length = 0;
+    const html = await (await get("/moderation")).text();
+    expect(
+      seen.filter((r) => r.path === "/moderation/log/counts").map((r) => `${r.query}`),
+    ).toEqual([""]);
+    const from = html.indexOf('<figure aria-labelledby="log-counts"');
+    const tally = html
+      .slice(from, html.indexOf("</figure>", from))
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ");
+    expect(tally).toContain("The whole log: 11 decisions, by action");
+    expect(tally).toContain("Delisted 4");
+    expect(tally).toContain("Text hidden 2");
+    expect(tally).toContain("Profile hidden 1");
+    expect(tally).toContain("Restored 3");
+    expect(tally).toContain("Refiled 1");
+    expect(html.replace(/<[^>]+>/g, "")).toContain(
+      "This page holds 3 of the log&#x27;s 11 decisions.",
+    );
+    // An earlier page counts the same whole log, and an empty one says nothing of its place.
+    const earlier = await (await get("/moderation?before=5")).text();
+    expect(earlier).toContain("The whole log: 11 decisions");
+    expect(earlier).not.toContain("This page holds");
+  });
+
+  test.each([
+    ["a failed read", undefined],
+    ["parts that don't add up to the total", { ...LOG_COUNTS, total: "12" }],
+  ])("leaves the counts out after %s, and keeps the log", async (_, counts) => {
+    stub.logCounts = counts;
+    try {
+      const response = await get("/moderation");
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
+      expect(html).not.toContain("The whole log");
+      expect(html).not.toContain("of the log's");
+    } finally {
+      stub.logCounts = LOG_COUNTS;
+    }
+  });
 
   test("states what moderation can't reach and every ground, with the log or without it", async () => {
     for (const path of ["/moderation", "/moderation?before=5"]) {

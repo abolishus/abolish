@@ -529,6 +529,9 @@ const enUS = {
     "This poll's results are counted from its public board. Entries are only ever added at the end, and none shows how anyone voted.",
   resultsBoardUnavailable: "The board couldn't be read just now.",
   resultsVerify: "How to count it yourself",
+  resultsRecountTitle: "Count this poll again",
+  resultsRecountBody:
+    "Once the community node has copied and verified the boards, as How to count it yourself sets out, the verifier checks this poll on its own with this command. Its exit code is the verdict.",
   reactionsTitle: "Reactions",
   reactionsLede:
     "React to the poll itself, whether or not you answer it. A reaction isn't an answer and says nothing about whether you answered.",

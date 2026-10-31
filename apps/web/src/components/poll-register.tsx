@@ -6,10 +6,10 @@ import { type ReactNode, useId } from "react";
 
 import { catalogs } from "../messages.ts";
 import { type Counting, COUNTINGS, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
-import type { ListedPoll, PollList as List, RegisterPage } from "../server/load.ts";
+import type { ListedPoll, PollList as List, RegisterCounts, RegisterPage } from "../server/load.ts";
 import { MAX_STREAM_QUERY, MAX_STREAM_TERMS } from "../stream.ts";
 import { FilterGroup } from "./filter-group.tsx";
-import { formatUtc } from "./format.ts";
+import { formatUtc, formatUtcWhole } from "./format.ts";
 import { LookupForm } from "./lookup-form.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollRows } from "./poll-list.tsx";
@@ -146,6 +146,49 @@ export interface PollRegisterProps {
 }
 
 /**
+ * The whole listing in numbers under the heading, as the register's mockup
+ * has them: every listed poll, those open now and those not open yet, from
+ * the API's counts rather than the page in hand, at the clock the page read
+ * statuses by. Like the list, they leave out delisted and hidden polls, which
+ * the lede says (T-68).
+ */
+function Tally({ counts, asOf }: { counts: RegisterCounts; asOf: List["asOf"] }) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const number = new Intl.NumberFormat(locale);
+  const figures = [
+    { term: t("registerCountListed"), value: counts.listed },
+    { term: t("registerCountOpen"), value: counts.open },
+    { term: t("registerCountScheduled"), value: counts.scheduled },
+  ];
+  return (
+    <dl
+      aria-label={t("registerCounts")}
+      className="m-0 mt-4 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-foreground pt-5 sm:grid-cols-4"
+    >
+      {figures.map(({ term, value }) => (
+        <div key={term} className="grid content-start gap-1">
+          <dt className="text-sm text-muted-foreground">{term}</dt>
+          <dd className="m-0 font-heading text-3xl font-semibold tabular-nums">
+            {number.format(value)}
+          </dd>
+        </div>
+      ))}
+      <div className="grid content-start gap-1">
+        <dt className="text-sm text-muted-foreground">{t("registerCountAsOf")}</dt>
+        {/* As `When` does: the two ICU versions can word a date differently. */}
+        <dd className="m-0 pt-2 font-mono text-xs" suppressHydrationWarning>
+          {t("utcTime", {
+            time:
+              asOf.iso === undefined ? asOf.seconds : formatUtcWhole(locale, new Date(asOf.iso)),
+          })}
+        </dd>
+      </div>
+    </dl>
+  );
+}
+
+/**
  * The register of polls (`/polls`): the lookup form, then a page of the
  * polls our API lists, narrowed by a search the API runs over the polls'
  * words and filtered by status and counting rule. The listing leaves out
@@ -169,7 +212,11 @@ export function PollRegister({
   const unsearched = registerHref(undefined, { status, counting });
   return (
     <div className="grid gap-16">
-      <PageHeader eyebrow={t("registerEyebrow")} title={t("registerTitle")} lede={t("listLede")} />
+      <PageHeader eyebrow={t("registerEyebrow")} title={t("registerTitle")} lede={t("listLede")}>
+        {page.kind === "list" && page.counts !== undefined ? (
+          <Tally counts={page.counts} asOf={page.asOf} />
+        ) : null}
+      </PageHeader>
 
       <section
         aria-labelledby="lookup-title"

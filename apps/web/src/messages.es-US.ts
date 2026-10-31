@@ -493,6 +493,11 @@ export const esUS: Messages = {
   status_closed: "Cerrada",
   registerEyebrow: "Registro de encuestas",
   registerTitle: "Todas las encuestas de la lista",
+  registerCounts: "La lista en cifras",
+  registerCountListed: "Encuestas de la lista",
+  registerCountOpen: "Abiertas ahora",
+  registerCountScheduled: "Programadas",
+  registerCountAsOf: "Actualizado",
   registerLookupTitle: "Abrir una encuesta por su ID",
   registerFindTitle: "Buscar una encuesta",
   registerFindLede:

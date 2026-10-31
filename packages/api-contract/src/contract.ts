@@ -243,6 +243,18 @@ const listElections = oc
   )
   .output(z.strictObject({ elections: z.array(Hash32).check(z.maxLength(MAX_PAGE)) }));
 
+const getListingCounts = oc
+  .route({
+    method: "GET",
+    path: "/elections/counts",
+    summary: "How many polls this server lists",
+    description:
+      "How many polls `GET /elections` lists by this server's clock: `listed`, every poll the `id` order lists, open or not; `open`, those open now (the definition's `opens_at` at or before the clock and `closes_at` after it), as `closing` lists them; and `scheduled`, those whose `opens_at` is still to come. A poll whose times this server hasn't stored yet is counted only in `listed`. They are read in one statement, so they agree with each other; a page of the listing read in another request may differ by what changed since. Counts are decimal strings. Delisted and hidden polls are left out, as from the listing (docs/moderation-policy.md). Like the listing, they are a convenience, never a source of truth: they are counts of public chain data under the public moderation log, the same for everyone, and the election registry on the L2 names every poll (T-34, T-68).",
+    tags: ["elections"],
+  })
+  .input(z.strictObject({}))
+  .output(z.strictObject({ listed: U64, open: U64, scheduled: U64 }));
+
 const getTags = oc
   .route({
     method: "GET",
@@ -900,6 +912,7 @@ const submitPosting = oc
 export const contract = {
   elections: {
     list: listElections,
+    getCounts: getListingCounts,
     getDefinition,
     getDisplayText,
     getTags,

@@ -476,6 +476,41 @@ describe("elections.list (T-68)", () => {
       expect(await listed(mine)).toEqual([...mine].sort());
     });
 
+    test("count the listed polls, those open by the server's clock and those not open yet", async () => {
+      const counts = async () => {
+        const r = await get("/elections/counts", {});
+        expect(r.status).toBe(200);
+        return Object.fromEntries(
+          Object.entries(await json(r)).map(([k, v]) => [k, BigInt(v as string)]),
+        );
+      };
+      const was = await counts();
+      expect(Object.keys(was).sort()).toEqual(["listed", "open", "scheduled"]);
+      await election();
+      await open(1_000n);
+      const soon = b32();
+      await storeDefinition(
+        app,
+        encodeElectionDefinition({
+          ...typical,
+          election_id: soon,
+          opens_at: nowS() + 3_600n,
+          closes_at: nowS() + 7_200n,
+        }),
+      );
+      const hidden = await open(1_000n);
+      await moderate(app, new Uint8Array(Buffer.from(hidden, "hex")), {
+        action: "hide",
+        reason: "threat",
+        moderator: "mod-1",
+      });
+      const now = await counts();
+      expect(now["listed"]! - was["listed"]!).toBe(3n);
+      expect(now["open"]! - was["open"]!).toBe(1n);
+      expect(now["scheduled"]! - was["scheduled"]!).toBe(1n);
+      expect((await get("/elections/counts", { limit: "1" })).status).toBe(400);
+    });
+
     test("refuse an unknown sort, and a cursor the order can't place", async () => {
       expect((await get("/elections", { sort: "popular", limit: "1" })).status).toBe(400);
       const unregistered = (await election()).idHex;

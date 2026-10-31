@@ -64,6 +64,7 @@ const LIST: PollList = {
   ],
   next: NEXT,
   asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
+  counts: { listed: 1234, open: 212, scheduled: 41 },
 };
 
 const meta = {
@@ -95,6 +96,21 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Every listed poll");
   await expect(canvas.getByText(/the election registry on chain names every poll/)).toBeVisible();
   await expect(canvas.getByRole("textbox", { name: "Poll ID" })).toBeVisible();
+  // The whole listing in numbers, from the API's counts, not the page's four.
+  const tally = canvasElement.querySelector<HTMLElement>('dl[aria-label="The list in numbers"]')!;
+  await expect(tally).toBeVisible();
+  const figures = [...tally.querySelectorAll("dt")].map((dt) => [
+    dt.textContent,
+    dt.nextElementSibling?.textContent,
+  ]);
+  await expect(figures.slice(0, 3)).toEqual([
+    ["Listed polls", "1,234"],
+    ["Open now", "212"],
+    ["Scheduled", "41"],
+  ]);
+  await expect(figures[3]![0]).toBe("As of");
+  // The clock and "UTC" wrap whole, never "UTC" alone on a line.
+  await expect(figures[3]![1]).toMatch(/^January 5, 2026.*12:00\u00a0AM\u00a0UTC$/);
   // Each poll's status, read from its own times at the page's clock.
   const rows = canvas.getAllByRole("article");
   await expect(rows).toHaveLength(4);
@@ -225,10 +241,13 @@ export const NoMatch: Story = {
 };
 
 export const Empty: Story = {
-  args: { page: { ...LIST, polls: [], next: undefined } },
+  args: { page: { ...LIST, polls: [], next: undefined, counts: undefined } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No polls listed.")).toBeVisible();
+    // Counts that couldn't be read are left out, not shown as nothing.
+    await expect(canvas.queryByText("The list in numbers")).toBeNull();
+    await expect(canvas.queryByText("Open now")).toBeNull();
     await expect(canvas.queryByRole("radio")).toBeNull();
     await expect(canvas.queryByRole("link", { name: "More polls" })).toBeNull();
   },

@@ -13,8 +13,9 @@ import {TrusteeFixture} from "../utils/TrusteeFixture.sol";
 import {TestBase, Vm} from "../utils/Vm.sol";
 
 /// What the handler submits against: the board, the relay's alias, the
-/// election and its window, its two ballots, a statement to re-sign, and the
-/// signing secrets of seats 1, 2, 3 and 5.
+/// election and its window, its two ballots, a statement to re-sign, the
+/// signing secrets of seats 1, 2, 3 and 5, and a rolling election with the
+/// same window, its ballot and the root its proof holds against.
 struct CloseRuleSetup {
     Board board;
     address relayAlias;
@@ -24,13 +25,18 @@ struct CloseRuleSetup {
     bytes[2] ballots;
     bytes statement;
     uint256[4] secrets;
+    bytes32 rollingHash;
+    bytes rolling;
+    bytes32 rollingRoot;
 }
 
 /// Submits ballot.json's two ballots the board admits on the ordinary and
 /// relayed paths, at block times and stamps around the window's edges, from
 /// the relay's alias and from others, and close statements of
 /// close-statement.json's four seats with any of three claims against any
-/// of two L1 blocks, each signed by its seat. Keeps a shadow of what the
+/// of two L1 blocks, each signed by its seat; and ballot-v5-records.json's
+/// ok-newest-step on the rolling and relayed rolling paths the same way,
+/// with its own root or any other. Keeps a shadow of what the
 /// board should do (the records it remembers, each seat's claims) and of the
 /// accumulator, and the first outcome that broke a rule.
 contract CloseRuleHandler is TestBase {
@@ -43,6 +49,9 @@ contract CloseRuleHandler is TestBase {
     uint64 internal immutable closesAt;
     bytes[2] internal ballots;
     bytes internal statement;
+    bytes32 internal immutable rollingHash;
+    bytes internal rolling;
+    bytes32 internal immutable rollingRoot;
     uint8[4] internal seats = [1, 2, 3, 5];
     mapping(uint8 seat => uint256) internal secrets;
 
@@ -53,6 +62,7 @@ contract CloseRuleHandler is TestBase {
     bytes32 public shadowAccumulator;
     uint64 public shadowCount;
     uint256 public relayedAccepted;
+    uint256 public relayedRollingAccepted;
     uint256 public statementsAccepted;
     string public failure;
 
@@ -63,6 +73,7 @@ contract CloseRuleHandler is TestBase {
         (opensAt, closesAt) = (c.opensAt, c.closesAt);
         ballots = c.ballots;
         statement = c.statement;
+        (rollingHash, rolling, rollingRoot) = (c.rollingHash, c.rolling, c.rollingRoot);
         for (uint256 i; i < 4; i++) {
             secrets[seats[i]] = c.secrets[i];
         }
@@ -119,6 +130,64 @@ contract CloseRuleHandler is TestBase {
         _fold(logs);
     }
 
+    /// The rolling ballot on the rolling call at a block time around the
+    /// window, with its own root or `other`: a no-op if remembered, whatever
+    /// the root and time; otherwise accepted with an event exactly inside the
+    /// window with its proof's root.
+    function submitRolling(uint8 timeSeed, bool ownRoot, bytes32 other) external {
+        bytes32 root = ownRoot ? rollingRoot : other;
+        vm.warp(_time(timeSeed));
+        bool inside = block.timestamp >= opensAt && block.timestamp <= closesAt;
+        bytes32 key = keccak256(rolling);
+        (bool ok, Vm.Log[] memory logs) =
+            _call(address(this), abi.encodeCall(Board.submitRollingBallot, (root, rolling)));
+        if (remembered[key]) {
+            if (!ok || logs.length != 0) _fail("a remembered rolling ballot wasn't a no-op");
+        } else if (inside && root == rollingRoot) {
+            if (!ok || logs.length != 1) _fail("a rolling ballot inside the window was refused");
+            remembered[key] = true;
+        } else if (ok) {
+            _fail("a rolling ballot outside the window or with another root was accepted");
+        }
+        _fold(logs);
+    }
+
+    /// The rolling ballot deposited on the relayed rolling call with a stamp
+    /// around the window, its own root or `other`, from the relay's alias or
+    /// another sender, at any block time: accepted with an event carrying
+    /// that root exactly when the sender is the alias, the stamp is inside
+    /// and the root is its proof's, a remembered record included.
+    function submitRelayedRolling(
+        uint8 stampSeed,
+        uint8 timeSeed,
+        bool forged,
+        bool ownRoot,
+        bytes32 other
+    ) external {
+        bytes32 root = ownRoot ? rollingRoot : other;
+        uint64 stamp = _time(stampSeed);
+        vm.warp(_time(timeSeed));
+        address from = forged ? address(uint160(relayAlias) ^ 1) : relayAlias;
+        bytes memory data = abi.encodeCall(
+            Board.submitRelayedRollingBallot, (uint64(stampSeed), 1, stamp, 1, root, rolling)
+        );
+        (bool ok, Vm.Log[] memory logs) = _call(from, data);
+        bool expected = !forged && stamp >= opensAt && stamp <= closesAt && root == rollingRoot;
+        if (ok != expected || logs.length != (expected ? 1 : 0)) {
+            _fail("a relayed rolling deposit's outcome isn't its sender's, stamp's and root's");
+        }
+        if (ok) {
+            if (
+                logs[0].topics[0] != Board.RelayedRollingBallotSubmitted.selector
+                    || keccak256(logs[0].data)
+                        != keccak256(abi.encode(uint64(stampSeed), 1, stamp, 1, root, rolling))
+            ) _fail("a relayed rolling event isn't its deposit's");
+            remembered[keccak256(rolling)] = true;
+            relayedRollingAccepted++;
+        }
+        _fold(logs);
+    }
+
     /// A statement of one of the four seats with one of three claims against
     /// one of two L1 blocks, signed by the seat: a no-op if remembered,
     /// accepted unless the seat already has two claims or this one, refused
@@ -157,7 +226,9 @@ contract CloseRuleHandler is TestBase {
     function _fold(Vm.Log[] memory logs) internal {
         for (uint256 i; i < logs.length; i++) {
             if (logs[i].emitter != address(board)) _fail("another emitter");
-            if (logs[i].topics[1] != definitionHash) _fail("another election");
+            if (logs[i].topics[1] != definitionHash && logs[i].topics[1] != rollingHash) {
+                _fail("another election");
+            }
             shadowAccumulator = EventAccumulatorLib.step(
                 shadowAccumulator,
                 shadowCount++,
@@ -222,7 +293,12 @@ contract CloseRuleHandler is TestBase {
 ///    it is a no-op whatever the time.
 /// 2. A relayed deposit is accepted, with its event, exactly when it comes
 ///    from the relay's alias with a stamp inside the window, whatever the
-///    block's time and whether the board already holds the record.
+///    block's time and whether the board already holds the record. The
+///    same holds for a rolling poll's ballot on the rolling and relayed
+///    rolling calls, each accepted only with the root its proof holds
+///    against (a remembered record on the rolling call is the no-op
+///    whatever its root), and a relayed rolling event carries exactly its
+///    deposit's call fields, root and record.
 /// 3. Each seat has at most two accepted statements per election, with
 ///    different claims, and a statement within that limit is never refused.
 /// 4. The accumulator is the shadow's replay over exactly the logs emitted.
@@ -232,7 +308,10 @@ contract BoardCloseRuleInvariantTest is TestBase {
     string internal constant V1 = "../../docs/spec/vectors/ballot.json";
     string internal constant CLOSE = "../../docs/spec/vectors/close-statement.json";
     string internal constant RELAY_VECTORS = "../../docs/spec/vectors/relay.json";
+    string internal constant V5 = "../../docs/spec/vectors/ballot-v5-records.json";
+    string internal constant EVENTS_V10 = "../../docs/spec/vectors/contract-event-v10.json";
     bytes32 internal constant STUB = keccak256("close-rule stub");
+    bytes32 internal constant STUB_V5 = keccak256("close-rule rolling stub");
     bytes32 internal constant PANEL = keccak256("panel");
 
     Board internal board;
@@ -261,24 +340,20 @@ contract BoardCloseRuleInvariantTest is TestBase {
         for (uint256 i; i < 32; i++) {
             statement[3 + i] = h[i];
         }
-        bytes[2] memory ballots = [
+        CloseRuleSetup memory c;
+        c.ballots = [
             vm.parseBytes(vm.parseJsonString(bj, ".ballots[0].encoding")),
             vm.parseBytes(vm.parseJsonString(bj, _ballotAt(bj, "option-proof")))
         ];
-        handler = new CloseRuleHandler(
-            CloseRuleSetup({
-                board: board,
-                relayAlias: address(
-                    bytes20(vm.parseBytes(vm.parseJsonString(rj, ".aliases[0].l2")))
-                ),
-                definitionHash: h,
-                opensAt: d.opensAt,
-                closesAt: d.closesAt,
-                ballots: ballots,
-                statement: statement,
-                secrets: secrets
-            })
-        );
+        (c.rollingHash, c.rolling, c.rollingRoot) =
+            _setRollingElection(elections, trustees, d.opensAt, d.closesAt);
+        c.board = board;
+        c.relayAlias = address(bytes20(vm.parseBytes(vm.parseJsonString(rj, ".aliases[0].l2"))));
+        c.definitionHash = h;
+        (c.opensAt, c.closesAt) = (d.opensAt, d.closesAt);
+        c.statement = statement;
+        c.secrets = secrets;
+        handler = new CloseRuleHandler(c);
     }
 
     function targetContracts() public view returns (address[] memory targets) {
@@ -341,6 +416,81 @@ contract BoardCloseRuleInvariantTest is TestBase {
         // With the statements' seats 1, 2, 3 and 5: more seats only relax
         // `share-hash-unqualified`, so the ballots still pass.
         trustees.setKeySet(STUB, PANEL, mask | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 5));
+    }
+
+    /// ballot-v5-records.json's rolling election with the window given (every
+    /// cell with the root 0, as the election registry records it), its
+    /// ok-newest-step ballot's key sets, and that ballot with the root its
+    /// proof holds against, from contract-event-v10.json's record of it.
+    function _setRollingElection(
+        ElectionsStub elections,
+        TrusteesStub trustees,
+        uint64 opensAt,
+        uint64 closesAt
+    ) internal returns (bytes32 h, bytes memory rolling, bytes32 root) {
+        string memory j = vm.readFile(V5);
+        string memory e = ".elections.rolling";
+        ElectionRegistry.Parameters memory p;
+        p.ballotVersion = 5;
+        p.threshold = uint8(vm.parseJsonUint(j, string.concat(e, ".threshold")));
+        p.panelSize = uint8(vm.parseJsonUint(j, string.concat(e, ".panelSize")));
+        p.authorThreshold = uint8(vm.parseJsonUint(j, string.concat(e, ".authorThreshold")));
+        p.authorPanelSize = uint8(vm.parseJsonUint(j, string.concat(e, ".authorPanelSize")));
+        (p.opensAt, p.closesAt) = (opensAt, closesAt);
+        uint256 n;
+        while (vm.keyExistsJson(j, string.concat(e, ".questions[", vm.toString(n), "]"))) n++;
+        p.questions = new ElectionRegistry.Question[](n);
+        for (uint256 q; q < n; q++) {
+            string memory jq = string.concat(e, ".questions[", vm.toString(q), "]");
+            p.questions[q] = ElectionRegistry.Question(
+                1,
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".optionCount"))),
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".minSelections"))),
+                uint16(vm.parseJsonUint(j, string.concat(jq, ".maxSelections")))
+            );
+            p.optionCount += p.questions[q].optionCount;
+        }
+        n = 0;
+        while (vm.keyExistsJson(j, string.concat(e, ".cells[", vm.toString(n), "]"))) n++;
+        uint8[] memory tiers = new uint8[](n);
+        for (uint256 c; c < n; c++) {
+            tiers[c] =
+                uint8(vm.parseJsonUint(j, string.concat(e, ".cells[", vm.toString(c), "].tier")));
+        }
+        h = bytes32(vm.parseBytes(vm.parseJsonString(j, string.concat(e, ".definitionHash"))));
+        elections.set(h, p, tiers, new uint256[](n));
+        elections.setCeremony(h, STUB_V5, PANEL);
+        assertTrue(
+            keccak256(bytes(vm.parseJsonString(j, ".ballots[0].id")))
+                == keccak256("ok-newest-step"),
+            "ok-newest-step"
+        );
+        trustees.setKeySet(
+            STUB_V5, PANEL, _mask(vm.parseJsonUintArray(j, ".ballots[0].registered"))
+        );
+        elections.setAuthorKeySet(
+            h, _mask(vm.parseJsonUintArray(j, ".ballots[0].authorRegistered"))
+        );
+        string memory ej = vm.readFile(EVENTS_V10);
+        assertTrue(
+            keccak256(bytes(vm.parseJsonString(ej, ".records[2].id")))
+                == keccak256("rolling-ballot-ok-newest-step"),
+            "its event"
+        );
+        (root, rolling) = abi.decode(
+            vm.parseBytes(vm.parseJsonString(ej, ".records[2].fields.data")), (bytes32, bytes)
+        );
+        assertEq(
+            keccak256(rolling),
+            keccak256(vm.parseBytes(vm.parseJsonString(j, ".ballots[0].encoding"))),
+            "the file's ballot"
+        );
+    }
+
+    function _mask(uint256[] memory seats) internal pure returns (uint256 m) {
+        for (uint256 i; i < seats.length; i++) {
+            m |= 1 << seats[i];
+        }
     }
 
     function _setStatementSeats(TrusteesStub trustees, string memory cj)

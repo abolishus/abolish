@@ -374,7 +374,110 @@ contract BoardRollingBallotTest is TestBase {
         assertEq(_accept(call).length, 1, "the canonical call");
     }
 
+    /// The honest call carries no personal data: its calldata, its event's
+    /// data and each topic are fixed-size typed fields and a framed record,
+    /// with no run of text (contracts skill, No PII on-chain; T-17).
+    function test_NoPersonalDataInCalldataOrEvents() public {
+        string memory json = vm.readFile(V5);
+        _registerKeySets(json, _ballot(json, "ok-newest-step"));
+        string memory ej = vm.readFile(EVENTS);
+        (bytes32 root, bytes memory record) =
+            _rolling(ej, _eventFields(ej, "rolling-ballot-ok-newest-step"));
+        bytes memory call = abi.encodeCall(Board.submitRollingBallot, (root, record));
+        assertTrue(!_looksLikeText(call), "calldata");
+        Vm.Log[] memory logs = _accept(call);
+        assertEq(logs.length, 1, "one event");
+        assertTrue(!_looksLikeText(logs[0].data), "event data");
+        for (uint256 t; t < logs[0].topics.length; t++) {
+            assertTrue(!_looksLikeText(abi.encode(logs[0].topics[t])), "event topic");
+        }
+    }
+
+    /// Text in the root or in the record's chosen-bytes fields is caught by
+    /// the detector (its positive control) and refused: as the root, or in
+    /// place of the membership proof, the share hashes or the step, the
+    /// proof fails against any root. Residual (contracts.md, Rolling
+    /// ballots, What a submitter controls; T-17, T-52): anyone can prove
+    /// against a tree of their own, so a record the verifier rejects can
+    /// still carry chosen scalars and elements at gas cost.
+    function test_TextInTheRootOrRecordIsRefused() public {
+        string memory json = vm.readFile(V5);
+        _registerKeySets(json, _ballot(json, "ok-newest-step"));
+        string memory ej = vm.readFile(EVENTS);
+        (bytes32 root, bytes memory record) =
+            _rolling(ej, _eventFields(ej, "rolling-ballot-ok-newest-step"));
+        bytes memory text = bytes(
+            "Jane Doe, jane.doe@example.com, passport X1234567, 1 Main Street, Springfield. "
+            "Voted for option 2. Jane Doe, jane.doe@example.com, passport X1234567, 1 Main St. "
+            "Born 1 January 1970, phone +1 555 0100, Jane Doe, jane.doe@example.com, X1234567. "
+            "Jane Doe, jane.doe@example.com, passport X1234567, 1 Main Street, Springfield."
+        );
+        bytes memory refused = abi.encodeWithSelector(
+            BallotCheckLib.BallotRefused.selector, BallotCheckLib.Code.MembershipProof
+        );
+        bytes32 textRoot = bytes32(_slice(text, 0, 31));
+        assertTrue(_looksLikeText(abi.encode(textRoot)), "detector misses the root");
+        _refuse(abi.encodeCall(Board.submitRollingBallot, (textRoot, record)), refused, "root");
+        // The step's four bytes and the first share hash: the record's own
+        // fields, framed but bound by the proof.
+        uint256[2] memory at = [uint256(364), _firstShareHash(record)];
+        uint256[2] memory length = [uint256(4), 32];
+        for (uint256 i; i < at.length; i++) {
+            bytes memory changed = bytes.concat(record);
+            for (uint256 k; k < length[i]; k++) {
+                changed[at[i] + k] = text[k];
+            }
+            _refuse(abi.encodeCall(Board.submitRollingBallot, (root, changed)), refused, "field");
+        }
+        // The whole proof, whose points' coordinates text breaks.
+        bytes memory proof = bytes.concat(record);
+        for (uint256 k; k < 256; k++) {
+            proof[108 + k] = text[k];
+        }
+        assertTrue(_looksLikeText(proof), "detector misses the proof");
+        (bool ok,) = address(board).call(abi.encodeCall(Board.submitRollingBallot, (root, proof)));
+        assertTrue(!ok, "text as the proof");
+    }
+
     // --- helpers -------------------------------------------------------------
+
+    /// Where the default panel's first share hash is: after the step, the
+    /// VSS list (`T` rows of `k` 32-byte elements, each counted) and the
+    /// share hashes' count.
+    function _firstShareHash(bytes memory record) internal pure returns (uint256 o) {
+        o = 368;
+        uint256 rows = _u32(record, o);
+        o += 4;
+        for (uint256 j; j < rows; j++) {
+            o += 4 + 32 * _u32(record, o);
+        }
+        o += 4;
+    }
+
+    function _u32(bytes memory r, uint256 o) internal pure returns (uint256 v) {
+        for (uint256 i; i < 4; i++) {
+            v = (v << 8) | uint8(r[o + i]);
+        }
+    }
+
+    /// As Board.t.sol's: a run of 12 printable bytes, or an at sign flanked by
+    /// two printable bytes on each side (an e-mail address).
+    function _looksLikeText(bytes memory b) internal pure returns (bool) {
+        uint256 run;
+        for (uint256 i; i < b.length; i++) {
+            bool printable = uint8(b[i]) >= 0x20 && uint8(b[i]) < 0x7f;
+            run = printable ? run + 1 : 0;
+            if (run >= 12) return true;
+            if (b[i] == 0x40 && i >= 2 && i + 2 < b.length) {
+                bool flanked = true;
+                for (uint256 k = i - 2; k <= i + 2; k++) {
+                    if (uint8(b[k]) < 0x20 || uint8(b[k]) >= 0x7f) flanked = false;
+                }
+                if (flanked) return true;
+            }
+        }
+        return false;
+    }
 
     /// The board's verdict on a ballot whose verifier admission code is
     /// `code`: `accepted`, or the code it refuses with. The validity proofs

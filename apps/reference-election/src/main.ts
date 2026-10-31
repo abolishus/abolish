@@ -12,7 +12,11 @@
 // A rolling poll under definition version 7 (P2-17) is registered over a
 // group the run creates and changes in the group registry, its opening state
 // and steps derived from the registry's events; its ballots, against a step
-// before a voter joins and the next, go straight to the board's rolling call.
+// before a voter joins and the next, go straight to the board's rolling call,
+// and the operator carries them to the poll's board. Every seat takes them in
+// against the step roots it computes, its receipts are boarded, and past the
+// close the poll is tallied and sealed as the others are; its verifier run
+// isn't built yet (P2-17 part 4f-2b-2b), so the node stops it at 2.3.
 // Its ballots get receipts signed by the fixture as board operator, among
 // them one for a forked board and one for a ballot it never boards, which
 // the voter's later checks must find from L1, and the verifier's drop rule
@@ -56,12 +60,14 @@ import {
   type Checkpoint,
   copyCheckpoints,
   decodeOpening,
+  decodeTallyOpening,
   deliveryDeadlines,
   type ElectionDefinition,
   encodeBallot,
   encodeCheckpoint,
   encodeDisplayText,
   encodeDisplayTextV2,
+  encodeShareReceiptV2,
   identityKey,
   intakeBallotV5,
   MembershipProverError,
@@ -73,6 +79,7 @@ import {
   type RegisteredKeys,
   type RollingTier,
   rootClockBoundary,
+  shareReceiptRecordV2,
   rootClockStepAtOrBefore,
   rootStepWindow,
   RollingTierTree,
@@ -608,15 +615,26 @@ async function run(
     log(
       `stage 3 (rolling): group ${group} created in the group registry and filled by both registrars' records; the poll's version-7 definition, opening with ${tier.group_size} members at L2 block ${rootL2Block}, registered on L2 after a ceremony of ${c.seats.length} seats, and a civic one refused with rolling-class; then, after step ${before}'s boundary, voter 3 added and voter 1 removed and added again, so ${steps.length} accepted steps, the newest with ${last.size} leaves and ${last.memberCount} members`,
     );
-    return { ceremony: c, group, registeredAt, events, early: before, late: before + 1n };
+    return {
+      ceremony: c,
+      board: firstEntry("rolling", c, first),
+      group,
+      registeredAt,
+      events,
+      early: before,
+      late: before + 1n,
+    };
   })();
+  // Every board the operator keeps and anchors: the rolling poll's beside the
+  // others, whose verifier runs (stage 9) don't yet take a rolling poll.
+  const boards: Election[] = [...elections, rolling.board];
 
   // Stage 7: each period's checkpoints anchored in one call, inside its
   // window. A segment with nothing appended in it repeats the board's state
   // after the last one that has.
   const appended = [first, cast, tallied, seal];
   const checkpointsAt = (segment: number) =>
-    elections.map((e) => {
+    boards.map((e) => {
       const copies = copyCheckpoints(e.definition.value.election_id, e.entries, appended);
       const at = appended.filter((s) => s <= segment && copies.has(s)).at(-1);
       const c = at === undefined ? undefined : copies.get(at);
@@ -971,7 +989,7 @@ async function run(
   // T-16). Every L1 reference is in the window of the step it names, inside
   // the voting window, and every submission lands in an L2 block inside it.
   await (async () => {
-    const { ceremony: c, group, registeredAt, events, early, late } = rolling;
+    const { ceremony: c, board: poll, group, registeredAt, events, early, late } = rolling;
     const [v0, v1, v2, v3] = voters;
     if (v0 === undefined || v1 === undefined || v2 === undefined || v3 === undefined)
       throw new Error("too few voters");
@@ -1008,7 +1026,11 @@ async function run(
     } catch (e) {
       if (!(e instanceof MembershipProverError) || e.code !== "not-a-member") throw e;
     }
-    const boarded: { readonly voter: number; readonly ballot: CastRollingBallot }[] = [];
+    const boarded: {
+      readonly voter: number;
+      readonly votes: readonly number[];
+      readonly ballot: CastRollingBallot;
+    }[] = [];
     for (const [i, voter, votes, ref, tree] of [
       [0, v0, [1, 0, 0], refs[0], before],
       [3, v3, [0, 1, 0], refs[0], after],
@@ -1018,7 +1040,7 @@ async function run(
     ] as const) {
       const ballot = await castRolling(casting, voter, [...votes], ref, tree);
       await submitRollingBallot(l2, anvil, ballot.root, ballot.bytes);
-      boarded.push({ voter: i, ballot });
+      boarded.push({ voter: i, votes, ballot });
     }
     const [first0, , , revoted, revote] = boarded;
     if (revoted === undefined || revote === undefined || first0 === undefined)
@@ -1044,6 +1066,10 @@ async function run(
       )
     )
       throw new Error("the board's rolling ballots aren't the ones submitted");
+    // The operator carries each ballot from the board's log to the poll's
+    // board, in log order, in the voting window's segment, as it does a
+    // direct submission of a fixed poll (contracts.md, Rolling ballots).
+    for (const l of logged) board(poll, l.record);
     // Every seat takes each boarded ballot in, as its node does from the
     // client's direct route (share-encryption.md, Ballot version 5): admitted
     // against the root of the step it names, which the seat computes from the
@@ -1088,7 +1114,7 @@ async function run(
       default: casting.registered.map((k) => ({ index: k.index, signingKey: k.signingKey })),
       author: [],
     };
-    const taken = boarded.map(({ voter, ballot }) => {
+    const taken = boarded.map(({ voter, votes, ballot }) => {
       const { record } = ballot;
       const named = {
         definitionHash: casting.election.definitionHash,
@@ -1132,9 +1158,33 @@ async function run(
           )
         )
           throw new Error(`seat ${s.index}'s receipt doesn't bind the rolling ballot's step`);
-        return r.receipt;
+        return r;
       });
-      return { voter, ballot, receipts };
+      return { voter, votes, ballot, receipts };
+    });
+    // Each seat's receipt boarded as the ballot's delivery record, version 2
+    // under ballot version 5, naming the ballot by version 5's hash, which
+    // binds the step (delivery.md; T-38, T-53).
+    for (const { receipts } of taken)
+      for (const [i, r] of receipts.entries()) {
+        const seat = c.secrets[i]?.index;
+        if (seat === undefined) throw new Error("a receipt from no seat");
+        board(
+          poll,
+          encodeShareReceiptV2(shareReceiptRecordV2(casting.election.definitionHash, seat, r)),
+        );
+      }
+    // The counted set for stage 6: each voter's last ballot, voter 2's
+    // re-vote over its first, with the shares every seat took from it.
+    const lastOf = new Map(taken.map((t) => [t.voter, t]));
+    const kept = [...lastOf.values()];
+    counted.set(poll, {
+      ballots: kept.map(({ ballot, receipts }) => ({
+        payload: ballot.bytes,
+        shares: new Map(receipts.map((r, i) => [c.secrets[i]?.index ?? 0, r.shares])),
+      })),
+      registered: casting.registered,
+      counts: countsOf(kept.map(({ votes }) => votes)),
     });
     writeFileSync(
       join(OUT, "rolling", "receipts.json"),
@@ -1144,7 +1194,10 @@ async function run(
           ballots: taken.map(({ voter, ballot, receipts }) => ({
             voter,
             step: ballot.record.step,
-            receipts: receipts.map((r, i) => ({ seat: c.secrets[i]?.index, receipt: hex(r) })),
+            receipts: receipts.map((r, i) => ({
+              seat: c.secrets[i]?.index,
+              receipt: hex(r.receipt),
+            })),
           })),
         },
         null,
@@ -1173,7 +1226,7 @@ async function run(
       )}\n`,
     );
     log(
-      `stage 4 (rolling): ${boarded.length} version-5 ballots with real membership proofs under the rolling scope submitted straight to the board's rolling call, ${boarded.filter((b) => b.ballot.record.step === Number(early)).length} against step ${early} and ${boarded.filter((b) => b.ballot.record.step === Number(late)).length} against step ${late}, voter 3 (joined after registration) and voter 1 (removed and added again) among them, and voter 2 re-voting across the two steps under one nullifier; voter 3 refused before proving against the step before they joined, and an honest ballot with another step's root refused by the board; every seat took each ballot in against the step root it computed (${taken.length * c.secrets.length} version-2 receipts over the version-5 ballot hash, none checking for the other step), and refused step ${late}'s ballots with step-unsettled until the L2 held a block past its boundary`,
+      `stage 4 (rolling): ${boarded.length} version-5 ballots with real membership proofs under the rolling scope submitted straight to the board's rolling call, ${boarded.filter((b) => b.ballot.record.step === Number(early)).length} against step ${early} and ${boarded.filter((b) => b.ballot.record.step === Number(late)).length} against step ${late}, voter 3 (joined after registration) and voter 1 (removed and added again) among them, and voter 2 re-voting across the two steps under one nullifier; voter 3 refused before proving against the step before they joined, and an honest ballot with another step's root refused by the board; every seat took each ballot in against the step root it computed (${taken.length * c.secrets.length} version-2 receipts over the version-5 ballot hash, none checking for the other step), and refused step ${late}'s ballots with step-unsettled until the L2 held a block past its boundary; the ballots carried from the board's log and the receipts boarded on the poll's board in segment ${cast}`,
     );
   })();
   await anchorAt(anvil, anchor, checkpointsAt(cast), end(cast) + ANCHOR_DELAY);
@@ -1184,11 +1237,20 @@ async function run(
   // cell's opening boarded in the tally's segment; once that checkpoint is
   // anchored, each seat states destruction in the seal's (docs/spec/tally.md,
   // Destruction, When).
-  const tallies = [honest, questions].map((e) => {
+  const tallies = [honest, questions, rolling.board].map((e) => {
     const taken = counted.get(e);
     if (taken === undefined) throw new Error(`no counted ballots for ${e.name}`);
-    const { ballots, registered } = taken;
-    board(e, tallyOpening(e.definition, registered, e.secrets, ballots), tallied);
+    const { ballots, registered, counts } = taken;
+    const opening = tallyOpening(e.definition, registered, e.secrets, ballots);
+    // What the seats opened must be what the counted ballots add up to. The
+    // verifier judges every opening from the board in stage 9 (7.2, 7.4);
+    // this catches the fixture's own fault first, and is the only check of
+    // the rolling poll's until stage 9 reads a rolling poll (P2-17 part
+    // 4f-2b-2b).
+    const opened = decodeTallyOpening(opening, 1).opening.map(({ v }) => Number(v));
+    if (opened.join() !== counts.join())
+      throw new Error(`${e.name}'s cell opened as ${opened.join()}, not ${counts.join()}`);
+    board(e, opening, tallied);
     return { e, ballots };
   });
   await anchorAt(anvil, anchor, checkpointsAt(tallied), end(tallied) + ANCHOR_DELAY);
@@ -1212,7 +1274,7 @@ async function run(
   );
   const archived = await archiveObjects(
     arweave,
-    elections.flatMap((e) => segmentObjects(e.entries).flatMap((o) => [o.object, o.hashes])),
+    boards.flatMap((e) => segmentObjects(e.entries).flatMap((o) => [o.object, o.hashes])),
     { l1ChainId: L1_CHAIN_ID, anchor: anchor.address },
     contractEvents,
   );
@@ -1273,7 +1335,7 @@ async function run(
   // here on.
   const mirror = join(OUT, "node", "blocks");
   mkdirSync(mirror, { recursive: true });
-  for (const e of elections)
+  for (const e of boards)
     writeFileSync(
       join(mirror, `${e.name}.car`),
       blocksCar(segmentObjects(e.entries).flatMap((s) => [s.object, s.hashes])),
@@ -1618,6 +1680,30 @@ async function run(
     )
       failures.push(
         `node (${e.name}): its report's checks differ from the verifier's on the bundle`,
+      );
+  }
+  // The rolling poll, anchored and mirrored with the rest: no release pins
+  // the group and election registries yet (verifier, PINNED_REGISTRIES), so
+  // the node builds no chain for it and stops it at 2.3, unverifiable and
+  // never passed (T-36, T-71). Its run under the fixture's registries is
+  // P2-17 part 4f-2b-2b.
+  {
+    const id = hex(rolling.board.definition.value.election_id);
+    const line = verified.lines.find((l) => l["election"] === id);
+    const report =
+      line?.["report"] === undefined
+        ? undefined
+        : (JSON.parse(
+            readFileSync(join(reports, id, "report.json"), "utf8"),
+          ) as VerifierRun["report"]);
+    const profile = report?.checks.find((c) => c.id === "2.3");
+    if (
+      report?.verdict !== "unverifiable" ||
+      profile?.status !== "unverifiable" ||
+      profile.code !== "unsupported-version"
+    )
+      failures.push(
+        `node (rolling): expected 2.3 unverifiable with unsupported-version, got ${JSON.stringify(profile ?? line)}`,
       );
   }
   log(

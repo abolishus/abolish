@@ -48,13 +48,18 @@ import {
   type TallyRules,
   tallyRules,
 } from "./tally.ts";
-import type { ElectionDefinition, ElectionDefinitionV6 } from "./election-definition.ts";
+import {
+  type ElectionDefinition,
+  type ElectionDefinitionV6,
+  ELECTORATE_MODES,
+} from "./election-definition.ts";
 import {
   type AnyElectionDefinitionRecord,
   electionDefinitionHash,
   electionDefinitionV3Hash,
   electionDefinitionV4Hash,
   electionDefinitionV5Hash,
+  electionDefinitionV7Hash,
   type ElectionDefinitionV7Record,
   panelledFacts,
   UnsupportedVersionError,
@@ -182,10 +187,14 @@ function signedBytes(m: AnyStatement): Uint8Array {
 
 /**
  * A registered definition a tally runs under: a version-1 definition, or a
- * decoded record of version 1, 3, 4 or 5 (`tallyRules`; a version-6 one is
- * refused until P2-16 tallies ballot version 4).
+ * decoded record of version 1, 3, 4 or 5, or a rolling version 7 without an
+ * author panel (`tallyRules`). A version-6 one, and a fixed version 7, without
+ * an author panel are refused until the trustee node tallies them.
  */
-export type SummedShareDefinition = ElectionDefinition | AnyElectionDefinitionRecord;
+export type SummedShareDefinition =
+  | ElectionDefinition
+  | AnyElectionDefinitionRecord
+  | ElectionDefinitionV7Record;
 
 /**
  * A version-6 definition, or a version-7 one under a fixed electorate, with
@@ -227,26 +236,25 @@ interface DefinitionContext {
   readonly rules: TallyRules;
   /**
    * The number of cells in the registered partition: under definition version
-   * 1, one per `electorate` entry, under versions 3 to 5 every tier's cells
-   * (verifier 2.8). A trustee sums only for
-   * these cells, so no request for another cell, over a subset of a counted
+   * 1, one per `electorate` entry, under versions 3 to 5 every tier's cells,
+   * and under a rolling version 7 one per rolling tier (verifier 2.8). A
+   * trustee sums only for these cells, so no request for another cell, over a subset of a counted
    * set, can make it disclose a difference of sums (T-14, T-16).
    */
   readonly cells: number;
 }
 
 function contextOf(definition: SummedShareDefinition): DefinitionContext {
-  const record: AnyElectionDefinitionRecord =
+  const record: AnyElectionDefinitionRecord | ElectionDefinitionV7Record =
     "version" in definition && "value" in definition
       ? definition
       : { version: 1, value: definition };
-  // Summed-share message version 1 under definition version 6 or 7 is the
+  if (record.version === 7) return rollingContextOf(record);
+  // Summed-share message version 1 under definition version 6 is the
   // trustee node's tally of a poll without an author panel, which isn't
-  // built yet: refused, as before tallyRules read either (T-36). A caller's
-  // cast can pass version 7, which the type doesn't admit.
+  // built yet: refused, as before tallyRules read it (T-36).
   const version: number = record.version;
-  if (version === 6 || version === 7)
-    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, version);
+  if (version === 6) throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, version);
   // Refuses a definition that isn't well-formed (T-28).
   const rules = tallyRules(record);
   switch (record.version) {
@@ -276,6 +284,29 @@ function contextOf(definition: SummedShareDefinition): DefinitionContext {
       // Unreachable: tallyRules refused every other version.
       throw new RangeError("summed share: unsupported definition version");
   }
+}
+
+/**
+ * A rolling version-7 definition's values without an author panel: its
+ * profile pins tally-opening version 1, which fixes this message at version 1
+ * (docs/spec/tally.md, Rolling tiers; Summed-share message), and its
+ * partition is one cell per rolling tier, in `rolling_electorate`'s order
+ * (verifier 2.8), so a trustee sums for no other cell (T-14, T-16). The hash
+ * is version 7's, which binds the rolling tiers, so a message for one poll
+ * never opens under a fixed reading of it (T-37). A fixed version 7 without
+ * an author panel, read as version 6, is refused as version 6 is (T-36).
+ */
+function rollingContextOf(definition: ElectionDefinitionV7Record): DefinitionContext {
+  if (definition.value.electorate_mode !== ELECTORATE_MODES.rolling)
+    throw new UnsupportedVersionError(RECORD_TYPES.electionDefinition, definition.version);
+  // Refuses one that isn't well-formed or has an author panel (T-28, T-37).
+  const rules = tallyRules(definition);
+  return {
+    definitionHash: electionDefinitionV7Hash(definition.value),
+    ceremonyTranscriptHash: Uint8Array.from(definition.value.ceremony_transcript_hash),
+    rules,
+    cells: definition.value.rolling_electorate.length,
+  };
 }
 
 /**

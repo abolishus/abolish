@@ -10,6 +10,13 @@ export const STATUS_MARK = {
   closed: { icon: CircleCheckBig, tone: "text-muted-foreground", label: "status_closed" },
 } as const satisfies Record<PollStatus, { icon: LucideIcon; tone: string; label: keyof Messages }>;
 
+/** Each status in the words a poll's own pages head it with. */
+export const STATUS_TEXT = {
+  open: "pollStatus_open",
+  scheduled: "pollStatus_scheduled",
+  closed: "pollStatus_closed",
+} as const satisfies Record<PollStatus, keyof Messages>;
+
 /** How a poll is counted, in words. */
 export const COUNTING_LABEL = {
   plurality: "typePlurality",

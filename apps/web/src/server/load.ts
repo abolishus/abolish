@@ -19,6 +19,7 @@ import {
   type CellResults,
   cellResultsView,
   type PollResults,
+  isCounted,
   resultsView,
   type ServedResults,
 } from "../results.ts";
@@ -783,13 +784,7 @@ async function countedOf(api: Api, poll: PollView, asOf: Instant): Promise<boole
   if (pollStatus(poll, asOf) !== "closed") return false;
   const served = await resultsOf(api, poll.electionId);
   if (!("state" in served)) return false;
-  const results = resultsView(poll, served);
-  return (
-    results.kind === "read" &&
-    poll.electorate.every((g) =>
-      results.tiers.some((t) => t.tier === g.tier && t.questions !== undefined),
-    )
-  );
+  return isCounted(poll, resultsView(poll, served));
 }
 
 /**

@@ -47,18 +47,31 @@ const cells: readonly CellResults[] = [
   },
 ];
 
+const definitionHash = "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750";
+const opensAt = { seconds: "1767225600", iso: "2026-01-01T00:00:00.000Z" };
+const closesAt = { seconds: "1767830400", iso: "2026-01-08T00:00:00.000Z" };
+
 const meta = {
   component: PollResultsPage,
   parameters: { layout: "padded" },
   args: {
     poll: {
       electionId,
+      version: 5,
+      definitionHash,
+      counting: "questions",
       questions: [
         { optionCount: 3, minSelections: 0, maxSelections: 1 },
         { optionCount: 2, minSelections: 0, maxSelections: 2 },
       ],
+      electorate: [
+        { tier: 0, groupSize: "7220" },
+        { tier: 2, groupSize: "120" },
+      ],
       threshold: 2,
       panelSize: 3,
+      opensAt,
+      closesAt,
     },
     heading: "Riverside Park",
     results: {
@@ -99,6 +112,13 @@ type Story = StoryObj<typeof meta>;
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Riverside Park");
+  // Closed with a tier still unpublished: closed, not counted.
+  await expect(canvas.getByText("Closed")).toBeVisible();
+  await expect(canvas.queryByText("Counted")).toBeNull();
+  // The poll's facts, as its own page states them.
+  const facts = canvas.getAllByRole("definition");
+  await expect(facts[0]).toHaveTextContent("Tier 0 (verified e-mail)Tier 2 (document-verified)");
+  await expect(facts[3]).toHaveTextContent("2 questions, 5 options");
   const tabs = canvas.getByRole("tablist", { name: "Results by group" });
   const tier0 = within(tabs).getByRole("tab", { name: /Tier 0 \(verified e-mail\)/ });
   await expect(tier0).toHaveAttribute("aria-selected", "true");
@@ -137,6 +157,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "Tier 2 (document-verified)Not published yet",
   ]);
 
+  // What a recount starts from, with the ways to check it.
+  const check = within(canvas.getByRole("region", { name: "Check it yourself" }));
+  await expect(check.getByRole("figure", { name: "Poll ID" })).toHaveTextContent(electionId);
+  await expect(check.getByRole("figure", { name: /^Definition hash/ })).toHaveTextContent(
+    definitionHash,
+  );
   await expect(canvas.getByRole("link", { name: "Check the count on the board" })).toHaveAttribute(
     "href",
     `/polls/${electionId}/board`,
@@ -160,9 +186,15 @@ export const ByNumber: Story = {
   args: {
     poll: {
       electionId,
+      version: 1,
+      definitionHash,
+      counting: "plurality",
       questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
+      electorate: [{ tier: 0, groupSize: "50" }],
       threshold: 1,
       panelSize: 1,
+      opensAt,
+      closesAt,
     },
     heading: undefined,
     results: { kind: "read", tiers: [{ tier: 0, counted: 3, questions: [["0", "3", "0"]] }] },
@@ -185,6 +217,9 @@ export const ByNumber: Story = {
     await expect(
       canvas.getByText("Most picked: ⁨Answer 2⁩, by 100% of those who answered."),
     ).toBeVisible();
+    // Closed with its one tier read: counted.
+    await expect(canvas.getByText("Counted")).toBeVisible();
+    await expect(canvas.getAllByRole("definition")[3]).toHaveTextContent("One choice3 options");
     // One tier: nothing to set side by side; one cell: no parts.
     await expect(canvas.queryByRole("region", { name: "The groups side by side" })).toBeNull();
     await expect(canvas.queryByText("Part by part")).toBeNull();
@@ -238,6 +273,7 @@ export const Sealed: Story = {
     await expect(canvas.getByRole("status")).toHaveTextContent(
       "Answers stay sealed while the poll is open.",
     );
+    await expect(canvas.getByText("Open for answers")).toBeVisible();
     await expect(canvas.queryByRole("tablist")).toBeNull();
     await expect(canvas.queryByRole("region", { name: "Who opened the count" })).toBeNull();
   },

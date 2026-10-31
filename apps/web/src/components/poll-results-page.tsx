@@ -1,5 +1,7 @@
 import {
   cn,
+  Fingerprint,
+  Hash,
   Table,
   TableBody,
   TableCaption,
@@ -11,12 +13,13 @@ import {
   useI18n,
   useTranslate,
 } from "@abolishus/ui";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleCheckBig } from "lucide-react";
 
 import { catalogs, tierMessage } from "../messages.ts";
 import type { PollStatus, PollView } from "../poll.ts";
 import {
   type CellResults,
+  isCounted,
   leadersOf,
   type PollResults,
   shareOf,
@@ -24,10 +27,24 @@ import {
 } from "../results.ts";
 import type { PollWords } from "../stream.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
+import { PollFacts, StatusMark } from "./poll-facts.tsx";
 import { ResultsQuestion } from "./poll-results.tsx";
+import { STATUS_MARK, STATUS_TEXT } from "./poll-status.ts";
 
 export interface PollResultsPageProps {
-  poll: Pick<PollView, "electionId" | "questions" | "threshold" | "panelSize">;
+  poll: Pick<
+    PollView,
+    | "electionId"
+    | "version"
+    | "definitionHash"
+    | "counting"
+    | "questions"
+    | "electorate"
+    | "threshold"
+    | "panelSize"
+    | "opensAt"
+    | "closesAt"
+  >;
   /** The poll's heading in its own words; without them, it goes by its ID. */
   heading: string | undefined;
   results: PollResults;
@@ -430,7 +447,10 @@ const STATE_TEXT = {
  * counted in several cells, each cell's own results. As on the poll page,
  * these are the results our server reads from the openings on the board,
  * not the verifier's verdict, so the page says so and links to checking
- * them (T-34).
+ * them (T-34). It is headed by the poll's facts as the poll page states
+ * them, and marked counted only once it has closed with every tier's every
+ * question read, as the register marks it; the poll's ID and definition
+ * hash, which a recount starts from, are with the ways to check it.
  */
 export function PollResultsPage({
   poll,
@@ -444,6 +464,10 @@ export function PollResultsPage({
   const t = useTranslate(catalogs);
   const prefix = poll.electionId.slice(0, 16);
   const read = results.kind === "read" && results.tiers.length > 0 ? results.tiers : undefined;
+  const counted = status === "closed" && isCounted(poll, results);
+  const mark = counted
+    ? { icon: CircleCheckBig, tone: "text-recorded", text: "resultsStatusCounted" as const }
+    : { ...STATUS_MARK[status], text: STATUS_TEXT[status] };
   return (
     <article className="grid gap-16">
       <PageHeader
@@ -465,6 +489,12 @@ export function PollResultsPage({
           <ArrowLeft aria-hidden="true" className="size-4" />
           {t("boardPageBack")}
         </a>
+        <div className="flex flex-wrap items-center gap-3">
+          <StatusMark icon={mark.icon} tone={mark.tone}>
+            {t(mark.text)}
+          </StatusMark>
+        </div>
+        <PollFacts poll={poll} phoneVerification={phoneVerification} />
       </PageHeader>
 
       {read === undefined ? (
@@ -521,6 +551,20 @@ export function PollResultsPage({
           <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
             {t("resultsClaim")}
           </p>
+          <div className="grid gap-4">
+            <p className="m-0 max-w-prose text-pretty">{t("resultsFingerprints")}</p>
+            <Hash value={poll.electionId} label={t("pollId")} />
+            <div className="flex min-w-0 items-start gap-4">
+              <Fingerprint
+                value={poll.definitionHash}
+                label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
+                size={64}
+              />
+              <div className="min-w-0">
+                <Hash value={poll.definitionHash} label={t("definitionHash")} />
+              </div>
+            </div>
+          </div>
           <ul className="m-0 grid list-none gap-2 p-0">
             <li>
               <a

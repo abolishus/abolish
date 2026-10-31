@@ -74,6 +74,17 @@ library DeliveryCheckLib {
         uint256 shift;
     }
 
+    /// How a posting's ballot is checked: by `checker`, under `qualified`,
+    /// its election's key sets' seats (the default panel's, then the author
+    /// panel's), and, with `rolling`, as the rolling call checks one,
+    /// against `root`, the root its sender supplies.
+    struct PostingBallot {
+        BallotCheck checker;
+        uint256[2] qualified;
+        bool rolling;
+        uint256 root;
+    }
+
     /// Why a decoded delivery record is refused, in checking order.
     enum Code {
         /// No definition with the record's hash is registered.
@@ -375,21 +386,37 @@ library DeliveryCheckLib {
 
     /// Checks a share posting against `ballot`, the record (0x0002) of the
     /// ballot it delivers, and returns the hashes it names. The ballot must
-    /// pass the whole ballot check, run by `checker`, under `qualified`, its
-    /// election's key sets' seats (the default panel's, then the author
-    /// panel's), membership proof included, though it is never admitted or
+    /// pass the whole ballot check, run as `pb` says, membership proof
+    /// included, though it is never admitted or
     /// emitted here (docs/spec/delivery.md, Direct submit): otherwise anyone
     /// could make up a ballot committing to a ciphertext of their choice and
-    /// archive it whole as a posting (T-17, T-52).
+    /// archive it whole as a posting (T-17, T-52). With `pb.rolling`, the
+    /// ballot is checked as the rolling call checks one, version 5 only,
+    /// its membership proof against `root`, the root its sender supplies
+    /// (docs/spec/contracts.md, Board, Delivery records (ballot version 5));
+    /// without, it is read as versions 1 to 4 only, so a rolling poll's
+    /// ballot is `unknown-version` and a fixed poll's registered root is
+    /// never replaced by a supplied one (T-04, T-25).
     function checkPosting(
         bytes calldata r,
         bytes calldata ballot,
         IBoardElections elections,
         IBoardTrustees trustees,
-        BallotCheck checker,
-        uint256[2] memory qualified
+        PostingBallot memory pb
     ) internal view returns (bytes32 definitionHash, bytes32 ballotHash) {
-        Head memory h = _head(r, 0, POSTING_TYPE, elections);
+        Head memory h = _posting(r, elections, trustees);
+        _bindBallot(r, ballot, elections, pb, h);
+        return (h.definitionHash, h.ballotHash);
+    }
+
+    /// A posting's own steps, before its ballot is read: the header, the
+    /// fields, the seat and `posting-length`.
+    function _posting(bytes calldata r, IBoardElections elections, IBoardTrustees trustees)
+        private
+        view
+        returns (Head memory h)
+    {
+        h = _head(r, 0, POSTING_TYPE, elections);
         uint256 s = h.shift;
         _uint(r, 0, M_AT + s, 32);
         if (r.length < CT_DH_AT + s) {
@@ -417,9 +444,6 @@ library DeliveryCheckLib {
         // per option, behind a 4-byte count, then the 16-byte tag.
         uint256 options = elections.parameters(h.definitionHash).optionCount;
         if (sealedLength != 4 + 64 * options + 16) revert DeliveryRefused(0, Code.PostingLength);
-
-        _bindBallot(r, ballot, elections, checker, qualified, h);
-        return (h.definitionHash, h.ballotHash);
     }
 
     /// A posting's ballot: it passes the whole ballot check, its ballot
@@ -430,12 +454,12 @@ library DeliveryCheckLib {
         bytes calldata r,
         bytes calldata ballot,
         IBoardElections elections,
-        BallotCheck checker,
-        uint256[2] memory qualified,
+        PostingBallot memory pb,
         Head memory h
     ) private view {
-        (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) =
-            checker.check(ballot, elections, qualified[0], qualified[1]);
+        (BallotCheckLib.Admitted memory a, BallotCheckLib.Layout memory l) = pb.rolling
+            ? pb.checker.checkRolling(ballot, elections, pb.root, pb.qualified[0], pb.qualified[1])
+            : pb.checker.check(ballot, elections, pb.qualified[0], pb.qualified[1]);
         // Both of the posting's names: its ballot hash binds the ballot's
         // definition, never the posting's own `definition_hash`, which must
         // be the same election, or the seat, key set and length judged above
@@ -469,7 +493,8 @@ library DeliveryCheckLib {
 
     /// The header and the election: type, then the election the record
     /// names, then its version, which ballot versions 1 to 3 fix at 1 and
-    /// ballot version 4 at 2 (docs/spec/delivery.md, Versions, Version 2);
+    /// ballot versions 4 and 5 at 2 (docs/spec/delivery.md, Versions,
+    /// Version 2);
     /// then the ballot hash, version 2's panel and the seat. As in the ballot
     /// check, the election is found before the version means anything.
     function _head(bytes calldata r, uint256 index, uint16 expected, IBoardElections elections)
@@ -517,7 +542,7 @@ library DeliveryCheckLib {
 
     /// The type, the election and the version, which every delivery record
     /// starts with. Returns whether the record is version 2, which ballot
-    /// version 4 fixes.
+    /// versions 4 and 5 fix.
     function _definition(
         bytes calldata r,
         uint256 index,
@@ -540,10 +565,14 @@ library DeliveryCheckLib {
         if (pinned == 0) revert DeliveryRefused(index, Code.DeliveryStray);
         // A ballot version the board doesn't know fixes delivery versions it
         // can't know either.
-        if (pinned > 4) {
+        if (pinned > 5) {
             _malformed(index, ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
         }
-        two = pinned == 4;
+        // Ballot version 5 keeps version 4's records (Delivery records
+        // (ballot version 5), Step 3), so a seat of either panel receipts,
+        // complains and forces what it owes in a rolling poll as in a fixed
+        // one (T-25, T-54).
+        two = pinned >= 4;
         if (version != (two ? 2 : 1)) {
             _malformed(index, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2);
         }

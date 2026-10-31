@@ -741,8 +741,9 @@ contract BoardTest is TestBase {
     /// The steps run in the spec's order (contracts.md, Delivery records):
     /// the election before the version, the version before the fields, the
     /// fields before the seat, the seat before the signature; a pinned
-    /// ballot version above 4 is `unknown-version` before `profile-mismatch`,
-    /// and ballot version 4 fixes version 2 (Delivery records (version 2)).
+    /// ballot version above 5 is `unknown-version` before `profile-mismatch`,
+    /// and ballot versions 4 and 5 fix version 2 (Delivery records (version
+    /// 2), Delivery records (ballot version 5)).
     function test_DeliveryCheckOrder() public {
         bytes memory highS = receiptHighS;
         // Labelled version 2, so framed as 165 bytes.
@@ -779,11 +780,17 @@ contract BoardTest is TestBase {
 
         p.ballotVersion = 5;
         _setParameters(h, p);
+        _refuse(_receiptsCall(receipt), mismatch, "receipt under ballot version 5");
+        _refuse(_complaintCall(complaint), mismatch, "complaint under ballot version 5");
+        _refuse(_postingCall(posting, alice), mismatch, "posting under ballot version 5");
+
+        p.ballotVersion = 6;
+        _setParameters(h, p);
         bytes memory unknown = _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2);
-        _refuse(_receiptsCall(receipt), unknown, "receipt under ballot version 5");
-        _refuse(_receiptsCall(v2HighS), unknown, "version 2 under ballot version 5");
-        _refuse(_complaintCall(complaint), unknown, "complaint under ballot version 5");
-        _refuse(_postingCall(posting, alice), unknown, "posting under ballot version 5");
+        _refuse(_receiptsCall(receipt), unknown, "receipt under ballot version 6");
+        _refuse(_receiptsCall(v2HighS), unknown, "version 2 under ballot version 6");
+        _refuse(_complaintCall(complaint), unknown, "complaint under ballot version 6");
+        _refuse(_postingCall(posting, alice), unknown, "posting under ballot version 6");
     }
 
     /// The seat's registered signing key decides: pointing seat 1's at seat
@@ -1965,8 +1972,8 @@ contract BoardTest is TestBase {
             "a batch as a root"
         );
         assertEq(_accept(_rootCall(honest)).length, 1, "the honest root, its slot still empty");
-        // Ballot version 4 fixes version 2, and a ballot version above 4
-        // fixes no root version the board reads.
+        // Ballot versions 4 and 5 fix version 2, and a ballot version above
+        // 5 fixes no root version the board reads.
         ElectionRegistry.Parameters memory p = elections.parameters(h);
         p.ballotVersion = 4;
         elections.set(h, p, new uint8[](0), new uint256[](0));
@@ -1979,8 +1986,15 @@ contract BoardTest is TestBase {
         elections.set(h, p, new uint8[](0), new uint256[](0));
         _refuse(
             _rootCall(_signedRoot(h, 2, 1, 3, leaves, signingSecrets[2])),
-            _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2),
+            _malformed(0, ElectionDefinitionLib.DecodeError.ProfileMismatch, 2),
             "ballot version 5"
+        );
+        p.ballotVersion = 6;
+        elections.set(h, p, new uint8[](0), new uint256[](0));
+        _refuse(
+            _rootCall(_signedRoot(h, 2, 1, 3, leaves, signingSecrets[2])),
+            _malformed(0, ElectionDefinitionLib.DecodeError.UnknownVersion, 2),
+            "ballot version 6"
         );
         // Canonical calldata only.
         _refuse(

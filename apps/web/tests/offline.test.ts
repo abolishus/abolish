@@ -92,6 +92,10 @@ function scope(site: Record<string, string> = {}, config: OfflineWorkerConfig = 
         if (cache === undefined) caches.set(name, (cache = new FakeCache(network)));
         return cache;
       },
+      // As a browser's does: a cache that isn't there matches nothing, and
+      // isn't made.
+      match: async (path: string, options: { cacheName: string }) =>
+        caches.get(options.cacheName)?.match(path),
       keys: async () => [...caches.keys()],
       delete: async (name: string) => caches.delete(name),
       has: async (name: string) => caches.has(name),
@@ -196,6 +200,19 @@ describe("the offline shell's worker", () => {
     expect([...s.caches.keys()].sort()).toEqual([CONFIG.cache, "someone-else"].sort());
     expect(s.self.registration.navigationPreload.enable).toHaveBeenCalledOnce();
     expect(s.self.clients.claim).toHaveBeenCalledOnce();
+  });
+
+  test("never brings back its cache once a successor has dropped it", async () => {
+    const s = await installed();
+    // The next worker's activation drops this one's cache before it claims
+    // the page, so this one still answers the page's requests meanwhile.
+    s.caches.delete(CONFIG.cache);
+    s.online(false);
+    expect((await s.page("/polls"))!.type).toBe("error");
+    await expect(s.request(STYLESHEET)).rejects.toThrow("Failed to fetch");
+    s.online(true);
+    expect((await s.request(FONTS[0]!))!.status).toBe(200);
+    expect([...s.caches.keys()]).toEqual([]);
   });
 
   test("passes every page through from the network, a server's error page included", async () => {

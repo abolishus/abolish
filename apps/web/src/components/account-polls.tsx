@@ -281,7 +281,7 @@ export function AccountPolls({
       );
     const link = (
       href: string,
-      words: "pollsFollowSetup" | "pollsPage" | "pollsResults" | "pollsStartNew",
+      words: "pollsAskAgain" | "pollsFollowSetup" | "pollsPage" | "pollsResults",
     ) => (
       <a href={href} aria-describedby={which} className={LINK}>
         {t(words)}
@@ -299,8 +299,9 @@ export function AccountPolls({
         </span>
       );
     if (p.state !== "failed") return null;
-    // Its reason ends "start a new poll": the way to do it is here, not at the list's top.
-    if (!p.retryable) return link("/account/polls/new", "pollsStartNew");
+    // Its reason ends with asking again as a new poll: the way to do it is
+    // here, starting from the poll's own words rather than an empty form.
+    if (!p.retryable) return link(`/account/polls/new?from=${p.id}`, "pollsAskAgain");
     return (
       <span className="flex flex-wrap gap-x-4 md:justify-end">
         <Button

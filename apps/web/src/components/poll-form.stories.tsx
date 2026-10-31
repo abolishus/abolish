@@ -327,6 +327,64 @@ export const WriteAndSave: Story = {
   },
 };
 
+// A poll that didn't open and can't be tried again, whose author asks it
+// again from their list (P2-29, the author's list's iteration 27).
+const NEVER_OPENED: PollWithDraft = {
+  summary: {
+    ...SUMMARY,
+    id: "ab".repeat(16),
+    state: "failed",
+    submittedAt: "2026-10-14T10:00:00.000Z",
+    failure: "open-timeout",
+  },
+  draft: { ...SAVED, closesAt: 1792195200n }, // 2026-10-17T00:00:00Z, before the stories' clock
+};
+
+export const AskAgain: Story = {
+  args: { client: fakeDrafts({ read: NEVER_OPENED }), from: "ab".repeat(16), onCreated: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    // The author's words are back, so asking again isn't typing it all again.
+    await expect(await canvas.findByRole("textbox", { name: "Title" })).toHaveValue(
+      "Harbor library hours",
+    );
+    await expect(canvas.getAllByRole("region", { name: /^Question \d$/ })).toHaveLength(2);
+    await expect(
+      canvas.getByDisplayValue("Which evenings should it stay open late?"),
+    ).toBeVisible();
+    // A new poll, not the old one: nothing saved yet, so no list to go back to.
+    await expect(canvas.getByRole("heading", { level: 1, name: "Ask a question" })).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "Back to your polls" })).toBeNull();
+    await expect(
+      canvas.getByText(
+        "Your words from the poll that didn't open are filled in. Choose when this one closes; only you can see it until you submit it.",
+      ),
+    ).toBeVisible();
+    // The old close was for a poll that never opened, and has passed: it is chosen anew.
+    await expect(canvas.getByLabelText("Closing date")).toHaveValue("");
+    await expect(canvas.getByLabelText("Closing time")).toHaveValue("");
+    fireEvent.change(canvas.getByLabelText("Closing date"), { target: { value: "2026-11-04" } });
+    fireEvent.change(canvas.getByLabelText("Closing time"), { target: { value: "10:00" } });
+    await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
+    await expect(await canvas.findByText("Your draft is saved.")).toBeVisible();
+    // Saved as a new draft with the old words, never as a change to the poll that failed.
+    await expect(writes(args.client)).toEqual([["create", undefined, SAVED]]);
+    await expect(args.onCreated).toHaveBeenCalledWith(NEW_ID);
+    await expect(canvas.getByText(/^Only you can see a draft/)).toBeVisible();
+  },
+};
+
+export const AskAgainFromAPollGone: Story = {
+  args: { client: fakeDrafts(), from: "ab".repeat(16) },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // The link promised a new poll: one that can't be read still starts one, empty.
+    await expect(await canvas.findByRole("textbox", { name: "Title" })).toHaveValue("");
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await expect(canvas.getByText(/^Only you can see a draft/)).toBeVisible();
+  },
+};
+
 export const TopicAndPlace: Story = {
   args: { client: fakeDrafts(), onCreated: fn() },
   play: async ({ canvasElement, args }) => {

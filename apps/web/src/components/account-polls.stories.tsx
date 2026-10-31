@@ -219,18 +219,19 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
     timedOut!.getByRole("button", { name: "Try again" }),
   );
   // A registered poll stays: nothing to retry or discard. Its reason ends
-  // "start a new poll", and the row has the way to, after the reason.
+  // with asking again as a new poll, and the row has the way to, after the
+  // reason, starting from the poll's own words (P2-29, iteration 27).
   await expect(registered!.getByText(/It will never take answers/)).toBeVisible();
   await expect(registered!.queryByRole("button")).toBeNull();
   await expect(
     registered!.getByRole("link", {
-      name: "Start a new poll",
+      name: "Ask it again",
       description: "Move the market to Saturdays?",
     }),
-  ).toHaveAttribute("href", "/account/polls/new");
+  ).toHaveAttribute("href", `/account/polls/new?from=${REGISTERED.id}`);
   await before(
-    registered!.getByText(/start a new poll\.$/),
-    registered!.getByRole("link", { name: "Start a new poll" }),
+    registered!.getByText(/ask your question again as a new poll, starting from what you wrote\.$/),
+    registered!.getByRole("link", { name: "Ask it again" }),
   );
   // A time is in the state's face and size, never the evidence's monospace.
   for (const item of items) {

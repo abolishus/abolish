@@ -886,6 +886,8 @@ export interface PollFormPageProps {
   readonly client: DraftsClient;
   /** The draft to edit; none for a new poll. */
   readonly id?: string | undefined;
+  /** For a new poll, one of the author's own whose words it starts with: one that didn't open and can't be tried again. */
+  readonly from?: string | undefined;
   /** Called once a new draft is saved, with its ID, so the page's address can name it. */
   readonly onCreated?: (id: string) => void;
   /** The account's profile, for the choice of whether it shows the poll; none to offer no choice. */
@@ -921,6 +923,7 @@ export interface PollFormPageProps {
 export function PollFormPage({
   client,
   id,
+  from,
   onCreated,
   profiles,
   challenge,
@@ -936,6 +939,8 @@ export function PollFormPage({
   // refuses in server-rendered markup (P2-19), and list keys are the
   // browser's own.
   const [form, setForm] = useState<PollForm | undefined>();
+  // Whether a new poll's words came from `from`, which the lede then says.
+  const [copied, setCopied] = useState(false);
   const [unavailable, setUnavailable] = useState<Unavailable | undefined>();
   const [errors, setErrors] = useState<readonly FieldError[]>([]);
   const [attempt, setAttempt] = useState(0);
@@ -983,6 +988,28 @@ export function PollFormPage({
     setUnshown(false);
     // The author's own clock, as the browser knows it: the form only exists in the browser.
     const zone = timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    setCopied(false);
+    if (id === undefined && from !== undefined && ID.test(from)) {
+      // The poll's words, not its closing time: chosen for a poll that never
+      // opened, it has often passed, and a new poll's close is chosen anew.
+      setForm(undefined);
+      setBusy(true);
+      let live = true;
+      client
+        .read(from)
+        .then(({ draft }) => {
+          if (!live) return;
+          setForm({ ...formOf(draft, zone), closesDate: "", closesTime: "" });
+          setCopied(true);
+        })
+        // The link promised a new poll, and an empty one still is: nothing
+        // was saved, so there is nothing to lose by starting from nothing.
+        .catch(() => live && setForm(newPollForm(zone)))
+        .finally(() => live && setBusy(false));
+      return () => {
+        live = false;
+      };
+    }
     setForm(id === undefined ? newPollForm(zone) : undefined);
     if (id === undefined) return setBusy(false);
     setBusy(true);
@@ -1009,7 +1036,7 @@ export function PollFormPage({
     return () => {
       live = false;
     };
-  }, [client, id, timeZone]);
+  }, [client, id, from, timeZone]);
 
   useEffect(() => {
     if (attempt > 0) summary.current?.focus();
@@ -1177,7 +1204,7 @@ export function PollFormPage({
       eyebrow={t(isNew ? "pollFormNewEyebrow" : "pollFormEyebrow")}
       title={t(isNew ? "pollFormNewTitle" : "pollFormEditTitle")}
       titleRef={heading}
-      lede={t("pollFormLede")}
+      lede={t(isNew && copied ? "pollFormCopiedLede" : "pollFormLede")}
     >
       {back === null ? null : <p className="m-0">{back}</p>}
       <noscript>

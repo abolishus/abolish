@@ -31,9 +31,10 @@ const meta = {
   args: {
     list: {
       polls: [
-        { kind: "poll", poll: poll(OPEN) },
+        { kind: "poll", poll: poll(OPEN), text: undefined },
         {
           kind: "poll",
+          text: undefined,
           poll: poll(SCHEDULED, {
             counting: "approval",
             opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
@@ -42,6 +43,7 @@ const meta = {
         },
         {
           kind: "poll",
+          text: undefined,
           poll: poll(CLOSED, {
             closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
           }),
@@ -153,6 +155,12 @@ export const QuestionByQuestion: Story = {
         ...meta.args.list.polls,
         {
           kind: "poll",
+          text: {
+            language: "en",
+            heading: "Riverside Park improvements",
+            question: "Should the park get more lighting?",
+            options: ["Yes", "No", "Not sure"],
+          },
           poll: poll(QUESTIONS, {
             version: 5,
             counting: "questions",
@@ -172,7 +180,7 @@ export const QuestionByQuestion: Story = {
     await expect(canvas.getByRole("radio", { name: "One choice 2" })).not.toBeChecked();
     await expect(canvas.getByText("1 of 5 polls on this page match.")).toBeVisible();
     await expect(shown(canvasElement)).toEqual([`/polls/${QUESTIONS}`]);
-    const row = canvas.getByRole("article");
+    const row = canvas.getByRole("article", { name: "Riverside Park improvements" });
     await expect(within(row).getByText("Question by question")).toBeVisible();
     await expect(within(row).getByText("Open")).toBeVisible();
   },

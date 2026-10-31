@@ -100,13 +100,16 @@ export const sendPollReport = createServerFn({ method: "POST" })
   .handler(({ data }) => opaque(() => reportPoll(api(), data.electionId, data.reason)));
 
 export const fetchPollList = createServerFn({ method: "GET" })
-  .inputValidator((after: unknown) => {
+  .inputValidator((input: unknown) => {
+    const { after, locale } = (input ?? {}) as Record<string, unknown>;
     // `""` starts the list; `undefined` is refused, so a call must say where it starts.
     if (after !== "" && !isElectionId(after))
       throw new TypeError("expected an election ID or an empty string");
-    return after;
+    // The page's language picks each poll's translation; one of ours only.
+    if (!isLocale(locale)) throw new TypeError("expected a locale");
+    return { after, locale };
   })
-  .handler(({ data }) => opaque(() => loadPollList(api(), data)));
+  .handler(({ data }) => opaque(() => loadPollList(api(), data.after, data.locale)));
 
 /**
  * A page of the stream, with the ballot client's address (`BALLOT_URL`)

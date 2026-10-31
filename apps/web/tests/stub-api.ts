@@ -166,16 +166,13 @@ export const definitions = new Map([
 ]);
 
 /**
- * What the stub lists for discovery, in order, as the API would: never the
- * hidden poll. Eighteen fillers, the typical poll and one the stub has lost
- * fill the first page, with the lost one last (so it is the page's cursor
- * but not shown); the swapped poll is on the second.
+ * Eighteen fillers, the typical poll and one the stub has lost fill the
+ * register's first page (`listed`, below).
  */
 export const FILLER = Array.from({ length: 18 }, (_, i) =>
   (i + 1).toString(16).padStart(2, "0").repeat(32),
 );
 export const LOST_ID = "13".repeat(32);
-export const listed = [...FILLER, ID, SWAPPED_ID, LOST_ID].sort();
 for (const id of FILLER)
   definitions.set(
     id,
@@ -295,6 +292,23 @@ export const displayTexts = new Map([
   [OPEN_MANY, TEXT_V2.encoding],
   [STREAM_BAD_TEXT, TEXT_V2.encoding],
 ]);
+/**
+ * What the stub lists for discovery, in order, as the API would: never the
+ * hidden poll. The fillers, the typical poll and the lost one fill the first
+ * page, with the lost one last (so it is the page's cursor but not shown);
+ * the swapped poll and the stream's four, with and without words to show,
+ * are on the second.
+ */
+export const listed = [
+  ...FILLER,
+  ID,
+  SWAPPED_ID,
+  LOST_ID,
+  STREAM_V5,
+  STREAM_V1,
+  STREAM_BAD_TEXT,
+  STREAM_NO_TEXT,
+].sort();
 /** The stream under `new`; `closing` is the same polls the other way round. */
 export const streamed = [STREAM_V5, STREAM_V1, STREAM_BAD_TEXT, STREAM_NO_TEXT, ...FILLER];
 export const BALLOT = "https://ballot.test/";

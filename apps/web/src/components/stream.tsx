@@ -260,7 +260,9 @@ function Narrowing({
   const t = useTranslate(catalogs);
   return (
     <details open={open} className="group">
-      <summary className="inline-flex min-h-12 cursor-pointer items-center gap-2 text-base font-semibold focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none">
+      {/* Padded, and pulled back by as much, so its focus ring clears the
+          chevron and the last word while the chevron keeps the column's edge. */}
+      <summary className="-mx-2 inline-flex min-h-12 cursor-pointer items-center gap-2 px-2 text-base font-semibold focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none">
         <ChevronDown
           aria-hidden="true"
           className="size-4 -rotate-90 transition-transform group-open:rotate-0 motion-reduce:transition-none"
@@ -589,7 +591,9 @@ export function StreamPage({
           <Narrowed sort={sort} filter={filter} />
         )}
       </div>
-      <section aria-labelledby="stream-title" className="grid content-start gap-6">
+      {/* A reading width: at desktop width a card the page's whole width
+          held its question and answers in its left half, beside an empty one. */}
+      <section aria-labelledby="stream-title" className="grid max-w-3xl content-start gap-6">
         <h2 id="stream-title" className="sr-only">
           {t("streamQuestions")}
         </h2>

@@ -221,6 +221,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
     countBoxes(canvasElement)[0]!,
   ])
     await expect(box.getBoundingClientRect().width).toBeLessThanOrEqual(576);
+  // The cards themselves keep a reading width rather than the page's, which
+  // left each card's right half empty at 1280px.
+  await expect(list.getAllByRole("article")[0]!.getBoundingClientRect().width).toBeLessThanOrEqual(
+    768,
+  );
 
   // The order is a link like the others; more comes only when asked for.
   const order = canvas.getByRole("navigation", { name: "Order" });
@@ -255,6 +260,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // The topics and the place are folded under one line, so a phone's first
   // question isn't two screens down; opening it shows both.
   const narrowing = canvas.getByText("Topic and place");
+  // Its focus ring clears the chevron and the last word.
+  await expect(getComputedStyle(narrowing).paddingInline).toBe("8px");
   await expect(canvas.getByRole("link", { name: "Transport" })).not.toBeVisible();
   await expect(canvas.getByRole("textbox", { name: "Place" })).not.toBeVisible();
   await userEvent.click(narrowing);

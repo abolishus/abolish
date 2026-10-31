@@ -43,13 +43,19 @@ function Sorts({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
   const t = useTranslate(catalogs);
   return (
     <nav aria-label={t("discoverSorts")} className="grid gap-3">
-      <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+      {/* Below `sm` the three share one row, each label wrapping in its own
+          box and the longest narrowing most: wrapped as whole links, the
+          third took a row alone. */}
+      <ul className="m-0 flex list-none gap-2 p-0 sm:flex-wrap">
         {STREAM_SORTS.map((option) => (
-          <li key={option}>
+          <li key={option} className="flex flex-auto sm:flex-none">
             <a
               href={streamHref(option, filter)}
               aria-current={option === sort ? "page" : undefined}
-              className={LINK}
+              className={cn(
+                LINK,
+                "w-full justify-center px-2 py-1 text-center text-pretty sm:w-auto sm:justify-start sm:px-4 sm:text-left",
+              )}
             >
               {t(SORT_LABEL[option])}
             </a>
@@ -283,7 +289,7 @@ function Answered({
   const t = useTranslate(catalogs);
   const titleId = useId();
   return (
-    <div className="grid gap-1 bg-muted/60 px-4 py-3 text-sm">
+    <div className="grid max-w-xl gap-1 bg-muted/60 px-4 py-3 text-sm">
       <p id={titleId} className="m-0 font-medium">
         {t("streamAnsweredSoFar")}
       </p>
@@ -335,21 +341,19 @@ export function StreamCard({
         aria-labelledby={titleId}
         className="grid gap-3 border border-dashed border-border p-5"
       >
+        {/* Everyday words, not the register's ID and "server": a visitor
+            here came for questions, and the poll's page has the detail. */}
         <h3 id={titleId} className="m-0 text-lg font-medium">
-          <a
-            className="font-mono underline underline-offset-4"
-            translate="no"
-            href={`/polls/${card.electionId}`}
-          >
-            {t("shortId", { prefix: card.electionId.slice(0, 16) })}
+          <a className="underline underline-offset-4" href={`/polls/${card.electionId}`}>
+            {t("streamUnreadable")}
           </a>
         </h3>
-        <p className="m-0 text-sm text-muted-foreground">
+        <p className="m-0 text-sm text-pretty text-muted-foreground">
           {t(
             card.problem === "undecodable"
-              ? "listUndecodable"
+              ? "streamUndecodable"
               : card.problem === "another-election"
-                ? "listMismatch"
+                ? "streamMismatch"
                 : "streamText",
           )}
         </p>
@@ -400,7 +404,7 @@ export function StreamCard({
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid max-w-xl gap-3">
           {explained && questions === 1 ? null : (
             <p className="m-0 text-sm text-pretty text-muted-foreground">
               {explained

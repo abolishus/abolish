@@ -378,8 +378,12 @@ export const esUS: Messages = {
   },
   streamPickFirst: "Estas respuestas son para la pregunta 1 de {count}.",
   streamNoBallot: "Responder desde esta página todavía no está disponible en este sitio.",
-  streamText:
-    "El texto de esta encuesta no se puede mostrar aquí. Su página tiene lo que este servidor guarda.",
+  streamUnreadable: "Esta encuesta no se puede mostrar aquí",
+  streamText: "No pudimos leer su pregunta. Su propia página tiene todo lo que guardamos de ella.",
+  streamUndecodable:
+    "Sus datos llegaron dañados, así que aquí no se puede confiar en su pregunta ni en sus respuestas. Su propia página explica más.",
+  streamMismatch:
+    "Sus datos pertenecen a otra encuesta, así que aquí no se puede confiar en su pregunta ni en sus respuestas. Su propia página explica más.",
   streamEmpty: "No hay preguntas abiertas en este momento",
   streamEmptyLede: "Cuando alguien haga una, aparecerá aquí.",
   streamMore: "Más preguntas",

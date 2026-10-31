@@ -2758,7 +2758,7 @@ const KB = 1024;
  * home the stream's cards beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 178, css: 40, fonts: 58 },
+  "/": { html: 10, js: 179, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 176, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 215, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },

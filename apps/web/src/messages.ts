@@ -374,7 +374,12 @@ const enUS = {
   },
   streamPickFirst: "These answers are for question 1 of {count}.",
   streamNoBallot: "Answering from this page isn't set up on this site yet.",
-  streamText: "This poll's text can't be shown here. Its page has what this server holds.",
+  streamUnreadable: "This poll can't be shown here",
+  streamText: "We couldn't read its question. Its own page has everything we hold about it.",
+  streamUndecodable:
+    "Its details came through damaged, so its question and answers can't be trusted here. Its own page says more.",
+  streamMismatch:
+    "Its details belong to a different poll, so its question and answers can't be trusted here. Its own page says more.",
   streamEmpty: "No open questions just now",
   streamEmptyLede: "When someone asks one, it shows up here.",
   streamMore: "More questions",

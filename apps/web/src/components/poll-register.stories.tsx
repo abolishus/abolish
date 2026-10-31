@@ -31,10 +31,16 @@ const meta = {
   args: {
     list: {
       polls: [
-        { kind: "poll", poll: poll(OPEN), text: undefined },
+        {
+          kind: "poll",
+          poll: poll(OPEN),
+          text: undefined,
+          answered: [{ tier: 0, answered: "1204" }],
+        },
         {
           kind: "poll",
           text: undefined,
+          answered: undefined,
           poll: poll(SCHEDULED, {
             counting: "approval",
             opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
@@ -44,6 +50,7 @@ const meta = {
         {
           kind: "poll",
           text: undefined,
+          answered: undefined,
           poll: poll(CLOSED, {
             closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
           }),
@@ -56,6 +63,7 @@ const meta = {
     after: undefined,
     filters: { status: undefined, counting: undefined },
     invalid: undefined,
+    phoneVerification: false,
   },
 } satisfies Meta<typeof PollRegister>;
 
@@ -80,6 +88,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(rows).toHaveLength(4);
   await expect(within(rows[0]!).getByText("Open")).toBeVisible();
   await expect(rows[0]).toHaveTextContent(/Closes January 8, 2026/);
+  await expect(rows[0]).toHaveTextContent(/Answered so far1,204 peopleTier 0 \(verified e-mail\)/);
+  await expect(rows[1]).not.toHaveTextContent(/Answered so far/);
   await expect(within(rows[1]!).getByText("Scheduled")).toBeVisible();
   await expect(rows[1]).toHaveTextContent(/Opens January 15, 2026/);
   // The status, then when it closed, without saying "Closed" twice.
@@ -161,6 +171,7 @@ export const QuestionByQuestion: Story = {
             question: "Should the park get more lighting?",
             options: ["Yes", "No", "Not sure"],
           },
+          answered: undefined,
           poll: poll(QUESTIONS, {
             version: 5,
             counting: "questions",

@@ -645,6 +645,8 @@ export type ListedPoll =
       readonly poll: PollView;
       /** Its words in the page's locale, checked against the definition; `undefined` if none can be shown. */
       readonly text: CardText | undefined;
+      /** How many have answered it so far, as a stream card's (`cardAnswered`); `undefined` if the read failed. */
+      readonly answered: CardAnswered | undefined;
     }
   | {
       readonly kind: "unavailable";
@@ -675,7 +677,8 @@ export interface PollList {
  * The API leaves out delisted and hidden polls (T-68); each listed poll's
  * definition is decoded and checked here as on its own page, and its display
  * text as a stream card's (src/server/stream-card.ts), so the list shows
- * nothing the poll page wouldn't (T-31, T-34, T-41). A poll stops being
+ * nothing the poll page wouldn't (T-31, T-34, T-41), and how many have
+ * answered it so far as a card's (`answeredOf`). A poll stops being
  * served between the listing and its definition only if the database lost
  * it, so it drops out of the page.
  */
@@ -687,11 +690,12 @@ export async function loadPollList(api: Api, after: string, locale: string): Pro
   const answers = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const [{ definition }, displayText] = await Promise.all([
+        const [{ definition }, displayText, answered] = await Promise.all([
           api.elections.getDefinition({ electionId }),
           displayTextOf(api, electionId),
+          answeredOf(api, electionId),
         ]);
-        return { electionId, definition, displayText };
+        return { electionId, definition, displayText, answered };
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;
@@ -708,6 +712,8 @@ export async function loadPollList(api: Api, after: string, locale: string): Pro
             kind: "poll",
             poll: view.poll,
             text: checkedText(view.poll, answer.definition, answer.displayText, locale),
+            answered:
+              answer.answered === undefined ? undefined : cardAnswered(view.poll, answer.answered),
           }
         : { kind: "unavailable", electionId: answer.electionId, problem: view.problem },
     );

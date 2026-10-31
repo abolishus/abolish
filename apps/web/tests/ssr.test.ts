@@ -1584,6 +1584,29 @@ describe("poll list", () => {
     expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(20);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(20);
+    expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(20);
+  });
+
+  // P2-19 part 17: how many have answered each poll on the register.
+  test("says how many have answered each poll so far, tier by tier, or nothing when the read fails", async () => {
+    const html = await (await get(`/polls?after=${LOST_ID}`)).text();
+    const row = (id: string) =>
+      (html.split(/<article\b/).find((part) => part.includes(`href="/polls/${id}"`)) ?? "").replace(
+        /<[^>]+>/g,
+        "|",
+      );
+    // Each tier the definition names on its own line, one with none served
+    // at 0; the API's count for a tier it doesn't name is left out (T-01).
+    expect(row(STREAM_V5)).toMatch(
+      /Answered so far\|+1,204 people\|+Tier 0 \(verified e-mail\)\|+0 people\|+Tier 2 \(document-verified\)\|/,
+    );
+    expect(row(STREAM_V5)).not.toContain("Tier 1");
+    expect(row(STREAM_V5)).not.toMatch(/\b7 people/);
+    // A failed read shows no count, and the row stays.
+    expect(row(STREAM_V1)).toContain("Should the park stay open late?");
+    expect(row(STREAM_V1)).not.toContain("Answered so far");
+    // A definition that names another election shows nothing from it, no count included (T-34).
+    expect(row(SWAPPED_ID)).not.toContain("Answered so far");
   });
 
   test("asks the API for nothing of the visitor's (T-10)", async () => {

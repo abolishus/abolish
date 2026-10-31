@@ -1,9 +1,10 @@
 import { cn, Fingerprint, useTranslate } from "@abolishus/ui";
 import { useId } from "react";
 
-import { catalogs } from "../messages.ts";
+import { catalogs, tierMessage } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll } from "../server/load.ts";
+import type { CardAnswered } from "../stream.ts";
 import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./when.tsx";
 
@@ -34,7 +35,40 @@ function Status({ poll, asOf }: { poll: PollView; asOf: Instant }) {
   );
 }
 
-function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
+/**
+ * How many have answered so far, one line per tier the definition names, as
+ * a stream card says it: the board's count of distinct voters, never a
+ * result and never one figure across tiers (T-01).
+ */
+function Answered({
+  answered,
+  phoneVerification,
+}: {
+  answered: CardAnswered;
+  phoneVerification: boolean;
+}) {
+  const t = useTranslate(catalogs);
+  return (
+    <ul className="m-0 grid list-none gap-1 p-0 text-sm">
+      {answered.map(({ tier, answered: count }) => (
+        <li key={tier} className="grid">
+          <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>
+          <span className="text-muted-foreground">{t(tierMessage(tier, phoneVerification))}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Row({
+  entry,
+  asOf,
+  phoneVerification,
+}: {
+  entry: ListedPoll;
+  asOf: Instant;
+  phoneVerification: boolean;
+}) {
   const t = useTranslate(catalogs);
   const titleId = useId();
   const electionId = idOf(entry);
@@ -50,7 +84,7 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
             their own language and direction, with its ID under them (T-34,
             T-41); by its ID alone otherwise. */}
         {text === undefined ? (
-          <h3 id={titleId} className="m-0 text-lg leading-snug font-medium md:col-span-5">
+          <h3 id={titleId} className="m-0 text-lg leading-snug font-medium md:col-span-4">
             <a
               className="font-mono underline underline-offset-4"
               translate="no"
@@ -60,7 +94,7 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
             </a>
           </h3>
         ) : (
-          <div className="grid min-w-0 gap-1 md:col-span-5">
+          <div className="grid min-w-0 gap-1 md:col-span-4">
             <h3
               id={titleId}
               lang={text.language}
@@ -84,8 +118,8 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
           />
         </span>
         {entry.kind === "poll" ? (
-          <dl className="col-span-2 m-0 grid gap-4 sm:grid-cols-2 md:col-span-6 md:grid-cols-6 md:gap-x-6">
-            <div className="grid content-start gap-1 md:col-span-3">
+          <dl className="col-span-2 m-0 grid gap-4 sm:grid-cols-2 md:col-span-7 md:grid-cols-7 md:gap-x-6">
+            <div className="grid content-start gap-1 md:col-span-2">
               <dt className={CELL_TERM}>{t("listCounting")}</dt>
               <dd className="m-0 grid gap-1 text-sm">
                 <span>{t(COUNTING_LABEL[entry.poll.counting])}</span>
@@ -100,9 +134,18 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
                 <Status poll={entry.poll} asOf={asOf} />
               </dd>
             </div>
+            {/* A failed read shows no count, as on a stream card. */}
+            {entry.answered === undefined ? null : (
+              <div className="grid content-start gap-1 md:col-span-2">
+                <dt className={CELL_TERM}>{t("streamAnsweredSoFar")}</dt>
+                <dd className="m-0">
+                  <Answered answered={entry.answered} phoneVerification={phoneVerification} />
+                </dd>
+              </div>
+            )}
           </dl>
         ) : (
-          <p className="col-span-2 m-0 text-sm text-muted-foreground md:col-span-6">
+          <p className="col-span-2 m-0 text-sm text-muted-foreground md:col-span-7">
             {t(entry.problem === "undecodable" ? "listUndecodable" : "listMismatch")}
           </p>
         )}
@@ -114,18 +157,21 @@ function Row({ entry, asOf }: { entry: ListedPoll; asOf: Instant }) {
 /**
  * Listed polls as rows of the register, under one set of column heads: the
  * poll, in its own words where they can be shown and by its ID, its counting
- * rule and its status, read from the definition's
+ * rule, its status, read from the definition's
  * times at `asOf` (the server's clock when it loaded them, so the page and
- * its hydration agree).
+ * its hydration agree), and how many have answered it so far, with Tier 0
+ * named by the deployment's phone setting (`phoneVerification`).
  */
 export function PollRows({
   polls,
   asOf,
   label,
+  phoneVerification,
 }: {
   polls: readonly ListedPoll[];
   asOf: Instant;
   label: string;
+  phoneVerification: boolean;
 }) {
   const t = useTranslate(catalogs);
   return (
@@ -134,13 +180,14 @@ export function PollRows({
         aria-hidden="true"
         className="hidden grid-cols-12 gap-x-6 border-y border-foreground py-3 md:grid"
       >
-        <span className={cn(COLUMN_HEAD, "col-span-5")}>{t("listPoll")}</span>
-        <span className={cn(COLUMN_HEAD, "col-span-3")}>{t("listCounting")}</span>
+        <span className={cn(COLUMN_HEAD, "col-span-4")}>{t("listPoll")}</span>
+        <span className={cn(COLUMN_HEAD, "col-span-2")}>{t("listCounting")}</span>
         <span className={cn(COLUMN_HEAD, "col-span-3")}>{t("listStatus")}</span>
+        <span className={cn(COLUMN_HEAD, "col-span-2")}>{t("streamAnsweredSoFar")}</span>
       </div>
       <ol aria-label={label} className="m-0 list-none border-t border-foreground p-0 md:border-t-0">
         {polls.map((entry) => (
-          <Row key={idOf(entry)} entry={entry} asOf={asOf} />
+          <Row key={idOf(entry)} entry={entry} asOf={asOf} phoneVerification={phoneVerification} />
         ))}
       </ol>
     </div>

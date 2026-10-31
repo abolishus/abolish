@@ -832,6 +832,7 @@ describe("the public log", () => {
     });
     const d = await refilePoll(app, id, { tags: {}, reason: "misfiled", moderator: "mod-2" });
     const e = await moderate(app, id, { action: "restore", reason: "error", moderator: "mod-1" });
+    const [first] = await readPublicModerationLog(app, a.seq - 1n, 1);
     // The log's counts take each refiling as one, beside the decisions.
     expect(await readPublicModerationCounts(app)).toEqual({
       ...counted,
@@ -839,6 +840,8 @@ describe("the public log", () => {
       restore: counted.restore + 1,
       refile: counted.refile + 3,
       total: counted.total + 5,
+      // Unchanged unless these are the log's first decisions.
+      since: counted.since ?? first!.decidedAt,
     });
     const log = await readPublicModerationLog(app, a.seq - 1n, MAX_MODERATION_PAGE);
     const at = (seq: bigint) => log.find((x) => x.seq === seq)?.decidedAt;

@@ -500,6 +500,7 @@ export const LOG_COUNTS = {
   restore: "3",
   refile: "1",
   total: "11",
+  since: "2026-09-01T08:30:00.000Z",
 };
 
 /**

@@ -1300,8 +1300,11 @@ describe("moderation (T-68)", () => {
     await moderate(app, a.id, { action: "restore", reason: "error", moderator: "mod-secret" });
     const now = await counts();
     expect(Object.keys(now).sort()).toEqual(
-      ["delist", "hide", "hideProfile", "refile", "restore", "total"].sort(),
+      ["delist", "hide", "hideProfile", "refile", "restore", "since", "total"].sort(),
     );
+    // The log's first decision's time, which these three come after.
+    expect(now["since"]).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+    if (was["since"] !== undefined) expect(now["since"]).toBe(was["since"]);
     const grew = (key: string) => BigInt(now[key]!) - BigInt(was[key]!);
     expect(["delist", "hide", "hideProfile", "restore", "refile", "total"].map(grew)).toEqual([
       1n,
@@ -1313,15 +1316,18 @@ describe("moderation (T-68)", () => {
     ]);
     // `total` is every entry the log serves.
     let served = 0;
+    const times: number[] = [];
     for (let after = "0"; ;) {
       const page = (await json(await get("/moderation/log", { after, limit: "256" })))[
         "entries"
-      ] as { seq: string }[];
+      ] as { seq: string; decidedAt: string }[];
       served += page.length;
+      times.push(...page.map((e) => Date.parse(e.decidedAt)));
       if (page.length < 256) break;
       after = page.at(-1)!.seq;
     }
     expect(now["total"]).toBe(String(served));
+    expect(Date.parse(now["since"]!)).toBe(Math.min(...times));
     expect(JSON.stringify(now)).not.toContain("mod-");
     expect((await get("/moderation/log/counts", { limit: "1" })).status).toBe(400);
   });

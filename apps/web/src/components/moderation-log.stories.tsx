@@ -57,7 +57,15 @@ const meta = {
         },
       ],
       // The whole log's, beyond this page.
-      counts: { delist: 21, hide: 9, "hide-profile": 3, restore: 7, refile: 8, total: 48 },
+      counts: {
+        delist: 21,
+        hide: 9,
+        "hide-profile": 3,
+        restore: 7,
+        refile: 8,
+        total: 48,
+        since: "2026-09-01",
+      },
     },
     before: undefined,
     next: undefined,
@@ -115,8 +123,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(filter).getByRole("radio", { name: "Refiled 2" })).toBeInTheDocument();
   await expect(canvas.queryByText(/decisions on this page took this action/)).toBeNull();
   // The whole log's counts by action, beyond the page, and the page's place in it.
-  const tally = canvas.getByRole("figure", { name: "The whole log: 48 decisions, by action" });
+  const tally = canvas.getByRole("figure", {
+    name: "The whole log since September 1, 2026: 48 decisions, by action",
+  });
   const counted = within(tally).getAllByRole("listitem");
+  // With every action shown, no bar is marked as the filter's.
+  await expect(tally.querySelector("[aria-current]")).toBeNull();
   await expect(counted.map((row) => row.textContent)).toEqual([
     "Delisted21",
     "Text hidden9",
@@ -200,6 +212,18 @@ export const FilteredToNone: Story = {
     // The chosen action stays offered, so it can be seen and cleared.
     const filter = canvas.getByRole("radiogroup", { name: "Action" });
     await expect(within(filter).getByRole("radio", { name: "Delisted 0" })).toBeChecked();
+    // The whole log's count of the chosen action is marked, in words as well as colour.
+    const counted = within(canvas.getByRole("figure")).getAllByRole("listitem");
+    await expect(counted.map((row) => row.getAttribute("aria-current"))).toEqual([
+      "true",
+      null,
+      null,
+      null,
+      null,
+    ]);
+    await expect(counted[0]).toHaveTextContent("DelistedShown below21");
+    await expect(counted[0]!.querySelector("rect.fill-primary")).not.toBeNull();
+    await expect(counted[1]!.querySelector("rect.fill-primary")).toBeNull();
     await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
       "href",
       "/moderation",
@@ -211,7 +235,15 @@ export const Empty: Story = {
   args: {
     log: {
       entries: [],
-      counts: { delist: 0, hide: 0, "hide-profile": 0, restore: 0, refile: 0, total: 0 },
+      counts: {
+        delist: 0,
+        hide: 0,
+        "hide-profile": 0,
+        restore: 0,
+        refile: 0,
+        total: 0,
+        since: undefined,
+      },
     },
   },
   play: async ({ canvasElement }) => {

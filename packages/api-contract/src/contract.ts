@@ -655,7 +655,7 @@ const getModerationCounts = oc
     path: "/moderation/log/counts",
     summary: "How many decisions the public moderation log holds, by action",
     description:
-      "The whole of `GET /moderation/log` counted by what each decision did: `delist` and `hide` about polls, `hideProfile` about creator profiles, `restore` of either, and `refile`, with `total` their sum. They are read from one snapshot of the log, so they agree with each other; a page of the log read in another request may hold a decision made since. Counts are decimal strings. Like the log, they name no moderator, reporter or account (T-10), and anyone copying the log can recount them (T-68).",
+      "The whole of `GET /moderation/log` counted by what each decision did: `delist` and `hide` about polls, `hideProfile` about creator profiles, `restore` of either, and `refile`, with `total` their sum, and `since`, when the earliest of them was made by the database's clock (absent while the log is empty). They are read from one snapshot of the log, so they agree with each other; a page of the log read in another request may hold a decision made since. Counts are decimal strings. Like the log, they name no moderator, reporter or account (T-10), and anyone copying the log can recount them (T-68).",
     tags: ["moderation"],
   })
   .input(z.strictObject({}))
@@ -667,6 +667,7 @@ const getModerationCounts = oc
       restore: U64,
       refile: U64,
       total: U64,
+      since: z.optional(Timestamp),
     }),
   );
 

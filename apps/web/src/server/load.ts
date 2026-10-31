@@ -643,8 +643,14 @@ export async function loadBoardPage(
 
 export type ModerationLog = Awaited<ReturnType<Api["moderation"]["getLog"]>>;
 
-/** How many decisions the whole log holds, by what the log page's filter calls them. */
-export type LogCounts = Readonly<Record<LogAction, number>> & { readonly total: number };
+/**
+ * How many decisions the whole log holds, by what the log page's filter calls
+ * them, and the UTC day (`YYYY-MM-DD`) of its earliest, absent while it holds none.
+ */
+export type LogCounts = Readonly<Record<LogAction, number>> & {
+  readonly total: number;
+  readonly since: string | undefined;
+};
 
 /** A page of the moderation log, with the whole log's counts when they could be read. */
 export type ModerationLogPage = ModerationLog & { readonly counts: LogCounts | undefined };
@@ -664,9 +670,10 @@ export async function loadModerationLog(api: Api, before: string): Promise<Moder
 }
 
 /**
- * The log's counts, or `undefined` when the read fails or its figures don't
- * add up to its total: the counts are optional on the page, as a poll's tags
- * are, and a total the parts contradict is shown nowhere (T-68).
+ * The log's counts, or `undefined` when the read fails, its figures don't
+ * add up to its total, or it gives a first decision's day for an empty log or
+ * none for a full one: the counts are optional on the page, as a poll's tags
+ * are, and figures that contradict each other are shown nowhere (T-68).
  */
 async function countsOf(api: Api): Promise<LogCounts | undefined> {
   let served;
@@ -684,7 +691,12 @@ async function countsOf(api: Api): Promise<LogCounts | undefined> {
   };
   const total = Number(served.total);
   const sum = Object.values(counts).reduce((a, b) => a + b, 0);
-  return Number.isSafeInteger(sum) && sum === total ? { ...counts, total } : undefined;
+  // The contract's timestamp is UTC with milliseconds, so its first ten
+  // characters are its day.
+  const since = served.since?.slice(0, 10);
+  return Number.isSafeInteger(sum) && sum === total && (total === 0) === (since === undefined)
+    ? { ...counts, total, since }
+    : undefined;
 }
 
 /**

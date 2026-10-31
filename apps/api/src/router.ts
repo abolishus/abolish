@@ -538,6 +538,7 @@ export const router = os.router({
         restore: String(counts.restore),
         refile: String(counts.refile),
         total: String(counts.total),
+        ...(counts.since === undefined ? {} : { since: counts.since.toISOString() }),
       };
     }),
     getStatus: os.moderation.getStatus.handler(async ({ input, context, errors }) => {

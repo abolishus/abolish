@@ -14,7 +14,7 @@
 // the notice each decision and rejected appeal queues for the author
 // (src/account-notices.ts).
 
-import { and, asc, desc, eq, gt, isNull, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, min, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { queueNotice } from "./account-notices.ts";
@@ -344,6 +344,8 @@ export interface PublicModerationCounts {
   readonly restore: number;
   readonly refile: number;
   readonly total: number;
+  /** When the earliest of these decisions was made, by the database's clock; `undefined` while the log is empty. */
+  readonly since: Date | undefined;
 }
 
 /** The whole public log's `PublicModerationCounts`, as `GET /moderation/log/counts` serves them. */
@@ -352,14 +354,22 @@ export async function readPublicModerationCounts(client: Sql): Promise<PublicMod
   const [polls, profiles, refilings] = await drizzle({ client }).transaction(
     async (tx) => [
       await tx
-        .select({ action: moderationActions.action, n: count })
+        .select({
+          action: moderationActions.action,
+          n: count,
+          first: min(moderationActions.decidedAt),
+        })
         .from(moderationActions)
         .groupBy(moderationActions.action),
       await tx
-        .select({ action: profileModerationActions.action, n: count })
+        .select({
+          action: profileModerationActions.action,
+          n: count,
+          first: min(profileModerationActions.decidedAt),
+        })
         .from(profileModerationActions)
         .groupBy(profileModerationActions.action),
-      await tx.select({ n: count }).from(pollTagActions),
+      await tx.select({ n: count, first: min(pollTagActions.decidedAt) }).from(pollTagActions),
     ],
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
@@ -374,9 +384,15 @@ export async function readPublicModerationCounts(client: Sql): Promise<PublicMod
     restore: of(polls, "restore") + of(profiles, "restore"),
     refile: refilings[0]?.n ?? 0,
   };
+  // From the same snapshot as the counts, so `since` is the first of the
+  // decisions they count. An empty table's `min` is null.
+  const firsts = [...polls, ...profiles, ...refilings].flatMap((r) =>
+    r.first === null ? [] : [r.first.getTime()],
+  );
   return {
     ...counts,
     total: counts.delist + counts.hide + counts.hideProfile + counts.restore + counts.refile,
+    since: firsts.length === 0 ? undefined : new Date(Math.min(...firsts)),
   };
 }
 

@@ -15,7 +15,7 @@ import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
 import type { LogCounts, ModerationLogPage as Log } from "../server/load.ts";
-import { formatUtc } from "./format.ts";
+import { formatUtc, formatUtcDay } from "./format.ts";
 import { Bar } from "./poll-results.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { FilterGroup } from "./filter-group.tsx";
@@ -199,10 +199,20 @@ function Row({ entry }: { entry: Entry }) {
 
 /**
  * The whole log's decisions by action, as the filter names them, from the
- * API's counts rather than the page in hand: a reader sees how often each
- * action was taken without paging through the log (T-68).
+ * API's counts rather than the page in hand, since the log's first decision:
+ * a reader sees how often each action was taken, and over how long, without
+ * paging through the log (T-68). The action the filter shows is marked in
+ * words as well as by its bar's colour.
  */
-function LogTally({ counts }: { counts: LogCounts }) {
+function LogTally({
+  counts,
+  since,
+  chosen,
+}: {
+  counts: LogCounts;
+  since: string;
+  chosen: LogAction | undefined;
+}) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const number = new Intl.NumberFormat(locale);
@@ -211,19 +221,29 @@ function LogTally({ counts }: { counts: LogCounts }) {
       <figcaption
         id="log-counts"
         className="font-mono text-xs tracking-wide text-muted-foreground uppercase"
+        // A day in the locale's words, which server and browser can word apart.
+        suppressHydrationWarning
       >
-        {t("moderationCounts", { count: counts.total })}
+        {t("moderationCounts", { count: counts.total, since: formatUtcDay(locale, since) })}
       </figcaption>
       <ol className="m-0 grid list-none border-t border-foreground p-0">
         {LOG_ACTIONS.map((a) => (
           <li
             key={a}
+            aria-current={a === chosen ? "true" : undefined}
             className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 border-b border-border py-3 sm:grid-cols-[12rem_minmax(0,1fr)_5rem]"
           >
-            <span className="text-sm">{t(ACTION_TEXT[a])}</span>
+            {a === chosen ? (
+              <span className="grid text-sm">
+                <span className="font-semibold">{t(ACTION_TEXT[a])}</span>
+                <span className="text-xs text-muted-foreground">{t("moderationCountsShown")}</span>
+              </span>
+            ) : (
+              <span className="text-sm">{t(ACTION_TEXT[a])}</span>
+            )}
             {/* The bar after the count on a phone, between them otherwise. */}
             <span className="order-last col-span-full grid sm:order-none sm:col-span-1">
-              <Bar share={counts[a] / counts.total} lead={false} />
+              <Bar share={counts[a] / counts.total} lead={a === chosen} />
             </span>
             <span className="text-end font-mono text-sm tabular-nums">
               {number.format(counts[a])}
@@ -293,8 +313,8 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
           </p>
         }
       >
-        {log.counts === undefined || log.counts.total === 0 ? null : (
-          <LogTally counts={log.counts} />
+        {log.counts?.since === undefined ? null : (
+          <LogTally counts={log.counts} since={log.counts.since} chosen={only} />
         )}
         {log.entries.length === 0 ? (
           <p className="m-0 text-lg">{t("moderationEmpty")}</p>

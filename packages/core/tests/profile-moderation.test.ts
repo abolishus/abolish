@@ -583,16 +583,20 @@ describe("the public log's counts", () => {
   /** The counts by reading the whole log, page by page, as a copier would. */
   async function tallied() {
     const counts = { delist: 0, hide: 0, hideProfile: 0, restore: 0, refile: 0, total: 0 };
+    let since: Date | undefined;
     for (let after = 0n; ;) {
       const page = await readPublicModerationLog(app, after, MAX_MODERATION_PAGE);
       for (const e of page) {
+        // The earliest time, not the lowest number's: each decision reads
+        // the clock in its own transaction, so the two orders can differ.
+        if (since === undefined || e.decidedAt < since) since = e.decidedAt;
         counts.total++;
         if (e.target === "refiling") counts.refile++;
         else if (e.action === "restore") counts.restore++;
         else if (e.target === "profile") counts.hideProfile++;
         else counts[e.action]++;
       }
-      if (page.length < MAX_MODERATION_PAGE) return counts;
+      if (page.length < MAX_MODERATION_PAGE) return { ...counts, since };
       after = page.at(-1)!.seq;
     }
   }
@@ -643,7 +647,7 @@ describe("the public log's counts", () => {
   test("name no moderator, account or handle", async () => {
     const served = JSON.stringify(await readPublicModerationCounts(app));
     expect(Object.keys(JSON.parse(served)).sort()).toEqual(
-      ["delist", "hide", "hideProfile", "refile", "restore", "total"].sort(),
+      ["delist", "hide", "hideProfile", "refile", "restore", "since", "total"].sort(),
     );
     expect(served).not.toContain("mod-");
   });

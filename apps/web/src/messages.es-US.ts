@@ -1006,9 +1006,10 @@ export const esUS: Messages = {
   moderationActionNone: "Ninguna decisión de esta página tomó esta acción.",
   moderationActionEarlier: "Las decisiones anteriores pueden tener alguna.",
   moderationCounts: {
-    one: "Todo el registro: {count} decisión, por acción",
-    other: "Todo el registro: {count} decisiones, por acción",
+    one: "Todo el registro desde el {since}: {count} decisión, por acción",
+    other: "Todo el registro desde el {since}: {count} decisiones, por acción",
   },
+  moderationCountsShown: "Se muestra abajo",
   moderationPageOfLog: {
     one: "Esta página contiene {shown} de {count} decisión del registro.",
     other: "Esta página contiene {shown} de las {count} decisiones del registro.",

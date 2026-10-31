@@ -2254,7 +2254,8 @@ describe("moderation log", () => {
       .slice(from, html.indexOf("</figure>", from))
       .replace(/<[^>]+>/g, " ")
       .replace(/\s+/g, " ");
-    expect(tally).toContain("The whole log: 11 decisions, by action");
+    expect(tally).toContain("The whole log since September 1, 2026: 11 decisions, by action");
+    expect(tally).not.toContain("Shown below");
     expect(tally).toContain("Delisted 4");
     expect(tally).toContain("Text hidden 2");
     expect(tally).toContain("Profile hidden 1");
@@ -2265,13 +2266,50 @@ describe("moderation log", () => {
     );
     // An earlier page counts the same whole log, and an empty one says nothing of its place.
     const earlier = await (await get("/moderation?before=5")).text();
-    expect(earlier).toContain("The whole log: 11 decisions");
+    expect(earlier).toContain("The whole log since September 1, 2026: 11 decisions");
     expect(earlier).not.toContain("This page holds");
+  });
+
+  test("marks the filtered action's count among the whole log's", async () => {
+    const html = await (await get("/moderation?action=restore")).text();
+    const from = html.indexOf('<figure aria-labelledby="log-counts"');
+    const rows = html
+      .slice(from, html.indexOf("</figure>", from))
+      .split("<li")
+      .slice(1)
+      .map((row) => ({
+        current: row.startsWith(' aria-current="true"'),
+        lead: row.includes("fill-primary"),
+        text: row
+          .replace(/^[^>]*>/, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
+      }));
+    expect(rows).toEqual([
+      { current: false, lead: false, text: "Delisted 4" },
+      { current: false, lead: false, text: "Text hidden 2" },
+      { current: false, lead: false, text: "Profile hidden 1" },
+      { current: true, lead: true, text: "Restored Shown below 3" },
+      { current: false, lead: false, text: "Refiled 1" },
+    ]);
   });
 
   test.each([
     ["a failed read", undefined],
     ["parts that don't add up to the total", { ...LOG_COUNTS, total: "12" }],
+    [
+      "decisions with no first one's time",
+      Object.fromEntries(Object.entries(LOG_COUNTS).filter(([key]) => key !== "since")),
+    ],
+    [
+      "a first decision's time for an empty log",
+      {
+        ...LOG_COUNTS,
+        ...Object.fromEntries(Object.keys(LOG_COUNTS).map((k) => [k, "0"])),
+        since: LOG_COUNTS.since,
+      },
+    ],
   ])("leaves the counts out after %s, and keeps the log", async (_, counts) => {
     stub.logCounts = counts;
     try {

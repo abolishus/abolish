@@ -533,6 +533,9 @@ export const esUS: Messages = {
   resultsClaim:
     "Estos son los resultados que nuestro servidor lee del conteo publicado en el tablero público de la encuesta. Nada en esta página los comprueba por ti: cualquiera puede volver a contar el tablero y comparar.",
   resultsCheck: "Comprobar el conteo en el tablero",
+  resultsUpFront:
+    "Todo lo de abajo es lo que nuestro servidor dice de esta encuesta. Cualquiera puede volver a contar su tablero sin nosotros y comparar.",
+  resultsUpFrontLink: "Cómo comprobarlo tú",
   resultsSeeAll: "Ver todos los resultados",
   resultsPageTitle: "Resultados",
   resultsPageEyebrow: "Encuesta {prefix}… · Resultados",

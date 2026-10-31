@@ -452,8 +452,9 @@ const STATE_TEXT = {
  * counted in several cells, each cell's own results. As on the poll page,
  * these are the results our server reads from the openings on the board,
  * not the verifier's verdict, so the page says so and links to checking
- * them (T-34). It is headed by the poll's facts as the poll page states
- * them, and marked counted only once it has closed with every tier's every
+ * them (T-34), first under its facts and again with the ways to check
+ * them. It is headed by the poll's facts as the poll page states them, and
+ * marked counted only once it has closed with every tier's every
  * question read, as the register marks it; the poll's ID and definition
  * hash, which a recount starts from, are with the ways to check it, after
  * the board's head as the poll page states it.
@@ -502,6 +503,16 @@ export function PollResultsPage({
           </StatusMark>
         </div>
         <PollFacts poll={poll} phoneVerification={phoneVerification} />
+        {/* The mockup's claim under the facts: before any figure, the page
+            says it shows our server's word, and links down to how to check
+            it without us (T-34). No verifier verdict is claimed, since none
+            of our boards is anchored yet (T-53). */}
+        <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
+          {t("resultsUpFront")}{" "}
+          <a className="text-foreground underline underline-offset-4" href="#results-check-title">
+            {t("resultsUpFrontLink")}
+          </a>
+        </p>
       </PageHeader>
 
       {read === undefined ? (

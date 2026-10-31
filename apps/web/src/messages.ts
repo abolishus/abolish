@@ -521,6 +521,9 @@ const enUS = {
   resultsClaim:
     "These are the results our server reads from the count published on the poll's public board. Nothing on this page checks them for you: anyone can count the board again and compare.",
   resultsCheck: "Check the count on the board",
+  resultsUpFront:
+    "Everything below is what our server says about this poll. Anyone can count its board again without us, and compare.",
+  resultsUpFrontLink: "How to check it yourself",
   resultsSeeAll: "See the full results",
   resultsPageTitle: "Results",
   resultsPageEyebrow: "Poll {prefix}… · Results",

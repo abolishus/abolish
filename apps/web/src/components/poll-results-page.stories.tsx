@@ -121,6 +121,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const facts = canvas.getAllByRole("definition");
   await expect(facts[0]).toHaveTextContent("Tier 0 (verified e-mail)Tier 2 (document-verified)");
   await expect(facts[3]).toHaveTextContent("2 questions, 5 options");
+  // Before any figure, the page says whose word it is and links down to checking it (T-34).
+  await expect(canvas.getByText(/^Everything below is what our server says/)).toBeVisible();
+  const upFront = canvas.getByRole("link", { name: "How to check it yourself" });
+  await expect(upFront).toHaveAttribute("href", "#results-check-title");
+  await expect(canvasElement.querySelector("#results-check-title")).toHaveTextContent(
+    "Check it yourself",
+  );
   const tabs = canvas.getByRole("tablist", { name: "Results by group" });
   const tier0 = within(tabs).getByRole("tab", { name: /Tier 0 \(verified e-mail\)/ });
   await expect(tier0).toHaveAttribute("aria-selected", "true");

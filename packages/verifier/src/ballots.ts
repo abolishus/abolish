@@ -332,6 +332,11 @@ export function ballotChecks(
   readonly ordinary?: readonly number[];
   /** Under a live definition, where 5.5 runs: every copy the running sets read, in copy order. */
   readonly live?: readonly LiveBallotCopy[];
+  /**
+   * Under a rolling definition, where 5.5 runs: every copy whose membership
+   * proof verifies against its step's root, admitted or not, in copy order.
+   */
+  readonly steps?: readonly RollingBallotStep[];
 } {
   const judge = judgeFor(definition, registered, authorRegistered, rolling);
   if (typeof judge !== "function") return { rows: all(judge, blocks !== undefined) };
@@ -373,15 +378,30 @@ export function ballotChecks(
   // version 2, so 7.5 and 7.6 never read its copies. A rolling one's are
   // judged against the step roots of the same chain admission's judge was
   // made from, which it had, since it is a function.
+  //
+  // Under a rolling definition every copy's step and membership verdict are
+  // gathered the same way, live or sealed, beside an author panel too: the
+  // steps a verifying proof named give its tier's smallest step used (8.1),
+  // whatever else rejects the ballot (docs/spec/membership.md, Reported
+  // counts). The judge was made, so `registered`, the chain and, beside an
+  // author panel, its registered key set are set.
+  const steps =
+    definition.version === 7 && isRolling(definition)
+      ? new LiveCopies(
+          rollingBallotElection(
+            definition.value,
+            registered as readonly RegisteredKeys[],
+            rolling as RollingBallotChain,
+            definition.value.author_keys.length === 0 ? [] : authorRegistered,
+          ),
+          true,
+        )
+      : undefined;
   const live =
     isLive(definition) && definition.value.author_keys.length === 0 && registered !== undefined
-      ? definition.version === 7 && isRolling(definition)
-        ? new LiveCopies(
-            rollingBallotElection(definition.value, registered, rolling as RollingBallotChain),
-            true,
-          )
-        : new LiveCopies(panelBallotElection(definition.value, registered, []))
+      ? (steps ?? new LiveCopies(panelBallotElection(definition.value, registered, [])))
       : undefined;
+  const copies = live ?? steps;
   for (const [at, encoded] of entries.entries()) {
     let payload: Uint8Array;
     let path: Path;
@@ -441,7 +461,7 @@ export function ballotChecks(
     // window (T-45, T-71). Only contract-event versions 9 to 13 frame a
     // version-4 or version-5 ballot's ordinary and relayed copies, and a
     // rolling path's supplied root is judged as admission judged it.
-    live?.judged(at, path.segment, payload, checked, judged.tally, supplied);
+    copies?.judged(at, path.segment, payload, checked, judged.tally, supplied);
     if (!checked.ok) {
       rejected.push({
         entry: at,
@@ -581,6 +601,7 @@ export function ballotChecks(
     };
     for (const id of ["5.5", "5.7", ...(blocks !== undefined ? ["5.8"] : [])]) rows.set(id, open);
   }
+  const finished = copies !== undefined && windows && settled ? copies.finish(rejected) : undefined;
   return {
     rows,
     report: {
@@ -602,7 +623,13 @@ export function ballotChecks(
         })),
       }),
     ordinary,
-    ...(live !== undefined && windows && settled && { live: live.finish(rejected) }),
+    ...(live !== undefined && finished !== undefined && { live: finished }),
+    ...(steps !== undefined &&
+      finished !== undefined && {
+        steps: finished.flatMap((c) =>
+          c.member && c.step !== undefined ? [{ entry: c.entry, cell: c.cell, step: c.step }] : [],
+        ),
+      }),
   };
 }
 
@@ -806,6 +833,13 @@ function windowCode(
   if (path.l2Timestamp < opensAt) return "window-before-open";
   if (path.l2Timestamp > closesAt) return "window-after-close";
   return undefined;
+}
+
+/** A copy whose membership proof verifies against the root of the step it names. */
+export interface RollingBallotStep {
+  readonly entry: number;
+  readonly cell: number;
+  readonly step: number;
 }
 
 /** One ballot check of any version this verifier reads: versions 2 to 4 share `BallotCheckV2`. */

@@ -1265,6 +1265,31 @@ describe("moderation (T-68)", () => {
     expect(JSON.stringify([first, rest])).not.toContain("mod-");
   });
 
+  test("the public log reads back from a number, newest first, and from the latest", async () => {
+    const [a, b] = [await election(), await election()];
+    const x = await moderate(app, a.id, { action: "delist", reason: "spam", moderator: "mod-1" });
+    const y = await moderate(app, b.id, { action: "hide", reason: "threat", moderator: "mod-1" });
+    const z = await moderate(app, a.id, { action: "restore", reason: "error", moderator: "mod-2" });
+    const seqs = async (query: Record<string, string>) =>
+      ((await json(await get("/moderation/log", query)))["entries"] as { seq: string }[]).map(
+        (e) => e.seq,
+      );
+    expect(await seqs({ before: String(z.seq + 1n), limit: "3" })).toEqual(
+      [z.seq, y.seq, x.seq].map(String),
+    );
+    expect(await seqs({ before: String(z.seq), limit: "1" })).toEqual([String(y.seq)]);
+    expect(await seqs({ before: "1", limit: "5" })).toEqual([]);
+    // Past every number, from the latest decision.
+    for (const before of ["9223372036854775807", "18446744073709551615"])
+      expect((await seqs({ before, limit: "1" }))[0]).toBe(
+        (await seqs({ after: String(z.seq - 1n), limit: "256" })).at(-1),
+      );
+    // Without either, from the first.
+    expect(await seqs({ limit: "256" })).toEqual(await seqs({ after: "0", limit: "256" }));
+    const both = await get("/moderation/log", { after: "0", before: "9", limit: "1" });
+    expect(both.status).toBe(400);
+  });
+
   test("the contract's profile handle is core's", () => {
     expect(PROFILE_HANDLE.source).toBe(CORE_PROFILE_HANDLE.source);
     expect(PROFILE_HANDLE.flags).toBe(CORE_PROFILE_HANDLE.flags);

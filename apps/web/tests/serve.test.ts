@@ -1279,7 +1279,7 @@ describe("analytics", () => {
     reported.length = 0;
     const id = "cd".repeat(32);
     await raw(`/polls/${id}?q=1`, { headers: { cookie: `${SESSION}=tok` } });
-    await raw("/moderation?after=7");
+    await raw("/moderation?before=7");
     await raw("/P/3J55DW1");
     await raw("/p/3j55dw1/flyer?paper=a4&ink=mono");
     await raw("/embed/p/3j55dw1?theme=dark");

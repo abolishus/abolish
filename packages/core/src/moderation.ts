@@ -7,7 +7,8 @@
 // leaves its counts published, by option index. Each decision queues a
 // notice to the poll's author (src/account-notices.ts), in its transaction.
 
-import { and, asc, desc, eq, gt, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt, type SQL, sql as q } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { queueNotice } from "./account-notices.ts";
@@ -350,6 +351,40 @@ const INT8_MAX = (1n << 63n) - 1n;
 export const MAX_MODERATION_PAGE = 1000;
 
 /**
+ * Which page of the public log to read: the entries numbered above `after`,
+ * oldest first, or those numbered below `before`, newest first. Both bounds
+ * are exclusive.
+ */
+export type LogPage = { readonly after: bigint } | { readonly before: bigint };
+
+/**
+ * The filter and order of one page over a `seq` column, or `undefined` when
+ * the page can hold nothing. Sequence numbers are Postgres `bigint`s, which
+ * Postgres would refuse to compare with anything past the largest rather than
+ * say so: nothing lies above it, and everything lies below anything past it,
+ * so a `before` there reads from the latest.
+ */
+export function logPageOf(
+  seq: PgColumn,
+  page: LogPage,
+): { readonly where: SQL | undefined; readonly order: SQL } | undefined {
+  if ("after" in page) {
+    if (page.after >= INT8_MAX) return undefined;
+    return { where: gt(seq, page.after), order: asc(seq) };
+  }
+  return { where: page.before > INT8_MAX ? undefined : lt(seq, page.before), order: desc(seq) };
+}
+
+/** Throws unless `page` and `limit` are a page `readPublicModerationLog` and its kin can read. */
+export function checkLogPage(page: LogPage, limit: number): void {
+  const bound = "after" in page ? page.after : page.before;
+  if (typeof bound !== "bigint" || bound < 0n)
+    throw new TypeError(`${"after" in page ? "after" : "before"} must be a bigint ≥ 0`);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
+    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
+}
+
+/**
  * Up to `limit` decisions with a sequence number above `after`, oldest first:
  * the public moderation log (docs/moderation-policy.md, Transparency). It
  * never includes the moderator's handle.
@@ -359,21 +394,18 @@ export async function readModerationLog(
   after: bigint,
   limit: number,
 ): Promise<PublicModerationEntry[]> {
-  if (typeof after !== "bigint" || after < 0n) throw new TypeError("after must be a bigint ≥ 0");
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_MODERATION_PAGE)
-    throw new TypeError(`limit must be an integer from 1 to ${MAX_MODERATION_PAGE}`);
-  return moderationLogOf(drizzle({ client }), after, limit);
+  checkLogPage({ after }, limit);
+  return moderationLogOf(drizzle({ client }), { after }, limit);
 }
 
-/** `readModerationLog` in a transaction the caller holds, with arguments it has checked. */
+/** One page of `readModerationLog`'s table in a transaction the caller holds, with arguments it has checked. */
 export async function moderationLogOf(
   db: Pick<ModerationTx, "select">,
-  after: bigint,
+  page: LogPage,
   limit: number,
 ): Promise<PublicModerationEntry[]> {
-  // Sequence numbers are Postgres `bigint`s: past the largest there is
-  // nothing, and Postgres would refuse the comparison rather than say so.
-  if (after >= INT8_MAX) return [];
+  const bounds = logPageOf(moderationActions.seq, page);
+  if (bounds === undefined) return [];
   const rows = await db
     .select({
       seq: moderationActions.seq,
@@ -383,8 +415,8 @@ export async function moderationLogOf(
       decidedAt: moderationActions.decidedAt,
     })
     .from(moderationActions)
-    .where(gt(moderationActions.seq, after))
-    .orderBy(asc(moderationActions.seq))
+    .where(bounds.where)
+    .orderBy(bounds.order)
     .limit(limit);
   return rows.map((r) => ({
     seq: r.seq,

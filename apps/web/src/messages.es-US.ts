@@ -985,7 +985,7 @@ export const esUS: Messages = {
   moderationResultsStay:
     "Muestren lo que muestren nuestras páginas, el tablero de cada encuesta sigue siendo público, y cualquiera que lo descargue puede volver a contarlo.",
   moderationLogMark: "El registro",
-  moderationLogTitle: "Decisiones, de la más antigua a la más reciente",
+  moderationLogTitle: "Decisiones, de la más reciente a la más antigua",
   moderationLogLede:
     "Las horas son las del reloj de la base de datos, en UTC, no las del moderador. Una fila contiene solo la encuesta o el perfil, la acción y su motivo, nunca texto libre, así que ni siquiera el nombre de un perfil o el lugar de una encuesta: una reclasificación solo dice si cambió o quitó el lugar. Nuestra API ofrece el mismo registro para que cualquiera lo copie:",
   moderationEmpty: "Aún no hay decisiones.",
@@ -996,11 +996,12 @@ export const esUS: Messages = {
   moderationAction: "Acción",
   moderationReason: "Motivo",
   moderationDecided: "Hora",
-  moderationMore: "Decisiones posteriores",
+  moderationMore: "Decisiones anteriores",
+  moderationLatest: "Decisiones más recientes",
   moderationActionApply: "Mostrar estas decisiones",
   moderationActionMatches: "{shown} de las {total} decisiones de esta página tomaron esta acción.",
   moderationActionNone:
-    "Ninguna decisión de esta página tomó esta acción. Las decisiones posteriores pueden tener alguna.",
+    "Ninguna decisión de esta página tomó esta acción. Las decisiones anteriores pueden tener alguna.",
   moderationGroundsMark: "Motivos",
   moderationGroundsTitle: "Los únicos siete motivos",
   moderationGroundsLede:

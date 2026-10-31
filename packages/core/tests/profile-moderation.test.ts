@@ -33,6 +33,7 @@ import {
   readProfileModerationLog,
   readProfileReportQueue,
   readPublicModerationLog,
+  readPublicModerationLogBefore,
   REMOVAL_REASONS,
   type RemovalReason,
   renameProfile,
@@ -450,6 +451,53 @@ describe("the public log", () => {
     );
   });
 
+  test("the whole log read below a number comes newest first, both targets merged", async () => {
+    const { user, handle } = await profiled();
+    const poll = await shownPoll(user);
+    const a = await moderate(app, poll.electionId, {
+      action: "delist",
+      reason: "spam",
+      moderator: "mod-2",
+    });
+    const b = await moderateProfile(app, handle, hide("spam"));
+    const c = await moderate(app, poll.electionId, {
+      action: "restore",
+      reason: "error",
+      moderator: "mod-2",
+    });
+    const d = await moderateProfile(app, handle, restore());
+    const seqs = async (before: bigint, limit: number) =>
+      (await readPublicModerationLogBefore(app, before, limit)).map((e) => e.seq);
+    // A page holds `limit` entries of both kinds, the newest first, never one
+    // at or above `before`.
+    expect(await seqs(d.seq + 1n, 4)).toEqual([d.seq, c.seq, b.seq, a.seq]);
+    expect(await seqs(d.seq, 2)).toEqual([c.seq, b.seq]);
+    expect(await seqs(c.seq, 1)).toEqual([b.seq]);
+    const [entry] = await readPublicModerationLogBefore(app, c.seq, 1);
+    expect(entry).toEqual({
+      target: "profile",
+      seq: b.seq,
+      handle,
+      action: "hide",
+      reason: "spam",
+      decidedAt: entry!.decidedAt,
+    });
+    expect(await seqs(0n, 10)).toEqual([]);
+    expect(await seqs(1n, 10)).toEqual([]);
+    // Past the largest Postgres `bigint` (and past any u64 a caller sends),
+    // the page starts at the latest decision rather than failing.
+    for (const before of [(1n << 63n) - 1n, 1n << 63n, (1n << 64n) - 1n]) {
+      expect((await seqs(before, 1))[0]).toBe(
+        (await readPublicModerationLog(app, d.seq - 1n, MAX_MODERATION_PAGE)).at(-1)!.seq,
+      );
+    }
+    await expect(readPublicModerationLogBefore(app, -1n, 10)).rejects.toThrow(TypeError);
+    await expect(readPublicModerationLogBefore(app, 1n, 0)).rejects.toThrow(TypeError);
+    await expect(readPublicModerationLogBefore(app, 1n, MAX_MODERATION_PAGE + 1)).rejects.toThrow(
+      TypeError,
+    );
+  });
+
   test("paging the whole log at any page size returns every decision once, in order (fast-check)", async () => {
     const { user, handle } = await profiled();
     const poll = await shownPoll(user);
@@ -482,6 +530,49 @@ describe("the public log", () => {
         }
         expect(seen).toEqual(written);
       }),
+      { numRuns: Math.min(numRuns, 20) },
+    );
+  });
+
+  test("paging the whole log back from any number returns every decision below it once, newest first (fast-check)", async () => {
+    const { user, handle } = await profiled();
+    const poll = await shownPoll(user);
+    const pollSteps = [
+      { action: "delist", reason: "spam" },
+      { action: "restore", reason: "error" },
+    ] as const;
+    const profileSteps = [hide(), restore()] as const;
+    const written: bigint[] = [];
+    let onPoll = 0;
+    let onProfile = 0;
+    for (const toPoll of [false, true, true, false, true, false, false, true]) {
+      const { seq } = toPoll
+        ? await moderate(app, poll.electionId, { ...pollSteps[onPoll++ % 2]!, moderator: "mod-2" })
+        : await moderateProfile(app, handle, profileSteps[onProfile++ % 2]!);
+      written.push(seq);
+    }
+    const first = written[0]!;
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 1, max: 9 }),
+        fc.integer({ min: 0, max: written.length }),
+        async (limit, upTo) => {
+          // From just above the latest written, or from any written one.
+          const from = upTo === written.length ? written.at(-1)! + 1n : written[upTo]!;
+          const seen: bigint[] = [];
+          let before = from;
+          for (;;) {
+            const page = await readPublicModerationLogBefore(app, before, limit);
+            expect(page.length).toBeLessThanOrEqual(limit);
+            const mine = page.filter((e) => e.seq >= first);
+            seen.push(...mine.map((e) => e.seq));
+            // Every test writes to this log; stop once below this one's.
+            if (page.length < limit || mine.length < page.length) break;
+            before = page.at(-1)!.seq;
+          }
+          expect(seen).toEqual(written.filter((s) => s < from).reverse());
+        },
+      ),
       { numRuns: Math.min(numRuns, 20) },
     );
   });

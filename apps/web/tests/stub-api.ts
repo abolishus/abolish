@@ -536,12 +536,11 @@ export function stubApi(): Server {
     const electionId = url.searchParams.get("electionId") ?? "";
     const definition = definitions.get(electionId);
     if (url.pathname === "/moderation/log") {
-      const after = BigInt(url.searchParams.get("after") ?? "0");
+      // The website reads the log only back from a number, newest first.
+      const before = BigInt(url.searchParams.get("before") ?? "0");
       const entries =
-        after < 7n
+        before > 8n
           ? [
-              { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
-              { ...LATEST, electionId: HIDDEN_ID },
               {
                 seq: "8",
                 electionId: HIDDEN_ID,
@@ -551,6 +550,8 @@ export function stubApi(): Server {
                 topic: "transport",
                 place: "cleared",
               },
+              { ...LATEST, electionId: HIDDEN_ID },
+              { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
             ]
           : [];
       return json(200, { entries });

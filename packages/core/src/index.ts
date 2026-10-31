@@ -247,6 +247,7 @@ export {
   OPEN_POLL_HIDE_REASONS,
   type PublicModerationEntry,
   readModerationLog,
+  type LogPage,
   type RemovalReason,
   REMOVAL_REASONS,
   RESTORE_REASONS,
@@ -625,6 +626,7 @@ export {
   readProfileModerationLog,
   readProfileReportQueue,
   readPublicModerationLog,
+  readPublicModerationLogBefore,
   reportProfile,
   reviewProfileReports,
 } from "./profile-moderation.ts";

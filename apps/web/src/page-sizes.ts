@@ -23,6 +23,12 @@ export const ACTIVITY_PAGE = 24;
 /** Decisions per page of the moderation log. */
 export const LOG_PAGE = 50;
 
+/**
+ * The largest `u64`: a `before` above every sequence number, which the API
+ * reads as the moderation log's latest page.
+ */
+export const LOG_LATEST = "18446744073709551615";
+
 /** Polls per page of the discovery list: each costs the page one definition fetch. */
 export const LIST_PAGE = 20;
 

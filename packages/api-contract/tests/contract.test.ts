@@ -141,6 +141,29 @@ describe("identity backups (ADR 0017; T-10, T-20)", () => {
   });
 });
 
+describe("the moderation log's page", () => {
+  const input = contract.moderation.getLog["~orpc"].inputSchema;
+  const issues = async (value: unknown) => (await input?.["~standard"].validate(value))?.issues;
+
+  test("reads after a number, before one, or from the first, never both ways at once", async () => {
+    for (const ok of [
+      { after: "0", limit: "50" },
+      { before: "18446744073709551615", limit: "50" },
+      { before: "7", limit: "1" },
+      { limit: "50" },
+    ])
+      expect(await issues(ok)).toBeUndefined();
+    for (const bad of [
+      { after: "3", before: "9", limit: "50" },
+      { before: "-1", limit: "50" },
+      { before: "07", limit: "50" },
+      { before: "18446744073709551616", limit: "50" },
+      { before: "7", limit: "50", order: "desc" },
+    ])
+      expect(await issues(bad)).toBeDefined();
+  });
+});
+
 describe("Tier 0 registration (docs/spec/registration.md, Request)", () => {
   const input = contract.registrations.tier0["~orpc"].inputSchema;
   const valid = { commitment: "0a".repeat(32), region: "0", turnstile: "tok.en-1_" };

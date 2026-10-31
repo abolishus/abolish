@@ -31,6 +31,7 @@ import {
   readPollTags,
   readProfileModerationLog,
   readPublicModerationLog,
+  readPublicModerationLogBefore,
   MAX_MODERATION_PAGE,
   type RefileDecision,
   REFILE_REASONS,
@@ -872,6 +873,14 @@ describe("the public log", () => {
       c.seq,
     ]);
     expect((await readPublicModerationLog(app, c.seq, 1)).map((x) => x.seq)).toEqual([d.seq]);
+    // And read back from a number, the newest first, refilings included.
+    expect((await readPublicModerationLogBefore(app, d.seq + 1n, 4)).map((x) => x.seq)).toEqual([
+      d.seq,
+      c.seq,
+      b.seq,
+      a.seq,
+    ]);
+    expect(await readPublicModerationLogBefore(app, d.seq, 1)).toEqual([log[2]]);
   });
 
   test("leaves out a topic written past refilePoll, rather than failing every page that holds it", async () => {

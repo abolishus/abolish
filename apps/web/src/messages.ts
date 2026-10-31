@@ -205,6 +205,7 @@ const enUS = {
   howWeakTurnoutMeans:
     "Voters choose to take part, so a result describes who answered, not everyone. Results are advisory and bind no one.",
   howWeakTurnoutLimit: "Every result carries its tier and how many could vote.",
+  howVerify: "How to verify a result yourself",
   howSource:
     "The protocol, its threat model (with every entry named above) and the source code are published in the open at github.com/abolishus/abolish.",
   navVerify: "Verify it yourself",

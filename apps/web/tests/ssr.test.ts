@@ -2656,6 +2656,8 @@ describe("how it works", () => {
     expect(html).toContain("we hold every trustee seat");
     // Each diagram draws its first step on the server.
     expect([...html.matchAll(/data-testid="diagram-[a-z]+" data-step="0"/g)]).toHaveLength(6);
+    // It ends on the verify page, a plain link that needs no script.
+    expect(html).toMatch(/<a href="\/verify"[^>]*>How to verify a result yourself<\/a>/);
     expect(seen).toHaveLength(0);
   });
 });

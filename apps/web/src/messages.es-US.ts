@@ -205,6 +205,7 @@ export const esUS: Messages = {
   howWeakTurnoutMeans:
     "Los votantes eligen participar, así que un resultado describe a quienes respondieron, no a todos. Los resultados son orientativos y no obligan a nadie.",
   howWeakTurnoutLimit: "Cada resultado indica su nivel y cuántos podían votar.",
+  howVerify: "Cómo verificar un resultado por tu cuenta",
   howSource:
     "El protocolo, su modelo de amenazas (con cada entrada mencionada arriba) y el código fuente están publicados abiertamente en github.com/abolishus/abolish.",
   navVerify: "Verifícalo tú",

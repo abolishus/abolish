@@ -186,8 +186,9 @@ export function PollModeration({
           {t(`moderationMeans_${view.state}`)}
         </p>
       )}
+      {/* Each appeal is a sentence of four lines on a phone: 4px apart, two read as one paragraph, so they keep the block's own gap between them. */}
       {appeals.length === 0 ? null : (
-        <ul className="m-0 grid list-none gap-1 p-0">
+        <ul className="m-0 grid list-none gap-3 p-0">
           {appeals.map((a) => (
             // The measure every other sentence in the list keeps, not the row's whole width.
             <li

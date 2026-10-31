@@ -762,6 +762,11 @@ const decisionDatesWhole = async (canvasElement: HTMLElement) => {
   await expect(dates).toBe(4);
 };
 
+/**
+ * Two appeals of four lines each, 4px apart, read at 360 as one paragraph
+ * (P2-29, the author's list's iteration 21); they are now as far apart as
+ * the decision's meaning is from the first of them.
+ */
 export const ModerationHistoryPhone: Story = {
   args: { client: MODERATED },
   globals: { viewport: { value: "phone", isRotated: false } },
@@ -769,6 +774,13 @@ export const ModerationHistoryPhone: Story = {
     await showsModeration(context);
     await expect(context.canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
     await decisionDatesWhole(context.canvasElement);
+    const canvas = within(context.canvasElement);
+    const means = canvas.getByText(/don't show this poll's text/).getBoundingClientRect();
+    const [first, second] = canvas
+      .getAllByText(/^You appealed decision No\./)
+      .slice(0, 2)
+      .map((a) => a.getBoundingClientRect());
+    await expect(second!.top - first!.bottom).toBe(first!.top - means.bottom);
   },
 };
 

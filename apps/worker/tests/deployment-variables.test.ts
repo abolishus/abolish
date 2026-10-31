@@ -113,7 +113,7 @@ describe("the deployment's variables, as the worker reads them", () => {
     });
     expect(sync?.chainId).toBe(v.l2_chain_id);
     expect(sync?.l1ChainId).toBe(v.l1_chain_id);
-    expect(sync?.eventVersion).toBe(12);
+    expect(sync?.eventVersion).toBe(13);
     expect(sync?.board.toLowerCase()).toBe(`0x${Buffer.from(v.board).toString("hex")}`);
   });
 

@@ -59,7 +59,7 @@ import type { StoredTierElectorate } from "./poll-roots.ts";
  * The profile of every stub this step builds: definition version 5, the
  * newest the deployable election registry serves (rule 8), with exactly the
  * pins its rule 9 serves for it (ballot 3, spoiled-ballot opening 2, board
- * entry 5, contract event 12, display text 2) and version 1 of the receipt,
+ * entry 5, contract event 13, display text 2) and version 1 of the receipt,
  * the ceremony transcript and the tally opening, the only ones 2.3 reads
  * (docs/spec/contracts.md, Registration, rule 9).
  */
@@ -75,7 +75,7 @@ export const POLL_DEFINITION_PROFILE: ElectionDefinitionV5["profile"] = Object.f
         [RECORD_TYPES.ceremonyTranscript, 1],
         [RECORD_TYPES.tallyOpening, 1],
         [RECORD_TYPES.boardEntry, 5],
-        [RECORD_TYPES.contractEvent, 12],
+        [RECORD_TYPES.contractEvent, 13],
         [RECORD_TYPES.displayText, 2],
       ] as const
     ).map(([record_type, version]) => Object.freeze({ record_type, version })),

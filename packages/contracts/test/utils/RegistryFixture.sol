@@ -53,7 +53,7 @@ library RegistryFixture {
     /// A plurality election for Tier 0 and Tier 2 that names `registry`'s
     /// deployment, with identifier `electionId`, and pins the profile the
     /// registry serves for definition version 1: every type at version 1 but
-    /// board-entry version 5 and contract-event version 8.
+    /// board-entry version 5 and contract-event version 13.
     function template(ElectionRegistry registry, bytes32 electionId)
         internal
         view
@@ -68,7 +68,7 @@ library RegistryFixture {
             d.pinVersions[i] = 1;
         }
         d.pinVersions[6] = 5;
-        d.pinVersions[7] = 12;
+        d.pinVersions[7] = 13;
         d.electionId = electionId;
         d.l2ChainId = uint64(block.chainid);
         d.l1ChainId = registry.l1ChainId();
@@ -121,11 +121,11 @@ library RegistryFixture {
         );
     }
 
-    /// `template` under definition version 3, 4, 5 or 6, with each field its
+    /// `template` under definition version 3 to 7, with each field its
     /// layout adds: Tier 0 split into two regional cells and Tier 2 one cell
-    /// (versions 3 to 6); one receipt key (4 to 6); two questions in place of
-    /// the one (5 and 6); and a sealed everyday poll without an author panel
-    /// (6). The ballot, opening and display-text pins are the versions each
+    /// (versions 3 to 7); one receipt key (4 to 7); two questions in place of
+    /// the one (5 to 7); a sealed everyday poll without an author panel (6
+    /// and 7); and a fixed electorate (7, `electorate_mode` 1). The ballot, opening and display-text pins are the versions each
     /// pairs with, so every template is one the registry serves (rule 9).
     function templateV(ElectionRegistry registry, bytes32 electionId, uint8 version)
         internal
@@ -136,6 +136,8 @@ library RegistryFixture {
         d.version = version;
         d.pinVersions[0] = version;
         d.pinVersions[1] = version < 5 ? 2 : version == 5 ? 3 : 4;
+        // Ballot version 4's cores are opened by spoiled-ballot opening
+        // version 3, as are ballot version 5's.
         d.pinVersions[2] = version < 6 ? 2 : 3;
         d.pinVersions[8] = version < 5 ? 1 : 2;
         d.electorate = new ElectionDefinitionLib.TierGroup[](0);
@@ -172,10 +174,38 @@ library RegistryFixture {
             d.questions[0] = ElectionDefinitionLib.Question(1, 3, 0, 1);
             d.questions[1] = ElectionDefinitionLib.Question(1, 5, 2, 2);
         }
-        if (version == 6) {
+        if (version >= 6) {
             d.pollClass = 1;
             d.resultsMode = 1;
         }
+        if (version == 7) d.electorateMode = 1;
+    }
+
+    /// `templateV`'s version 7 under a rolling electorate (`electorate_mode`
+    /// 2): no fixed electorate, Tier 0 rolling over groups 1, 2 and 4 and
+    /// Tier 2 over group 3, each from `ROOT_BLOCK`, pinning ballot version 5,
+    /// whose ballots name their step.
+    function templateRolling(ElectionRegistry registry, bytes32 electionId)
+        internal
+        view
+        returns (ElectionDefinitionLib.Definition memory d)
+    {
+        d = templateV(registry, electionId, 7);
+        d.electorateMode = 2;
+        d.pinVersions[1] = 5;
+        d.tiers = new ElectionDefinitionLib.TierElectorate[](0);
+        d.rolling = new ElectionDefinitionLib.RollingTier[](2);
+        d.rolling[0].rootL2Block = ROOT_BLOCK;
+        d.rolling[0].groups = new uint64[](3);
+        (d.rolling[0].groups[0], d.rolling[0].groups[1], d.rolling[0].groups[2]) = (1, 2, 4);
+        d.rolling[0].root = 0x1234;
+        d.rolling[0].groupSize = 5000;
+        d.rolling[1].tier = 2;
+        d.rolling[1].rootL2Block = ROOT_BLOCK;
+        d.rolling[1].groups = new uint64[](1);
+        d.rolling[1].groups[0] = 3;
+        d.rolling[1].root = 0x5678;
+        d.rolling[1].groupSize = 800;
     }
 
     /// The board's questions for `d` (docs/spec/contracts.md, Parameters),
@@ -203,7 +233,7 @@ library RegistryFixture {
         pure
         returns (uint8[] memory tiers, uint256[] memory roots)
     {
-        uint256 n = d.electorate.length;
+        uint256 n = d.electorate.length + d.rolling.length;
         for (uint256 i; i < d.tiers.length; i++) {
             n += d.tiers[i].cells.length;
         }
@@ -219,6 +249,12 @@ library RegistryFixture {
                 (tiers[c], roots[c]) = (d.tiers[i].tier, d.tiers[i].cells[j].root);
                 c++;
             }
+        }
+        // A rolling tier is one cell, and its registered root is 0, never
+        // the opening root it lists (Parameters, Cells).
+        for (uint256 i; i < d.rolling.length; i++) {
+            (tiers[c], roots[c]) = (d.rolling[i].tier, 0);
+            c++;
         }
     }
 

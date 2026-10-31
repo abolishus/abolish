@@ -172,7 +172,7 @@ describe("contract-event tables", () => {
     const pins = [...source.matchAll(/if \(pins\[7\] != (\d+)\) revert ProfileNotServed\(0x0008/g)];
     expect(pins).toHaveLength(1);
     const pinned = Number(pins[0]?.[1]);
-    expect(pinned).toBe(12);
+    expect(pinned).toBe(13);
     const table = load(`contract-event-v${pinned}.json`).events;
     for (const [role, abi] of [electionRegistry, trusteeRegistry, groupRegistry, board])
       for (const e of declaredEvents(abi).filter((d) => !isPending(role, d.signature)))

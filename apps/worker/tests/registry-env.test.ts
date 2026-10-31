@@ -75,7 +75,7 @@ describe("the registry sync's configuration", () => {
       [{ REGISTRY_SYNC_L1_CHAIN_ID: "01" }, "REGISTRY_SYNC_L1_CHAIN_ID"],
       [{ REGISTRY_SYNC_PORTAL: "0x1234" }, "REGISTRY_SYNC_PORTAL"],
       [{ REGISTRY_SYNC_BOARD: "0x1234" }, "REGISTRY_SYNC_BOARD"],
-      [{ REGISTRY_SYNC_EVENT_VERSION: "13" }, "REGISTRY_SYNC_EVENT_VERSION"],
+      [{ REGISTRY_SYNC_EVENT_VERSION: "14" }, "REGISTRY_SYNC_EVENT_VERSION"],
     ];
     for (const [change, name] of cases) {
       const message = refusal({ ...full, ...change });

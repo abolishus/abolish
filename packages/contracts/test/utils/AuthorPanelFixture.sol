@@ -35,19 +35,45 @@ library AuthorPanelFixture {
 
     /// A version-6 definition for election `id` with a `k`-of-`n` author panel
     /// of keys `1·G` to `n·G`, pinning what rule 9 serves it (ballot 4, opening
-    /// 3, tally opening 3, board entry 7, contract event 12, display text 2), under the trustee
+    /// 3, tally opening 3, board entry 7, contract event 13, display text 2), under the trustee
     /// registry's default panel.
     function definition(ElectionRegistry registry, bytes32 id, uint8 k, uint8 n)
         internal
         view
         returns (ElectionDefinitionLib.Definition memory d)
     {
-        d = withDefaultPanel(registry, RegistryFixture.templateV(registry, id, 6));
+        d = withAuthorPanel(RegistryFixture.templateV(registry, id, 6), registry, id, k, n);
+    }
+
+    /// `definition` under version 7, with a fixed electorate (ballot 4) or,
+    /// if `rolling`, a rolling one (ballot 5).
+    function definitionV7(ElectionRegistry registry, bytes32 id, uint8 k, uint8 n, bool rolling)
+        internal
+        view
+        returns (ElectionDefinitionLib.Definition memory d)
+    {
+        d = rolling
+            ? RegistryFixture.templateRolling(registry, id)
+            : RegistryFixture.templateV(registry, id, 7);
+        d = withAuthorPanel(d, registry, id, k, n);
+        if (rolling) d.pinVersions[1] = 5;
+    }
+
+    /// `d` with a `k`-of-`n` author panel of keys `1·G` to `n·G` and the pins
+    /// rule 9 serves an author panel, under the default panel.
+    function withAuthorPanel(
+        ElectionDefinitionLib.Definition memory d,
+        ElectionRegistry registry,
+        bytes32 id,
+        uint8 k,
+        uint8 n
+    ) internal view returns (ElectionDefinitionLib.Definition memory) {
+        d = withDefaultPanel(registry, d);
         d.pinVersions[1] = 4;
         d.pinVersions[2] = 3;
         d.pinVersions[5] = 3;
         d.pinVersions[6] = 7;
-        d.pinVersions[7] = 12;
+        d.pinVersions[7] = 13;
         d.pinVersions[8] = 2;
         d.authorThreshold = k;
         d.authorTranscriptHash = sha256(abi.encode("author transcript", id));
@@ -56,6 +82,7 @@ library AuthorPanelFixture {
             (uint256 x, uint256 y) = vm.publicKeyP256(i + 1);
             d.authorKeys[i] = ElectionDefinitionLib.P256Key(uint8(2 + (y & 1)), bytes32(x));
         }
+        return d;
     }
 
     /// `d` under the trustee registry's pinned panel, with the default transcript.

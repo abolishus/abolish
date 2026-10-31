@@ -634,7 +634,7 @@ const isTier0Group = (x: unknown): x is { group_id: bigint; region: number } =>
   Number.isSafeInteger(x["region"]);
 
 const isEventVersion = (x: unknown): x is ContractEventVersion =>
-  Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 12;
+  Number.isInteger(x) && (x as number) >= 1 && (x as number) <= 13;
 const SEAL_KEYS = ["cell", "definitionHash", "id", "kind", "v", "votes"];
 const CHALLENGE_KEYS = ["id", "kind", "seal", "v"];
 const CAST_KEYS = ["id", "kind", "l1Hash", "l1Number", "prover", "seal", "secret", "v"];

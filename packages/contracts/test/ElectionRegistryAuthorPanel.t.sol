@@ -91,6 +91,33 @@ contract ElectionRegistryAuthorPanelTest is TestBase {
         assertEq(count, 3, "creation, definition and author panel");
     }
 
+    /// Version 7 with an author panel registers under a fixed electorate
+    /// (ballot version 4) and a rolling one (ballot version 5), with its key
+    /// set and the author stub hash over version 7's fields after
+    /// `author_transcript_hash` (rule 9; T-25, T-37, T-54).
+    function test_RegistersAVersion7DefinitionWithItsAuthorKeySet() public {
+        for (uint256 rolling; rolling < 2; rolling++) {
+            bytes32 id = _create();
+            ElectionDefinitionLib.Definition memory d =
+                AuthorPanelFixture.definitionV7(registry, id, 2, 3, rolling == 1);
+            bytes memory enc = _approve(d);
+            TrusteeFixture.Seat[] memory seats = _authorSeats(_range(1, 3));
+            bytes memory reg = _authorRegistration(enc, seats, _range(1, 2));
+            vm.prank(CREATOR);
+            registry.registerDefinitionWithAuthorPanel(enc, reg);
+            bytes32 h = lib.hash(enc);
+            assertEq(registry.definitionHashOf(id), h, "registered");
+            ElectionRegistry.Parameters memory p = registry.parameters(h);
+            assertEq(p.ballotVersion, rolling == 1 ? 5 : 4, "ballot version");
+            assertEq(p.authorThreshold, 2, "k_A");
+            assertEq(p.authorPanelSize, 3, "n_A");
+            (bytes32 keySetHash,) = registry.authorKeySetOf(h);
+            assertEq(keySetHash, tlib.keySetHash(TrusteeFixture.seatBytes(seats)), "key set");
+            (, uint256 root) = registry.cell(h, 0);
+            assertEq(root, rolling == 1 ? 0 : 0x1234, "the first cell's root");
+        }
+    }
+
     /// Any `q_A` of the seats approve, wherever they sit, and the key set
     /// needn't hold every seat or the approvers.
     function test_AnyQuorumOfSeatsApprovesAnyLargeEnoughKeySet() public {

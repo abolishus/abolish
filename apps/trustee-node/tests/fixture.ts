@@ -53,7 +53,7 @@ const V5_PINS: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.ballot, 3],
   [RECORD_TYPES.spoiledBallotOpening, 2],
   [RECORD_TYPES.boardEntry, 5],
-  [RECORD_TYPES.contractEvent, 12],
+  [RECORD_TYPES.contractEvent, 13],
   [RECORD_TYPES.displayText, 2],
 ]);
 

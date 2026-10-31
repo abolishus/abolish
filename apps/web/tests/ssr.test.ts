@@ -713,6 +713,13 @@ describe("results page", () => {
     expect(page).toContain("Closes");
     expect(page).toContain("Counting");
     expect(page).toContain("Check it yourself");
+    // Whose word the page is, said under the facts before any figure, linking down (T-34).
+    const upFront = page.indexOf("Everything below is what our server says about this poll.");
+    expect(upFront).toBeGreaterThan(page.indexOf("Counting"));
+    expect(upFront).toBeLessThan(page.indexOf("Results by group"));
+    const html = await (await get(`/polls/${CELLS_ID}/results`)).text();
+    expect(html).toMatch(/<a [^>]*href="#results-check-title"[^>]*>How to check it yourself<\/a>/);
+    expect(html).toContain('id="results-check-title"');
     expect(page).toContain("Counting it again without us starts from this poll&#x27;s ID");
     expect(page).toContain("Poll ID");
     expect(page).toContain("Definition hash, to compare with the election registry on chain");
@@ -2873,9 +2880,9 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/discover": { html: 8, js: 176, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 178, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 173, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 169, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 170, css: 40, fonts: 58 },
   "/account": { html: 6, js: 199, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 253, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 174, css: 40, fonts: 58 },

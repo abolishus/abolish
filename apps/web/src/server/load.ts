@@ -33,7 +33,7 @@ import {
   type PollTags,
   type PollView,
 } from "../poll.ts";
-import type { RemovalGround } from "../components/moderation-log.tsx";
+import type { RemovalGround } from "../moderation-grounds.ts";
 import type { Api } from "./api.ts";
 import { definitionView } from "./definition.ts";
 import { cardText, checkedWords, streamCard } from "./stream-card.ts";

@@ -1,7 +1,7 @@
 import { REFILE_REASONS, REMOVAL_REASONS, RESTORE_REASONS } from "@abolishus/api-contract";
 import { describe, expect, test } from "vite-plus/test";
 
-import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../src/components/moderation-log.tsx";
+import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../src/moderation-grounds.ts";
 import { catalogs } from "../src/messages.ts";
 
 describe("the moderation page's grounds", () => {

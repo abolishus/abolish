@@ -21,7 +21,7 @@ import {
 } from "./server/load.ts";
 import { isStreamPlace, isStreamSearch, STREAM_SORTS, type StreamSort } from "./stream.ts";
 import { isLocale } from "./locales.ts";
-import { REMOVAL_GROUNDS, type RemovalGround } from "./components/moderation-log.tsx";
+import { REMOVAL_GROUNDS, type RemovalGround } from "./moderation-grounds.ts";
 import {
   ballotBase,
   isCanonicalU64,

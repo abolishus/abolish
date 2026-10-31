@@ -5,7 +5,7 @@
 // reported (T-10, T-11). Core counts the report per handle and ground, with
 // nothing about who sent it.
 
-import type { RemovalGround } from "./components/moderation-log.tsx";
+import type { RemovalGround } from "./moderation-grounds.ts";
 
 /** How a report ended. */
 export type ReportOutcome =

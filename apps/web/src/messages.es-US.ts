@@ -966,6 +966,10 @@ export const esUS: Messages = {
   moderationReason: "Motivo",
   moderationDecided: "Hora",
   moderationMore: "Decisiones posteriores",
+  moderationActionApply: "Mostrar estas decisiones",
+  moderationActionMatches: "{shown} de las {total} decisiones de esta página tomaron esta acción.",
+  moderationActionNone:
+    "Ninguna decisión de esta página tomó esta acción. Las decisiones posteriores pueden tener alguna.",
   moderationGroundsMark: "Motivos",
   moderationGroundsTitle: "Los únicos siete motivos",
   moderationGroundsLede:

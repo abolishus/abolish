@@ -11,7 +11,7 @@ import type { DraftQuestion, PollDraft, PollTopic } from "@abolishus/core/poll-d
 import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
 import { TURNSTILE_HEADER } from "@abolishus/core/turnstile";
 
-import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../components/moderation-log.tsx";
+import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
 import { isElectionId } from "../values.ts";
 
 // Every state core's table admits (`satisfies` keeps this list core's).

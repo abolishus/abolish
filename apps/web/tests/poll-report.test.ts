@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 
-import { REMOVAL_GROUNDS } from "../src/components/moderation-log.tsx";
+import { REMOVAL_GROUNDS } from "../src/moderation-grounds.ts";
 import { createApi } from "../src/server/api.ts";
 import { reportPoll } from "../src/server/load.ts";
 

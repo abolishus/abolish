@@ -2,7 +2,7 @@ import { REMOVAL_REASONS } from "@abolishus/core";
 import fc from "fast-check";
 import { afterEach, describe, expect, test, vi } from "vite-plus/test";
 
-import { REMOVAL_GROUNDS } from "../src/components/moderation-log.tsx";
+import { REMOVAL_GROUNDS } from "../src/moderation-grounds.ts";
 import { reportProfile } from "../src/profile-report.ts";
 
 // The profile page's report (src/profile-report.ts), with fetch stubbed: what

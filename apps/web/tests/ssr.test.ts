@@ -1912,6 +1912,41 @@ describe("moderation log", () => {
     expect(html).toContain("No decisions yet.");
   });
 
+  test("filters the page in hand by action, asking the API for the same page (T-10)", async () => {
+    seen.length = 0;
+    await get("/moderation");
+    const plain = seen.map((r) => `${r.path}?${r.query}`).toSorted();
+    seen.length = 0;
+    const html = await (await get("/moderation?action=hide-profile")).text();
+    expect(seen.map((r) => `${r.path}?${r.query}`).toSorted()).toEqual(plain);
+    const page = html.replace(/<[^>]+>/g, "");
+    expect(html).toContain(`href="/by/${PROFILE_HANDLE}"`);
+    expect(html).not.toContain(`href="/polls/${HIDDEN_ID}"`);
+    expect(page).toContain("1 of the 3 decisions on this page took this action.");
+    expect(html).toMatch(
+      /<input[^>]*value="hide-profile"[^>]*checked=""|<input[^>]*checked=""[^>]*value="hide-profile"/,
+    );
+    expect(html).toContain('href="/moderation"');
+  });
+
+  test("keeps the page it filters, in the form and the clear link", async () => {
+    const html = await (await get("/moderation?after=3&action=refile")).text();
+    expect(html).toMatch(/<input type="hidden" name="after" value="3"\/>/);
+    expect(html).toContain('href="/moderation?after=3"');
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Refiled");
+    expect(html).not.toContain(`href="/by/${PROFILE_HANDLE}"`);
+  });
+
+  test.each(["action=vote", "action=hide&action=delist", "action=Hide"])(
+    "shows every action for %s",
+    async (search) => {
+      const html = await (await follow(`/moderation?${search}`)).text();
+      expect(html).toContain(`href="/by/${PROFILE_HANDLE}"`);
+      expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
+      expect(html).not.toContain("decisions on this page took this action");
+    },
+  );
+
   test("states what moderation can't reach and every ground, with the log or without it", async () => {
     for (const path of ["/moderation", "/moderation?after=7"]) {
       const html = await (await get(path)).text();
@@ -2346,15 +2381,15 @@ const KB = 1024;
  * home the stream's cards beside its trust scene.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 176, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 173, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 216, css: 40, fonts: 58 },
+  "/": { html: 10, js: 177, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 174, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 213, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 171, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 171, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 168, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 199, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 255, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 197, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 172, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

@@ -6,7 +6,7 @@ import { type FormEvent, useEffect, useId, useRef, useState } from "react";
 
 import { catalogs, type Messages } from "../messages.ts";
 import type { ReportOutcome } from "../profile-report.ts";
-import { REMOVAL_GROUNDS, type RemovalGround } from "./moderation-log.tsx";
+import { REMOVAL_GROUNDS, type RemovalGround } from "../moderation-grounds.ts";
 
 /** The words that name what is reported; the rest are the same for a profile and a poll. */
 export interface ReportWords {

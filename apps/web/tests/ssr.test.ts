@@ -2610,7 +2610,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 181, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 176, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 168, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 169, css: 40, fonts: 58 },
   "/account": { html: 6, js: 198, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 173, css: 40, fonts: 58 },

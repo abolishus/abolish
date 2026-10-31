@@ -1,4 +1,4 @@
-import { useTranslate } from "@abolishus/ui";
+import { cn, useTranslate } from "@abolishus/ui";
 
 import { catalogs, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import type { PollTags } from "../poll.ts";
@@ -17,13 +17,24 @@ const LINK = `${CHIP} underline-offset-4 hover:border-foreground hover:underline
  * only as the server checked it (src/server/load.ts, `tagsOf`; T-67). Nothing
  * when the poll is listed under neither.
  */
-export function ListedUnder({ tags, linked }: { tags: PollTags; linked: boolean }) {
+export function ListedUnder({
+  tags,
+  linked,
+  className,
+}: {
+  tags: PollTags;
+  linked: boolean;
+  className?: string;
+}) {
   const t = useTranslate(catalogs);
   const { topic, place } = tags;
   if (topic === undefined && place === undefined) return null;
   const filter = place === undefined ? undefined : streamPlace(place);
   return (
-    <ul aria-label={t("listedUnder")} className="m-0 flex list-none flex-wrap gap-2 p-0 text-sm">
+    <ul
+      aria-label={t("listedUnder")}
+      className={cn("m-0 flex list-none flex-wrap gap-2 p-0 text-sm", className)}
+    >
       {topic === undefined ? null : (
         <li className="flex min-w-0">
           {linked ? (

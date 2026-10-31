@@ -5,6 +5,7 @@ import { catalogs, tierMessage } from "../messages.ts";
 import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll } from "../server/load.ts";
 import type { CardAnswered } from "../stream.ts";
+import { ListedUnder } from "./listed-under.tsx";
 import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./when.tsx";
 
@@ -80,36 +81,41 @@ function Row({
         aria-labelledby={titleId}
         className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-4 py-6 md:grid-cols-12 md:items-baseline md:gap-x-6"
       >
-        {/* In the poll's own words where the definition commits to them, in
-            their own language and direction, with its ID under them (T-34,
-            T-41); by its ID alone otherwise. */}
-        {text === undefined ? (
-          <h3 id={titleId} className="m-0 text-lg leading-snug font-medium md:col-span-4">
-            <a
-              className="font-mono underline underline-offset-4"
-              translate="no"
-              href={`/polls/${electionId}`}
-            >
-              {shortId}
-            </a>
-          </h3>
-        ) : (
-          <div className="grid min-w-0 gap-1 md:col-span-4">
-            <h3
-              id={titleId}
-              lang={text.language}
-              dir="auto"
-              className="m-0 text-lg leading-snug font-medium break-words text-pretty"
-            >
-              <a className="underline underline-offset-4" href={`/polls/${electionId}`}>
-                {text.heading}
+        <div className="grid min-w-0 content-start gap-1 md:col-span-4">
+          {/* In the poll's own words where the definition commits to them, in
+              their own language and direction, with its ID under them (T-34,
+              T-41); by its ID alone otherwise. */}
+          {text === undefined ? (
+            <h3 id={titleId} className="m-0 text-lg leading-snug font-medium">
+              <a
+                className="font-mono underline underline-offset-4"
+                translate="no"
+                href={`/polls/${electionId}`}
+              >
+                {shortId}
               </a>
             </h3>
-            <p className="m-0 font-mono text-sm text-muted-foreground" translate="no">
-              {shortId}
-            </p>
-          </div>
-        )}
+          ) : (
+            <>
+              <h3
+                id={titleId}
+                lang={text.language}
+                dir="auto"
+                className="m-0 text-lg leading-snug font-medium break-words text-pretty"
+              >
+                <a className="underline underline-offset-4" href={`/polls/${electionId}`}>
+                  {text.heading}
+                </a>
+              </h3>
+              <p className="m-0 font-mono text-sm text-muted-foreground" translate="no">
+                {shortId}
+              </p>
+            </>
+          )}
+          {/* Where it is listed, each tag a link into the stream, as on its
+              page; the register lists no delisted or hidden poll (T-68). */}
+          {entry.kind === "poll" ? <ListedUnder tags={entry.tags} linked className="pt-2" /> : null}
+        </div>
         <span className="row-start-1 justify-self-end md:order-last md:col-span-1 md:row-start-auto">
           <Fingerprint
             value={electionId}
@@ -156,8 +162,8 @@ function Row({
 
 /**
  * Listed polls as rows of the register, under one set of column heads: the
- * poll, in its own words where they can be shown and by its ID, its counting
- * rule, its status, read from the definition's
+ * poll, in its own words where they can be shown and by its ID, with where
+ * it is listed, its counting rule, its status, read from the definition's
  * times at `asOf` (the server's clock when it loaded them, so the page and
  * its hydration agree), and how many have answered it so far, with Tier 0
  * named by the deployment's phone setting (`phoneVerification`).

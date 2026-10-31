@@ -23,6 +23,7 @@ import {
   owedReceipts,
   type ViewBallot,
 } from "../src/index.ts";
+import { forcedPathDemandWithRoots } from "../src/delivery.ts";
 import { hex, readVectorFile, SPEC_VECTORS } from "./spec-vectors.ts";
 
 // docs/spec/vectors/delivery-obligation.json comes from an independent Python
@@ -73,14 +74,19 @@ interface Vectors {
   readonly capacity: readonly {
     readonly id: string;
     readonly windows: Readonly<Record<keyof ForcedPathWindows, string>>;
-    readonly elections: readonly {
-      members: string;
-      seats: number;
-      closesAt: string;
-      l1InclusionBound: string;
-      receipts: Interval;
-      complaints: Interval;
-    }[];
+    readonly elections: readonly (
+      | {
+          members: string;
+          rolling?: undefined;
+          seats: number;
+          closesAt: string;
+          l1InclusionBound: string;
+          receipts: Interval;
+          complaints: Interval;
+        }
+      // A rolling election: no `M`, so no batch figures.
+      | { rolling: true; seats: number; closesAt: string; l1InclusionBound: string }
+    )[];
     readonly fits: boolean;
   }[];
   readonly limits: readonly { seats: number; margin: string; members: string }[];
@@ -115,12 +121,16 @@ const windowsOf = (w: Readonly<Record<keyof ForcedPathWindows, string>>): Forced
   forcedInclusion: BigInt(w.forcedInclusion),
   margin: BigInt(w.margin),
 });
-const electionOf = (e: Vectors["capacity"][number]["elections"][number]): ForcedPathElection => ({
-  members: BigInt(e.members),
-  seats: e.seats,
-  closesAt: BigInt(e.closesAt),
-  l1InclusionBound: BigInt(e.l1InclusionBound),
-});
+const electionOf = (e: Vectors["capacity"][number]["elections"][number]): ForcedPathElection => {
+  const common = {
+    seats: e.seats,
+    closesAt: BigInt(e.closesAt),
+    l1InclusionBound: BigInt(e.l1InclusionBound),
+  };
+  return e.rolling === true
+    ? { rolling: true, ...common }
+    : { members: BigInt(e.members), ...common };
+};
 
 const hour = 3600n;
 const deployed: ForcedPathWindows = {
@@ -185,6 +195,10 @@ describe("delivery-obligation vectors", () => {
     for (const c of V.capacity) {
       const w = windowsOf(c.windows);
       for (const e of c.elections) {
+        if (e.rolling === true) {
+          expect(() => forcedPathDemand(electionOf(e), w), c.id).toThrow(RangeError);
+          continue;
+        }
         const d = forcedPathDemand(electionOf(e), w);
         for (const [got, want] of [
           [d.receipts, e.receipts],
@@ -198,6 +212,13 @@ describe("delivery-obligation vectors", () => {
       }
       expect(forcedPathFits(c.elections.map(electionOf), w), c.id).toBe(c.fits);
     }
+  });
+
+  test("the file has rolling elections, alone and beside fixed ones, and none fits with batches", () => {
+    const rolling = V.capacity.filter((c) => c.elections.some((e) => e.rolling === true));
+    expect(rolling.some((c) => c.elections.length === 1)).toBe(true);
+    expect(rolling.some((c) => c.elections.some((e) => e.rolling !== true))).toBe(true);
+    expect(rolling.every((c) => !c.fits)).toBe(true);
   });
 
   test("a lone election's member limits are the file's", () => {
@@ -363,6 +384,52 @@ describe("forcedPathFits", () => {
     expect(() => forcedPathMembersLimit(0, deployed)).toThrow(RangeError);
   });
 
+  const rolling = (seats = 3, closesAt = close): ForcedPathElection => ({
+    rolling: true,
+    seats,
+    closesAt,
+    l1InclusionBound: 600n,
+  });
+
+  test("never fits a set holding a rolling election, which has no batch figures", () => {
+    expect(forcedPathFits([rolling()], deployed)).toBe(false);
+    expect(forcedPathFits([rolling(1)], deployed)).toBe(false);
+    expect(forcedPathFits([lone(0n), rolling()], deployed)).toBe(false);
+    // Its intervals a week away from the fixed one's: it still doesn't fit.
+    expect(forcedPathFits([lone(1n), rolling(3, close + 7n * 24n * hour)], deployed)).toBe(false);
+    expect(() => forcedPathDemand(rolling(), deployed)).toThrow(RangeError);
+  });
+
+  test("reads `rolling: false` as fixed, and refuses a `rolling` that isn't a boolean", () => {
+    const fixed = {
+      members: 1n,
+      rolling: false,
+      seats: 3,
+      closesAt: close,
+      l1InclusionBound: 600n,
+    };
+    expect(forcedPathFits([fixed], deployed)).toBe(true);
+    for (const r of [1, "true", null])
+      expect(() =>
+        forcedPathFits([{ ...lone(1n), rolling: r } as unknown as ForcedPathElection], deployed),
+      ).toThrow(RangeError);
+  });
+
+  test("refuses a rolling election out of range, beside fixed ones that fit or not", () => {
+    for (const e of [
+      rolling(0),
+      rolling(33),
+      rolling(1.5),
+      { ...rolling(), l1InclusionBound: -1n },
+    ]) {
+      expect(() => forcedPathFits([e], deployed)).toThrow(RangeError);
+      expect(() => forcedPathFits([lone(1n), e], deployed)).toThrow(RangeError);
+    }
+    // A malformed fixed election beside a rolling one throws too.
+    expect(() => forcedPathFits([lone(-1n), rolling()], deployed)).toThrow(RangeError);
+    expect(() => forcedPathFits([rolling()], { ...deployed, margin: 0n })).toThrow(RangeError);
+  });
+
   const elections = fc.array(
     fc.record({
       members: fc.bigInt({ min: 0n, max: 2_000n }),
@@ -387,6 +454,23 @@ describe("forcedPathFits", () => {
         );
         expect(forcedPathFits(fewer, deployed)).toBe(true);
       }),
+      { numRuns },
+    );
+  });
+
+  test("adding a rolling election anywhere in any set makes it not fit", () => {
+    fc.assert(
+      fc.property(
+        elections,
+        fc.nat(),
+        fc.integer({ min: 1, max: 32 }),
+        fc.bigInt({ min: close, max: close + 7n * 24n * hour }),
+        (es, at, seats, closesAt) => {
+          const i = at % (es.length + 1);
+          const with_ = [...es.slice(0, i), rolling(seats, closesAt), ...es.slice(i)];
+          expect(forcedPathFits(with_, deployed)).toBe(false);
+        },
+      ),
       { numRuns },
     );
   });
@@ -422,6 +506,11 @@ describe("forcedPathFits", () => {
 });
 
 describe("forcedPathElectionOf", () => {
+  const fixedOf = (d: Parameters<typeof forcedPathElectionOf>[0]) => {
+    const e = forcedPathElectionOf(d);
+    if (e.rolling === true) throw new Error("a fixed definition read as rolling");
+    return e;
+  };
   const definition = (file: string, id: string) => {
     const v = readVectorFile(file).vectors.find((x) => x.id === id);
     if (v?.encoding === undefined) throw new Error(`no ${id}`);
@@ -447,7 +536,7 @@ describe("forcedPathElectionOf", () => {
     // Its members are past the forced path's cap; with none it fits, so 32
     // seats are an input the check takes rather than refuses.
     expect(forcedPathFits([forcedPathElectionOf(full)], deployed)).toBe(false);
-    expect(forcedPathFits([{ ...forcedPathElectionOf(full), members: 0n }], deployed)).toBe(true);
+    expect(forcedPathFits([{ ...fixedOf(full), members: 0n }], deployed)).toBe(true);
   });
 
   test("counts only the default panel without an author panel, and under version 5", () => {
@@ -485,15 +574,37 @@ describe("forcedPathElectionOf", () => {
     expect(forcedPathFits([forcedPathElectionOf(at(both + 1n))], deployed)).toBe(false);
   });
 
-  test("counts version 7's author seats, and throws for its rolling electorate", () => {
+  test("counts version 7's author seats, and reads its rolling electorate as rolling, with no M", () => {
     const fixed = decodeElectionDefinitionV7(
       definition("election-definition-v7.json", "definition-v7-fixed-typical"),
     );
-    expect(forcedPathElectionOf(fixed).seats).toBe(fixed.panel_size + fixed.author_keys.length);
+    expect(forcedPathElectionOf(fixed)).toEqual({
+      members: definitionMembers(fixed),
+      seats: fixed.panel_size + fixed.author_keys.length,
+      closesAt: fixed.closes_at,
+      l1InclusionBound: BigInt(fixed.l1_inclusion_bound),
+    });
     const rolling = decodeElectionDefinitionV7(
       definition("election-definition-v7.json", "definition-v7-rolling-typical"),
     );
-    expect(() => forcedPathElectionOf(rolling)).toThrow(RangeError);
+    expect(rolling.electorate_mode).toBe(2);
+    const e = forcedPathElectionOf(rolling);
+    expect(e).toEqual({
+      rolling: true,
+      seats: rolling.panel_size + rolling.author_keys.length,
+      closesAt: rolling.closes_at,
+      l1InclusionBound: BigInt(rolling.l1_inclusion_bound),
+    });
+    expect("members" in e).toBe(false);
+    // Refused with batches, the safe side while roots can't be sent; sized
+    // with the root figure alone once they can.
+    expect(forcedPathFits([e], deployed)).toBe(false);
+    const roots = forcedPathDemandWithRoots(e, deployed);
+    expect(roots.commitsRoots).toBe(true);
+    expect(roots.receipts.gas).toBe(BigInt(e.seats) * FORCED_PATH.rootCallGas);
+    expect(roots.complaints.gas).toBe(BigInt(e.seats) * FORCED_PATH.rootCallGas);
+    // Its electorate is still uncountable by definitionMembers.
+    expect(() => definitionMembers(rolling)).toThrow(RangeError);
   });
 });
 

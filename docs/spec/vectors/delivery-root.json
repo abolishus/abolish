@@ -14747,6 +14747,173 @@
         }
       ],
       "fits": true
+    },
+    {
+      "id": "rolling-small",
+      "description": "A rolling election of 3 seats commits roots with no member count, and fits",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "rolling": true,
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": true,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "600000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "600000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "rolling-beside-fixed",
+      "description": "A rolling election beside a fixed one of 1,000 members closing together: batches for the fixed one, roots for the rolling one, and they fit",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1000",
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": false,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "27000000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "60000000"
+          }
+        },
+        {
+          "rolling": true,
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": true,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "600000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "600000"
+          }
+        }
+      ],
+      "fits": true
+    },
+    {
+      "id": "rolling-beside-cap",
+      "description": "A rolling election beside one at the 3-seat batch cap, closing together: the batched one takes the whole target, so they don't fit together",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "20992",
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": false,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "553500000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "1230000000"
+          }
+        },
+        {
+          "rolling": true,
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": true,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "600000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "600000"
+          }
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "rolling-beside-cap-apart",
+      "description": "The same two, the rolling one closing two hours later, after the batched one's receipt interval ends: they fit",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "20992",
+          "seats": "3",
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "commitsRoots": false,
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "553500000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "1230000000"
+          }
+        },
+        {
+          "rolling": true,
+          "seats": "3",
+          "closesAt": "1800007200",
+          "l1InclusionBound": "600",
+          "commitsRoots": true,
+          "receipts": {
+            "start": "1800130200",
+            "end": "1800133800",
+            "gas": "600000"
+          },
+          "complaints": {
+            "start": "1800231000",
+            "end": "1800393000",
+            "gas": "600000"
+          }
+        }
+      ],
+      "fits": true
     }
   ],
   "limits": [

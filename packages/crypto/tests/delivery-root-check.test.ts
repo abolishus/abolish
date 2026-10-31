@@ -20,6 +20,8 @@ import {
   type DeliveryRoots,
   encodeObligationRoot,
   FORCED_PATH,
+  forcedPathDemand,
+  type ForcedPathElection,
   forcedPathFits,
   forcedPathMembersLimit,
   H,
@@ -102,7 +104,9 @@ interface Interval {
 }
 
 interface CapacityElection {
-  readonly members: string;
+  /** Absent for a rolling election, which has no `M`. */
+  readonly members?: string;
+  readonly rolling?: true;
   readonly seats: string;
   readonly closesAt: string;
   readonly l1InclusionBound: string;
@@ -662,12 +666,16 @@ describe("the forced path for elections that commit roots (delivery-root.json, c
     forcedInclusion: BigInt(w.forcedInclusion),
     margin: BigInt(w.margin),
   });
-  const forcedOf = (e: CapacityElection) => ({
-    members: BigInt(e.members),
-    seats: Number(e.seats),
-    closesAt: BigInt(e.closesAt),
-    l1InclusionBound: BigInt(e.l1InclusionBound),
-  });
+  const forcedOf = (e: CapacityElection): ForcedPathElection => {
+    const common = {
+      seats: Number(e.seats),
+      closesAt: BigInt(e.closesAt),
+      l1InclusionBound: BigInt(e.l1InclusionBound),
+    };
+    if (e.rolling === true) return { rolling: true, ...common };
+    if (e.members === undefined) throw new Error("a fixed election without members");
+    return { members: BigInt(e.members), ...common };
+  };
   const interval = (i: { start: bigint; end: bigint; gas: bigint }) => ({
     start: `${i.start}`,
     end: `${i.end}`,
@@ -685,10 +693,66 @@ describe("the forced path for elections that commit roots (delivery-root.json, c
       }).toEqual({ commitsRoots: e.commitsRoots, receipts: e.receipts, complaints: e.complaints });
     }
     expect(forcedPathFitsWithRoots(c.elections.map(forcedOf), w)).toBe(c.fits);
+    // A rolling election commits roots whatever its size, with no batch figure.
+    for (const e of c.elections)
+      if (e.rolling === true) {
+        expect(e.commitsRoots).toBe(true);
+        expect(() => forcedPathDemand(forcedOf(e), w)).toThrow(RangeError);
+      }
     // Until roots can deliver, the exported check counts every election with
     // batches, so any election that would commit roots is refused.
     if (c.elections.some((e) => e.commitsRoots))
       expect(forcedPathFits(c.elections.map(forcedOf), w)).toBe(false);
+  });
+
+  const firstWindows = () => {
+    const c = V.capacity[0];
+    if (c === undefined) throw new Error("no capacity case");
+    return windowsOf(c.windows);
+  };
+
+  test("the file has rolling elections, alone and beside fixed ones, fitting and not", () => {
+    const rolling = V.capacity.filter((c) => c.elections.some((e) => e.rolling === true));
+    expect(rolling.some((c) => c.fits) && rolling.some((c) => !c.fits)).toBe(true);
+    expect(rolling.some((c) => c.elections.some((e) => e.rolling !== true))).toBe(true);
+  });
+
+  test("a rolling election's root figure is its seats' root calls, whatever any member count would be", () => {
+    const w = firstWindows();
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 32 }),
+        fc.bigInt({ min: 0n, max: 10n ** 12n }),
+        fc.bigInt({ min: 0n, max: 3600n }),
+        (seats, members, bound) => {
+          const common = { seats, closesAt: 1_800_000_000n, l1InclusionBound: bound };
+          const rolling = forcedPathDemandWithRoots({ rolling: true, ...common }, w);
+          const fixed = forcedPathDemandWithRoots({ members, ...common }, w);
+          const gas = BigInt(seats) * FORCED_PATH.rootCallGas;
+          expect(rolling.commitsRoots).toBe(true);
+          expect([rolling.receipts.gas, rolling.complaints.gas]).toEqual([gas, gas]);
+          // The same intervals as a fixed election's, whichever figure it takes.
+          for (const k of ["receipts", "complaints"] as const)
+            expect([rolling[k].start, rolling[k].end]).toEqual([fixed[k].start, fixed[k].end]);
+        },
+      ),
+      { numRuns },
+    );
+  });
+
+  test("a rolling election out of range throws, as a fixed one does", () => {
+    const w = firstWindows();
+    const rolling = { rolling: true, seats: 3, closesAt: 0n, l1InclusionBound: 0n } as const;
+    for (const e of [
+      { ...rolling, seats: 0 },
+      { ...rolling, seats: 33 },
+      { ...rolling, l1InclusionBound: -1n },
+    ]) {
+      expect(() => forcedPathDemandWithRoots(e, w)).toThrow(RangeError);
+      expect(() => forcedPathFitsWithRoots([e], w)).toThrow(RangeError);
+      expect(() => forcedPathFits([e], w)).toThrow(RangeError);
+    }
+    expect(() => forcedPathDemandWithRoots(rolling, { ...w, margin: 0n })).toThrow(RangeError);
   });
 
   test.each(V.limits.map((l) => [l.seats, l] as const))(

@@ -46,6 +46,7 @@ import {
   type ElectionDefinitionV5,
   type ElectionDefinitionV6,
   type ElectionDefinitionV7,
+  ELECTORATE_MODES,
 } from "./election-definition.ts";
 import { H } from "./group.ts";
 import { inclusionProof, merkleRoot, type TreeHash, verifyInclusion } from "./merkle.ts";
@@ -1568,14 +1569,43 @@ export interface ForcedPathWindows {
   readonly margin: bigint;
 }
 
-/** One election as the capacity check reads it. */
-export interface ForcedPathElection {
-  /** `M`: the definition's members, as [[verifier]] 2.4 recomputes them (`definitionMembers`). */
-  readonly members: bigint;
+/**
+ * One election as the capacity check reads it: a fixed one with its `M`, or
+ * a rolling one (definition version 7, `electorate_mode` 2), which carries no
+ * member count, since its members over the poll aren't known when a node
+ * approves it and nothing bounds them; it commits roots whatever its size
+ * (docs/spec/delivery.md, Elections that commit roots;
+ * [[0045-rolling-delivery-obligation]]; T-25, T-52).
+ */
+export type ForcedPathElection = FixedForcedPathElection | RollingForcedPathElection;
+
+interface ForcedPathElectionBase {
   /** `s`: every seat that may force records, the default panel's and an author panel's. */
   readonly seats: number;
   readonly closesAt: bigint;
   readonly l1InclusionBound: bigint;
+}
+
+/** An election whose electorate is fixed when it opens. */
+export interface FixedForcedPathElection extends ForcedPathElectionBase {
+  /** `M`: the definition's members, as [[verifier]] 2.4 recomputes them (`definitionMembers`). */
+  readonly members: bigint;
+  readonly rolling?: false;
+}
+
+/** A rolling election: always counted with the root figure, never with batches. */
+export interface RollingForcedPathElection extends ForcedPathElectionBase {
+  readonly rolling: true;
+}
+
+// Whether an election is rolling, refusing a `rolling` that is neither
+// absent, `false` nor `true`, so no malformed record is read as fixed with
+// whatever `members` it happens to carry, or as rolling with none.
+function isRolling(election: ForcedPathElection): election is RollingForcedPathElection {
+  const { rolling } = election as { readonly rolling?: unknown };
+  if (rolling !== undefined && typeof rolling !== "boolean")
+    throw new RangeError("rolling must be a boolean when present");
+  return rolling === true;
 }
 
 /** Gas a seat set may have to force through L1 between `start` (inclusive) and `end` (exclusive). */
@@ -1607,28 +1637,52 @@ export function forcedPathDemand(
   election: ForcedPathElection,
   windows: ForcedPathWindows,
 ): { readonly receipts: ForcedPathInterval; readonly complaints: ForcedPathInterval } {
-  const { members, seats, closesAt, l1InclusionBound } = election;
+  // A rolling election has no `M`, so no batch figure: it commits roots
+  // whatever its size (forcedPathDemandWithRoots).
+  if (isRolling(election))
+    throw new RangeError("a rolling election has no batch figures: it commits roots");
+  const { members } = election;
   if (typeof members !== "bigint" || members < 0n)
     throw new RangeError("members must be a bigint ≥ 0");
-  // At most MAX_TRUSTEES seats in each of the two panels.
-  if (!Number.isInteger(seats) || seats < 1 || seats > 2 * MAX_TRUSTEES)
-    throw new RangeError("seats must be an integer from 1 to 2 · MAX_TRUSTEES");
-  forcedPathLengths(windows);
-  const { delivery, complaint } = deliveryDeadlines(closesAt, l1InclusionBound);
-  const s = BigInt(seats);
+  const { receipts, complaints, s } = forcedPathSpans(election, windows);
   const owed = 2n * members;
   const calls = (owed + FORCED_PATH.receiptsPerCall - 1n) / FORCED_PATH.receiptsPerCall;
-  const cD = delivery - windows.forcedInclusion;
   return {
-    receipts: { start: cD - windows.margin, end: cD, gas: s * calls * FORCED_PATH.receiptCallGas },
+    receipts: { ...receipts, gas: s * calls * FORCED_PATH.receiptCallGas },
     complaints: {
-      start: delivery + windows.contractEventWindow,
-      end: complaint - windows.forcedInclusion,
+      ...complaints,
       gas:
         s *
         ((owed + FORCED_PATH.complaintsPerCall - 1n) / FORCED_PATH.complaintsPerCall) *
         FORCED_PATH.complaintCallGas,
     },
+  };
+}
+
+// The two intervals of an election, fixed or rolling, and its `s`: what the
+// batch and root figures share.
+function forcedPathSpans(
+  election: ForcedPathElection,
+  windows: ForcedPathWindows,
+): {
+  readonly receipts: { readonly start: bigint; readonly end: bigint };
+  readonly complaints: { readonly start: bigint; readonly end: bigint };
+  readonly s: bigint;
+} {
+  const { seats, closesAt, l1InclusionBound } = election;
+  // At most MAX_TRUSTEES seats in each of the two panels.
+  if (!Number.isInteger(seats) || seats < 1 || seats > 2 * MAX_TRUSTEES)
+    throw new RangeError("seats must be an integer from 1 to 2 · MAX_TRUSTEES");
+  forcedPathLengths(windows);
+  const { delivery, complaint } = deliveryDeadlines(closesAt, l1InclusionBound);
+  const cD = delivery - windows.forcedInclusion;
+  return {
+    receipts: { start: cD - windows.margin, end: cD },
+    complaints: {
+      start: delivery + windows.contractEventWindow,
+      end: complaint - windows.forcedInclusion,
+    },
+    s: BigInt(seats),
   };
 }
 
@@ -1640,16 +1694,24 @@ export function forcedPathDemand(
  * an interval's start, so the starts are the moments checked. A trustee node
  * runs it over a stub with every election its seat approved, and refuses the
  * stub if it doesn't fit, so it never owes more than L1 can carry in time
- * (T-25, T-52, T-54).
+ * (T-25, T-52, T-54). It counts every election with batches, so a set holding
+ * a rolling election, which has none and commits roots whatever its size,
+ * never fits: refused while roots can't be sent or read, the safe side.
  */
 export function forcedPathFits(
   elections: Iterable<ForcedPathElection>,
   windows: ForcedPathWindows,
 ): boolean {
-  return demandsFit(
-    [...elections].map((e) => forcedPathDemand(e, windows)),
-    windows,
-  );
+  const demands = [];
+  let rolling = false;
+  // Every election is still checked well-formed, rolling ones included, so a
+  // malformed one throws whatever else the set holds.
+  for (const e of elections)
+    if (isRolling(e)) {
+      forcedPathSpans(e, windows);
+      rolling = true;
+    } else demands.push(forcedPathDemand(e, windows));
+  return !rolling && demandsFit(demands, windows);
 }
 
 function demandsFit(
@@ -1677,11 +1739,12 @@ function demandsFit(
 
 /**
  * Internal: one election's forced-path demand once roots can deliver
- * (docs/spec/delivery.md, Capacity; Elections that commit roots). It commits
- * roots exactly when, alone, its batches don't fit (`forcedPathFits`), and
- * then each of its two intervals carries one root call per seat whatever its
- * members, `s · ROOT_CALL_GAS`; the batch and root figures never mix within
- * one election. The package entry point doesn't export it: until P1-12f part
+ * (docs/spec/delivery.md, Capacity; Elections that commit roots). A fixed
+ * election commits roots exactly when, alone, its batches don't fit
+ * (`forcedPathFits`), and a rolling one always does, with no batch figure
+ * computed; then each of its two intervals carries one root call per seat
+ * whatever its members, `s · ROOT_CALL_GAS`; the batch and root figures never
+ * mix within one election. The package entry point doesn't export it: until P1-12f part
  * 3 reads a root's leaves and P4-3 part 2c brings the attestation that makes
  * them available, no root can deliver, and nodes keep `forcedPathFits`, which
  * counts every election with batches and so refuses every election that
@@ -1695,13 +1758,18 @@ export function forcedPathDemandWithRoots(
   readonly receipts: ForcedPathInterval;
   readonly complaints: ForcedPathInterval;
 } {
-  const batches = forcedPathDemand(election, windows);
-  if (demandsFit([batches], windows)) return { commitsRoots: false, ...batches };
-  const gas = BigInt(election.seats) * FORCED_PATH.rootCallGas;
+  if (!isRolling(election)) {
+    const batches = forcedPathDemand(election, windows);
+    if (demandsFit([batches], windows)) return { commitsRoots: false, ...batches };
+  }
+  // T-25, T-52: a rolling election's members over the poll aren't bounded
+  // when it's approved, so only the root figure, which needs no `M`, sizes it.
+  const { receipts, complaints, s } = forcedPathSpans(election, windows);
+  const gas = s * FORCED_PATH.rootCallGas;
   return {
     commitsRoots: true,
-    receipts: { ...batches.receipts, gas },
-    complaints: { ...batches.complaints, gas },
+    receipts: { ...receipts, gas },
+    complaints: { ...complaints, gas },
   };
 }
 
@@ -1745,7 +1813,9 @@ export function forcedPathMembersLimit(seats: number, windows: ForcedPathWindows
  * (version 1) or of the tier's `regions` (versions 3 to 6, whose cells' members
  * sum to the same), the counts [[verifier]] 2.4 recomputes from the group
  * registry. A rolling tier's members over the poll aren't known when it opens
- * (docs/spec/delivery.md, Capacity), so it throws for a rolling definition
+ * and nothing bounds them, so a rolling election commits roots and is sized
+ * without `M` (docs/spec/delivery.md, Elections that commit roots;
+ * `forcedPathElectionOf`); this throws for a rolling definition
  * (`electorate_mode` 2, or any `rolling_electorate`), and for an empty
  * electorate, which no well-formed definition has and which is a rolling
  * one's `electorate`: counting it as no members would let a node approve an
@@ -1775,7 +1845,9 @@ export function definitionMembers(definition: {
 
 /**
  * One election as the capacity check reads it, from its definition
- * (docs/spec/delivery.md, Capacity): `M` from `definitionMembers`, and `s`
+ * (docs/spec/delivery.md, Capacity): `M` from `definitionMembers`, or, for a
+ * rolling definition (version 7, `electorate_mode` 2), no `M` and `rolling`,
+ * since it commits roots whatever its size (Elections that commit roots), and `s`
  * every seat that may force records, the default panel's `panel_size` and,
  * from definition version 6, the author panel's `n_A`, the length of
  * `author_keys`. Ballot version 4's author seats owe and send exactly what
@@ -1783,7 +1855,7 @@ export function definitionMembers(definition: {
  * figures bound (Version 2, What a node owes), so a check that counted only
  * the default panel would let a stub with an author panel through at up to
  * twice the gas it sized (T-25, T-52, T-54). Throws as `definitionMembers`
- * does for a rolling or empty electorate.
+ * does for a fixed definition with an empty or rolling electorate.
  */
 export function forcedPathElectionOf(
   definition:
@@ -1796,13 +1868,17 @@ export function forcedPathElectionOf(
 ): ForcedPathElection {
   // Typed by the codec's versions rather than by shape, so a definition from
   // version 6 on can't reach here without `author_keys` and count none.
-  return {
-    members: definitionMembers(definition),
+  const common = {
     seats:
       definition.panel_size + ("author_keys" in definition ? definition.author_keys.length : 0),
     closesAt: definition.closes_at,
     l1InclusionBound: BigInt(definition.l1_inclusion_bound),
   };
+  // Decided from the definition alone, as every node and client decides it
+  // (docs/spec/delivery.md, Elections that commit roots).
+  if ("electorate_mode" in definition && definition.electorate_mode === ELECTORATE_MODES.rolling)
+    return { rolling: true, ...common };
+  return { members: definitionMembers(definition), ...common };
 }
 
 /** What the delivery check runs against, all from data the verifier has already checked. */

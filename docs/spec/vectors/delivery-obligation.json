@@ -1261,6 +1261,92 @@
         }
       ],
       "fits": true
+    },
+    {
+      "id": "rolling-alone",
+      "description": "A rolling election of 3 seats alone: it has no batch figures, so counted with batches it never fits",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "rolling": true,
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600"
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "rolling-beside-fixed",
+      "description": "A rolling election beside a fixed one of 1,000 members closing together: the set doesn't fit with batches",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1000",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "27000000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "60000000"
+          }
+        },
+        {
+          "rolling": true,
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600"
+        }
+      ],
+      "fits": false
+    },
+    {
+      "id": "rolling-apart",
+      "description": "A rolling election closing a week after a fixed one, their intervals apart: it still doesn't fit with batches",
+      "windows": {
+        "contractEventWindow": "50400",
+        "forcedInclusion": "46800",
+        "margin": "3600"
+      },
+      "elections": [
+        {
+          "members": "1000",
+          "seats": 3,
+          "closesAt": "1800000000",
+          "l1InclusionBound": "600",
+          "receipts": {
+            "start": "1800123000",
+            "end": "1800126600",
+            "gas": "27000000"
+          },
+          "complaints": {
+            "start": "1800223800",
+            "end": "1800385800",
+            "gas": "60000000"
+          }
+        },
+        {
+          "rolling": true,
+          "seats": 3,
+          "closesAt": "1800604800",
+          "l1InclusionBound": "600"
+        }
+      ],
+      "fits": false
     }
   ],
   "limits": [

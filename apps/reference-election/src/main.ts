@@ -1289,7 +1289,12 @@ async function run(
     await l2Anvil.call("evm_setNextBlockTimestamp", [
       Number(at < closesAt ? closesAt + 1n : at + 1n),
     ]);
-    await addMembers(l2, anvil, group, 5n, [joiner.commitment]);
+    // The next leaf is the group's size: every leaf ever added, removed ones
+    // included (contracts.md, Group registry).
+    const size = rolling.events
+      .filter((x) => x.groupId === group && x.kind === "add")
+      .reduce((n, x) => n + BigInt(x.kind === "add" ? x.commitments.length : 0), 0n);
+    await addMembers(l2, anvil, group, size, [joiner.commitment]);
     await createElection(l2, anvil);
   }
   // Stage 8, the archive: every board's segment objects and entry-hash lists
@@ -1711,26 +1716,22 @@ async function run(
       if (tally === undefined) throw new Error("no counted ballots for the rolling poll");
       const name = "rolling (arweave, fixture's registries)";
       failures.push(
-        ...checkRows(name, run, {
-          "2.3": { status: "unverifiable", code: "not-implemented" },
-          "3.2": { status: "pass" },
-          "4.1": { status: "pass" },
-          "4.2": { status: "pass" },
-          "4.3": { status: "pass" },
-          ...Object.fromEntries(
-            ["5.1", "5.2", "5.3", "5.4", "5.5", "5.7", "6.2", "7.4"].map((id) => [
-              id,
-              { status: "pass" },
-            ]),
-          ),
-        }),
+        // The copy read from the archive alone, no row failed, the verdict
+        // unverifiable from local inputs and the exit its code, as every
+        // honest run (T-36, T-53).
+        ...checkExpectations(
+          run,
+          "arweave",
+          { admitted: rollingSelected.length + 1, rejected: [] },
+          { name, passes: ["4.3", "6.2", "7.4"] },
+        ),
+        ...checkRows(name, run, { "2.3": { status: "unverifiable", code: "not-implemented" } }),
         ...checkTallied(
           name,
           run,
           { counted: tally.ballots.length, counts: tally.counts },
           e.secrets.length,
         ),
-        ...checkBallots(name, run, { admitted: rollingSelected.length + 1, rejected: [] }),
         ...checkSelected(name, run, rollingSelected),
         ...checkArchivedEvents(name, run, held),
         ...checkRollingElectorate(name, run, { opening: 3, eligible: 4, close: 4 }),

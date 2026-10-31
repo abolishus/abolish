@@ -962,7 +962,8 @@ function archiveRow(read: ArchiveRead): Outcome {
  * short (T-49, T-53). `registries` are those `verifyBundle` is given: a
  * rolling poll's board checks run only with its chain, built under them from
  * the archive already read into `bundle`, so the read runs exactly when
- * theirs would.
+ * theirs would. The panels are the release's (`PINNED_PANELS`): they change
+ * only 2.3's live restriction, never whether a profile's read runs.
  */
 export async function readBoardByCid(
   bundle: Bundle,

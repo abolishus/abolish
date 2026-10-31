@@ -1609,6 +1609,52 @@ describe("poll list", () => {
     expect(row(SWAPPED_ID)).not.toContain("Answered so far");
   });
 
+  // P2-19 part 18: searching the register by the polls' words.
+  test("searches every listed poll by its words, keeping the search on every form and link", async () => {
+    seen.length = 0;
+    let html = await (await get("/polls?q=%20PaRK%20")).text();
+    expect(seen.find((r) => r.path === "/elections")?.query.get("q")).toBe("PaRK");
+    expect(linked(html)).toEqual(listed.filter((id) => id === STREAM_V5 || id === STREAM_V1));
+    expect(html).toContain("hold every word you searched for");
+    // The box holds what was typed; the page's own words never quote it.
+    expect(html).toMatch(/<input[^>]*type="search"[^>]*name="q"[^>]*value=" PaRK "/);
+    expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*PaRK/);
+    expect(html).toContain('<input type="hidden" name="q" value="PaRK"/>');
+    expect(html).toContain('href="/polls">Clear the search');
+    // The filters still apply to the page in hand, and the search form keeps them.
+    html = await (await get("/polls?q=library&status=closed")).text();
+    expect(linked(html)).toEqual([STREAM_V5]);
+    expect(html).toMatch(
+      /<form role="search"[^>]*>(?:(?!<\/form>)[\s\S])*name="status" value="closed"/,
+    );
+    expect(html).toContain('href="/polls?q=library">Clear filters');
+    expect(html).toContain('href="/polls?status=closed">Clear the search');
+    // A blank search is no search.
+    html = await (await get("/polls?q=%20%20")).text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).not.toContain("Clear the search");
+  });
+
+  test("says when a search finds nothing, or can't be run, asking nothing of one the contract refuses", async () => {
+    let html = await (await get("/polls?q=ferries")).text();
+    expect(linked(html)).toEqual([]);
+    expect(html).toContain("No listed poll matches");
+    expect(html).not.toContain("No polls listed.");
+    for (const q of [Array.from({ length: 9 }, (_, i) => `w${i}`).join("+"), "a".repeat(201)]) {
+      seen.length = 0;
+      const response = await get(`/polls?q=${q}`);
+      expect(response.status).toBe(200);
+      html = await response.text();
+      expect(html).toContain("That search can&#x27;t be run");
+      expect(linked(html)).toEqual([]);
+      expect(seen).toEqual([]);
+    }
+    // Control characters alone pass the contract's pattern, and the API refuses them.
+    html = await (await get("/polls?q=%C2%85")).text();
+    expect(html).toContain("That search can&#x27;t be run");
+    expect(html).not.toContain("BAD_REQUEST");
+  });
+
   test("asks the API for nothing of the visitor's (T-10)", async () => {
     seen.length = 0;
     await get("/polls", { cookie: "session=secret", "x-forwarded-for": "203.0.113.9" });
@@ -2435,19 +2481,19 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards beside its trust scene.
+ * home the stream's cards beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 177, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 174, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 213, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 8, js: 180, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 171, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 171, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 176, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 168, css: 40, fonts: 58 },
   "/account": { html: 6, js: 197, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 252, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 172, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 173, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

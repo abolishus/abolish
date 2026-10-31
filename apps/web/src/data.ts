@@ -101,17 +101,20 @@ export const sendPollReport = createServerFn({ method: "POST" })
 
 export const fetchPollList = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { after, locale } = (input ?? {}) as Record<string, unknown>;
+    const { after, q, locale } = (input ?? {}) as Record<string, unknown>;
     // `""` starts the list; `undefined` is refused, so a call must say where it starts.
     if (after !== "" && !isElectionId(after))
       throw new TypeError("expected an election ID or an empty string");
+    // `""` is no search; anything else is a query as `streamQuery` gives it, as for the stream.
+    if (q !== "" && (typeof q !== "string" || !isStreamSearch(q)))
+      throw new TypeError("expected a search query or an empty string");
     // The page's language picks each poll's translation; one of ours only.
     if (!isLocale(locale)) throw new TypeError("expected a locale");
-    return { after, locale };
+    return { after, q, locale };
   })
   .handler(({ data }) =>
     opaque(async () => ({
-      ...(await loadPollList(api(), data.after, data.locale)),
+      page: await loadPollList(api(), data.after, data.q, data.locale),
       // Names Tier 0 on each row's count, as the stream's cards name it.
       phoneVerification: process.env["PHONE_VERIFICATION"] === "on",
     })),

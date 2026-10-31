@@ -1048,6 +1048,13 @@ export const esUS: Messages = {
   "ground_appeal-upheld": "El creador de la encuesta apeló, y la apelación prosperó.",
   ground_error: "El retiro fue un error evidente.",
   "ground_notice-withdrawn": "El aviso legal que lo motivó fue retirado o anulado.",
+  moderationAppealOnce:
+    "Quien creó una encuesta puede apelar una vez, desde su cuenta, la decisión de quitarla de la lista u ocultarla, o de ocultar su perfil. La revisa un moderador distinto del que decidió.",
+  moderationReportsMark: "Denuncias",
+  moderationReportsTitle: "¿Ves una encuesta que incumple estas reglas?",
+  moderationReportsLede:
+    "Cualquiera puede denunciar una encuesta o el perfil de quien la creó, sin cuenta, desde su propia página: elige el motivo que corresponde y envíala. Las denuncias se cuentan, nunca quién las envió, y un moderador juzga lo denunciado según los motivos de arriba: el número de denuncias nunca decide nada.",
+  moderationReportsFind: "Buscar la encuesta en el registro",
   action_delist: "Retirada de la lista",
   action_hide: "Texto oculto",
   action_restore: "Restaurada",

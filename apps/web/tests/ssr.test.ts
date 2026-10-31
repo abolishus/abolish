@@ -2162,6 +2162,18 @@ describe("moderation log", () => {
     expect(html).toContain(`href="/polls/${HIDDEN_ID}"`);
   });
 
+  test("ends on how to report and appeal, leading to the register (T-10, T-68)", async () => {
+    seen.length = 0;
+    const html = await (await get("/moderation")).text();
+    expect(html).toContain("See a poll that breaks these rules?");
+    expect(html).toContain("Reports are counted, never who sent them");
+    expect(html).toContain("A moderator other than the one who decided reviews it.");
+    expect(html).toMatch(/href="\/polls"[^>]*>Find the poll in the register</);
+    // The section is words and a link: the page sends nothing and asks the API nothing more.
+    expect(html).not.toContain("/moderation/reports");
+    expect(seen.map((r) => r.path).sort()).toEqual(["/moderation/log", "/moderation/log/counts"]);
+  });
+
   test("lists a decision about a profile by its handle, linking its page", async () => {
     const html = await (await get("/moderation")).text();
     expect(html).toContain("Profile hidden");

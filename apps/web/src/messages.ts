@@ -1031,6 +1031,13 @@ const enUS = {
   "ground_appeal-upheld": "The poll's creator appealed, and the appeal succeeded.",
   ground_error: "The removal was wrong on its face.",
   "ground_notice-withdrawn": "The legal notice behind it was withdrawn or overturned.",
+  moderationAppealOnce:
+    "A creator can appeal a decision to delist or hide their poll, or to hide their profile, once, from their account. A moderator other than the one who decided reviews it.",
+  moderationReportsMark: "Reports",
+  moderationReportsTitle: "See a poll that breaks these rules?",
+  moderationReportsLede:
+    "Anyone can report a poll or a creator's profile, without an account, from its own page: choose the ground that fits and send it. Reports are counted, never who sent them, and a moderator judges what was reported against the grounds above: the number of reports never decides anything.",
+  moderationReportsFind: "Find the poll in the register",
   action_delist: "Delisted",
   action_hide: "Text hidden",
   action_restore: "Restored",

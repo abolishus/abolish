@@ -650,6 +650,17 @@ export const Place: Story = {
       "/discover?topic=transport&place=Old%20Town&q=library",
     );
     await expect(canvas.queryByText(/Old {1,2}Town/)).toBeNull();
+    // Each way to drop a narrowing is a 24px tap, set apart from the next
+    // line's words so it reads as the end of its own line, not the start of
+    // the next (P2-29, the stream's iteration 12).
+    const clearSearch = canvas.getByRole("link", { name: "Clear the search" });
+    const clearPlace = canvas.getByRole("link", { name: "Clear the place" });
+    for (const link of [clearSearch, clearPlace])
+      await expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
+    const placeNote = canvas.getByText(/filed at the place you entered/);
+    await expect(
+      placeNote.getBoundingClientRect().top - clearSearch.getBoundingClientRect().bottom,
+    ).toBeGreaterThanOrEqual(8);
   },
 };
 

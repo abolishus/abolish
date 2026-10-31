@@ -4,6 +4,7 @@ import {
   type ContractRole,
   decodeElectionDefinitionV7,
   ELECTORATE_MODES,
+  PARAMETERS,
   RESULTS_MODES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
@@ -128,15 +129,24 @@ function sequence(
   };
 }
 
+/** A poll's definition as the registry registered it. */
+interface Poll {
+  readonly definition: string;
+  readonly definitionHash: string;
+  readonly registeredAt: string;
+}
+
 /** The archive's replay of the registries, the group registry's holding `events`, each proven past close. */
-function replayOf(events: readonly RollingVectorEvent[]) {
+function replayOf(events: readonly RollingVectorEvent[], poll: Poll = { ...c, ...file }) {
+  const pd = { version: 7 as const, value: decodeElectionDefinitionV7(hex(poll.definition)) };
+  const v = pd.value;
   const after = { block: 10_000n, timestamp: v.closes_at + 1n };
   const registration = definitionRegistered(
-    d,
-    hex(c.definition),
-    hex(c.definitionHash),
+    pd,
+    hex(poll.definition),
+    hex(poll.definitionHash),
     99n,
-    BigInt(file.registeredAt),
+    BigInt(poll.registeredAt),
   );
   return {
     contracts: [
@@ -306,44 +316,52 @@ const sealed = read("verifier-ballots-v5-tier0-sealed.json") as {
   readonly releases: NonNullable<Report["releases"]>;
 };
 
-function sealedBundle(): Bundle {
-  const entries = splitEntries(hex(sealed.board)).entries;
+/**
+ * A sealed vector's bundle: anchored in an L1 state built here, the
+ * definition's receipt keys registered at its registration, so before
+ * opens_at and never retired (2.9), with the archive's replay of `events`.
+ */
+function sealedBundle(
+  vec: typeof sealed = sealed,
+  events: readonly RollingVectorEvent[] = file.events,
+  registeredAt: string = file.registeredAt,
+): Bundle {
+  const sv = decodeElectionDefinitionV7(hex(vec.definition));
+  const entries = splitEntries(hex(vec.board)).entries;
   const clock = {
-    epoch: BigInt(sealed.clock["epoch"] as string),
-    period: BigInt(sealed.clock["period"] as string),
-    deadline: BigInt(sealed.clock["deadline"] as string),
-    lastSegment: Number(sealed.clock["lastSegment"]),
+    epoch: BigInt(vec.clock["epoch"] as string),
+    period: BigInt(vec.clock["period"] as string),
+    deadline: BigInt(vec.clock["deadline"] as string),
+    lastSegment: Number(vec.clock["lastSegment"]),
   };
   // Well after the seal's window closes.
   const now = clock.epoch + BigInt(clock.lastSegment + 1) * clock.period + clock.deadline + 1n;
   const bundle = parseBundle(
     JSON.stringify({
       format: BUNDLE_FORMAT_BLOCKS,
-      definition: sealed.definition,
-      clock: sealed.clock,
-      // The definition's receipt keys registered at its registration, so
-      // before opens_at and never retired (2.9).
+      definition: vec.definition,
+      clock: vec.clock,
       l1: anchoredL1(
-        v.election_id,
-        v.l1_anchor,
+        sv.election_id,
+        sv.l1_anchor,
         entries,
         6,
         clock,
         // B, after the run of headers in number as in time.
         { number: 21_000_100n, timestamp: now },
-        receiptKeyStorage(v.receipt_keys, BigInt(file.registeredAt)),
+        receiptKeyStorage(sv.receipt_keys, BigInt(registeredAt)),
       ),
-      panel: sealed.panel,
-      l1Blocks: sealed.l1Blocks,
+      panel: vec.panel,
+      l1Blocks: vec.l1Blocks,
     }),
-    hex(sealed.board),
+    hex(vec.board),
   );
   return {
     ...bundle,
     archive: {
       count: 1n,
       walk: { latest: 0n, manifests: 1, reads: 1, findings: [] },
-      replay: replayOf(file.events),
+      replay: replayOf(events, { ...vec, registeredAt }),
     },
   };
 }
@@ -379,6 +397,86 @@ describe(
     // snapshot (tally.md, Schedule): the releases run over none.
     test("the releases ran, with the vectors' report", () => {
       expect(r.releases).toEqual(sealed.releases);
+    });
+
+    test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {
+      expect(r.verdictAgainstInputs).toBe("unverifiable");
+    });
+  },
+);
+
+// A live rolling poll long enough for scheduled snapshots
+// (verifier-ballots-v5-tier0-live.json, from packages/crypto/scripts/
+// verifier-ballots-v5-tier0-live-vectors.py; P2-17 part
+// 4d-2b-2b-2b-2b-2b-3): it releases every period and spans three, so its
+// snapshots are segments 1 and 2, each holding a batch of `live_batch`
+// ballots with their receipts, and the decision at snapshot 2 chooses
+// snapshot 1, whose running openings follow on the board. The release
+// report is the generator's model of tally.md's rules (live-verifier-
+// vectors.py) over the board it built, whose openings' bytes it checked
+// itself (verifier.md, Releases; T-16, T-45).
+const live = read("verifier-ballots-v5-tier0-live.json") as typeof sealed & {
+  readonly events: readonly RollingVectorEvent[];
+  readonly registeredAt: string;
+};
+const lv = decodeElectionDefinitionV7(hex(live.definition));
+const livePins: PinnedPanel[] = [
+  {
+    panelId: Buffer.from(lv.panel_id).toString("hex"),
+    kind: "transitional",
+    seats: Array.from({ length: lv.panel_size }, (_, i) => ({
+      holder: `seat ${i + 1}`,
+      ours: i < lv.threshold,
+    })),
+  },
+];
+const liveRegistries: RollingChainRelease = { ...release, electionRegistry: lv.election_registry };
+
+describe(
+  "a live poll with scheduled snapshots, through a chosen release",
+  { timeout: 120_000 },
+  () => {
+    test("the fixture releases every period, at the smallest batch, over a Tier-0-only rolling electorate", () => {
+      expect(lv.electorate_mode).toBe(ELECTORATE_MODES.rolling);
+      expect(lv.results_mode).toBe(RESULTS_MODES.live);
+      expect(lv.rolling_electorate.map((t) => t.tier)).toEqual([0]);
+      expect([lv.live_every, lv.live_batch]).toEqual([1, PARAMETERS.MIN_LIVE_BATCH]);
+    });
+
+    const r = verifyBundle(
+      sealedBundle(live, live.events, live.registeredAt),
+      livePins,
+      liveRegistries,
+    );
+
+    test("4.1, 4.2 and 2.9 pass", () => {
+      for (const id of ["4.1", "4.2", "2.9"]) expect(row(r, id), id).toEqual({ status: "pass" });
+    });
+
+    test("admission, selection, delivery, the counted set and the releases give the vectors' rows", () => {
+      for (const [id, want] of Object.entries(live.expected)) expect(row(r, id), id).toEqual(want);
+    });
+
+    test("the report gives the vectors' ballots, delivery, cells and tallies", () => {
+      expect(r.ballots).toEqual(live.ballots);
+      expect(r.delivery).toEqual(live.delivery);
+      expect(r.cells).toEqual(live.cells);
+      expect(r.tallies).toEqual(live.tallies);
+    });
+
+    test("snapshot 1 is released, its running openings pass, and the final tally's cut is the second batch", () => {
+      expect(r.releases).toEqual(live.releases);
+      const tier = r.releases?.tiers[0];
+      expect(tier?.decisions).toEqual([{ at: 2, release: 1, refused: [] }]);
+      const cell = r.releases?.cells[0];
+      expect(cell?.releases.map((x) => [x.size, x.entered, x.signers])).toEqual([
+        [20, 20, [1, 2, 3]],
+      ]);
+      expect(cell?.finalBatch).toMatchObject({
+        cut: 20,
+        flagged: false,
+        side: { kind: "unreleased" },
+      });
     });
 
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {

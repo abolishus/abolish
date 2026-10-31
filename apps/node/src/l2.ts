@@ -45,12 +45,14 @@ export const AVAILABILITY_COMPLAINT_SUBMITTED = topic(
 
 /**
  * The contract-event version this release reads: the newest whose tables hold
- * every event the deployable contracts emit, version 12, whose `PanelPinned`
- * logs the kind the trustee registry pins each panel with (P2-16 part 5e-2);
- * the other events read here are the same in every version from 2 on. The
+ * every event the deployable contracts emit, version 13, whose `PanelPinned`
+ * logs the kind the trustee registry pins each panel with (P2-16 part 5e-2)
+ * and whose `DefinitionRegistered` reads a version-7 definition, which the
+ * deployable election registry registers (P2-17 part 5d-4b); the other
+ * events read here are the same in every version from 2 on. The
  * verifier judges the logs again under the version the definition pins (4.4).
  */
-export const READ_VERSION: ContractEventVersion = 12;
+export const READ_VERSION: ContractEventVersion = 13;
 
 /** Why an election couldn't be read from L2; the election is reported and skipped. */
 export type L2ErrorCode =
@@ -212,7 +214,6 @@ async function readLogs(
 export interface Registration {
   /** The definition's canonical encoding, as `DefinitionRegistered` carries it. */
   readonly definition: Uint8Array;
-  /** Never version 7 under `READ_VERSION` 12, which fails its registration. */
   readonly decoded: AnyElectionDefinitionRecord | ElectionDefinitionV7Record;
   /** The L1 origin of the creation, which fixes the election's first segment. */
   readonly created: L1Origin;

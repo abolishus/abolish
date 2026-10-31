@@ -59,7 +59,7 @@ import type { StoredTierElectorate } from "./poll-roots.ts";
  * The profile of every stub this step builds: definition version 5, the
  * newest the deployable election registry serves (rule 8), with exactly the
  * pins its rule 9 serves for it (ballot 3, spoiled-ballot opening 2, board
- * entry 5, contract event 12, display text 2) and version 1 of the receipt,
+ * entry 5, contract event 13, display text 2) and version 1 of the receipt,
  * the ceremony transcript and the tally opening, the only ones 2.3 reads
  * (docs/spec/contracts.md, Registration, rule 9).
  */

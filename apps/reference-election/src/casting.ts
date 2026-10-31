@@ -13,22 +13,29 @@ import { readFileSync } from "node:fs";
 import {
   type BallotElection,
   type BallotRecord,
+  type BallotRecordV5,
   ballotCore,
   ballotElection,
   ballotHash,
+  ballotHashV5,
   type CastBallotV3,
   castSealV3,
   challengeSealV3,
   checkBallot,
+  checkBallotV5,
   checkCeremonyTranscript,
   decodeMembershipProof,
   type ElectionDefinition,
   type ElectionDefinitionV5,
+  type ElectionDefinitionV7,
   electionStubHash,
   electionStubV5Hash,
+  electionStubV7Hash,
   encodeBallot,
+  encodeBallotV5,
   encodeOpening,
   encryptShares,
+  encryptSharesV4,
   finishMembershipProof,
   finishSealV3,
   identityCommitment,
@@ -38,11 +45,19 @@ import {
   openChallenge,
   type Panel,
   proveValidity,
+  proveValidityV5,
   type QuestionBallotElection,
   questionBallotElection,
   type RegisteredKeys,
+  rollingBallotElection,
+  type RollingBallotChain,
+  type RollingBallotElection,
+  rollingMembershipNullifier,
+  rollingMembershipProverInput,
+  RollingTierTree,
   sealBallotV3,
   shareVote,
+  shareVoteV4,
   tierTreeRoot,
   trackingCode,
 } from "@abolishus/crypto";
@@ -327,4 +342,143 @@ export async function castQuestions(
   const sealed = sealBallotV3(c.election, CELL, votes);
   const casting = castSealV3(sealed, voter.secret, c.leaves, l1Ref);
   return finishSealV3(casting, await proveMembership(casting.witness, c.artifacts));
+}
+
+/** What every ballot of a rolling poll (ballot version 5) is made against, derived as a client derives it. */
+export interface RollingCasting {
+  readonly election: RollingBallotElection;
+  /** The key set the transcript check registered, in seat order. */
+  readonly registered: readonly RegisteredKeys[];
+  readonly artifacts: MembershipProverArtifacts;
+}
+
+/**
+ * `castingFor` for a rolling version-7 definition: the key set its
+ * transcript check registers (T-37), and `rollingBallotElection` over the
+ * group registry's events through the cast and the timestamp of the
+ * definition's registration, from which @abolishus/crypto computes every
+ * accepted step's root itself (T-08, T-53).
+ */
+export function rollingCastingFor(
+  definition: ElectionDefinitionV7,
+  panel: Panel,
+  transcript: Uint8Array,
+  chain: RollingBallotChain,
+  artifacts: MembershipProverArtifacts,
+): RollingCasting {
+  const registered = registeredKeys(definition, electionStubV7Hash(definition), panel, transcript);
+  return {
+    election: rollingBallotElection(definition, registered, chain),
+    registered,
+    artifacts,
+  };
+}
+
+/** A step's tree as a client rebuilds it: its leaves, removed ones 0, and its root. */
+export interface StepTree {
+  readonly step: number;
+  readonly leaves: readonly bigint[];
+  readonly root: bigint;
+}
+
+/**
+ * Step `step`'s tree over `groups`: every event of `chain` in an L2 block
+ * stamped at or before the step's boundary `boundary`, in chain order
+ * ([[membership]], Root clock and steps), rebuilt from every leaf so no path
+ * is ever asked of anyone (T-10, T-13).
+ */
+export function stepTree(
+  chain: RollingBallotChain,
+  groups: readonly bigint[],
+  step: number,
+  boundary: bigint,
+): StepTree {
+  const tree = new RollingTierTree([...groups]);
+  for (const e of chain.events) if (e.timestamp <= boundary) tree.apply(e);
+  return { step, leaves: tree.leaves, root: tree.root() };
+}
+
+/** A cast rolling ballot: its record and encoding, the root it proved against and each seat's ciphertext. */
+export interface CastRollingBallot {
+  readonly record: BallotRecordV5;
+  readonly bytes: Uint8Array;
+  readonly root: bigint;
+  readonly ciphertexts: readonly Uint8Array[];
+}
+
+/** A rolling poll's one cell: its one rolling tier. */
+const ROLLING_CELL = 0;
+
+/**
+ * One version-5 ballot of `voter` for `votes`, naming `l1Ref` and the step
+ * whose tree is `at`, in Casting's order: the core, each registered seat's
+ * shares encrypted to its registered key (step 1); the validity proofs
+ * binding the nullifier under the tier's rolling scope, which has no root
+ * in it, and the ballot hash binding the step (step 2); the membership
+ * proof against the step's root under the same scope, through
+ * @abolishus/crypto's rolling prover input and the client's prover, then
+ * finished (step 3); and the admission checks with the root it proved
+ * against supplied, as the board's rolling call takes it (step 4; T-08,
+ * T-25).
+ */
+export async function castRolling(
+  c: RollingCasting,
+  voter: Voter,
+  votes: readonly (0 | 1)[],
+  l1Ref: L1Ref,
+  at: StepTree,
+): Promise<CastRollingBallot> {
+  const { election, registered } = c;
+  const { definitionHash } = election;
+  const cell = election.cells[ROLLING_CELL];
+  if (cell === undefined) throw new Error("the definition lists no rolling tier");
+  const rules = {
+    questions: election.questions,
+    threshold: election.threshold,
+    panelSize: election.panelSize,
+    authorThreshold: election.authorThreshold,
+    authorPanelSize: election.authorPanelSize,
+  };
+  const sharing = shareVoteV4(rules, votes);
+  const encrypted = encryptSharesV4(
+    { definitionHash },
+    sharing,
+    registered.map((k) => k.kemKey),
+    [],
+  );
+  const nullifier = rollingMembershipNullifier(voter.secret, { definitionHash, tier: cell.tier });
+  const named = { definitionHash, cell: ROLLING_CELL, nullifier };
+  const vote = proveValidityV5({ ...rules, ...named }, sharing, encrypted.hashes, []);
+  const message = membershipMessage({
+    definitionHash,
+    tier: cell.tier,
+    ballotHash: ballotHashV5({ ...named, step: at.step }, vote),
+    l1RefNumber: l1Ref.number,
+    l1RefHash: l1Ref.hash,
+  });
+  const input = rollingMembershipProverInput(voter.secret, at.leaves, {
+    definitionHash,
+    tier: cell.tier,
+    root: at.root,
+    message,
+  });
+  const proof = finishMembershipProof(input, await proveMembership(input.witness, c.artifacts));
+  const record: BallotRecordV5 = {
+    definition_hash: definitionHash,
+    cell: ROLLING_CELL,
+    nullifier,
+    l1_ref_number: l1Ref.number,
+    l1_ref_hash: l1Ref.hash,
+    membership_proof: decodeMembershipProof(proof),
+    step: at.step,
+    committed_vote: vote,
+  };
+  const checked = checkBallotV5(election, record, at.root);
+  if (!checked.ok) throw new Error(`an honest rolling ballot fails admission: ${checked.code}`);
+  return {
+    record,
+    bytes: encodeBallotV5(record),
+    root: at.root,
+    ciphertexts: encrypted.ciphertexts,
+  };
 }

@@ -332,6 +332,93 @@ export async function transact(
   if (got === undefined) await send(l2.rpc, { from: l2.operator, to: hex(to), data: hex(data) });
 }
 
+/**
+ * Calldata for the board's `submitRollingBallot(bytes32 root, bytes record)`
+ * in the one encoding CanonicalCalldata accepts: the root's word, the
+ * record's offset (64), its length, the record zero-padded to a word.
+ */
+export function rollingBallotCalldata(root: bigint, record: Uint8Array): Uint8Array {
+  return concatBytes(
+    selector("submitRollingBallot(bytes32,bytes)"),
+    word(root),
+    word(64n),
+    word(BigInt(record.length)),
+    padded(record),
+  );
+}
+
+/**
+ * Submits a rolling poll's ballot straight to the board with the root it
+ * proved against, as anyone can, with no server of ours in the path
+ * (docs/spec/contracts.md, Board, Rolling ballots; T-25), or expects
+ * `refusal`.
+ */
+export async function submitRollingBallot(
+  l2: L2,
+  l1: Rpc,
+  root: bigint,
+  record: Uint8Array,
+  refusal?: string,
+): Promise<void> {
+  await transact(l2, l1, l2.board, rollingBallotCalldata(root, record), refusal);
+}
+
+/** A `RollingBallotSubmitted` log: the root its submitter supplied and the record. */
+export interface RollingBallotLog {
+  readonly definitionHash: Uint8Array;
+  readonly ballotHash: Uint8Array;
+  readonly root: bigint;
+  readonly record: Uint8Array;
+  readonly timestamp: bigint;
+}
+
+const ROLLING_BALLOT_SUBMITTED = hex(
+  keccak_256(new TextEncoder().encode("RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)")),
+);
+
+/** The board's `RollingBallotSubmitted` logs in chain order, each `(root, record)` decoded from its data. */
+export async function rollingBallotLogs(l2: L2): Promise<RollingBallotLog[]> {
+  const logs = await l2.rpc.call<
+    {
+      readonly blockNumber: string;
+      readonly logIndex: string;
+      readonly topics: readonly string[];
+      readonly data: string;
+    }[]
+  >("eth_getLogs", [
+    {
+      address: hex(l2.board),
+      fromBlock: "0x0",
+      toBlock: "latest",
+      topics: [ROLLING_BALLOT_SUBMITTED],
+    },
+  ]);
+  const ordered = [...logs].sort((a, b) => {
+    const d = BigInt(a.blockNumber) - BigInt(b.blockNumber);
+    return d !== 0n ? (d < 0n ? -1 : 1) : Number(BigInt(a.logIndex) - BigInt(b.logIndex));
+  });
+  const out: RollingBallotLog[] = [];
+  for (const log of ordered) {
+    const data = unhex(log.data);
+    const at = (i: number) => BigInt(hex(data.slice(32 * i, 32 * (i + 1))));
+    const length = at(2);
+    if (at(1) !== 64n || data.length < 96 || BigInt(data.length) < 96n + length)
+      throw new Error("a RollingBallotSubmitted log whose data isn't (bytes32, bytes)");
+    const block = await l2.rpc.call<{ timestamp: string }>("eth_getBlockByNumber", [
+      log.blockNumber,
+      false,
+    ]);
+    out.push({
+      definitionHash: unhex(log.topics[1] ?? "0x"),
+      ballotHash: unhex(log.topics[2] ?? "0x"),
+      root: at(0),
+      record: data.slice(96, 96 + Number(length)),
+      timestamp: BigInt(block.timestamp),
+    });
+  }
+  return out;
+}
+
 /** Registers the ceremony's record with the trustee registry, or expects `refusal`. */
 export async function registerCeremony(
   l2: L2,

@@ -16,7 +16,12 @@ import { BN254_R, EncodeError } from "./codec.ts";
 import { isIdentitySecret } from "./identity-backup.ts";
 import { isForbiddenCommitment } from "./group-registry.ts";
 import { BJJ_G } from "./keyed-nullifier.ts";
-import { MEMBERSHIP_DEPTH, membershipScope, semaphoreField } from "./membership.ts";
+import {
+  MEMBERSHIP_DEPTH,
+  membershipScope,
+  rollingMembershipScope,
+  semaphoreField,
+} from "./membership.ts";
 import {
   MEMBERSHIP_PROOF_LENGTH,
   MEMBERSHIP_WASM_SHA256,
@@ -184,6 +189,65 @@ export function membershipProverInput(
   // Read once, so a getter can't show the checks one value and the inputs another.
   const { definitionHash, tier, root, message } = statement;
   const scope = membershipScope(definitionHash, tier, root);
+  const messageField = semaphoreField(message);
+  const s = secretScalar(secret);
+  return proverInputAt(s, memberPath(commitmentOf(s), leaves, root), scope, messageField);
+}
+
+/**
+ * What a rolling ballot's proof is for (docs/spec/membership.md, Rolling
+ * scope and Checks for rolling ballots): `MembershipStatement`, with `root`
+ * the root of the step the ballot names, which the client computed itself
+ * from the listed groups' events (`rollingTierSteps`), never one a server,
+ * relay or submitter gave it.
+ */
+export type RollingMembershipStatement = MembershipStatement;
+
+/**
+ * `membershipNullifier` under a rolling electorate: `ν = Poseidon2(ŝ_t, s)`
+ * with the rolling scope of `statement`'s definition hash and tier, which
+ * has no root in it, so the voter's nullifier is the same at every step, in
+ * every listed group and after a removal and re-addition (T-01, T-02,
+ * T-03). It is the `nullifier` signal `rollingMembershipProverInput` gives
+ * for the same secret, definition and tier under any root and message.
+ * Throws `MembershipProverError` with `secret`, and as
+ * `rollingMembershipScope` does.
+ */
+export function rollingMembershipNullifier(
+  secret: Uint8Array,
+  statement: Pick<RollingMembershipStatement, "definitionHash" | "tier">,
+): bigint {
+  if (statement === null || typeof statement !== "object")
+    throw new TypeError("statement: expected an object");
+  const { definitionHash, tier } = statement;
+  return poseidon2(rollingMembershipScope(definitionHash, tier), secretScalar(secret));
+}
+
+/**
+ * `membershipProverInput` for a ballot of a rolling tier (ballot version 5):
+ * the path built here from `leaves`, the step tree's leaves in chain order
+ * with `0n` where a member was removed (`RollingStep`'s tree), at the first
+ * leaf holding the voter's commitment, which after a removal and
+ * re-addition is the live one, and checked to climb to `statement.root`, the
+ * step's root; the scope is the tier's rolling scope `ŝ_t`
+ * (`rollingMembershipScope`), never a fixed one, so the proof verifies only
+ * as a rolling ballot of this definition and tier (T-08, T-13, T-31). The
+ * client still proves only under a definition it verified, with the tier and
+ * root computed from it and the chain (Security notes, Chosen-scope linkage;
+ * T-12). Finish it with `finishMembershipProof`. Throws
+ * `MembershipProverError`; a definition value out of range throws as
+ * `rollingMembershipScope` does.
+ */
+export function rollingMembershipProverInput(
+  secret: Uint8Array,
+  leaves: Iterable<bigint>,
+  statement: RollingMembershipStatement,
+): MembershipProverInput {
+  if (statement === null || typeof statement !== "object")
+    throw new TypeError("statement: expected an object");
+  // Read once, so a getter can't show the checks one value and the inputs another.
+  const { definitionHash, tier, root, message } = statement;
+  const scope = rollingMembershipScope(definitionHash, tier);
   const messageField = semaphoreField(message);
   const s = secretScalar(secret);
   return proverInputAt(s, memberPath(commitmentOf(s), leaves, root), scope, messageField);

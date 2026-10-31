@@ -959,7 +959,11 @@ function archiveRow(read: ArchiveRead): Outcome {
  * `verifyBundle` then reports the same stop from the bundle alone. Nothing
  * read here is trusted: `verifyBundle` authenticates every entry against the
  * anchored heads and roots, so a store or a gateway can only leave the copy
- * short (T-49, T-53).
+ * short (T-49, T-53). `registries` are those `verifyBundle` is given: a
+ * rolling poll's board checks run only with its chain, built under them from
+ * the archive already read into `bundle`, so the read runs exactly when
+ * theirs would. The panels are the release's (`PINNED_PANELS`): they change
+ * only 2.3's live restriction, never whether a profile's read runs.
  */
 export async function readBoardByCid(
   bundle: Bundle,
@@ -967,6 +971,7 @@ export async function readBoardByCid(
   maxBytes: number,
   gateways?: Gateways,
   archived?: AsyncBlockSource,
+  registries: RollingChainRelease | undefined = PINNED_REGISTRIES,
 ): Promise<Bundle> {
   if (bundle.entries.length !== 0 || bundle.unreadableBytes !== 0 || bundle.byCid !== undefined)
     throw new TypeError("the bundle already holds a board copy");
@@ -984,7 +989,7 @@ export async function readBoardByCid(
   });
   const notReached = () =>
     ({ ...bundle, byCid: { ...read(), stopped: { reason: "not-reached" } } }) as const;
-  const definition = fromDefinition(bundle);
+  const definition = fromDefinition(bundle, PINNED_PANELS, registries);
   if ("rows" in definition) return notReached();
   const input = anchoring(bundle, definition.inputs);
   if (input instanceof L1Error) return notReached();

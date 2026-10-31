@@ -120,6 +120,38 @@ export function checkTallied(
   return problems;
 }
 
+/** What a rolling poll's one tier must report about who could answer (verifier 8.1). */
+export interface ExpectedElectorate {
+  readonly opening: number;
+  readonly eligible: number;
+  /** The members of the last step by the close, which the poll must accept. */
+  readonly close: number;
+}
+
+/**
+ * Why a rolling poll's report doesn't give its one tier the electorate the
+ * fixture's group events add up to; empty if it does. The counts rest on the
+ * chain the verifier built, so a joiner after the close, or an event the
+ * chain missed, shows here (T-08, T-16).
+ */
+export function checkRollingElectorate(
+  name: string,
+  run: Pick<VerifierRun, "report">,
+  expected: ExpectedElectorate,
+): string[] {
+  const tiers = run.report.tiers ?? [];
+  const e = tiers[0]?.electorate;
+  return tiers.length === 1 &&
+    e?.opening.members === expected.opening &&
+    e.eligible === expected.eligible &&
+    e.close?.members === expected.close &&
+    e.close.accepted
+    ? []
+    : [
+        `${name}: tiers ${JSON.stringify(tiers)}, not one with electorate ${JSON.stringify(expected)}`,
+      ];
+}
+
 // The verifier's exit codes (packages/verifier, EXIT_CODES).
 const EXIT = { verified: 0, failed: 20, unverifiable: 21 } as const;
 

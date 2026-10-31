@@ -10,6 +10,7 @@ import type { TransactionSource } from "./archive.ts";
 import { readBlockStore } from "./blocks.ts";
 import { type Bundle, BundleError, parseBundle } from "./bundle.ts";
 import type { Gateways } from "./gateways.ts";
+import { PINNED_REGISTRIES, type RollingChainRelease } from "./rolling-chain.ts";
 import { type ArchiveReadOptions, readArchive, readBoardByCid } from "./verify.ts";
 
 /**
@@ -103,7 +104,9 @@ async function withArchive(bundle: Bundle, archive: ArchiveSources) {
  * the objects read from `archive`, or from several, blocks.car asked first,
  * then the archive's objects. Where `archive` is given the run's archive is
  * read first (`readArchive`), with board.bin's copy as with one read by CID.
- * A bundle with neither file needs gateways or an archive.
+ * A bundle with neither file needs gateways or an archive. `registries` are
+ * those the bundle will be verified under (`verifyBundle`'s), which decide
+ * whether a rolling poll's board checks, and so its read by CID, run.
  * Throws `BundleError` if the bundle doesn't follow the spec, holds
  * board.bin while gateways are given (that copy would never be read by
  * CID), or is of format 1 or 2 while an archive is given.
@@ -113,6 +116,7 @@ export async function loadBundle(
   maxBytes: number = DEFAULT_MAX_BOARD_BYTES,
   gateways?: Gateways,
   archive?: ArchiveSources,
+  registries: RollingChainRelease | undefined = PINNED_REGISTRIES,
 ): Promise<Bundle> {
   const car = present(dir, "blocks.car");
   if (!car && gateways === undefined && (archive === undefined || present(dir, "board.bin"))) {
@@ -127,7 +131,8 @@ export async function loadBundle(
     );
   const bundle = parseBundle(json(dir), new Uint8Array());
   const store = car ? readBlockStore(read(dir, "blocks.car")) : undefined;
-  if (archive === undefined) return readBoardByCid(bundle, store, maxBytes, gateways);
+  if (archive === undefined)
+    return readBoardByCid(bundle, store, maxBytes, gateways, undefined, registries);
   const archived = await withArchive(bundle, archive);
-  return readBoardByCid(archived.bundle, store, maxBytes, gateways, archived.blocks);
+  return readBoardByCid(archived.bundle, store, maxBytes, gateways, archived.blocks, registries);
 }

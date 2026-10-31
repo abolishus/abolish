@@ -167,7 +167,9 @@ export const Failed: Story = {
     advance(args.client);
     const alert = await canvas.findByRole("alert");
     await expect(alert).toHaveTextContent("Your poll didn't open.");
-    await expect(alert).toHaveTextContent(/couldn't finish preparing its keys after four tries/);
+    await expect(alert).toHaveTextContent(
+      /Making the key that seals your poll's answers didn't finish after four tries/,
+    );
     await expect(
       within(alert).getByRole("link", { name: "Back to your polls, to try again or discard it" }),
     ).toHaveAttribute("href", "/account");

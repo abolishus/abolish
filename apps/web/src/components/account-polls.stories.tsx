@@ -198,8 +198,12 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
   // A failure in its own words, with what the author can do.
   await expect(timedOut!.getByText("Didn't open")).toBeVisible();
   await expect(
-    timedOut!.getByText(/couldn't finish preparing its keys after four tries/),
+    timedOut!.getByText(
+      /Making the key that seals your poll's answers didn't finish after four tries/,
+    ),
   ).toBeVisible();
+  // Trustees are invisible in an everyday poll: a reason never names them (P2-29, iteration 24).
+  await expect(timedOut!.queryByText(/trustee/i)).toBeNull();
   await expect(
     timedOut!.getByRole("button", { name: "Try again", description: "Repaint the bandstand?" }),
   ).toBeVisible();
@@ -211,7 +215,7 @@ const showsEveryState: Story["play"] = async ({ canvasElement }) => {
     setup!.getByRole("link", { name: "Follow its setup" }),
   );
   await before(
-    timedOut!.getByText(/couldn't finish preparing its keys/),
+    timedOut!.getByText(/didn't finish after four tries/),
     timedOut!.getByRole("button", { name: "Try again" }),
   );
   // A registered poll stays: nothing to retry or discard. Its reason ends
@@ -251,7 +255,7 @@ export const EveryStatePhone: Story = {
     // On a phone the row stacks, so the reason is read above its actions.
     const timedOut = within(within(context.canvasElement).getAllByRole("listitem")[5]!);
     await expect(
-      timedOut.getByText(/couldn't finish preparing its keys/).getBoundingClientRect().bottom,
+      timedOut.getByText(/didn't finish after four tries/).getBoundingClientRect().bottom,
     ).toBeLessThanOrEqual(
       timedOut.getByRole("button", { name: "Try again" }).getBoundingClientRect().top,
     );

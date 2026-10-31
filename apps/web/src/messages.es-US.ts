@@ -720,7 +720,7 @@ export const esUS: Messages = {
   pollFailure_stubRefused:
     "Algo salió mal de nuestro lado mientras se preparaba tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_registrationRefused:
-    "El trabajo de los custodios sobre tu encuesta no pasó nuestras comprobaciones, así que no la registramos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "La preparación de tu encuesta no pasó nuestras comprobaciones, así que no la registramos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_registrationReverted:
     "El registro público rechazó registrar tu encuesta. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_registrationReplaced:
@@ -732,7 +732,7 @@ export const esUS: Messages = {
   pollFailure_openMismatch:
     "Lo que el registro público tiene de tu encuesta no es exactamente lo que escribiste, así que no la abrimos. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
   pollFailure_ceremonyTimeout:
-    "Los custodios de la encuesta no pudieron terminar de preparar sus claves tras cuatro intentos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
+    "La clave que sella las respuestas de tu encuesta no se terminó de crear tras cuatro intentos. Tu pregunta no se publicó. Puedes intentarlo de nuevo o descartarla.",
   pollFailure_openTimeout:
     "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Para hacer tu pregunta, crea una encuesta nueva.",
   evidenceSummary: "¿Cómo sabemos que esto es real?",

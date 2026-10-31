@@ -1004,6 +1004,14 @@ export const esUS: Messages = {
   moderationActionMatches: "{shown} de las {total} decisiones de esta página tomaron esta acción.",
   moderationActionNone: "Ninguna decisión de esta página tomó esta acción.",
   moderationActionEarlier: "Las decisiones anteriores pueden tener alguna.",
+  moderationCounts: {
+    one: "Todo el registro: {count} decisión, por acción",
+    other: "Todo el registro: {count} decisiones, por acción",
+  },
+  moderationPageOfLog: {
+    one: "Esta página contiene {shown} de {count} decisión del registro.",
+    other: "Esta página contiene {shown} de las {count} decisiones del registro.",
+  },
   moderationGroundsMark: "Motivos",
   moderationGroundsTitle: "Los únicos siete motivos",
   moderationGroundsLede:

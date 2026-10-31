@@ -987,6 +987,14 @@ const enUS = {
   moderationActionMatches: "{shown} of the {total} decisions on this page took this action.",
   moderationActionNone: "No decision on this page took this action.",
   moderationActionEarlier: "Earlier decisions may have some.",
+  moderationCounts: {
+    one: "The whole log: {count} decision, by action",
+    other: "The whole log: {count} decisions, by action",
+  },
+  moderationPageOfLog: {
+    one: "This page holds {shown} of the log's {count} decision.",
+    other: "This page holds {shown} of the log's {count} decisions.",
+  },
   moderationGroundsMark: "Grounds",
   moderationGroundsTitle: "The only seven grounds",
   moderationGroundsLede:

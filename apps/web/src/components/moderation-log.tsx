@@ -14,8 +14,9 @@ import type { ReactNode } from "react";
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { LOG_ACTIONS, type LogAction } from "../log-actions.ts";
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
-import type { ModerationLog as Log } from "../server/load.ts";
+import type { LogCounts, ModerationLogPage as Log } from "../server/load.ts";
 import { formatUtc } from "./format.ts";
+import { Bar } from "./poll-results.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { FilterGroup } from "./filter-group.tsx";
 
@@ -196,6 +197,44 @@ function Row({ entry }: { entry: Entry }) {
   );
 }
 
+/**
+ * The whole log's decisions by action, as the filter names them, from the
+ * API's counts rather than the page in hand: a reader sees how often each
+ * action was taken without paging through the log (T-68).
+ */
+function LogTally({ counts }: { counts: LogCounts }) {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const number = new Intl.NumberFormat(locale);
+  return (
+    <figure aria-labelledby="log-counts" className="m-0 grid gap-3">
+      <figcaption
+        id="log-counts"
+        className="font-mono text-xs tracking-wide text-muted-foreground uppercase"
+      >
+        {t("moderationCounts", { count: counts.total })}
+      </figcaption>
+      <ol className="m-0 grid list-none border-t border-foreground p-0">
+        {LOG_ACTIONS.map((a) => (
+          <li
+            key={a}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 border-b border-border py-3 sm:grid-cols-[12rem_minmax(0,1fr)_5rem]"
+          >
+            <span className="text-sm">{t(ACTION_TEXT[a])}</span>
+            {/* The bar after the count on a phone, between them otherwise. */}
+            <span className="order-last col-span-full grid sm:order-none sm:col-span-1">
+              <Bar share={counts[a] / counts.total} lead={false} />
+            </span>
+            <span className="text-end font-mono text-sm tabular-nums">
+              {number.format(counts[a])}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </figure>
+  );
+}
+
 export interface ModerationLogProps {
   log: Log;
   /** The number this page reads below, if not from the latest decision. */
@@ -212,7 +251,7 @@ export interface ModerationLogProps {
  * beside it. The log carries no free text, so a row can't carry personal
  * data (T-17); the page shows the API's rows as they come, newest first, so
  * what moderation did last is what a reader meets first, filtered by action
- * over the page in hand.
+ * over the page in hand, beneath the whole log's counts by action.
  */
 export function ModerationLog({ log, before, next, action }: ModerationLogProps) {
   const t = useTranslate(catalogs);
@@ -254,6 +293,9 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
           </p>
         }
       >
+        {log.counts === undefined || log.counts.total === 0 ? null : (
+          <LogTally counts={log.counts} />
+        )}
         {log.entries.length === 0 ? (
           <p className="m-0 text-lg">{t("moderationEmpty")}</p>
         ) : (
@@ -318,6 +360,16 @@ export function ModerationLog({ log, before, next, action }: ModerationLogProps)
               ))}
             </ol>
           </div>
+        )}
+        {/* Not where the page holds more than the counts: the two are read
+            apart, so a decision made between them can leave the counts a
+            little behind the page, which this hides only at its extreme. */}
+        {log.counts === undefined ||
+        log.entries.length === 0 ||
+        log.entries.length > log.counts.total ? null : (
+          <p className="m-0 font-mono text-xs tracking-wide text-muted-foreground">
+            {t("moderationPageOfLog", { shown: log.entries.length, count: log.counts.total })}
+          </p>
         )}
         {next === undefined && before === undefined ? null : (
           <div className="flex flex-wrap items-center gap-x-6">

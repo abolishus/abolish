@@ -28,6 +28,8 @@ import {
 import {
   accountProfileAppeals,
   accountProfiles,
+  moderationActions,
+  pollTagActions,
   profileModerationActions,
   profileReports,
 } from "./db/schema/index.ts";
@@ -325,6 +327,57 @@ export async function readPublicModerationLogBefore(
   limit: number,
 ): Promise<PublicLogEntry[]> {
   return publicLogPage(client, { before }, limit);
+}
+
+/**
+ * How many decisions the whole public log holds, by what they did: poll
+ * delistings, poll hidings, profile hidings, restores of either, and
+ * refilings, as the log page's filter names them. The three tables are read
+ * from one snapshot, so the counts are of one log at one moment, and `total`
+ * is their sum (T-68). Like the log, they say nothing of who decided or who
+ * reported (T-10).
+ */
+export interface PublicModerationCounts {
+  readonly delist: number;
+  readonly hide: number;
+  readonly hideProfile: number;
+  readonly restore: number;
+  readonly refile: number;
+  readonly total: number;
+}
+
+/** The whole public log's `PublicModerationCounts`, as `GET /moderation/log/counts` serves them. */
+export async function readPublicModerationCounts(client: Sql): Promise<PublicModerationCounts> {
+  const count = q<number>`count(*)`.mapWith(Number);
+  const [polls, profiles, refilings] = await drizzle({ client }).transaction(
+    async (tx) => [
+      await tx
+        .select({ action: moderationActions.action, n: count })
+        .from(moderationActions)
+        .groupBy(moderationActions.action),
+      await tx
+        .select({ action: profileModerationActions.action, n: count })
+        .from(profileModerationActions)
+        .groupBy(profileModerationActions.action),
+      await tx.select({ n: count }).from(pollTagActions),
+    ],
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
+  const of = (rows: readonly { action: string; n: number }[], action: string) =>
+    rows.find((r) => r.action === action)?.n ?? 0;
+  // The tables' check constraints admit only these actions, so nothing is
+  // left uncounted.
+  const counts = {
+    delist: of(polls, "delist"),
+    hide: of(polls, "hide"),
+    hideProfile: of(profiles, "hide"),
+    restore: of(polls, "restore") + of(profiles, "restore"),
+    refile: refilings[0]?.n ?? 0,
+  };
+  return {
+    ...counts,
+    total: counts.delist + counts.hide + counts.hideProfile + counts.restore + counts.refile,
+  };
 }
 
 async function publicLogPage(client: Sql, page: LogPage, limit: number): Promise<PublicLogEntry[]> {

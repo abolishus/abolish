@@ -649,6 +649,27 @@ const getModerationLog = oc
     }),
   );
 
+const getModerationCounts = oc
+  .route({
+    method: "GET",
+    path: "/moderation/log/counts",
+    summary: "How many decisions the public moderation log holds, by action",
+    description:
+      "The whole of `GET /moderation/log` counted by what each decision did: `delist` and `hide` about polls, `hideProfile` about creator profiles, `restore` of either, and `refile`, with `total` their sum. They are read from one snapshot of the log, so they agree with each other; a page of the log read in another request may hold a decision made since. Counts are decimal strings. Like the log, they name no moderator, reporter or account (T-10), and anyone copying the log can recount them (T-68).",
+    tags: ["moderation"],
+  })
+  .input(z.strictObject({}))
+  .output(
+    z.strictObject({
+      delist: U64,
+      hide: U64,
+      hideProfile: U64,
+      restore: U64,
+      refile: U64,
+      total: U64,
+    }),
+  );
+
 const getModerationStatus = oc
   .route({
     method: "GET",
@@ -892,7 +913,12 @@ export const contract = {
   openings: { submit: submitOpening },
   destructions: { submit: submitDestruction },
   postings: { submit: submitPosting },
-  moderation: { getLog: getModerationLog, getStatus: getModerationStatus, report: reportPoll },
+  moderation: {
+    getLog: getModerationLog,
+    getCounts: getModerationCounts,
+    getStatus: getModerationStatus,
+    report: reportPoll,
+  },
   backups: { put: putBackup, fetch: fetchBackup, delete: deleteBackup },
   registrations: { tier0: registerTier0, tier1: relayTier1 },
 };

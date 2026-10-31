@@ -492,8 +492,24 @@ const RESULTS = new Map<string, unknown>([
   ],
 ]);
 
-/** The stub's state: while `down`, it drops every connection unanswered, as a dead API would. */
-export const stub = { down: false };
+/** The log's counts the stub serves, as the API does. */
+export const LOG_COUNTS = {
+  delist: "4",
+  hide: "2",
+  hideProfile: "1",
+  restore: "3",
+  refile: "1",
+  total: "11",
+};
+
+/**
+ * The stub's state: while `down`, it drops every connection unanswered, as a
+ * dead API would; with `logCounts` unset, its read of the log's counts fails.
+ */
+export const stub: { down: boolean; logCounts: Record<string, string> | undefined } = {
+  down: false,
+  logCounts: LOG_COUNTS,
+};
 
 /** Every request the stub API received, with its headers. */
 export const seen: { path: string; query: URLSearchParams; headers: IncomingHttpHeaders }[] = [];
@@ -535,6 +551,10 @@ export function stubApi(): Server {
     };
     const electionId = url.searchParams.get("electionId") ?? "";
     const definition = definitions.get(electionId);
+    if (url.pathname === "/moderation/log/counts") {
+      if (stub.logCounts === undefined) return json(503, { code: "INTERNAL_SERVER_ERROR" });
+      return json(200, stub.logCounts);
+    }
     if (url.pathname === "/moderation/log") {
       // The website reads the log only back from a number, newest first.
       const before = BigInt(url.searchParams.get("before") ?? "0");

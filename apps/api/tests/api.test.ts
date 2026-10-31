@@ -1290,6 +1290,42 @@ describe("moderation (T-68)", () => {
     expect(both.status).toBe(400);
   });
 
+  test("the log's counts are the whole log's, by action, naming no moderator", async () => {
+    const counts = async () =>
+      (await json(await get("/moderation/log/counts", {}))) as Record<string, string>;
+    const [a, b] = [await election(), await election()];
+    const was = await counts();
+    await moderate(app, a.id, { action: "delist", reason: "spam", moderator: "mod-secret" });
+    await moderate(app, b.id, { action: "hide", reason: "threat", moderator: "mod-secret" });
+    await moderate(app, a.id, { action: "restore", reason: "error", moderator: "mod-secret" });
+    const now = await counts();
+    expect(Object.keys(now).sort()).toEqual(
+      ["delist", "hide", "hideProfile", "refile", "restore", "total"].sort(),
+    );
+    const grew = (key: string) => BigInt(now[key]!) - BigInt(was[key]!);
+    expect(["delist", "hide", "hideProfile", "restore", "refile", "total"].map(grew)).toEqual([
+      1n,
+      1n,
+      0n,
+      1n,
+      0n,
+      3n,
+    ]);
+    // `total` is every entry the log serves.
+    let served = 0;
+    for (let after = "0"; ;) {
+      const page = (await json(await get("/moderation/log", { after, limit: "256" })))[
+        "entries"
+      ] as { seq: string }[];
+      served += page.length;
+      if (page.length < 256) break;
+      after = page.at(-1)!.seq;
+    }
+    expect(now["total"]).toBe(String(served));
+    expect(JSON.stringify(now)).not.toContain("mod-");
+    expect((await get("/moderation/log/counts", { limit: "1" })).status).toBe(400);
+  });
+
   test("the contract's profile handle is core's", () => {
     expect(PROFILE_HANDLE.source).toBe(CORE_PROFILE_HANDLE.source);
     expect(PROFILE_HANDLE.flags).toBe(CORE_PROFILE_HANDLE.flags);

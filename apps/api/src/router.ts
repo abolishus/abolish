@@ -24,6 +24,7 @@ import {
   readBoardedEntry,
   readEntryAt,
   readPollTags,
+  readPublicModerationCounts,
   readPublicModerationLog,
   readPublicModerationLogBefore,
   report,
@@ -525,6 +526,18 @@ export const router = os.router({
               return { ...common, handle: e.handle, action: e.action, reason: e.reason };
           }
         }),
+      };
+    }),
+    // The same three log tables, counted in one snapshot.
+    getCounts: os.moderation.getCounts.handler(async ({ context }) => {
+      const counts = await readPublicModerationCounts(context.sql);
+      return {
+        delist: String(counts.delist),
+        hide: String(counts.hide),
+        hideProfile: String(counts.hideProfile),
+        restore: String(counts.restore),
+        refile: String(counts.refile),
+        total: String(counts.total),
       };
     }),
     getStatus: os.moderation.getStatus.handler(async ({ input, context, errors }) => {

@@ -157,14 +157,18 @@ export function offlineWorker(scope: OfflineWorkerScope, config: OfflineWorkerCo
     } catch {
       // The fetch failed before any answer: no connection. A server's own
       // error page is an answer, and passes through above.
-      const page = await (await scope.caches.open(config.cache)).match(config.offline);
-      return page ?? Response.error();
+      return (await kept(config.offline)) ?? Response.error();
     }
   }
 
+  // Read through `caches.match`, never `caches.open`, which makes the cache
+  // it names when there is none: a fetch this worker still answers after
+  // its successor has dropped its cache (before the successor claims the
+  // page) would otherwise bring the dropped cache back, empty, for good.
+  const kept = (path: string) => scope.caches.match(path, { cacheName: config.cache });
+
   async function stored(request: Request, path: string): Promise<Response> {
-    const hit = await (await scope.caches.open(config.cache)).match(path);
-    return hit ?? scope.fetch(request);
+    return (await kept(path)) ?? scope.fetch(request);
   }
 
   scope.addEventListener("install", (event) => {

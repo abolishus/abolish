@@ -320,6 +320,23 @@ describe("rollingChains", () => {
     expect(moved.settledAt).toBe(at);
   });
 
+  test("records past the block they are read at are refused, never judged against", async () => {
+    const at = records.reduce((m, r) => (r.l2_timestamp > m ? r.l2_timestamp : m), 0n) - 1n;
+    await expect(
+      rollingChains({ read: async () => ({ at, records }) }, pinned).read(d),
+    ).rejects.toThrow(RangeError);
+  });
+
+  test("a definition sharing another's election_id gets its own chain, not the other's", async () => {
+    const at = t.closesAt + 1n;
+    const chains = rollingChains({ read: async () => ({ at, records }) }, pinned);
+    const first = await chains.read(d);
+    const other = { ...d, value: { ...d.value, closes_at: d.value.closes_at + 1n } };
+    const read = await chains.read(other);
+    expect(read).not.toBe(first);
+    expect(read.outcome).toEqual(rollingChain(other, records, pinned));
+  });
+
   test("records the recount doesn't pass give no chain", async () => {
     const read = await rollingChains(
       { read: async () => ({ at: t.closesAt + 1n, records: records.slice(1) }) },

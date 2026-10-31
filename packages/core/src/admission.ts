@@ -36,6 +36,7 @@ import {
   decodeElectionDefinitionV7,
   DecodeError,
   deliverySegments,
+  encodeElectionDefinitionV7,
   type ElectionDefinitionV7Record,
   ELECTORATE_MODES,
   MAX_BOARD_PAYLOAD,
@@ -207,7 +208,9 @@ export interface RollingChains {
  * block, each contract's in order of `n` and its whole sequence there, as
  * the caller proved them (the worker's index checked against each
  * registry's event accumulator under an L2 output root on L1, as for
- * `provenGroupRecords`; T-71), with that block's timestamp.
+ * `provenGroupRecords`; T-71), with that block's timestamp. The block must
+ * be finalized, so its records never change while `at` stays the same:
+ * `rollingChains` keeps a chain for as long as `at` does.
  */
 export interface ProvenRegistryRecords {
   readonly at: bigint;
@@ -238,13 +241,19 @@ export function rollingChains(
     async read(definition) {
       const { at, records } = await source.read();
       if (typeof at !== "bigint" || at < 0n) throw new RangeError("at must be a bigint ≥ 0");
-      const key = Buffer.from(definition.value.election_id).toString("hex");
+      // By the definition's bytes, not its election_id: `rollingChain`
+      // checks that these very bytes were registered, which a hit skips.
+      const key = Buffer.from(encodeElectionDefinitionV7(definition.value)).toString("hex");
       const held = known.get(key);
       if (held !== undefined && held.settledAt === at) {
         known.delete(key);
         known.set(key, held);
         return held;
       }
+      // A record after `at` means `at` isn't the block the records run
+      // through: a step it calls settled could still gain events (T-08).
+      if (records.some((r) => r.l2_timestamp > at))
+        throw new RangeError("the registries' records run past their block's timestamp");
       const read = { settledAt: at, outcome: rollingChain(definition, records, release) };
       remember(known, key, read, cacheSize);
       return read;

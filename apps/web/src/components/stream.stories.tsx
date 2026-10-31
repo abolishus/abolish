@@ -197,14 +197,17 @@ const play: Story["play"] = async ({ canvasElement }) => {
   );
 
   // A poll whose text failed its checks shows none, and can't be answered
-  // from here. It says so in everyday words, with no ID and no "server".
+  // from here. It says so in everyday words, with no "server", and the ID only as a small note.
   const unreadable = list.getByRole("heading", { name: "This poll can't be shown here" });
   await expect(within(unreadable).getByRole("link")).toHaveAttribute(
     "href",
     `/polls/${UNREADABLE}`,
   );
   await expect(list.getByText(/couldn't read its question/)).toBeVisible();
-  await expect(list.queryByText(/4040404040404040/)).toBeNull();
+  // The ID's start, small, is all that tells two such cards' links apart.
+  await expect(within(unreadable).getByRole("link")).toHaveAccessibleDescription(
+    "Poll 4040404040404040…",
+  );
   await expect(list.queryByText(/server/)).toBeNull();
 
   // The three orders share one row at every width; on a phone each label
@@ -385,6 +388,10 @@ export const Unreadable: Story = {
       `/polls/${UNREADABLE}`,
       `/polls/${NEXT}`,
     ]);
+    // Two such links share their words, so each is described by its own ID.
+    await expect(
+      headings.map((h) => within(h).getByRole("link").getAttribute("aria-describedby")),
+    ).toSatisfy((ids: (string | null)[]) => new Set(ids).size === 2 && !ids.includes(null));
     await expect(list.getByText(/came through damaged/)).toBeVisible();
     await expect(list.getByText(/belong to a different poll/)).toBeVisible();
     await expect(list.queryByText(/definition|server/)).toBeNull();

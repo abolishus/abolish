@@ -375,6 +375,7 @@ const enUS = {
   streamPickFirst: "These answers are for question 1 of {count}.",
   streamNoBallot: "Answering from this page isn't set up on this site yet.",
   streamUnreadable: "This poll can't be shown here",
+  streamUnreadableId: "Poll {prefix}…",
   streamText: "We couldn't read its question. Its own page has everything we hold about it.",
   streamUndecodable:
     "Its details came through damaged, so its question and answers can't be trusted here. Its own page says more.",

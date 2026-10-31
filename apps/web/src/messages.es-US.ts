@@ -379,6 +379,7 @@ export const esUS: Messages = {
   streamPickFirst: "Estas respuestas son para la pregunta 1 de {count}.",
   streamNoBallot: "Responder desde esta página todavía no está disponible en este sitio.",
   streamUnreadable: "Esta encuesta no se puede mostrar aquí",
+  streamUnreadableId: "Encuesta {prefix}…",
   streamText: "No pudimos leer su pregunta. Su propia página tiene todo lo que guardamos de ella.",
   streamUndecodable:
     "Sus datos llegaron dañados, así que aquí no se puede confiar en su pregunta ni en sus respuestas. Su propia página explica más.",

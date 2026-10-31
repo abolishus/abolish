@@ -342,9 +342,15 @@ export function StreamCard({
         className="grid gap-3 border border-dashed border-border p-5"
       >
         {/* Everyday words, not the register's ID and "server": a visitor
-            here came for questions, and the poll's page has the detail. */}
+            here came for questions, and the poll's page has the detail. The
+            ID's start, small below, is all that tells two such cards apart,
+            so it describes the link. */}
         <h3 id={titleId} className="m-0 text-lg font-medium">
-          <a className="underline underline-offset-4" href={`/polls/${card.electionId}`}>
+          <a
+            className="underline underline-offset-4"
+            href={`/polls/${card.electionId}`}
+            aria-describedby={questionId}
+          >
             {t("streamUnreadable")}
           </a>
         </h3>
@@ -356,6 +362,9 @@ export function StreamCard({
                 ? "streamMismatch"
                 : "streamText",
           )}
+        </p>
+        <p id={questionId} className="m-0 font-mono text-xs text-muted-foreground" translate="no">
+          {t("streamUnreadableId", { prefix: card.electionId.slice(0, 16) })}
         </p>
       </article>
     );

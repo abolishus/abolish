@@ -282,3 +282,20 @@ export function locatorStorage(bytes: Uint8Array, count: bigint) {
   }
   return entries;
 }
+
+/**
+ * The anchor's storage registering each receipt key `p ‖ x` at
+ * `registeredAt`, never retired, in Solidity's layout (docs/spec/contracts.md,
+ * Board anchor, Receipt keys): the word at
+ * `keccak256(abi.encode(x, keccak256(abi.encode(uint256(p), A + 4))))`, with
+ * `registered_at` in its low 64 bits and `retired_at` (zero) in the next 64.
+ */
+export function receiptKeyStorage(keys: readonly Uint8Array[], registeredAt: bigint) {
+  return keys.map((k): [Uint8Array, Uint8Array] => {
+    const inner = keccak_256(
+      Uint8Array.from([...word(BigInt(k[0] as number)), ...word(ANCHOR_NAMESPACE + 4n)]),
+    );
+    const slot = keccak_256(Uint8Array.from([...k.subarray(1), ...inner]));
+    return [slot, stored(word(registeredAt))];
+  });
+}

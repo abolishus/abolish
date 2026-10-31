@@ -10,8 +10,11 @@ import {
   decodeElectionDefinitionRecord,
   decodeElectionDefinitionV5,
   decodeElectionDefinitionV6,
+  decodeElectionDefinitionV7,
   decodeSummedShareMessage,
   type ElectionDefinition,
+  type ElectionDefinitionV7,
+  electionDefinitionV7Rule,
   element,
   encode,
   encodeSummedShareMessage,
@@ -623,7 +626,7 @@ describe("summed-share messages", () => {
   });
 });
 
-describe("summed-share messages under definition versions 3 to 5", () => {
+describe("summed-share messages under definition versions 3 to 7", () => {
   const readVector = (name: string, id: string) => {
     const f = JSON.parse(readFileSync(new URL(name, SPEC_VECTORS), "utf8")) as {
       readonly vectors: readonly { readonly id: string; readonly encoding?: string }[];
@@ -767,5 +770,123 @@ describe("summed-share messages under definition versions 3 to 5", () => {
         summedOf(1),
       ),
     ).toThrow(UnsupportedVersionError);
+  });
+
+  // A rolling version 7 without an author panel pins tally-opening version 1,
+  // which fixes this message at version 1, over one cell per rolling tier
+  // (docs/spec/tally.md, Rolling tiers; P2-17 part 4f-2b-2a). The vector's
+  // typical rolling poll, with its author panel taken out and a 2-of-3
+  // panel, has two rolling tiers (0 and 2).
+  const rollingOf = (id: string): { version: 7; value: ElectionDefinitionV7 } => {
+    const v = decodeElectionDefinitionV7(readVector("election-definition-v7.json", id));
+    return {
+      version: 7,
+      value: {
+        ...v,
+        threshold: 2,
+        panel_size: 3,
+        author_threshold: 0,
+        author_keys: [],
+        author_transcript_hash: new Uint8Array(32),
+        ceremony_transcript_hash: ceremonyTranscriptHash,
+      },
+    };
+  };
+  const rolling = rollingOf("definition-v7-rolling-typical");
+  const rr = tallyRules(rolling);
+  const empty = aggregateCell(rr, []);
+  const zero = Array.from({ length: rr.optionCount }, () => ({ v: 0n, r: 0n }));
+  const sealRolling = (definition: { version: 7; value: ElectionDefinitionV7 }, cell: number) =>
+    sealSummedShares(
+      { definition, cell, aggregate: empty },
+      keys,
+      { index: 3, signingSecret: seat(3).signingSecret },
+      1,
+      zero,
+    );
+
+  test("a rolling version 7 numbers one cell per rolling tier, under its own hash", () => {
+    expect(electionDefinitionV7Rule(rolling.value)).toBeUndefined();
+    const tiers = rolling.value.rolling_electorate.length;
+    expect(tiers).toBe(2);
+    const election = {
+      definition: rolling,
+      aggregates: Array.from({ length: tiers }, () => empty),
+      registered: keys,
+    };
+    for (let cell = 0; cell < tiers; cell++)
+      expect(
+        openSummedShares(
+          election,
+          { index: 1, secretKey: seat(1).kem.secretKey },
+          sealRolling(rolling, cell),
+        ),
+      ).toEqual({ ok: true, cell, sender: 3, summed: zero });
+    const bytes = sealRolling(rolling, tiers - 1);
+    // Version 1, as tally-opening version 1 fixes: no panel byte.
+    expect(decodeSummedShareMessage(bytes, 1).cell).toBe(tiers - 1);
+    // A cell past the rolling tiers is refused before sealing (T-14, T-16).
+    expect(() => sealRolling(rolling, tiers)).toThrow(RangeError);
+    // One aggregate per rolling tier, no more and no fewer.
+    for (const n of [tiers - 1, tiers + 1])
+      expect(() =>
+        openSummedShares(
+          { ...election, aggregates: Array.from({ length: n }, () => empty) },
+          { index: 1, secretKey: seat(1).kem.secretKey },
+          bytes,
+        ),
+      ).toThrow(RangeError);
+    // The AAD and signature bind version 7's hash, which covers the rolling
+    // tiers: the same poll with a tier's groups changed doesn't open it (T-37).
+    const [first, ...rest] = rolling.value.rolling_electorate;
+    if (first === undefined) throw new Error("no rolling tier");
+    const regrouped = {
+      ...rolling,
+      value: {
+        ...rolling.value,
+        rolling_electorate: [{ ...first, groups: first.groups.slice(1) }, ...rest],
+      },
+    };
+    expect(electionDefinitionV7Rule(regrouped.value)).toBeUndefined();
+    expect(
+      openSummedShares(
+        { ...election, definition: regrouped },
+        { index: 1, secretKey: seat(1).kem.secretKey },
+        bytes,
+      ),
+    ).toEqual({ ok: false, code: "summed-context" });
+  });
+
+  test("a fixed version 7, or a rolling one with an author panel, has no single-panel tally here", () => {
+    const fixed = rollingOf("definition-v7-fixed-minimal");
+    expect(fixed.value.electorate_mode).toBe(1);
+    expect(() => sealRolling(fixed, 0)).toThrow(UnsupportedVersionError);
+    // The vector's own author panel: each panel tallies its half under
+    // summed-share version 2 (tally.md, Author panel; T-37).
+    const own = decodeElectionDefinitionV7(
+      readVector("election-definition-v7.json", "definition-v7-rolling-typical"),
+    );
+    const authored = {
+      ...rolling,
+      value: {
+        ...rolling.value,
+        author_threshold: own.author_threshold,
+        author_keys: own.author_keys,
+        author_transcript_hash: own.author_transcript_hash,
+      },
+    };
+    expect(authored.value.author_keys.length).toBeGreaterThan(0);
+    expect(electionDefinitionV7Rule(authored.value)).toBeUndefined();
+    expect(() => sealRolling(authored, 0)).toThrow(/per panel/);
+    // A rolling one that isn't well-formed is refused before any value is read (T-28).
+    const unsorted = {
+      ...rolling,
+      value: {
+        ...rolling.value,
+        rolling_electorate: [...rolling.value.rolling_electorate].reverse(),
+      },
+    };
+    expect(electionDefinitionV7Rule(unsorted.value)).toBeDefined();
+    expect(() => sealRolling(unsorted, 0)).toThrow(/well-formed/);
   });
 });

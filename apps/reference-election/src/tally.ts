@@ -32,8 +32,12 @@ import {
 } from "@abolishus/crypto";
 import { definitionHash, type FixtureDefinition, type SeatKeys } from "./election.ts";
 
-/** The definitions the fixture tallies: one question, or questions, each over a fixed electorate. */
-type Tallied = Exclude<FixtureDefinition, { readonly version: 7 }>;
+/**
+ * The definitions the fixture tallies: one question or questions over a
+ * fixed electorate, or a rolling poll's questions, one cell per rolling tier
+ * (docs/spec/tally.md, Rolling tiers).
+ */
+type Tallied = FixtureDefinition;
 
 /** A ballot as every seat took it in: its share receipts to board, and each seat's shares. */
 export interface Intake {
@@ -76,11 +80,20 @@ export interface Counted {
   readonly shares: ReadonlyMap<number, readonly Share[]>;
 }
 
-/** The ballot's VSS commitments, decoded under the ballot version the definition pins. */
+/**
+ * The ballot's VSS commitments, decoded under the ballot version the
+ * definition pins: under a rolling poll's ballot version 5, the default
+ * panel's, the only half a poll without an author panel has.
+ */
 function vssOf(d: Tallied, payload: Uint8Array): CommittedVote["vss"] {
-  return d.version === 1
-    ? decodeBallot(payload, 1).committed_vote.vss
-    : decodeBallot(payload, 3).committed_vote.vss;
+  switch (d.version) {
+    case 1:
+      return decodeBallot(payload, 1).committed_vote.vss;
+    case 5:
+      return decodeBallot(payload, 3).committed_vote.vss;
+    case 7:
+      return decodeBallot(payload, 5).committed_vote.vss;
+  }
 }
 
 /**

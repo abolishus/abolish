@@ -17,7 +17,7 @@ import {
 } from "../poll.ts";
 import type { PollResults as Results } from "../results.ts";
 import type { BoardHead, ModerationState } from "../server/load.ts";
-import type { CardText, PollWords } from "../stream.ts";
+import type { CardAnswered, CardText, PollWords } from "../stream.ts";
 import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
@@ -51,6 +51,8 @@ export interface PollSummaryProps {
   askedBy?: Asker | undefined;
   /** Its results so far; without them, none are shown. */
   results?: Results | undefined;
+  /** How many have answered it so far, tier by tier; without it, no count is shown. */
+  answered?: CardAnswered | undefined;
   /** Its words in the page's language, checked against its definition; without them, it goes by its ID. */
   text?: CardText | undefined;
   /** Every question's words, which name its questions, their options and the results'. */
@@ -194,6 +196,44 @@ function PollQuestions({ poll, words }: { poll: PollView; words: PollWords }) {
 }
 
 /**
+ * How many have answered so far, one line per tier the definition names, as
+ * a stream card and the register say it (`everyday-poll-page.tsx`'s sealed
+ * results): the board's count of distinct voters, never a result and never
+ * one figure across tiers (T-01).
+ */
+function PollAnswered({
+  answered,
+  closed,
+  phoneVerification,
+}: {
+  answered: CardAnswered;
+  closed: boolean;
+  phoneVerification: boolean;
+}) {
+  const t = useTranslate(catalogs);
+  return (
+    <div className="grid gap-1 border-t border-border pt-3">
+      <p id="answered-title" className="m-0 font-medium">
+        {t(closed ? "pollAnsweredClosed" : "streamAnsweredSoFar")}
+      </p>
+      <ul aria-labelledby="answered-title" className="m-0 grid list-none gap-1 p-0">
+        {answered.map(({ tier, answered: count }) => (
+          <li key={tier} className="flex flex-wrap gap-x-2">
+            <span className="font-heading text-xl font-semibold tabular-nums">
+              {t("resultsPeople", { count: BigInt(count) })}
+            </span>{" "}
+            <span aria-hidden="true">·</span>{" "}
+            <span className="self-center text-foreground/80">
+              {t(tierMessage(tier, phoneVerification))}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
  * One poll's page, in the everyday register ([[language]]): what it is and
  * where it stands on the surface, and what our server says about it one step
  * down, behind "How do we know this is real?". That part says plainly that
@@ -214,6 +254,7 @@ export function PollSummary({
   phoneVerification,
   askedBy,
   results,
+  answered,
   text,
   words,
   ballot,
@@ -368,6 +409,14 @@ export function PollSummary({
         ) : status === "open" && ballot === null ? (
           <p className="m-0 text-base text-pretty text-muted-foreground">{t("streamNoBallot")}</p>
         ) : null}
+        {/* Nobody can have answered before it opens. */}
+        {answered === undefined || status === "scheduled" ? null : (
+          <PollAnswered
+            answered={answered}
+            closed={status === "closed"}
+            phoneVerification={phoneVerification}
+          />
+        )}
         {answering === null ? null : (
           <div className="grid justify-items-start gap-2 pt-2">
             <a

@@ -476,8 +476,8 @@ describe("poll page", () => {
       "x-forwarded-for": "203.0.113.9",
       "user-agent": "visitor-agent",
     });
-    // The definition, head, moderation, code, tags, display text and results.
-    expect(seen.length).toBe(7);
+    // The definition, head, moderation, code, tags, display text, results and answered count.
+    expect(seen.length).toBe(8);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(headers.authorization).toBeUndefined();
@@ -486,6 +486,25 @@ describe("poll page", () => {
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");
       expect(JSON.stringify(headers)).not.toContain("visitor-agent");
     }
+  });
+
+  // P2-19 part 21: how many have answered, on the poll page.
+  test("says how many have answered the poll, tier by tier, or nothing when the read fails", async () => {
+    const text = async (id: string) =>
+      (await (await get(`/polls/${id}`)).text()).replace(/<[^>]+>/g, "|");
+    // Each tier the definition names on its own line, one with none served
+    // at 0; the API's count for a tier it doesn't name is left out (T-01).
+    const counted = await text(STREAM_V5);
+    expect(counted).toMatch(
+      /Answered before it closed\|+1,204 people[| ]+·[| ]+Tier 0 \(verified e-mail\)\|+0 people[| ]+·[| ]+Tier 2 \(document-verified\)\|/,
+    );
+    expect(counted).not.toMatch(/\b7 people/);
+    // An open poll's count is so far; none served is 0.
+    expect(await text(OPEN_ONE)).toMatch(/Answered so far\|+0 people\|/);
+    // A failed read shows no count, and the page stays.
+    const failed = await text(STREAM_V1);
+    expect(failed).toContain("This poll has closed.");
+    expect(failed).not.toMatch(/Answered (?:so far|before it closed)/);
   });
 
   test("shows where the poll is listed, each tag a link into the stream", async () => {

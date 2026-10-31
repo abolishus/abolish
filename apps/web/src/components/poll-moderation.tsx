@@ -149,6 +149,15 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           </span>
         )}
       </p>
+      {/* Under the heading focus returns to after filing, as the list's own outcomes are under its heading: at the block's end, under the log link, a phone drew it a screen below. Empty, it is out of the grid, so it takes no gap; it stays in the tree, so its words are announced when they come. */}
+      <div role="status" className="max-w-prose text-pretty empty:absolute">
+        {notice}
+      </div>
+      {alert === null ? null : (
+        <p role="alert" className="m-0 max-w-prose text-pretty text-destructive">
+          {alert}
+        </p>
+      )}
       {view === undefined || latest === undefined ? null : (
         <p className="m-0 max-w-prose text-pretty text-muted-foreground">
           {t(`moderationMeans_${view.state}`)}
@@ -207,15 +216,6 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
           {t("moderationLogLink")}
         </a>
       </p>
-      {/* Empty, it is out of the grid, so it takes no gap and the block's rule ends with its last line; it stays in the tree, so its words are announced when they come. */}
-      <div role="status" className="empty:absolute">
-        {notice}
-      </div>
-      {alert === null ? null : (
-        <p role="alert" className="m-0 text-destructive">
-          {alert}
-        </p>
-      )}
     </div>
   );
 }

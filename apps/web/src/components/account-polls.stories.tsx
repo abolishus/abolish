@@ -522,6 +522,21 @@ export const ListUnavailable: Story = {
   },
 };
 
+/**
+ * A moderation block's outcome is the first thing under its heading, where
+ * focus returns after filing: drawn at the block's end, under the log link,
+ * it sat a phone's screen below (P2-29, the author's list's iteration 18).
+ */
+const outcomeUnderTheDecision = async (block: HTMLElement, outcome: HTMLElement) => {
+  const heading = within(block)
+    .getByText(/^(Delisted|Text hidden|Restored):/)
+    .closest("p");
+  if (heading === null) throw new Error("no decision heading");
+  const gap = outcome.getBoundingClientRect().top - heading.getBoundingClientRect().bottom;
+  await expect(gap).toBeGreaterThanOrEqual(0);
+  await expect(gap).toBeLessThanOrEqual(16);
+};
+
 const DELISTED: PollModerationView = {
   state: "delisted",
   latest: { seq: 41n, action: "delist", reason: "spam", decidedAt: "2026-10-17T16:45:00.000Z" },
@@ -559,6 +574,7 @@ export const AppealADecision: Story = {
     await expect(await moderation.findByRole("status")).toHaveTextContent(
       "Your appeal is filed. A different moderator will review it.",
     );
+    await outcomeUnderTheDecision(block, moderation.getByRole("status"));
     await expect(
       moderation.getByText(
         "You appealed decision No. 41 on October 18, 2026 at 9:30 AM UTC: waiting for a moderator other than the one who decided.",
@@ -801,6 +817,10 @@ export const AppealRefusedAsChanged: Story = {
     await userEvent.click(canvas.getByRole("button", { name: "Send appeal" }));
     await expect(await canvas.findByRole("alert")).toHaveTextContent(
       "That decision changed or was already appealed since this page read it. This shows how it stands now.",
+    );
+    await outcomeUnderTheDecision(
+      canvas.getByRole("group", { name: /^Delisted: Spam/ }),
+      canvas.getByRole("alert"),
     );
   },
 };

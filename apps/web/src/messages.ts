@@ -411,7 +411,7 @@ const enUS = {
   streamSearchHint:
     "Every word you type must appear in a question or its title, up to {words} words. Results keep the order below.",
   streamSearchSubmit: "Search",
-  streamSearching: "Only the questions that hold every word you searched for.",
+  streamSearching: "Only questions with all your words.",
   streamSearchClear: "Clear the search",
   streamSearchEmpty: "No open question matches",
   streamSearchEmptyLede:
@@ -426,7 +426,7 @@ const enUS = {
   streamPlaceLabel: "Place",
   streamPlaceHint:
     "A town, neighbourhood or school, as askers write it. Capitals and spacing don't matter, but the whole name must match.",
-  streamPlaceFiltering: "Only the questions filed at the place you entered.",
+  streamPlaceFiltering: "Only questions filed at this place.",
   streamPlaceClear: "Clear the place",
   streamTopicClear: "Show every topic",
   streamFilterEmpty: "No open question is filed here",

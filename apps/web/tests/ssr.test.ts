@@ -1946,7 +1946,7 @@ describe("stream", () => {
   test("searches within the order, keeping the search on every link", async () => {
     let html = await (await get("/discover?q=%20PaRK%20")).text();
     expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
-    expect(html).toContain("hold every word you searched for");
+    expect(html).toContain("with all your words");
     // The box holds what was typed; the page's own words never quote it.
     expect(html).toMatch(/<input[^>]*type="search"[^>]*name="q"[^>]*value=" PaRK "/);
     expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*PaRK/);
@@ -2019,7 +2019,7 @@ describe("stream", () => {
     expect(cards(html)).toEqual([STREAM_V5]);
     expect(html).toMatch(/<input[^>]*name="place"[^>]*value=" RIVERSIDE  park"/);
     expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*RIVERSIDE/);
-    expect(html).toContain("filed at the place you entered");
+    expect(html).toContain("filed at this place");
     expect(html).toContain('href="/discover">Clear the place');
     expect(html).toContain('href="/discover?sort=closing&amp;place=RIVERSIDE%20park"');
     // Filed under a topic and at a place that share nothing.

@@ -1944,6 +1944,14 @@ describe("stream", () => {
     const third = await (await get(`/discover?after=${streamed[19]}`)).text();
     expect(cards(third)).toEqual(streamed.slice(20));
     expect(third).not.toContain("More questions");
+    // A full last page leads to one holding nothing, which says the earlier
+    // pages held them all and leads back to the first, never that nothing
+    // is open (P2-29, the stream's iteration 19).
+    const past = await (await get(`/discover?sort=closing&after=${streamed[0]}`)).text();
+    expect(cards(past)).toEqual([]);
+    expect(past).toContain("That was the last of them");
+    expect(past).toContain('href="/discover?sort=closing">Start from the top');
+    expect(past).not.toContain("No open questions just now");
     const closing = await (await get("/discover?sort=closing")).text();
     expect(cards(closing)).toEqual(streamed.toReversed().slice(0, 10));
     expect(closing).toMatch(/<a href="\/discover\?sort=closing" aria-current="page"/);

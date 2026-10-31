@@ -626,6 +626,8 @@ export interface StreamPageProps {
   ballot: string | null;
   /** Whether Tier 0 asks for a phone here, which names it on each card's count. */
   phoneVerification: boolean;
+  /** Whether the page starts after another one's last question (`after`). */
+  later?: boolean;
 }
 
 /**
@@ -646,6 +648,7 @@ export function StreamPage({
   filter,
   ballot,
   phoneVerification,
+  later = false,
 }: StreamPageProps) {
   const t = useTranslate(catalogs);
   const { q, topic, place } = filter;
@@ -724,6 +727,16 @@ export function StreamPage({
         ) : stream.kind === "cursor-not-found" ? (
           <Empty title={t("streamCursorLostTitle")} href={streamHref(sort, filter)}>
             {t("streamCursorLost")}
+          </Empty>
+        ) : stream.cards.length === 0 && later ? (
+          // A page is full whenever the API returns ten, so "More questions"
+          // can lead past the last of them to a page holding none. Told
+          // there were no open questions just now, with nothing to tap, a
+          // visitor who had just read ten took the stream for emptied; its
+          // narrowings' boxes, read here, blamed a topic or a place that had
+          // matched the page before (P2-29, the stream's iteration 19).
+          <Empty title={t("streamEndTitle")} href={streamHref(sort, filter)}>
+            {t("streamEnd")}
           </Empty>
         ) : stream.cards.length === 0 && q !== undefined ? (
           <Empty

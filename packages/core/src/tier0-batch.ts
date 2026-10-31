@@ -36,8 +36,7 @@ export const MIN_REGISTRATION_BATCH = 8;
 export const MAX_REGISTRATION_HOLD = 6;
 /**
  * Seconds into a period within which its boundary may still start
- * (`BOUNDARY_WITHIN` in docs/spec/registration.md): four of the worker's
- * ticks. A boundary forms its batches half a period before the
+ * (`BOUNDARY_WITHIN` in docs/spec/registration.md): two minutes. A boundary forms its batches half a period before the
  * root clock's next boundary (`ROOT_OFFSET`; docs/spec/registration.md,
  * Timing against the root clock), so a batch sent then is in the next step
  * of every rolling poll listing its group. A runner that was down, or whose

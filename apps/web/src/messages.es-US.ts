@@ -355,7 +355,7 @@ export const esUS: Messages = {
   navDiscover: "Descubrir",
   discoverTitle: "Lo que la gente pregunta",
   discoverLede:
-    "Preguntas abiertas de vecinos, grupos y escuelas. Responde cualquiera en la app de votación. Nada aquí se ordena por clics, por discusiones ni por nada sobre ti: cada orden de abajo es igual para todos.",
+    "Preguntas abiertas de vecinos, grupos y escuelas. Nada aquí se ordena por clics, por discusiones ni por nada sobre ti: cada orden de abajo es igual para todos.",
   discoverTopicLede:
     "Preguntas abiertas que sus autores clasificaron en este tema. Nada aquí se ordena por clics, por discusiones ni por nada sobre ti.",
   discoverSorts: "Orden",

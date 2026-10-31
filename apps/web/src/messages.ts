@@ -351,7 +351,7 @@ const enUS = {
   navDiscover: "Discover",
   discoverTitle: "What people are asking",
   discoverLede:
-    "Open questions from neighbours, groups and schools. Answer any of them in the ballot app. Nothing here is ranked by clicks, by arguments or by anything about you: every order below is the same for everyone.",
+    "Open questions from neighbours, groups and schools. Nothing here is ranked by clicks, by arguments or by anything about you: every order below is the same for everyone.",
   discoverTopicLede:
     "Open questions their askers filed under this topic. Nothing here is ranked by clicks, by arguments or by anything about you.",
   discoverSorts: "Order",

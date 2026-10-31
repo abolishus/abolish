@@ -289,9 +289,13 @@ function Answered({
       </p>
       <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
         {answered.map(({ tier, answered: count }) => (
-          <li key={tier} className="flex flex-wrap gap-x-2">
+          // On a phone the count and its tier take a line each, as one
+          // line they wrapped and left the dot ending the first.
+          <li key={tier} className="grid sm:flex sm:flex-wrap sm:gap-x-2">
             <span className="tabular-nums">{t("resultsPeople", { count: BigInt(count) })}</span>{" "}
-            <span aria-hidden="true">·</span>{" "}
+            <span aria-hidden="true" className="hidden sm:inline">
+              ·
+            </span>{" "}
             <span className="text-foreground/80">{t(tierMessage(tier, phoneVerification))}</span>
           </li>
         ))}
@@ -359,7 +363,7 @@ export function StreamCard({
       aria-labelledby={titleId}
       className="grid content-start gap-5 border border-border p-5 sm:p-6"
     >
-      <p className="m-0 flex flex-wrap justify-between gap-x-4 gap-y-1 text-sm text-muted-foreground">
+      <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
         {card.askedBy === undefined ? null : <AskedBy askedBy={card.askedBy} />}
         <span>
           {t("streamCloses")} <When instant={poll.closesAt} />

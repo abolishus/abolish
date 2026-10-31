@@ -258,6 +258,20 @@ const play: Story["play"] = async ({ canvasElement }) => {
       .getAllByRole("listitem")
       .map((li) => li.textContent),
   ).toEqual(["38 people · Tier 0 (verified e-mail)", "1 person · Tier 2 (document-verified)"]);
+  // Narrower than `sm` the count and its tier take a line each, with no dot
+  // left ending the first; wider, one line with the dot between.
+  const dot = within(counts[0]!).getByText("·");
+  if (window.matchMedia("(min-width: 40rem)").matches) await expect(dot).toBeVisible();
+  else await expect(dot).not.toBeVisible();
+
+  // The card's top line keeps its facts together rather than spread to the
+  // card's two edges and middle at desktop width.
+  const riversideCard = list.getAllByRole("article")[1]!;
+  const top = within(riversideCard).getByText(/^Closes/).parentElement!;
+  await expect(getComputedStyle(top).justifyContent).not.toBe("space-between");
+
+  // The lede leaves what choosing an answer does to the one line above the cards.
+  await expect(canvas.getAllByText(/in the ballot app/)).toHaveLength(1);
 };
 
 export const Default: Story = { play };

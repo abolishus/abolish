@@ -73,6 +73,9 @@ export const PARAMETERS = Object.freeze({
   // Changed nullifiers per cell; the live-results batch floor of
   // election-definition version 6.
   MIN_LIVE_BATCH: 20,
+  // A count; a reported count of at least 1 and below it is flagged as small
+  // (docs/spec/verifier.md, 8.2): the verifier's word, never a record's.
+  SMALL_COUNT: 20,
   // Seconds; the root clock of rolling electorates, election-definition
   // version 7: boundary n is n * ROOT_PERIOD + ROOT_OFFSET in UNIX time, and
   // a ballot names a step within ROOT_WINDOW before its L1 reference, and a

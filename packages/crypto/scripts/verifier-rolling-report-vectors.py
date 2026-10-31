@@ -8,7 +8,8 @@ Reported counts; P2-17 part 4e-1): its member count at opening, its eligible
 count, its count at the last boundary, the smallest step its ballots used and
 its growth per anchoring period; and, for the live poll, its eligible count
 at each release its tier chose (membership.md, At a live release; P2-17 part
-4e-2).
+4e-2); and 8.2's small-count flags on its eligible count and its smallest
+step's (verifier.md, 8.2; parameters.md, SMALL_COUNT; P2-17 part 4e-2b).
 
 Each poll is rebuilt by its own generator's `build` (every value but the
 proofs' bytes, deterministically from fixed labels), whose ballots are every
@@ -45,6 +46,14 @@ lv = _load("verifier_ballots_v5_tier0_live_vectors", "verifier-ballots-v5-tier0-
 r5 = sv.r5
 
 
+# parameters.md: a count of at least 1 and below it is small (verifier.md, 8.2).
+SMALL_COUNT = 20
+
+
+def small(count):
+    return 1 <= int(count) < SMALL_COUNT
+
+
 def tier_report(d, events, registered_at, epoch, period, steps, releases=None):
     """rolling-report-vectors.py's report of the definition's one rolling tier, under (epoch, period).
 
@@ -68,6 +77,8 @@ def tier_report(d, events, registered_at, epoch, period, steps, releases=None):
     )
     if releases is not None:
         rep["releases"] = [{"snapshot": snapshot, "step": got["step"], "count": got["count"]} for (snapshot, _, _), got in zip(releases, got_releases)]
+    smallest = rep["smallestStep"]
+    rep["flagged"] = {"eligible": small(rep["eligible"]), "smallestStep": smallest is not None and small(smallest["members"])}
     return {"tier": tier["tier"], "electorate": rep}
 
 
@@ -119,7 +130,9 @@ def main():
             "its step with a membership proof that verifies, so every one counts toward the smallest step used. "
             "Both polls are live: `releases` gives each release its tier chose, with `step` (n_r) and `count` (E(n_r)), "
             "as strings or null; the shorter poll has no scheduled snapshot and so none, and the longer one's snapshot 1's n_r is the newest boundary in its period, above every step its ballots name, "
-            "and its count includes the joiners, though only twenty ballots are released there."
+            "and its count includes the joiners, though only twenty ballots are released there. "
+            "`flagged` is 8.2's small-count rule (at least 1 and below SMALL_COUNT, 20) on the eligible count and the smallest step's: "
+            "the shorter poll's both are small, the longer one's neither."
         ),
         "polls": {
             "verifier-ballots-v5-tier0-sealed.json": [sealed(constants)],

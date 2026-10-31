@@ -5,6 +5,7 @@ import { join } from "node:path";
 import fc from "fast-check";
 import { afterAll, describe, expect, test } from "vite-plus/test";
 import { exitCode, printable, summary } from "../src/cli.ts";
+import type { RollingElectorateReport } from "../src/rolling-report.ts";
 import {
   type CellReport,
   EXIT_CODES,
@@ -267,6 +268,69 @@ describe("the summary's results", () => {
       "  tier 2: 3 counted; no counts (an opening of its cells didn't pass 7.2)",
       "    cell 0: 1 counted; counts 1, 0",
       "    cell 1: 2 counted; no counts (tally-opening)",
+    ]);
+  });
+
+  test("give a rolling tier its turnout among who could answer, its label and its small counts (8.1, 8.2)", () => {
+    const electorate = (
+      eligible: number,
+      smallest: { step: number; members: number } | null,
+      flagged: { eligible: boolean; smallestStep: boolean },
+    ): RollingElectorateReport => ({
+      opening: { members: 2 },
+      eligible,
+      close: null,
+      smallestStep: smallest,
+      growth: [],
+      flagged,
+    });
+    const tier1 = {
+      tier: 1,
+      counted: 999,
+      counts: ["500", "499"],
+      electorate: electorate(
+        1000,
+        { step: 9, members: 1000 },
+        { eligible: false, smallestStep: false },
+      ),
+    };
+    const rolling = [
+      {
+        tier: 0,
+        counted: 2,
+        counts: ["1", "1"],
+        electorate: electorate(3, { step: 7, members: 2 }, { eligible: true, smallestStep: true }),
+      },
+      tier1,
+      {
+        tier: 2,
+        counted: 0,
+        counts: ["0", "0"],
+        electorate: electorate(0, null, { eligible: false, smallestStep: false }),
+      },
+    ];
+    expect(results({ ...base, verdict: "verified", tiers: rolling })).toEqual([
+      "results per tier, never summed across tiers:",
+      // 2/3 is 66.66…%, rounded down, never up to a share it didn't reach.
+      "  tier 0 (not Sybil-resistant; open to new identities during the poll): " +
+        "2 counted among 3 who could answer during the poll (66.6%); counts 1, 1",
+      "    small counts, which can reveal votes: 3 could answer, smallest step used 7, 2 members",
+      "  tier 1: 999 counted among 1000 who could answer during the poll (99.9%); counts 500, 499",
+      // No ratio over no one.
+      "  tier 2: 0 counted among 0 who could answer during the poll; counts 0, 0",
+    ]);
+    const onlyStep = [
+      {
+        ...tier1,
+        electorate: electorate(
+          1000,
+          { step: 9, members: 5 },
+          { eligible: false, smallestStep: true },
+        ),
+      },
+    ];
+    expect(results({ ...base, verdict: "verified", tiers: onlyStep }).slice(2)).toEqual([
+      "    small counts, which can reveal votes: smallest step used 9, 5 members",
     ]);
   });
 

@@ -3,7 +3,7 @@
   "title": "What each rolling tier of the Tier-0-only rolling polls through verifyBundle reports about its electorate",
   "spec": "docs/spec/verifier.md",
   "generator": "Printed by packages/crypto/scripts/verifier-rolling-report-vectors.py: each poll rebuilt by its own generator's build (verifier-ballots-v5-tier0-sealed-vectors.py, verifier-ballots-v5-tier0-live-vectors.py), its counts by rolling-report-vectors.py's report under the bundle's anchoring clock, independently of packages/crypto and packages/verifier.",
-  "description": "For each vector file, its report's `tiers` electorate counts, as strings: every ballot on its board names its step with a membership proof that verifies, so every one counts toward the smallest step used. Both polls are live: `releases` gives each release its tier chose, with `step` (n_r) and `count` (E(n_r)), as strings or null; the shorter poll has no scheduled snapshot and so none, and the longer one's snapshot 1's n_r is the newest boundary in its period, above every step its ballots name, and its count includes the joiners, though only twenty ballots are released there.",
+  "description": "For each vector file, its report's `tiers` electorate counts, as strings: every ballot on its board names its step with a membership proof that verifies, so every one counts toward the smallest step used. Both polls are live: `releases` gives each release its tier chose, with `step` (n_r) and `count` (E(n_r)), as strings or null; the shorter poll has no scheduled snapshot and so none, and the longer one's snapshot 1's n_r is the newest boundary in its period, above every step its ballots name, and its count includes the joiners, though only twenty ballots are released there. `flagged` is 8.2's small-count rule (at least 1 and below SMALL_COUNT, 20) on the eligible count and the smallest step's: the shorter poll's both are small, the longer one's neither.",
   "polls": {
     "verifier-ballots-v5-tier0-sealed.json": [
       {
@@ -30,7 +30,11 @@
               "members": "4"
             }
           ],
-          "releases": []
+          "releases": [],
+          "flagged": {
+            "eligible": true,
+            "smallestStep": true
+          }
         }
       }
     ],
@@ -65,7 +69,11 @@
               "step": "2967413",
               "count": "40"
             }
-          ]
+          ],
+          "flagged": {
+            "eligible": false,
+            "smallestStep": false
+          }
         }
       }
     ]

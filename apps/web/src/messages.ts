@@ -501,6 +501,8 @@ const enUS = {
   pollAnsweredClosed: "Answered before it closed",
   pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
   resultsTitle: "Results",
+  resultsEachQuestion:
+    "Each question is counted on its own. Answers to different questions are never matched up: only each question's totals are opened, so no result shows how anyone answered the set.",
   resultsSealed:
     "Answers stay sealed while the poll is open. The results appear here once they're counted.",
   resultsCounting: "This poll has closed. The results appear here once its answers are counted.",

@@ -203,6 +203,12 @@ export function PollResults({ poll, results, status, words, phoneVerification }:
       <h2 id="results-title" className="m-0 font-heading text-3xl font-semibold">
         {t("resultsTitle")}
       </h2>
+      {/* Said wherever the poll asks several, as the closed poll's mockup
+          says it: only per-question sums are ever opened (ADR 0026, No
+          cross-tabulation), which a single question has nothing to say about. */}
+      {poll.questions.length > 1 ? (
+        <p className="m-0 max-w-prose text-lg text-pretty">{t("resultsEachQuestion")}</p>
+      ) : null}
       {results.kind === "read" ? (
         <>
           {results.tiers.map((result) => (

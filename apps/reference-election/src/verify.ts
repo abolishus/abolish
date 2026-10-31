@@ -37,6 +37,15 @@ export interface VerifierRun {
       readonly counted: number;
       readonly counts?: readonly string[];
     }[];
+    /** Once 7.1 passed: each tier's result, a rolling tier's with its electorate (8.1). */
+    readonly tiers?: readonly {
+      readonly tier: number;
+      readonly electorate?: {
+        readonly opening: { readonly members: number };
+        readonly eligible: number;
+        readonly close: { readonly members: number; readonly accepted: boolean } | null;
+      };
+    }[];
     /** Format 5, once 8.5 ran: each registered seat's destruction. */
     readonly destruction?: {
       readonly seats: readonly { readonly seat: number; readonly code?: string }[];
@@ -94,6 +103,62 @@ export function runVerifier(bundleDir: string, options: readonly string[] = []):
   if (run.error !== undefined) throw run.error;
   if (run.stdout === "")
     throw new Error(`the verifier gave no report (exit ${run.status}): ${run.stderr}`);
+  return {
+    exitCode: run.status,
+    report: JSON.parse(run.stdout) as VerifierRun["report"],
+    stdout: run.stdout,
+  };
+}
+
+/** The group and election registries, as `RollingChainRelease` in `packages/verifier` names them. */
+export interface Registries {
+  readonly chainId: bigint;
+  readonly registry: Uint8Array;
+  readonly registrars: readonly Uint8Array[];
+  readonly threshold: number;
+  readonly electionRegistry: Uint8Array;
+}
+
+/**
+ * The verifier's `verifyBundle` over `bundleDir`, read as the CLI reads it
+ * from the Arweave gateways `arweave`, but with a rolling poll's chain built
+ * under `registries` in place of the release's `PINNED_REGISTRIES`, which
+ * pins none until the release that deploys the registries (P1-18). That is
+ * the run such a release would make: the fixture's registries stand in for
+ * the ones it would pin, and nothing else changes. It runs in a process of
+ * its own, as `runVerifier` does, so all it sees of the run is the bundle,
+ * the archive and the registries (T-36, T-71).
+ */
+export function runVerifierUnder(
+  bundleDir: string,
+  arweave: readonly string[],
+  registries: Registries,
+): VerifierRun {
+  const script = [
+    "import { arweaveSource, DEFAULT_MAX_BOARD_BYTES, EXIT_CODES, loadBundle, parseGateway, PINNED_PANELS, verifyBundle }",
+    `  from ${JSON.stringify(VERIFIER.href)};`,
+    `const revive = ${taggedReviver.toString()};`,
+    "const chunks = [];",
+    "for await (const c of process.stdin) chunks.push(c);",
+    "const { arweave, registries } = JSON.parse(Buffer.concat(chunks).toString('utf8'), revive);",
+    "const archive = { source: arweaveSource(arweave.map(parseGateway)).source, options: {} };",
+    "const bundle = await loadBundle(process.argv[1], DEFAULT_MAX_BOARD_BYTES, undefined, archive, registries);",
+    "const report = verifyBundle(bundle, PINNED_PANELS, registries);",
+    "process.stdout.write(JSON.stringify(report, null, 2) + '\\n');",
+    "process.exitCode = EXIT_CODES[report.verdict];",
+  ].join("\n");
+  const run = spawnSync(process.execPath, ["--input-type=module", "-e", script, "--", bundleDir], {
+    encoding: "utf8",
+    input: tagged({ arweave, registries }),
+    env: {},
+    cwd: fileURLToPath(new URL(".", VERIFIER)),
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (run.error !== undefined) throw run.error;
+  if (run.stdout === "")
+    throw new Error(
+      `the verifier under the fixture's registries gave no report (exit ${run.status}): ${run.stderr}`,
+    );
   return {
     exitCode: run.status,
     report: JSON.parse(run.stdout) as VerifierRun["report"],

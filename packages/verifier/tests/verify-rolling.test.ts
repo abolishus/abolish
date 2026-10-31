@@ -13,11 +13,13 @@ import {
 import { describe, expect, test } from "vite-plus/test";
 import {
   archivedChain,
+  type BlockStore,
   BUNDLE_FORMAT_DEFINITION,
   type Bundle,
   type CheckResult,
   parseBundle,
   PINNED_REGISTRIES,
+  readBoardByCid,
   type Report,
   type RollingChainRelease,
   verifyBundle,
@@ -253,6 +255,29 @@ describe("the run builds a rolling poll's chain from the archive", () => {
     expect(r.verdict).toBe("unverifiable");
     // A sealed poll has no releases.
     expect(row(r, "7.5")).toMatchObject({ status: "pass" });
+  });
+
+  // The read by CID runs where the board checks would (Board by CID): a
+  // rolling poll's only with its chain, so under the release's registries,
+  // which pin none yet, it never runs. The reference election reads the
+  // rolling poll's copy from the archive under its own registries, which
+  // `loadBundle` threads through as `verifyBundle` does.
+  test("the read by CID of a rolling poll's copy isn't reached without registries", async () => {
+    const p = poll(TREE);
+    let asked = 0;
+    const store: BlockStore = {
+      source: async () => {
+        asked++;
+        return [];
+      },
+      blocks: 0,
+      unreadableBytes: 0,
+    };
+    const bare = { ...bundleOf(p, replayOf(p)), entries: [], unreadableBytes: 0 };
+    const read = await readBoardByCid(bare, store, 1 << 20);
+    expect(read.byCid?.stopped).toEqual({ reason: "not-reached" });
+    expect(asked).toBe(0);
+    expect(row(verifyBundle(read), "2.3")).toMatchObject(UNSUPPORTED);
   });
 
   // Releases, step 1: a live rolling poll's releases are read as a fixed

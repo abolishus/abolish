@@ -131,13 +131,20 @@ export function PollModeration({ client, pollId, titleId, onSignedOut }: PollMod
         suppressHydrationWarning
       >
         {Icon === undefined ? null : <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0" />}
-        {latest === undefined
-          ? t("moderationOfPoll")
-          : t("moderationDecision", {
+        {latest === undefined ? (
+          t("moderationOfPoll")
+        ) : (
+          // The time on a line of its own under the decision, as each row's time is under its state: run on after the reason, a narrow heading broke it between "October" and "16".
+          <span>
+            {t("moderationDecisionWhat", {
               action: t(`action_${latest.action}`),
               reason: t(`reason_${latest.reason}`),
-              when: at(latest.decidedAt),
             })}
+            <span className="block font-normal text-muted-foreground">
+              {t("moderationDecidedOn", { when: at(latest.decidedAt) })}
+            </span>
+          </span>
+        )}
       </p>
       {view === undefined || latest === undefined ? null : (
         <p className="m-0 max-w-prose text-pretty text-muted-foreground">

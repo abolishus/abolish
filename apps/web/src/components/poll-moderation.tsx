@@ -21,7 +21,9 @@ const ACTION_ICON = {
 /** The poll row's links: the buttons' 48px target and underline, so the history's actions match the row's. */
 const LINK = buttonVariants({ variant: "link", className: "px-0" });
 
-type Done = "moderationAppealFiled";
+// `moderationNone`: loaded again on request, and nothing was ever decided,
+// which is said rather than the block vanishing with focus in it.
+type Done = "moderationAppealFiled" | "moderationNone";
 // Only these reach the page (`failed` below); the submission's refusals never do.
 type Failure = Extract<DraftsFailure, "signedOut" | "gone" | "changed" | "failed"> | "unloaded";
 
@@ -120,6 +122,24 @@ export function PollModeration({
     }
   };
 
+  /** Reads this poll's moderation again after it couldn't be loaded, without reloading the page. */
+  const reload = async () => {
+    // The failure stays on screen until the answer comes: cleared first, the
+    // block would vanish with the focused button in it.
+    setBusy(true);
+    try {
+      const fresh = await client.moderation(pollId);
+      setFailure(undefined);
+      setView(fresh);
+      if (fresh.latest === undefined && fresh.appeals.length === 0) setDone("moderationNone");
+    } catch (e) {
+      failed(e, "unloaded");
+    } finally {
+      setBusy(false);
+      heading.current?.focus();
+    }
+  };
+
   const at = (iso: string) => formatUtcWhole(locale, new Date(iso));
 
   const outcome = (a: ModerationAppeal) =>
@@ -176,10 +196,24 @@ export function PollModeration({
       <div role="status" className="max-w-prose text-pretty empty:absolute">
         {notice}
       </div>
+      {/* A poll's moderation that couldn't load offers the way to load it alone again, as the list does, rather than the whole account page. */}
       {alert === null ? null : (
-        <p role="alert" className="m-0 max-w-prose text-pretty text-destructive">
-          {alert}
-        </p>
+        <div className="grid justify-items-start gap-1">
+          <p role="alert" className="m-0 max-w-prose text-pretty text-destructive">
+            {alert}
+          </p>
+          {failure === "unloaded" ? (
+            <Button
+              variant="link"
+              className="px-0"
+              aria-describedby={titleId}
+              disabled={busy}
+              onClick={() => void reload()}
+            >
+              {t("moderationReload")}
+            </Button>
+          ) : null}
+        </div>
       )}
       {view === undefined || latest === undefined ? null : (
         <p className="m-0 max-w-prose text-pretty text-muted-foreground">

@@ -859,19 +859,56 @@ export const AppealRefusedAsChanged: Story = {
   },
 };
 
+/** A moderation read that fails `failures` times, then answers `then`. */
+const failingModeration = (failures: number, then: PollModerationView) => {
+  let left = failures;
+  return async () => {
+    if (left-- > 0) throw new DraftsError("failed");
+    return then;
+  };
+};
+
 export const ModerationUnavailable: Story = {
   args: {
-    client: {
-      ...fakeDrafts([OPEN]),
-      moderation: async () => {
-        throw new DraftsError("failed");
-      },
-    },
+    client: { ...fakeDrafts([OPEN]), moderation: failingModeration(2, DELISTED) },
   },
   play: async ({ canvasElement }) => {
-    await expect(await within(canvasElement).findByRole("alert")).toHaveTextContent(
-      "This poll's moderation couldn't be loaded. Try again shortly.",
-    );
+    const canvas = within(canvasElement);
+    const alert = await canvas.findByRole("alert");
+    // It says what failed and offers what tries again, never "try again" with nothing to press.
+    await expect(alert).toHaveTextContent(/^This poll's moderation couldn't be loaded just now\.$/);
+    const reload = () =>
+      canvas.getByRole("button", {
+        name: "Load its moderation again",
+        description: "Name the new ferry",
+      });
+    // Failing again keeps the words and the way, and focus on the block.
+    await userEvent.click(reload());
+    await waitFor(() => expect(reload()).toBeEnabled());
+    await expect(canvas.getByRole("alert")).toHaveTextContent(/couldn't be loaded just now/);
+    await expect(canvas.getByText("Moderation")).toHaveFocus();
+    await userEvent.click(reload());
+    const heading = await canvas.findByText("Delisted: Spam", { exact: false });
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await expect(canvas.queryByRole("button", { name: "Load its moderation again" })).toBeNull();
+    await expect(heading.closest("p")).toHaveFocus();
+    await expect(canvas.getByRole("button", { name: "Appeal this decision…" })).toBeEnabled();
+  },
+};
+
+/** Loaded again, a poll nothing was decided about says so rather than vanishing with focus in it. */
+export const ModerationUnavailableThenNone: Story = {
+  args: {
+    client: { ...fakeDrafts([OPEN]), moderation: failingModeration(1, VISIBLE) },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: "Load its moderation again" }));
+    await expect(
+      await canvas.findByText("Moderation hasn't decided anything about this poll."),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("alert")).toBeNull();
+    await expect(canvas.getByText("Moderation", { exact: true })).toHaveFocus();
   },
 };
 

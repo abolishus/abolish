@@ -1328,7 +1328,9 @@ const enUS = {
   moderationFailure_changed:
     "That decision changed or was already appealed since this page read it. This shows how it stands now.",
   moderationFailure_failed: "The appeal didn't go through. Nothing changed; try again shortly.",
-  moderationFailure_unloaded: "This poll's moderation couldn't be loaded. Try again shortly.",
+  moderationFailure_unloaded: "This poll's moderation couldn't be loaded just now.",
+  moderationReload: "Load its moderation again",
+  moderationNone: "Moderation hasn't decided anything about this poll.",
   pollsFailure_tooManyInSetup:
     "You have as many polls setting up as an account can at once. Submit this one when one of them has opened.",
   pollsFailure_tooManyToday:

@@ -381,9 +381,14 @@ export function StreamCard({
       <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
         {card.askedBy === undefined ? null : <AskedBy askedBy={card.askedBy} />}
         <span>
-          {t("streamCloses")} <When instant={poll.closesAt} />
+          {t("streamCloses")} <When instant={poll.closesAt} short />
         </span>
-        {questions > 1 ? <span>{t("questionCount", { count: questions })}</span> : null}
+        {/* Where answers are offered, the note above them already says
+            "question 1 of 3": said here too, it took a phone's fourth line
+            above the question (P2-29, the stream's iteration 6). */}
+        {questions > 1 && ballot === null ? (
+          <span>{t("questionCount", { count: questions })}</span>
+        ) : null}
       </p>
       <div className="grid gap-2">
         <h3

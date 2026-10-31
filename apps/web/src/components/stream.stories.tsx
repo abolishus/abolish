@@ -170,8 +170,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const bus = list.getByRole("link", { name: "Sí" });
   await expect(bus).toHaveAttribute("href", `${BALLOT}#election=${BUS}&pick=0`);
   await expect(within(bus).getByText("Sí")).toHaveAttribute("lang", "es-419");
-  await expect(list.getByText("3 questions")).toBeVisible();
-  await expect(list.getAllByText(/^Closes/)[0]).toHaveTextContent("Closes January 8, 2026");
+  // The note above the answers says "question 1 of 3", so the top line doesn't.
+  await expect(list.queryByText("3 questions")).toBeNull();
+  // The month abbreviated, so "Closes", the date and its clock keep one line
+  // even at a small phone's width, where the long date wrapped its clock.
+  const closes = list.getAllByText(/^Closes/);
+  await expect(closes[0]!.textContent).toBe("Closes Jan 8, 2026, 12:00\u00a0AM\u00a0UTC");
+  for (const line of closes) await expect(line.getClientRects()).toHaveLength(1);
 
   // Where each poll is listed, each tag a way into the stream narrowed to it;
   // a poll filed under neither shows none.
@@ -342,6 +347,8 @@ export const NoBallotClient: Story = {
     const list = questions(canvasElement);
     await expect(canvasElement.querySelectorAll('a[href*="#election="]')).toHaveLength(0);
     await expect(list.getAllByText(/isn't set up on this site yet/)).toHaveLength(3);
+    // With no answers offered, no note says how many questions: the top line does.
+    await expect(list.getByText("3 questions")).toBeVisible();
     await expect(within(canvasElement).queryByText(/Nothing is sent until/)).toBeNull();
   },
 };

@@ -7,7 +7,10 @@ import {
   GROUP_REGISTRY_MAX_BATCH,
   groupAdditionDigest,
   groupRegistryDomainSeparator,
+  PARAMETERS,
   POSEIDON2_ZERO_ONE,
+  rootClockBoundary,
+  rootClockStepAtOrBefore,
   signGroupApproval,
 } from "@abolishus/crypto";
 import fc from "fast-check";
@@ -20,6 +23,7 @@ import {
   REGISTRATION_PERIOD,
   REGISTRATION_QUEUE_MAX,
   selectUniformly,
+  TIER0_BOUNDARY_WITHIN,
   Tier0Batches,
   type Tier0Chain,
   type Tier0GroupState,
@@ -813,12 +817,51 @@ describe("boundaries", () => {
     const job = newJob(new FakeChain());
     await enqueue(commitments(3));
     expect(await job.runBoundary()).not.toBeNull();
-    clock += REGISTRATION_PERIOD - 1;
+    clock += TIER0_BOUNDARY_WITHIN - 1;
     expect(await job.runBoundary()).toBeNull();
+    clock += REGISTRATION_PERIOD - TIER0_BOUNDARY_WITHIN;
     expect(await redis.hget(keys().held, GROUP.toString())).toBe("1");
     clock += 1;
     expect(await job.runBoundary()).not.toBeNull();
     expect(await redis.hget(keys().held, GROUP.toString())).toBe("2");
+  });
+
+  test("a boundary starts only within TIER0_BOUNDARY_WITHIN of its period; a late one skips it", async () => {
+    const job = newJob(new FakeChain());
+    await enqueue(commitments(3));
+    clock = NOW + TIER0_BOUNDARY_WITHIN;
+    expect(await job.runBoundary()).toBeNull();
+    // Skipped, not run: nothing was held, and the period isn't marked.
+    expect(await redis.hgetall(keys().held)).toEqual({});
+    expect(await redis.get(keys().boundary)).toBeNull();
+    clock = NOW + REGISTRATION_PERIOD + TIER0_BOUNDARY_WITHIN - 1;
+    expect((await job.runBoundary())?.[0]?.outcome).toBe("held");
+  });
+
+  test("a boundary that starts in time forms its batches before the root clock's next boundary", () => {
+    // The registration periods and the root clock share a period, offset by
+    // half of it (docs/spec/parameters.md, ROOT_OFFSET).
+    expect(REGISTRATION_PERIOD).toBe(PARAMETERS.ROOT_PERIOD);
+    expect(TIER0_BOUNDARY_WITHIN).toBeLessThan(PARAMETERS.ROOT_OFFSET);
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: (1n << 32n) - 2n }),
+        fc.integer({ min: 0, max: TIER0_BOUNDARY_WITHIN - 1 }),
+        (period, into) => {
+          const start = period * BigInt(REGISTRATION_PERIOD);
+          const t = start + BigInt(into);
+          const before = rootClockStepAtOrBefore(t);
+          const next = before === undefined ? 0n : before + 1n;
+          const tau = rootClockBoundary(next);
+          // At least ROOT_OFFSET − TIER0_BOUNDARY_WITHIN seconds to land in
+          // step `next`, which closes before the next period's boundary.
+          expect(tau - t).toBeGreaterThan(BigInt(PARAMETERS.ROOT_OFFSET - TIER0_BOUNDARY_WITHIN));
+          expect(tau).toBe(start + BigInt(PARAMETERS.ROOT_OFFSET));
+          expect(tau).toBeLessThan(start + BigInt(REGISTRATION_PERIOD));
+        },
+      ),
+      { numRuns },
+    );
   });
 
   test("a Redis failure is reported without the script's arguments", async () => {

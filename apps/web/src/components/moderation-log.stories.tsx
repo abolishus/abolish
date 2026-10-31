@@ -145,6 +145,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(
     within(grounds).getByText("The poll's result or turnout, actual or expected"),
   ).toBeVisible();
+  await expect(within(grounds).getByText(/appeal a decision to delist or hide/)).toBeVisible();
+  // Reports are sent from each poll's own page, so this section only leads there.
+  const reports = canvas.getByRole("region", { name: "See a poll that breaks these rules?" });
+  await expect(within(reports).getByText(/never who sent them/)).toBeVisible();
+  await expect(
+    within(reports).getByRole("link", { name: "Find the poll in the register" }),
+  ).toHaveAttribute("href", "/polls");
+  await expect(within(reports).queryByRole("form")).toBeNull();
   // Nothing on the page sets an inline style: the CSP refuses one.
   await expect(canvasElement.querySelector("[style]")).toBeNull();
 };

@@ -274,7 +274,9 @@ export interface ModerationLogProps {
  * beside it. The log carries no free text, so a row can't carry personal
  * data (T-17); the page shows the API's rows as they come, newest first, so
  * what moderation did last is what a reader meets first, filtered by action
- * over the page in hand, beneath the whole log's counts by action.
+ * over the page in hand, beneath the whole log's counts by action. It ends
+ * on how to report and appeal; reports are sent from each poll's and
+ * profile's own page, which already knows what is reported.
  */
 export function ModerationLog({ log, place, next, later, action }: ModerationLogProps) {
   const t = useTranslate(catalogs);
@@ -484,8 +486,23 @@ export function ModerationLog({ log, place, next, later, action }: ModerationLog
                 </li>
               ))}
             </ul>
+            <p className="m-0 text-sm text-muted-foreground">{t("moderationAppealOnce")}</p>
           </div>
         </div>
+      </Section>
+
+      <Section
+        index="03"
+        mark={t("moderationReportsMark")}
+        title={t("moderationReportsTitle")}
+        id="reports-title"
+        lede={<p className="m-0">{t("moderationReportsLede")}</p>}
+      >
+        <p className="m-0">
+          <a className={buttonVariants({ variant: "outline" })} href="/polls">
+            {t("moderationReportsFind")}
+          </a>
+        </p>
       </Section>
     </div>
   );

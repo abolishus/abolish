@@ -33,17 +33,14 @@
 import {
   type ContractEventRecord,
   decodeBallot,
-  decodeElectionDefinitionV7,
   DecodeError,
   deliverySegments,
   encodeElectionDefinitionV7,
   type ElectionDefinitionV7Record,
-  ELECTORATE_MODES,
   MAX_BOARD_PAYLOAD,
   type Panel,
   panelId,
   type PeriodClock,
-  RECORD_TYPES,
   type RollingBallotChain,
   rootClockBoundary,
 } from "@abolishus/crypto";
@@ -68,7 +65,7 @@ import {
   readEntries,
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
-import { readDefinition } from "./definitions.ts";
+import { decodeStoredDefinition, isRollingDefinition, readDefinition } from "./definitions.ts";
 import type { L1References } from "./l1-references.ts";
 
 export type SubmitErrorCode =
@@ -641,17 +638,14 @@ export class BallotAdmissions {
  * admission then refuses as it would any.
  */
 function rollingDefinition(bytes: Uint8Array): ElectionDefinitionV7Record | undefined {
-  if (bytes.length < 3 || bytes[0] !== 0 || bytes[1] !== RECORD_TYPES.electionDefinition)
-    return undefined;
-  if (bytes[2] !== 7) return undefined;
-  let value;
+  let record;
   try {
-    value = decodeElectionDefinitionV7(bytes);
+    record = decodeStoredDefinition(bytes);
   } catch (e) {
     if (e instanceof DecodeError) return undefined;
     throw e;
   }
-  return value.electorate_mode === ELECTORATE_MODES.rolling ? { version: 7, value } : undefined;
+  return record.version === 7 && isRollingDefinition(record) ? record : undefined;
 }
 
 /**

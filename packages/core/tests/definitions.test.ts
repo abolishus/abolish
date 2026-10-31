@@ -1,11 +1,17 @@
 import {
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  electionDefinitionV7Hash,
+  electionDefinitionV7Rule,
+  ELECTORATE_MODES,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   profileCombinationRule,
+  RESULTS_MODES,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
@@ -67,6 +73,42 @@ const typicalV5 = decodeElectionDefinitionV5(
 );
 const freshV5 = (electionId = new Uint8Array(randomBytes(32))) =>
   encodeElectionDefinitionV5({ ...typicalV5, election_id: electionId });
+
+// Version-7 definitions under profiles 2.3 passes, each from an independent
+// implementation: a rolling one (verifier-ballots-v5.json's board), a fixed
+// one and a fixed live one; and the fixed one given an author panel
+// (verifier-ballots-v4-author-definition-v7.json's) and the pins 2.3 asks
+// of one (board-entry version 7, tally-opening version 3).
+const caseDefinition = (name: string, id: string) =>
+  decodeElectionDefinitionV7(
+    unhex(
+      (
+        JSON.parse(
+          readFileSync(new URL(`../../../docs/spec/vectors/${name}`, import.meta.url), "utf8"),
+        ) as { cases: { id: string; definition: string }[] }
+      ).cases.find((c) => c.id === id)!.definition,
+    ),
+  );
+const rollingV7 = caseDefinition("verifier-ballots-v5.json", "board");
+const fixedV7 = caseDefinition("verifier-ballots-v4-definition-v7.json", "admitted");
+const liveV7 = caseDefinition("verifier-ballots-v4-definition-v7.json", "live");
+const authorPanel = caseDefinition("verifier-ballots-v4-author-definition-v7.json", "author-mixed");
+const authorV7 = {
+  ...fixedV7,
+  author_threshold: authorPanel.author_threshold,
+  author_keys: authorPanel.author_keys,
+  author_transcript_hash: authorPanel.author_transcript_hash,
+  profile: {
+    ...fixedV7.profile,
+    pins: fixedV7.profile.pins.map((p) =>
+      p.record_type === RECORD_TYPES.boardEntry
+        ? { ...p, version: 7 }
+        : p.record_type === RECORD_TYPES.tallyOpening
+          ? { ...p, version: 3 }
+          : p,
+    ),
+  },
+};
 
 /** `typical` (the typical vector under a profile 2.3 passes) under a fresh election ID. */
 const fresh = (electionId = new Uint8Array(randomBytes(32))) =>
@@ -432,6 +474,114 @@ describe("storeDefinition under definition version 5 (several questions, P2-14)"
       }
     }
     expect(await rows()).toBe(before);
+  });
+});
+
+describe("storeDefinition under definition version 7 (electorate modes, P2-17)", () => {
+  test("stores a rolling one and a fixed one under their election IDs, with version 7's hash", async () => {
+    expect(rollingV7.electorate_mode).toBe(ELECTORATE_MODES.rolling);
+    expect(fixedV7.electorate_mode).toBe(ELECTORATE_MODES.fixed);
+    for (const d of [rollingV7, fixedV7]) {
+      const id = new Uint8Array(randomBytes(32));
+      const bytes = encodeElectionDefinitionV7({ ...d, election_id: id });
+      const stored = await storeDefinition(app, bytes);
+      expect(stored.electionId).toEqual(id);
+      expect(stored.definitionHash).toEqual(
+        electionDefinitionV7Hash(decodeElectionDefinitionV7(bytes)),
+      );
+      expect(await readDefinition(app, id)).toEqual(bytes);
+      expect((await storeDefinition(app, bytes)).definitionHash).toEqual(stored.definitionHash);
+      const other = encodeElectionDefinitionV7({ ...d, election_id: id, opens_at: 1n });
+      expect(await refusedWith(storeDefinition(app, other))).toBe("conflict");
+    }
+  });
+
+  test("refuses every version-7 vector that fails decoding, naming its code, with nothing stored", async () => {
+    // Only the version byte routes a record: a vector labelled another
+    // version is decoded, and refused, as that version's.
+    const bad = readVectors("election-definition-v7.json").filter(
+      (v) => v.error !== undefined && v.encoding.slice(4, 6) === "07",
+    );
+    expect(bad.length).toBeGreaterThan(5);
+    const before = await rows();
+    for (const v of bad) {
+      const e = await storeDefinition(app, unhex(v.encoding)).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, v.id).toBe("decode");
+      expect(((e as DefinitionError).cause as { code: string }).code, v.id).toBe(v.error);
+    }
+    expect(await rows()).toBe(before);
+  });
+
+  test("refuses every version-7 vector that is ill formed, naming the rule", async () => {
+    const bad = readVectors("election-definition-v7.json").filter((v) => v.illFormed !== undefined);
+    expect(bad.map((v) => v.illFormed)).toEqual(
+      expect.arrayContaining(["electorate", "rolling-class", "rolling-tier"]),
+    );
+    for (const v of bad) {
+      const id = new Uint8Array(randomBytes(32));
+      const decoded = decodeElectionDefinitionV7(unhex(v.encoding));
+      const bytes = encodeElectionDefinitionV7({ ...decoded, election_id: id });
+      const e = await storeDefinition(app, bytes).catch((x: unknown) => x);
+      expect((e as DefinitionError).code, v.id).toBe("ill-formed");
+      expect((e as DefinitionError).cause, v.id).toBe(v.illFormed);
+      expect(await readDefinition(app, id), v.id).toBeUndefined();
+    }
+  });
+
+  test("refuses a live poll under the live restriction, which no seat here is pinned for", async () => {
+    expect(liveV7.results_mode).toBe(RESULTS_MODES.live);
+    const id = new Uint8Array(randomBytes(32));
+    const e = await storeDefinition(
+      app,
+      encodeElectionDefinitionV7({ ...liveV7, election_id: id }),
+    ).catch((x: unknown) => x);
+    expect(e).toMatchObject({ code: "profile", cause: "profile-combination" });
+    expect(await hasDefinition(app, id)).toBe(false);
+  });
+
+  test("refuses an author panel as unsupported, though 2.3 passes it", async () => {
+    expect(authorV7.author_keys.length).toBeGreaterThan(0);
+    expect(electionDefinitionV7Rule(authorV7)).toBeUndefined();
+    expect(profileCombinationRule(authorV7)).toBeUndefined();
+    const id = new Uint8Array(randomBytes(32));
+    const bytes = encodeElectionDefinitionV7({ ...authorV7, election_id: id });
+    expect(await refusedWith(storeDefinition(app, bytes))).toBe("unsupported");
+    expect(await hasDefinition(app, id)).toBe(false);
+  });
+
+  test("stores one exactly when 2.3, reading rolling electorates, passes its profile", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.constantFrom(rollingV7, fixedV7),
+        fc.nat(),
+        fc.integer({ min: 1, max: 0xff }),
+        async (d, at, version) => {
+          const types = d.profile.pins
+            .map((p) => p.record_type)
+            .filter((t) => t !== RECORD_TYPES.electionDefinition);
+          const type = types[at % types.length]!;
+          const pins = d.profile.pins.map((p) => (p.record_type === type ? { ...p, version } : p));
+          const decoded = {
+            ...d,
+            election_id: new Uint8Array(randomBytes(32)),
+            profile: { ...d.profile, pins },
+          };
+          const rule = profileCombinationRule(
+            decoded,
+            0,
+            d.electorate_mode === ELECTORATE_MODES.rolling,
+          );
+          const stored = await storeDefinition(app, encodeElectionDefinitionV7(decoded)).then(
+            () => undefined,
+            (e: unknown) => e,
+          );
+          if (rule === undefined) expect(stored).toBeUndefined();
+          else expect(stored).toMatchObject({ code: "profile", cause: rule });
+          expect(await hasDefinition(app, decoded.election_id)).toBe(rule === undefined);
+        },
+      ),
+      { numRuns: Math.min(numRuns, 200) },
+    );
   });
 });
 

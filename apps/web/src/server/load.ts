@@ -997,28 +997,7 @@ export async function loadStream(
     throw error;
   }
   const cards = await Promise.all(
-    elections.map(async (electionId) => {
-      try {
-        const [{ definition }, displayText, tags, askedBy, answered] = await Promise.all([
-          api.elections.getDefinition({ electionId }),
-          displayTextOf(api, electionId),
-          tagsOf(api, electionId),
-          askedByOf(readAskedBy, electionId),
-          answeredOf(api, electionId),
-        ]);
-        const card = streamCard(electionId, definition, displayText, locale, tags);
-        return card.kind === "poll"
-          ? {
-              ...card,
-              askedBy,
-              answered: answered === undefined ? undefined : cardAnswered(card.poll, answered),
-            }
-          : card;
-      } catch (error) {
-        if (notFound(error)) return undefined;
-        throw error;
-      }
-    }),
+    elections.map((electionId) => loadCard(api, electionId, locale, readAskedBy)),
   );
   return {
     kind: "stream",
@@ -1026,6 +1005,79 @@ export async function loadStream(
     // The listing's own cursor, as the register's, so a dropped poll doesn't end the stream.
     next: elections.length === limit ? elections.at(-1) : undefined,
   };
+}
+
+/**
+ * One poll's card as the stream shows it: its definition and text checked
+ * (src/server/stream-card.ts), its tags, who asked it and how many have
+ * answered it so far, or `undefined` if the database lost it since the
+ * listing named it.
+ */
+async function loadCard(
+  api: Api,
+  electionId: string,
+  locale: string,
+  readAskedBy: ReadAskedBy | undefined,
+): Promise<StreamCard | undefined> {
+  try {
+    const [{ definition }, displayText, tags, askedBy, answered] = await Promise.all([
+      api.elections.getDefinition({ electionId }),
+      displayTextOf(api, electionId),
+      tagsOf(api, electionId),
+      askedByOf(readAskedBy, electionId),
+      answeredOf(api, electionId),
+    ]);
+    const card = streamCard(electionId, definition, displayText, locale, tags);
+    return card.kind === "poll"
+      ? {
+          ...card,
+          askedBy,
+          answered: answered === undefined ? undefined : cardAnswered(card.poll, answered),
+        }
+      : card;
+  } catch (error) {
+    if (notFound(error)) return undefined;
+    throw error;
+  }
+}
+
+/** A card the home page features: a poll with words to show and someone who answered it. */
+export type FeaturedCard = Extract<StreamCard, { kind: "poll" }>;
+
+/**
+ * The home page's featured question: the first poll of "most answered this
+ * week" that isn't one of `shown` (the newest questions the page already
+ * shows), as its card, or `undefined` when there is none to feature. The
+ * listing asks for one poll past `shown`, so however the two orders overlap
+ * the page reads one more card at most (T-52). That card is featured only if
+ * its words can be shown and the board counts someone as having answered it
+ * so far, so a page never heads a poll nobody answered as the most answered;
+ * otherwise nothing is, rather than a second poll's card read in its place.
+ * The order is the API's, on public data only (T-68: delisted and hidden
+ * polls aren't listed).
+ */
+export async function loadFeatured(
+  api: Api,
+  shown: readonly string[],
+  locale: string,
+  readAskedBy?: ReadAskedBy,
+): Promise<FeaturedCard | undefined> {
+  let elections;
+  try {
+    ({ elections } = await api.elections.list({
+      sort: "answered",
+      limit: String(shown.length + 1),
+    }));
+  } catch (error) {
+    if (listingError(error, "SORT_UNAVAILABLE")) return undefined;
+    throw error;
+  }
+  const electionId = elections.find((id) => !shown.includes(id));
+  if (electionId === undefined) return undefined;
+  const card = await loadCard(api, electionId, locale, readAskedBy);
+  return card?.kind === "poll" && card.answered?.some(({ answered }) => answered !== "0")
+    ? card
+    : undefined;
 }
 
 export type EmbedPage =

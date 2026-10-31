@@ -1,23 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { HomePage } from "../components/home-page.tsx";
-import { fetchStream } from "../data.ts";
-
-/** Questions the home page shows from the top of the stream: one row of cards at desktop width. */
-const HOME_STREAM = 3;
+import { fetchHome } from "../data.ts";
 
 export const Route = createFileRoute("/")({
-  // The front page stays up when the API doesn't answer: only the newest
-  // questions are left out, and the error says nothing (T-67).
+  // The front page stays up when the API doesn't answer: only the questions
+  // are left out, and the error says nothing (T-67).
   loader: ({ context: { locale } }) =>
-    fetchStream({
-      data: { sort: "new", after: "", q: "", topic: "", place: "", limit: HOME_STREAM, locale },
-    }).then(
-      ({ stream, ballot, phoneVerification }) =>
-        stream.kind === "stream" ? { cards: stream.cards, ballot, phoneVerification } : undefined,
-      () => undefined,
+    fetchHome({ data: locale }).then(
+      ({ stream, featured, ballot, phoneVerification }) =>
+        stream.kind === "stream"
+          ? { newest: { cards: stream.cards, ballot, phoneVerification }, featured }
+          : { newest: undefined, featured: undefined },
+      () => ({ newest: undefined, featured: undefined }),
     ),
   component: function Home() {
-    return <HomePage newest={Route.useLoaderData()} />;
+    const { newest, featured } = Route.useLoaderData();
+    return <HomePage newest={newest} featured={featured} />;
   },
 });

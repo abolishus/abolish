@@ -2644,7 +2644,7 @@ describe("server functions", () => {
       .filter((f) => f.endsWith(".js"))
       .flatMap((f) => [...readFileSync(`${dir}/${f}`, "utf8").matchAll(/\(`([0-9a-f]{64})`\)/g)])
       .map((m) => m[1] ?? "");
-    expect(ids.length).toBe(13);
+    expect(ids.length).toBe(14);
     return ids;
   }
 
@@ -2690,7 +2690,7 @@ describe("server functions", () => {
         // input, and answer the key, the address and the setting: off here,
         // which seroval writes `{"t":2,"s":3}`.
         new RegExp(
-          `expected an election ID|expected 1 to 10 distinct election IDs|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|${SITE_KEY}|${BALLOT.replaceAll(".", "\\.")}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
+          `expected an election ID|expected 1 to 10 distinct election IDs|expected a canonical decimal u64|or an empty string|expected a canonical short code|expected a profile handle|expected a stream order|expected a locale|${SITE_KEY}|${BALLOT.replaceAll(".", "\\.")}|"result","error","context"\\],"v":\\[\\{"t":2,"s":3\\}`,
         ),
       );
     }
@@ -2725,12 +2725,75 @@ describe("home", () => {
     seen.length = 0;
     await get("/");
     // The listing, newest first, then each card's definition, text, tags and
-    // count: three, not ten.
+    // count: three, not ten. Then the most answered, one past those three,
+    // which this API can't sort by, so no card is read for it.
     const listings = seen.filter((r) => r.path === "/elections");
-    expect(listings).toHaveLength(1);
+    expect(listings).toHaveLength(2);
     expect(listings[0]?.query.get("sort")).toBe("new");
     expect(listings[0]?.query.get("limit")).toBe("3");
-    expect(seen).toHaveLength(1 + 3 * 4);
+    expect(listings[1]?.query.get("sort")).toBe("answered");
+    expect(listings[1]?.query.get("limit")).toBe("4");
+    expect(seen).toHaveLength(2 + 3 * 4);
+  });
+
+  // P2-19 part 44: the featured question, from the home mockup's hero.
+  describe("the featured question", () => {
+    const featured = (html: string) =>
+      /<section aria-labelledby="featured-title"[\s\S]*?<\/section>/.exec(html)?.[0];
+    const withOrder = async (order: readonly string[], run: () => Promise<void>) => {
+      stub.mostAnswered = order;
+      stub.answered.set(OPEN_MANY, [{ tier: 0, answered: "9" }]);
+      try {
+        await run();
+      } finally {
+        stub.mostAnswered = undefined;
+        stub.answered.delete(OPEN_MANY);
+      }
+    };
+
+    test("is the most answered this week of those not among the newest, answerable from its card", async () =>
+      withOrder([STREAM_V5, OPEN_MANY, STREAM_V1], async () => {
+        seen.length = 0;
+        const html = await (await get("/")).text();
+        const section = featured(html);
+        expect(section).toBeDefined();
+        expect(section).toMatch(/<h2 id="featured-title"[^>]*>Most answered this week</);
+        expect(section).toMatch(
+          /<a href="\/discover\?sort=answered"[^>]*>More of the most answered</,
+        );
+        // STREAM_V5 is already among the newest, so the next is featured.
+        expect(section).toContain(`href="/polls/${OPEN_MANY}"`);
+        expect(section).not.toContain(STREAM_V5);
+        expect(section).toContain(`href="${BALLOT}#election=${OPEN_MANY}&amp;pick=0"`);
+        // Its card says what choosing does, which the newest's lede says only for theirs.
+        expect(section).toContain(
+          "Choose an answer to question 1\u00a0of\u00a02 to open it in the ballot app.",
+        );
+        // Beside the promise, before the newest questions.
+        expect(html.indexOf("featured-title")).toBeLessThan(html.indexOf("newest-title"));
+        expect(html.indexOf("Browse questions")).toBeLessThan(html.indexOf("featured-title"));
+        // One card more than the newest three: four requests for it, no more (T-52).
+        expect(seen.filter((r) => r.query.get("electionId") === OPEN_MANY)).toHaveLength(4);
+        expect(seen).toHaveLength(2 + 4 * 4);
+      }));
+
+    test("is left out when the next is a poll nobody has answered, rather than reading another", async () =>
+      withOrder([STREAM_V5, OPEN_ONE, OPEN_MANY], async () => {
+        seen.length = 0;
+        const html = await (await get("/")).text();
+        expect(featured(html)).toBeUndefined();
+        expect(html).not.toContain("Most answered this week");
+        expect(seen.filter((r) => r.query.get("electionId") === OPEN_MANY)).toEqual([]);
+        // The newest questions are as without it.
+        expect(html).toContain("What people are asking");
+      }));
+
+    test("is left out when every most answered poll is among the newest", async () =>
+      withOrder([STREAM_V5, STREAM_V1, STREAM_BAD_TEXT], async () => {
+        const html = await (await get("/")).text();
+        expect(featured(html)).toBeUndefined();
+        expect(html).not.toContain("Most answered this week");
+      }));
   });
 
   test("stays up without the API, leaving out only the questions and quoting nothing", async () => {
@@ -2958,7 +3021,7 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards beside its trust scene, the register its search box.
+ * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 180, css: 40, fonts: 58 },

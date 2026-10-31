@@ -19,6 +19,7 @@ export const esUS: Messages = {
   homeStreamPick:
     "Elige una respuesta en cualquier tarjeta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",
   homeStreamAll: "Ver todas las preguntas",
+  homeFeaturedAll: "Más de las más respondidas",
   homeStreamEmpty:
     "No hay preguntas abiertas en este momento. Cuando alguien haga una, aparecerá aquí.",
   homeListUnavailable:

@@ -1955,7 +1955,9 @@ describe("stream", () => {
     // The server doesn't know the visitor's zone, so each card's closing time
     // is served in UTC; the browser redraws it on the visitor's own clock
     // (P2-29, the stream's iteration 22).
-    expect(html).toMatch(/Closes(?:<!-- -->)? <time datetime="[^"]+Z"[^>]*>[^<]*\u00a0UTC<\/time>/i);
+    expect(html).toMatch(
+      /Closes(?:<!-- -->)? <time datetime="[^"]+Z"[^>]*>[^<]*\u00a0UTC<\/time>/i,
+    );
   });
 
   test("shows where each card's poll is listed, each tag a link into the stream", async () => {

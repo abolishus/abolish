@@ -49,6 +49,8 @@ type Story = StoryObj<typeof meta>;
 const play: Story["play"] = async ({ canvasElement }) => {
   const canvas = within(canvasElement);
   await expect(canvas.getByRole("heading", { level: 2, name: "Results" })).toBeVisible();
+  // Two questions, each counted on its own and never matched up (ADR 0026).
+  await expect(canvas.getByText(/^Each question is counted on its own\./)).toBeVisible();
   const tier = within(canvas.getByRole("region", { name: "Tier 0 (verified e-mail)" }));
   await expect(tier.getByText("1,234 people answered")).toBeVisible();
   await expect(tier.getByText("Most picked: ⁨Yes⁩, by 56.7% of those who answered.")).toBeVisible();
@@ -97,6 +99,8 @@ export const ByNumber: Story = {
     await expect(canvas.getByText("Answer 3")).toBeVisible();
     // One question needs no number.
     await expect(canvas.queryByText("Question 1")).toBeNull();
+    // Nor the line about several questions.
+    await expect(canvas.queryByText(/^Each question is counted on its own/)).toBeNull();
   },
 };
 
@@ -125,9 +129,12 @@ export const NothingPicked: Story = {
 export const Sealed: Story = {
   args: { results: { kind: "unopened" }, status: "open" },
   play: async ({ canvasElement }) => {
-    await expect(within(canvasElement).getByRole("status")).toHaveTextContent(
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("status")).toHaveTextContent(
       "Answers stay sealed while the poll is open.",
     );
+    // How the questions will be counted holds before any count does.
+    await expect(canvas.getByText(/^Each question is counted on its own\./)).toBeVisible();
   },
 };
 

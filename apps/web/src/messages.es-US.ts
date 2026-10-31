@@ -510,6 +510,8 @@ export const esUS: Messages = {
   pollAnswerClosed:
     "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",
   resultsTitle: "Resultados",
+  resultsEachQuestion:
+    "Cada pregunta se cuenta por separado. Las respuestas a distintas preguntas nunca se cruzan: solo se abren los totales de cada pregunta, así que ningún resultado muestra cómo respondió alguien el conjunto.",
   resultsSealed:
     "Las respuestas siguen selladas mientras la encuesta está abierta. Los resultados aparecen aquí una vez que se cuentan.",
   resultsCounting:

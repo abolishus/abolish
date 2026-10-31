@@ -3,9 +3,13 @@
  * whatever their time zones. Their ICU versions can still word it slightly
  * differently, so callers render it with `suppressHydrationWarning`.
  */
-export function formatUtc(locale: string, date: Date): string {
+export function formatUtc(
+  locale: string,
+  date: Date,
+  dateStyle: "long" | "medium" = "long",
+): string {
   return new Intl.DateTimeFormat(locale, {
-    dateStyle: "long",
+    dateStyle,
     timeStyle: "short",
     timeZone: "UTC",
   }).format(date);
@@ -16,8 +20,12 @@ export function formatUtc(locale: string, date: Date): string {
  * before "UTC" in the words, a narrow phone wraps "2:20 PM UTC" whole: never
  * "2:20" over "PM UTC", nor "UTC" alone.
  */
-export function formatUtcWhole(locale: string, date: Date): string {
-  return formatUtc(locale, date).replace(/\s(?=\S+$)/, "\u00a0");
+export function formatUtcWhole(
+  locale: string,
+  date: Date,
+  dateStyle: "long" | "medium" = "long",
+): string {
+  return formatUtc(locale, date, dateStyle).replace(/\s(?=\S+$)/, "\u00a0");
 }
 
 /** A UTC day, `YYYY-MM-DD`, for `locale`. */

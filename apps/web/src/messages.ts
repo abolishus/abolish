@@ -371,9 +371,9 @@ const enUS = {
   streamPick: {
     one: "Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",
     other:
-      "Choose an answer to question 1 of {count} to open it in the ballot app. Nothing is sent until you cast your ballot there.",
+      "Choose an answer to question 1\u00a0of\u00a0{count} to open it in the ballot app. Nothing is sent until you cast your ballot there.",
   },
-  streamPickFirst: "These answers are for question 1 of {count}.",
+  streamPickFirst: "These answers are for question 1\u00a0of\u00a0{count}.",
   streamNoBallot: "Answering from this page isn't set up on this site yet.",
   streamUnreadable: "This poll can't be shown here",
   streamUnreadableId: "Poll {prefix}…",

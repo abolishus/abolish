@@ -138,6 +138,16 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const asker = list.getByRole("link", { name: "Riverside Neighbours" });
   await expect(asker).toHaveAttribute("href", "/by/k7qa2mzr5xw3bn4d");
   await expect(list.getAllByText(/Asked by/)).toHaveLength(1);
+  // Its name takes a tap 24px tall, though its line of small text is 14px:
+  // points 11px above and below its middle still land on it.
+  asker.scrollIntoView({ block: "center" });
+  const named = asker.getBoundingClientRect();
+  for (const dy of [-11, 11])
+    await expect(
+      document
+        .elementFromPoint(named.left + named.width / 2, named.top + named.height / 2 + dy)
+        ?.closest("a"),
+    ).toBe(asker);
 
   // Each answer opens the ballot client with it chosen, the poll and the
   // pick in the fragment only ([[first-answer]], step 1).
@@ -157,7 +167,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // a poll of several questions still says which one its answers are for.
   await expect(canvas.getAllByText(/Nothing is sent until you cast/)).toHaveLength(1);
   await expect(list.queryByText(/Nothing is sent/)).toBeNull();
-  await expect(list.getByText("These answers are for question 1 of 3.")).toBeVisible();
+  const which = list.getByText("These answers are for question 1 of 3.");
+  await expect(which).toBeVisible();
+  // "1 of 3" keeps one line: at 360px "of 3." wrapped alone under the rest.
+  const ofThree = document.createRange();
+  const words = which.firstChild!;
+  ofThree.setStart(words, words.textContent!.indexOf("1\u00a0of"));
+  ofThree.setEnd(words, words.textContent!.length);
+  await expect(ofThree.getClientRects()).toHaveLength(1);
   const riverside = within(
     list.getByRole("list", { name: "Which one improvement matters most to you?" }),
   );

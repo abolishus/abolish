@@ -1855,7 +1855,7 @@ describe("stream", () => {
           ...html.matchAll(new RegExp(`href="${BALLOT}#election=${id}&amp;pick=([0-9]+)"`, "g")),
         ].map((m) => m[1]),
       ).toEqual(["0", "1", "2"]);
-    expect(html).toContain("These answers are for question 1 of 2.");
+    expect(html).toContain("These answers are for question 1\u00a0of\u00a02.");
     expect(html).toContain("Choose an answer on any card to open it in the ballot app.");
     expect(html).not.toContain(`#election=${STREAM_V5}"`);
     // Text the definition doesn't commit to, or none, gets no words and no way to answer (T-41).

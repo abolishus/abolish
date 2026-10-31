@@ -599,7 +599,12 @@ export function stubApi(): Server {
           });
         return json(200, { elections: order.slice(from, from + limit) });
       }
-      return json(200, { elections: listed.filter((id) => id > after).slice(0, limit) });
+      const only = q === null ? undefined : (SEARCHES.get(q.toLowerCase()) ?? []);
+      return json(200, {
+        elections: listed
+          .filter((id) => id > after && (only === undefined || only.includes(id)))
+          .slice(0, limit),
+      });
     }
     if (definition === undefined)
       return json(404, {

@@ -432,7 +432,14 @@ const enUS = {
   registerLookupTitle: "Open a poll by its ID",
   registerFindTitle: "Find a poll",
   registerFindLede:
-    "Filter this page of the list by status and counting rule. Leave a group at All to include all of it.",
+    "Search every listed poll by its words, then filter the page of the list by status and counting rule. Leave a group at All to include all of it.",
+  registerSearchLabel: "Search the polls",
+  registerSearchHint:
+    "Every word you type must appear in a poll's title or questions, up to {words} words. Open, scheduled and closed polls are all searched, in the list's order.",
+  registerSearching: "Only the polls that hold every word you searched for.",
+  registerSearchEmpty: "No listed poll matches",
+  registerSearchEmptyLede:
+    "Try fewer words, or shorter ones: a poll matches only when its title or questions hold every one. A poll that moderation has delisted isn't searched, but it stays open by its ID.",
   registerAsOf:
     "Statuses come from each poll's stated opening and closing times, read against this server's clock ({time} UTC).",
   filterAll: "All",

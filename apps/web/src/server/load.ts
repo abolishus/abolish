@@ -664,6 +664,7 @@ export function now(): Instant {
 }
 
 export interface PollList {
+  readonly kind: "list";
   readonly polls: readonly ListedPoll[];
   /** When the page was loaded, for each poll's status. */
   readonly asOf: Instant;
@@ -672,8 +673,17 @@ export interface PollList {
 }
 
 /**
+ * A page of the register, or a search the API refused: one of control
+ * characters alone, which no pattern the contract can state catches first
+ * (as the stream's, `searchRefused`).
+ */
+export type RegisterPage = PollList | { readonly kind: "search-refused" };
+
+/**
  * A page of the polls the API lists for discovery, from just above `after`
- * (an election ID, or `""` from the start), each poll's words in `locale`.
+ * (an election ID, or `""` from the start), only those whose question text
+ * holds every term of `q` when it is given (a query `streamQuery` admits,
+ * or `""` for none), each poll's words in `locale`.
  * The API leaves out delisted and hidden polls (T-68); each listed poll's
  * definition is decoded and checked here as on its own page, and its display
  * text as a stream card's (src/server/stream-card.ts), so the list shows
@@ -682,11 +692,23 @@ export interface PollList {
  * served between the listing and its definition only if the database lost
  * it, so it drops out of the page.
  */
-export async function loadPollList(api: Api, after: string, locale: string): Promise<PollList> {
-  const { elections } = await api.elections.list({
-    ...(after === "" ? {} : { after }),
-    limit: String(LIST_PAGE),
-  });
+export async function loadPollList(
+  api: Api,
+  after: string,
+  q: string,
+  locale: string,
+): Promise<RegisterPage> {
+  let elections;
+  try {
+    ({ elections } = await api.elections.list({
+      ...(after === "" ? {} : { after }),
+      ...(q === "" ? {} : { q }),
+      limit: String(LIST_PAGE),
+    }));
+  } catch (error) {
+    if (q !== "" && searchRefused(error)) return { kind: "search-refused" };
+    throw error;
+  }
   const answers = await Promise.all(
     elections.map(async (electionId) => {
       try {
@@ -719,6 +741,7 @@ export async function loadPollList(api: Api, after: string, locale: string): Pro
     );
   }
   return {
+    kind: "list",
     polls,
     asOf: now(),
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.

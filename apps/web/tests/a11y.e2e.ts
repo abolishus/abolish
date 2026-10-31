@@ -71,6 +71,7 @@ const PAGES = [
   "/how-it-works",
   "/verify",
   "/polls",
+  "/polls?q=park",
   `/polls/${ID}`,
   `/polls/${QUESTIONS_ID}`,
   `/polls/${STREAM_V5}`,
@@ -868,13 +869,14 @@ describe("each page's title", () => {
     expect(titles.get(`/polls/${SWAPPED_ID}`)).toBe("Poll unavailable · Abolish");
     expect(titles.get("/discover?topic=housing")).toBe("Housing · Discover · Abolish");
     expect(titles.get(`/polls/${ID}`)).toBe(`Poll ${ID.slice(0, 16)}… · Abolish`);
-    // A search or a place narrows the stream without naming it (T-67).
+    // A search or a place narrows the stream, and a search the register, without naming it (T-67).
     for (const path of ["/discover?q=park", "/discover?place=Old%20Town"])
       expect(titles.get(path), path).toBe(titles.get("/discover"));
+    expect(titles.get("/polls?q=park")).toBe(titles.get("/polls"));
     // Every other page's title is its own.
     const alike = new Map<string, string[]>();
     for (const [path, title] of titles)
-      if (!path.startsWith("/discover?q=") && !path.startsWith("/discover?place="))
+      if (!/^\/(?:discover\?q|discover\?place|polls\?q)=/.test(path))
         alike.set(title, [...(alike.get(title) ?? []), path]);
     // A poll whose words can be shown is named by them, isolated (T-75).
     expect(titles.get(`/polls/${STREAM_V5}`)).toBe("\u2068Park and library\u2069 · Abolish");

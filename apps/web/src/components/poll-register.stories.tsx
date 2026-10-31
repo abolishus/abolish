@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
 import type { PollView } from "../poll.ts";
+import type { PollList } from "../server/load.ts";
 import { PollRegister, registerHref } from "./poll-register.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
@@ -26,41 +27,45 @@ const UNREADABLE = "40".repeat(32);
 const NEXT = "50".repeat(32);
 const QUESTIONS = "60".repeat(32);
 
+const LIST: PollList = {
+  kind: "list",
+  polls: [
+    {
+      kind: "poll",
+      poll: poll(OPEN),
+      text: undefined,
+      answered: [{ tier: 0, answered: "1204" }],
+    },
+    {
+      kind: "poll",
+      text: undefined,
+      answered: undefined,
+      poll: poll(SCHEDULED, {
+        counting: "approval",
+        opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
+        closesAt: { seconds: "18446744073709551615", iso: undefined },
+      }),
+    },
+    {
+      kind: "poll",
+      text: undefined,
+      answered: undefined,
+      poll: poll(CLOSED, {
+        closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
+      }),
+    },
+    { kind: "unavailable", electionId: UNREADABLE, problem: "another-election" },
+  ],
+  next: NEXT,
+  asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
+};
+
 const meta = {
   component: PollRegister,
   args: {
-    list: {
-      polls: [
-        {
-          kind: "poll",
-          poll: poll(OPEN),
-          text: undefined,
-          answered: [{ tier: 0, answered: "1204" }],
-        },
-        {
-          kind: "poll",
-          text: undefined,
-          answered: undefined,
-          poll: poll(SCHEDULED, {
-            counting: "approval",
-            opensAt: { seconds: "1768435200", iso: "2026-01-15T00:00:00.000Z" },
-            closesAt: { seconds: "18446744073709551615", iso: undefined },
-          }),
-        },
-        {
-          kind: "poll",
-          text: undefined,
-          answered: undefined,
-          poll: poll(CLOSED, {
-            closesAt: { seconds: "1767484800", iso: "2026-01-04T00:00:00.000Z" },
-          }),
-        },
-        { kind: "unavailable", electionId: UNREADABLE, problem: "another-election" },
-      ],
-      next: NEXT,
-      asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
-    },
+    page: LIST,
     after: undefined,
+    typed: "",
     filters: { status: undefined, counting: undefined },
     invalid: undefined,
     phoneVerification: false,
@@ -129,7 +134,7 @@ export const Filtered: Story = {
     await expect(canvas.getByText("1 of 4 polls on this page match.")).toBeVisible();
     await expect(shown(canvasElement)).toEqual([`/polls/${CLOSED}`]);
     // The form and every link keep this page and these filters.
-    const form = canvasElement.querySelector("form:has(input[name=status])");
+    const form = canvasElement.querySelector("form:not([role=search]):has(input[name=status])");
     await expect(form?.querySelector("input[type=hidden][name=after]")).toHaveValue(OPEN);
     await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
       "href",
@@ -159,10 +164,10 @@ export const AllSent: Story = {
 /** A version-5 poll is counted question by question, and filtered as such. */
 export const QuestionByQuestion: Story = {
   args: {
-    list: {
-      ...meta.args.list,
+    page: {
+      ...LIST,
       polls: [
-        ...meta.args.list.polls,
+        ...LIST.polls,
         {
           kind: "poll",
           text: {
@@ -211,7 +216,7 @@ export const NoMatch: Story = {
 };
 
 export const Empty: Story = {
-  args: { list: { polls: [], next: undefined, asOf: meta.args.list.asOf } },
+  args: { page: { ...LIST, polls: [], next: undefined } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("No polls listed.")).toBeVisible();
@@ -230,12 +235,92 @@ export const InvalidLookup: Story = {
   },
 };
 
-/** The register's address puts `after` first and each filter in a fixed order. */
+/**
+ * A search the API ran: the box holds what was typed, the page says it is
+ * narrowed without quoting it, and every form and link keeps it but the
+ * one that clears it.
+ */
+export const Searched: Story = {
+  args: {
+    typed: " Park  library ",
+    after: OPEN,
+    filters: { q: "Park  library", status: "closed", counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const search = canvas.getByRole("search");
+    await expect(within(search).getByRole("searchbox", { name: "Search the polls" })).toHaveValue(
+      " Park  library ",
+    );
+    // A new search starts from the top, keeping the filters.
+    await expect(search.querySelector("input[name=after]")).toBeNull();
+    await expect(search.querySelector("input[type=hidden][name=status]")).toHaveValue("closed");
+    await expect(canvas.getByText(/hold every word you searched for/)).toBeVisible();
+    await expect(canvas.queryByText(/Park {2}library/)).toBeNull();
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/polls?status=closed",
+    );
+    const form = canvasElement.querySelector("form:has(input[name=counting])");
+    await expect(form?.querySelector("input[type=hidden][name=q]")).toHaveValue("Park  library");
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      `/polls?after=${OPEN}&q=Park%20%20library`,
+    );
+    await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
+      "href",
+      `/polls?after=${NEXT}&q=Park%20%20library&status=closed`,
+    );
+  },
+};
+
+export const SearchEmpty: Story = {
+  args: {
+    page: { ...LIST, polls: [], next: undefined },
+    typed: "ferries",
+    filters: { q: "ferries", status: undefined, counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "No listed poll matches" })).toBeVisible();
+    await expect(canvas.queryByText("No polls listed.")).toBeNull();
+    await expect(canvas.queryByRole("radio")).toBeNull();
+    for (const link of canvas.getAllByRole("link", { name: "Clear the search" }))
+      await expect(link).toHaveAttribute("href", "/polls");
+  },
+};
+
+/** A search the API wouldn't take: said in our words, with the box still holding it. */
+export const SearchRefused: Story = {
+  args: {
+    page: { kind: "search-refused" },
+    typed: "w0 w1 w2 w3 w4 w5 w6 w7 w8",
+    filters: { q: undefined, status: undefined, counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "That search can't be run" })).toBeVisible();
+    await expect(canvas.getByText(/one to 8 words, in at most 200 characters/)).toBeVisible();
+    await expect(canvas.getByRole("searchbox", { name: "Search the polls" })).toHaveValue(
+      "w0 w1 w2 w3 w4 w5 w6 w7 w8",
+    );
+    await expect(canvas.queryByRole("radio")).toBeNull();
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/polls",
+    );
+  },
+};
+
+/** The register's address puts `after` first, then the search, then each filter in a fixed order. */
 export const Addresses: Story = {
   play: async () => {
     await expect(registerHref(undefined, { status: undefined, counting: "all" })).toBe("/polls");
     await expect(registerHref(undefined, { status: "closed", counting: "approval" })).toBe(
       "/polls?status=closed&counting=approval",
     );
+    await expect(
+      registerHref(NEXT, { q: "café & bar #1", status: undefined, counting: "approval" }),
+    ).toBe(`/polls?after=${NEXT}&q=caf%C3%A9%20%26%20bar%20%231&counting=approval`);
   },
 };

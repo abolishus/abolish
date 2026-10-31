@@ -397,7 +397,11 @@ describe("forcedPathFits", () => {
     expect(forcedPathFits([lone(0n), rolling()], deployed)).toBe(false);
     // Its intervals a week away from the fixed one's: it still doesn't fit.
     expect(forcedPathFits([lone(1n), rolling(3, close + 7n * 24n * hour)], deployed)).toBe(false);
-    expect(() => forcedPathDemand(rolling(), deployed)).toThrow(RangeError);
+    expect(() => forcedPathDemand(rolling(), deployed)).toThrow(/commits roots/);
+    // Not even with a member count beside its flag.
+    const both = { ...rolling(), members: 1n } as unknown as ForcedPathElection;
+    expect(() => forcedPathDemand(both, deployed)).toThrow(/commits roots/);
+    expect(forcedPathFits([both], deployed)).toBe(false);
   });
 
   test("reads `rolling: false` as fixed, and refuses a `rolling` that isn't a boolean", () => {

@@ -313,10 +313,12 @@ def fits(elections, w):
     none, since it commits roots whatever its size: a set holding one never fits.
     """
     events = []
+    for e in elections:
+        assert 1 <= e["seats"] <= 2 * MAX_TRUSTEES
+        assert e.get("rolling") or e["members"] >= 0
     if any(e.get("rolling") for e in elections):
         return False
     for e in elections:
-        assert e["members"] >= 0 and 1 <= e["seats"] <= 2 * MAX_TRUSTEES
         for start, stop, gas, _ in intervals(e, w):
             assert stop > start
             rate = Fraction(gas, stop - start)

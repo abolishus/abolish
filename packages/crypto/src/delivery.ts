@@ -1744,9 +1744,9 @@ function demandsFit(
  * (`forcedPathFits`), and a rolling one always does, with no batch figure
  * computed; then each of its two intervals carries one root call per seat
  * whatever its members, `s · ROOT_CALL_GAS`; the batch and root figures never
- * mix within one election. The package entry point doesn't export it: until P1-12f part
- * 3 reads a root's leaves and P4-3 part 2c brings the attestation that makes
- * them available, no root can deliver, and nodes keep `forcedPathFits`, which
+ * mix within one election. The package entry point doesn't export it: until
+ * P1-12f part 3 reads a root's leaves and P4-3 part 2c brings the attestation
+ * that makes them available, no root can deliver, and nodes keep `forcedPathFits`, which
  * counts every election with batches and so refuses every election that
  * would commit roots (T-25, T-52, T-54).
  */

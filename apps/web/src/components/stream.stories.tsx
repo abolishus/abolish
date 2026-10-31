@@ -504,6 +504,34 @@ export const Empty: Story = {
   },
 };
 
+/**
+ * A page after the last of an order's questions, reached from a full page's
+ * "More questions": it says the earlier pages held them all, never that
+ * nothing is open or that its narrowings matched nothing, and leads back to
+ * the first page keeping them (P2-29, the stream's iteration 19).
+ */
+export const PastTheLast: Story = {
+  args: {
+    sort: "closing",
+    typedPlace: "Eastside",
+    filter: { topic: "transport", place: "Eastside" },
+    stream: { kind: "stream", cards: [], next: undefined },
+    later: true,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "That was the last of them" })).toBeVisible();
+    await expect(canvas.getByText(/on the pages before this one/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Start from the top" })).toHaveAttribute(
+      "href",
+      "/discover?sort=closing&topic=transport&place=Eastside",
+    );
+    await expect(canvas.queryByText(/No open questions/)).toBeNull();
+    await expect(canvas.queryByText(/are listed\./)).toBeNull();
+    await expect(canvas.queryByRole("list", { name: "Questions" })).toBeNull();
+  },
+};
+
 /** A search: the order and every next page keep it, and the box shows what was typed. */
 export const Searching: Story = {
   args: { sort: "closing", typed: " library  hours", filter: { q: "library  hours" } },

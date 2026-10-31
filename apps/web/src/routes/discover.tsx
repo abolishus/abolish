@@ -74,7 +74,7 @@ export const Route = createFileRoute("/discover")({
     };
   },
   component: function Discover() {
-    const { sort, q, topic, place } = Route.useSearch();
+    const { sort, after, q, topic, place } = Route.useSearch();
     const { stream, ballot, phoneVerification } = Route.useLoaderData();
     const query = streamQuery(q);
     const filter = streamPlace(place);
@@ -91,6 +91,7 @@ export const Route = createFileRoute("/discover")({
         }}
         ballot={ballot}
         phoneVerification={phoneVerification}
+        later={after !== undefined}
       />
     );
   },

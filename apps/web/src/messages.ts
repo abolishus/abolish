@@ -299,6 +299,27 @@ const enUS = {
   recountTrustGateways: "IPFS gateways",
   recountTrustGatewaysMeans:
     "Nothing about the board: every block is checked against its address, so a gateway can only fail to answer. It does see which blocks, and so which poll, you read.",
+  recountNodeMark: "Community node",
+  recountNodeTitle: "Run a node, keep a copy",
+  recountNodeLede:
+    "The community node in the commands above is the verifier, a copy of the boards and a chain reader, with no database and no account. Each one left running is another copy of the record that doesn't depend on us.",
+  recountNodeServeTitle: "Serve your copy",
+  recountNodeServeBody:
+    "From the same checkout, after the boards are copied, this hands out every block the node holds, by its address, and the reports the verify step wrote.",
+  recountNodeOpen:
+    "It listens only on your own machine unless you tell it otherwise. Opened to others, put a proxy in front that limits each address: on its own, one visitor can hold every connection.",
+  recountNodeKeeps: "Keeps",
+  recountNodeKeepsMeans:
+    "The board files the copy step fetched, each block checked against its address. It adds to them only when you run that step again.",
+  recountNodeServes: "Serves",
+  recountNodeServesMeans:
+    "Each block it holds to any IPFS client that asks, and each poll's latest report. It writes nothing down about who asked for what.",
+  recountNodeVerifies: "Verifies",
+  recountNodeVerifiesMeans:
+    "Every poll the anchors name, each time you run the verify step. It doesn't run that on its own yet.",
+  recountNodeNeeds: "Needs",
+  recountNodeNeedsMeans:
+    "A machine left on, an Ethereum node, a node of the poll's network, and disk for the boards you copy. Restart it to serve what a later copy added.",
   recountSource:
     "The verifier's source is in packages/verifier and its specification in docs/spec/verifier.md, both published at github.com/abolishus/abolish.",
   dgTitle: "{section}: step {step} of {total}",

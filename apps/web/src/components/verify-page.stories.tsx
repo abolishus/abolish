@@ -30,14 +30,20 @@ export const Default: Story = {
       "Four commands, one verdict per poll",
       "8 groups of checks, from the code to the count",
       "What it takes on trust, and what it doesn't",
+      "Run a node, keep a copy",
     ]);
     await expect(
       within(canvas.getByRole("navigation", { name: "On this page" })).getAllByRole("link"),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
     // Each command sits under its step, as text to copy.
     const commands = canvasElement.querySelectorAll("pre");
-    await expect(commands).toHaveLength(4);
+    await expect(commands).toHaveLength(5);
     await expect(commands[1]).toHaveTextContent("--anchor $ANCHOR");
+    // The node serves the copy the steps above made, and promises no run of its own.
+    await expect(commands[4]).toHaveTextContent("serve --blocks boards --reports reports");
+    await expect(canvas.getByText("Verifies").nextElementSibling).toHaveTextContent(
+      "It doesn't run that on its own yet.",
+    );
     const codes = within(canvas.getByRole("table", { name: "What the exit code means" }))
       .getAllByRole("row")
       .slice(1)

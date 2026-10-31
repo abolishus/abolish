@@ -303,6 +303,27 @@ export const esUS: Messages = {
   recountTrustGateways: "Pasarelas de IPFS",
   recountTrustGatewaysMeans:
     "En nada sobre el tablero: cada bloque se revisa contra su dirección, así que una pasarela solo puede dejar de responder. Sí ve qué bloques lees, y por tanto qué encuesta.",
+  recountNodeMark: "Nodo comunitario",
+  recountNodeTitle: "Ejecuta un nodo, guarda una copia",
+  recountNodeLede:
+    "El nodo comunitario de los comandos de arriba es el verificador, una copia de los tableros y un lector de las cadenas, sin base de datos y sin cuenta. Cada uno que se deja funcionando es otra copia del registro que no depende de nosotros.",
+  recountNodeServeTitle: "Comparte tu copia",
+  recountNodeServeBody:
+    "Desde la misma copia del código, después de copiar los tableros, esto entrega cada bloque que guarda el nodo, por su dirección, y los informes que escribió el paso de verificación.",
+  recountNodeOpen:
+    "Solo escucha en tu propia máquina, a menos que le indiques otra cosa. Si lo abres a otros, pon delante un proxy que limite cada dirección: por sí solo, un visitante puede ocupar todas las conexiones.",
+  recountNodeKeeps: "Guarda",
+  recountNodeKeepsMeans:
+    "Los archivos de los tableros que trajo el paso de copia, con cada bloque revisado contra su dirección. Solo añade más cuando vuelves a ejecutar ese paso.",
+  recountNodeServes: "Entrega",
+  recountNodeServesMeans:
+    "Cada bloque que guarda a cualquier cliente de IPFS que lo pida, y el último informe de cada encuesta. No anota nada sobre quién pidió qué.",
+  recountNodeVerifies: "Verifica",
+  recountNodeVerifiesMeans:
+    "Cada encuesta que nombran los anclajes, cada vez que ejecutas el paso de verificación. Todavía no lo hace por su cuenta.",
+  recountNodeNeeds: "Necesita",
+  recountNodeNeedsMeans:
+    "Una máquina encendida, un nodo de Ethereum, un nodo de la red de la encuesta y disco para los tableros que copies. Reinícialo para que entregue lo que añadió una copia posterior.",
   recountSource:
     "El código fuente del verificador está en packages/verifier y su especificación en docs/spec/verifier.md, ambos publicados en github.com/abolishus/abolish.",
   dgTitle: "{section}: paso {step} de {total}",

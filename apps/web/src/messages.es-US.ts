@@ -371,6 +371,22 @@ export const esUS: Messages = {
     "Abiertas ahora, según cuántas personas respondieron en los últimos siete días, cada persona una vez sin importar cuántas veces cambió su respuesta. Cualquiera puede volver a contarlo desde el tablero público.",
   streamQuestions: "Preguntas",
   streamAnsweredSoFar: "Han respondido hasta ahora",
+  streamAnswered_email: {
+    one: "{count} persona con correo verificado",
+    other: "{count} personas con correo verificado",
+  },
+  streamAnswered_phone: {
+    one: "{count} persona con correo y teléfono verificados",
+    other: "{count} personas con correo y teléfono verificados",
+  },
+  streamAnswered_vouched: {
+    one: "{count} persona avalada por otras personas",
+    other: "{count} personas avaladas por otras personas",
+  },
+  streamAnswered_document: {
+    one: "{count} persona verificada con pasaporte o documento de identidad",
+    other: "{count} personas verificadas con pasaporte o documento de identidad",
+  },
   streamCloses: "Cierra",
   streamPick: {
     one: "Elige una respuesta para abrirla en la app de votación. No se envía nada hasta que emitas tu boleta ahí.",

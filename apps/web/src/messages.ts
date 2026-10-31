@@ -367,6 +367,22 @@ const enUS = {
     "Open now, by how many people answered in the last seven days, each person once however often they changed their answer. Anyone can count it again from the public board.",
   streamQuestions: "Questions",
   streamAnsweredSoFar: "Answered so far",
+  streamAnswered_email: {
+    one: "{count} person with a verified e-mail",
+    other: "{count} people with a verified e-mail",
+  },
+  streamAnswered_phone: {
+    one: "{count} person with a verified e-mail and phone",
+    other: "{count} people with a verified e-mail and phone",
+  },
+  streamAnswered_vouched: {
+    one: "{count} person vouched for by others",
+    other: "{count} people vouched for by others",
+  },
+  streamAnswered_document: {
+    one: "{count} person verified with a passport or ID",
+    other: "{count} people verified with a passport or ID",
+  },
   streamCloses: "Closes",
   streamPick: {
     one: "Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",

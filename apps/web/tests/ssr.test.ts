@@ -2034,9 +2034,11 @@ describe("stream", () => {
     // Each tier the definition names on its own line, one with none served
     // at 0; the API's count for a tier it doesn't name is left out (T-01).
     expect(text(v5)).toMatch(
-      /Answered so far\|+1,204 people[|\s]+·[|\s]+Tier 0 \(verified e-mail\)\|+0 people[|\s]+·[|\s]+Tier 2 \(document-verified\)\|/,
+      /Answered so far\|+1,204 people with a verified e-mail\|+0 people verified with a passport or ID\|/,
     );
-    expect(text(v5)).not.toContain("Tier 1");
+    // Each tier in words, never as a code (P2-29, the stream's iteration 9).
+    expect(text(v5)).not.toMatch(/Tier \d/);
+    expect(text(v5)).not.toContain("vouched");
     expect(text(v5)).not.toMatch(/\b7 people/);
     // A failed read shows no count, and the card stays.
     expect(text(v1)).not.toContain("Answered so far");

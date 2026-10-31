@@ -242,25 +242,25 @@ function PlaceForm({
 }
 
 /**
- * The topics and the place, folded under one line until a visitor opens it
- * or the page is narrowed by a place, which only its box shows (T-67):
- * fifteen topics and a second box put a phone's first question two screens
- * down. A native disclosure, so it opens before the page's script loads.
+ * The topics, and the place unless the page already shows its box, folded
+ * under one line until a visitor opens it: fifteen topics and a second box
+ * put a phone's first question two screens down. A native disclosure, so it
+ * opens before the page's script loads.
  */
 function Narrowing({
   sort,
   filter,
   typedPlace,
-  open,
+  withPlace,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typedPlace: string;
-  open: boolean;
+  withPlace: boolean;
 }) {
   const t = useTranslate(catalogs);
   return (
-    <details open={open} className="group">
+    <details className="group">
       {/* Padded, and pulled back by as much, so its focus ring clears the
           chevron and the last word while the chevron keeps the column's edge. */}
       <summary className="-mx-2 inline-flex min-h-12 cursor-pointer items-center gap-2 px-2 text-base font-semibold focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none">
@@ -268,11 +268,11 @@ function Narrowing({
           aria-hidden="true"
           className="size-4 -rotate-90 transition-transform group-open:rotate-0 motion-reduce:transition-none"
         />
-        {t("streamNarrow")}
+        {t(withPlace ? "streamNarrow" : "discoverTopics")}
       </summary>
       <div className="mt-4 grid gap-6">
         <Topics sort={sort} filter={filter} />
-        <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} />
+        {withPlace ? <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} /> : null}
       </div>
     </details>
   );
@@ -600,6 +600,7 @@ export function StreamPage({
 }: StreamPageProps) {
   const t = useTranslate(catalogs);
   const { q, topic, place } = filter;
+  const placeShown = place !== undefined || stream.kind === "place-refused";
   return (
     <div className="grid gap-10">
       <PageHeader
@@ -609,16 +610,14 @@ export function StreamPage({
       />
       <div className="grid gap-6">
         <SearchForm sort={sort} filter={filter} typed={typed} />
+        {/* A place's page shows its box beside the search's, as only its box
+            says the place (T-67), and keeps the topics folded as a topic's
+            page does (P2-29, the stream's iteration 3): opening the whole
+            fold for the box put fifteen topics above a phone's first
+            question, 1,686px down at 360px (the stream's iteration 13). */}
+        {placeShown ? <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} /> : null}
         <Sorts sort={sort} filter={filter} />
-        <Narrowing
-          sort={sort}
-          filter={filter}
-          typedPlace={typedPlace}
-          // A topic's page keeps it closed: its title names the topic and
-          // the line below drops it, where opening it put fifteen topics
-          // above a phone's first question (P2-29, the stream's iteration 3).
-          open={place !== undefined || stream.kind === "place-refused"}
-        />
+        <Narrowing sort={sort} filter={filter} typedPlace={typedPlace} withPlace={!placeShown} />
         {stream.kind === "search-refused" || stream.kind === "place-refused" ? null : (
           <Narrowed sort={sort} filter={filter} />
         )}

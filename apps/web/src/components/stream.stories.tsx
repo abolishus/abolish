@@ -631,6 +631,25 @@ export const Place: Story = {
     await expect(list.getByRole("link", { name: "Culture" })).toBeVisible();
     await expect(list.queryByRole("link", { name: /Riverside Park|Eastside/ })).toBeNull();
     await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveValue(" Old  Town");
+    // The place's box stands beside the search's, out of the fold, which
+    // stays closed with only the topics in it: opened for the box, it put
+    // fifteen topics above a phone's first question (P2-29, the stream's
+    // iteration 13).
+    await expect(within(placeForm(canvasElement)).getByRole("textbox")).toBeVisible();
+    await expect(canvasElement.querySelector("details")).not.toHaveAttribute("open");
+    await expect(canvasElement.querySelector("details summary")).toHaveTextContent(/^Topics$/);
+    await expect(
+      searchForm(canvasElement).compareDocumentPosition(placeForm(canvasElement)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await expect(
+      placeForm(canvasElement).compareDocumentPosition(
+        canvas.getByRole("navigation", { name: "Order" }),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await expect(
+      canvasElement.querySelectorAll('input[name="place"]:not([type="hidden"])'),
+    ).toHaveLength(1);
     // Each form keeps the other's accepted value.
     await expect(searchForm(canvasElement).querySelector('input[name="place"]')).toHaveValue(
       "Old Town",
@@ -689,8 +708,10 @@ export const PlaceRefused: Story = {
       canvas.getByRole("heading", { name: "That place can't be looked up" }),
     ).toBeVisible();
     await expect(canvas.getByText(/one to 80 characters/)).toBeVisible();
-    // The refused place stays in its box, shown, to be corrected.
+    // The refused place stays in its box, shown out of the fold, to be corrected.
     await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveValue("a".repeat(81));
+    await expect(within(placeForm(canvasElement)).getByRole("textbox")).toBeVisible();
+    await expect(canvasElement.querySelector("details")).not.toHaveAttribute("open");
     await expect(canvas.getByRole("link", { name: "Clear the place" })).toHaveAttribute(
       "href",
       "/discover",

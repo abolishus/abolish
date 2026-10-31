@@ -182,7 +182,12 @@ describe("the moderation log's counts", () => {
     expect(await issues(input, {})).toBeUndefined();
     expect(await issues(input, { limit: "1" })).toBeDefined();
     expect(await issues(output, counts)).toBeUndefined();
+    // `since` only once the log has a decision, at the log's own precision.
+    expect(await issues(output, { ...counts, since: "2026-09-01T08:30:00.000Z" })).toBeUndefined();
     for (const bad of [
+      { ...counts, since: "2026-09-01T08:30:00Z" },
+      { ...counts, since: "1 September 2026" },
+      { ...counts, since: null },
       { ...counts, total: "04" },
       { ...counts, hide: "-1" },
       { ...counts, hide: 0 },

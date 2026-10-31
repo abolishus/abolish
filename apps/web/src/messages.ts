@@ -989,9 +989,10 @@ const enUS = {
   moderationActionNone: "No decision on this page took this action.",
   moderationActionEarlier: "Earlier decisions may have some.",
   moderationCounts: {
-    one: "The whole log: {count} decision, by action",
-    other: "The whole log: {count} decisions, by action",
+    one: "The whole log since {since}: {count} decision, by action",
+    other: "The whole log since {since}: {count} decisions, by action",
   },
+  moderationCountsShown: "Shown below",
   moderationPageOfLog: {
     one: "This page holds {shown} of the log's {count} decision.",
     other: "This page holds {shown} of the log's {count} decisions.",

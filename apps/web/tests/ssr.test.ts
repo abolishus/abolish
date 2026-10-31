@@ -792,6 +792,15 @@ describe("results page", () => {
     expect(page).toContain("only this server&#x27;s word");
   });
 
+  test("gives the verifier's command for this poll alone, as the verify page runs it (T-53)", async () => {
+    const html = await (await get(`/polls/${CELLS_ID}/results`)).text();
+    expect(html).toContain(
+      `<code translate="no">vp node packages/verifier/src/bin.ts --gateway $GATEWAY reports/${CELLS_ID}</code>`,
+    );
+    expect(html).not.toContain("$POLL_ID");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("anchor boards to Ethereum yet");
+  });
+
   test("a failed read of the board's head leaves the results page up and says so", async () => {
     const response = await get(`/polls/${HEAD_FAILS_ID}/results`);
     expect(response.status).toBe(200);
@@ -2640,7 +2649,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 178, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 175, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 214, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 215, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 186, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 177, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 172, css: 40, fonts: 58 },

@@ -541,6 +541,9 @@ export const esUS: Messages = {
     "Los resultados de esta encuesta se cuentan a partir de su tablero público. Las entradas solo se agregan al final, y ninguna muestra cómo votó nadie.",
   resultsBoardUnavailable: "No se pudo leer el tablero en este momento.",
   resultsVerify: "Cómo contarlo tú",
+  resultsRecountTitle: "Cuenta esta encuesta de nuevo",
+  resultsRecountBody:
+    "Cuando el nodo comunitario haya copiado y verificado los tableros, como explica Cómo contarlo tú, el verificador revisa esta encuesta por separado con este comando. Su código de salida es el veredicto.",
   reactionsTitle: "Reacciones",
   reactionsLede:
     "Reacciona a la encuesta en sí, la respondas o no. Una reacción no es una respuesta y no dice nada sobre si respondiste.",

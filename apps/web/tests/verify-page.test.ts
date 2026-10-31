@@ -3,6 +3,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { CHECK_GROUPS, COMMANDS, EXIT_ROWS } from "../src/components/verify-page.tsx";
 import { catalogs } from "../src/messages.ts";
+import { recountOne } from "../src/recount.ts";
 
 // The page restates the verifier's own documents, so each statement it
 // copies is tied to them here: a page that misstated how to run the verifier
@@ -36,5 +37,13 @@ describe("the verify page", () => {
     // The verifier installs no binary yet, so the page runs it from source.
     expect(read("packages/verifier/package.json")).not.toContain('"bin"');
     expect(COMMANDS.at(-1)?.command).toContain("packages/verifier/src/bin.ts");
+  });
+
+  test("one poll's command is the last one with that poll's ID, and nothing else changed", () => {
+    const id = "ab".repeat(32);
+    const one = recountOne(id);
+    expect(one).toBe(COMMANDS.at(-1)?.command.replace("$POLL_ID", id));
+    expect(one.endsWith(`reports/${id}`)).toBe(true);
+    expect(one).not.toContain("$POLL_ID");
   });
 });

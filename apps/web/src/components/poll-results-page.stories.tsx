@@ -175,6 +175,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(check.getByRole("figure", { name: /^Definition hash/ })).toHaveTextContent(
     definitionHash,
   );
+  // The verifier's command for this poll alone, its ID filled in.
+  await expect(check.getByRole("heading", { name: "Count this poll again" })).toBeVisible();
+  await expect(check.getByLabelText("Count this poll again")).toHaveTextContent(
+    `vp node packages/verifier/src/bin.ts --gateway $GATEWAY reports/${electionId}`,
+  );
+  await expect(check.getByText(/don't anchor boards to Ethereum yet/)).toBeVisible();
   await expect(canvas.getByRole("link", { name: "Check the count on the board" })).toHaveAttribute(
     "href",
     `/polls/${electionId}/board`,

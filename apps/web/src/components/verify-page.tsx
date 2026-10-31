@@ -1,6 +1,7 @@
 import { useTranslate } from "@abolishus/ui";
 
 import { catalogs, type Messages } from "../messages.ts";
+import { ONE_POLL } from "../recount.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 
 type Key = keyof Messages;
@@ -37,7 +38,7 @@ export const COMMANDS = [
   {
     title: "recountStep4Title",
     body: "recountStep4Body",
-    command: "vp node packages/verifier/src/bin.ts --gateway $GATEWAY reports/$POLL_ID",
+    command: ONE_POLL,
   },
 ] as const satisfies readonly { title: Key; body: Key; command: string }[];
 

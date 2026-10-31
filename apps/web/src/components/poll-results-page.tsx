@@ -26,6 +26,7 @@ import {
   type TierResults,
 } from "../results.ts";
 import type { BoardHead } from "../server/load.ts";
+import { recountOne } from "../recount.ts";
 import type { PollWords } from "../stream.ts";
 import { BoardHeadFacts } from "./board-head.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
@@ -582,6 +583,31 @@ export function PollResultsPage({
                 <Hash value={poll.definitionHash} label={t("definitionHash")} />
               </div>
             </div>
+          </div>
+          <div className="grid min-w-0 gap-3">
+            <h3 className="m-0 font-heading text-lg font-semibold">{t("resultsRecountTitle")}</h3>
+            <p className="m-0 max-w-prose text-pretty">{t("resultsRecountBody")}</p>
+            {/* Wraps rather than scrolls, as on the verify page, so the ID is
+                never hidden at 360px. */}
+            <pre
+              aria-label={t("resultsRecountTitle")}
+              className="m-0 border border-foreground bg-muted p-4 font-mono text-sm whitespace-pre-wrap wrap-anywhere"
+            >
+              <code translate="no">{recountOne(poll.electionId)}</code>
+            </pre>
+            <dl className="m-0 grid gap-1 text-sm">
+              <dt>
+                <code translate="no" className="font-mono">
+                  $GATEWAY
+                </code>
+              </dt>
+              <dd className="m-0 text-muted-foreground">{t("recountValueGateway")}</dd>
+            </dl>
+            {/* Until the anchor runs the command finds nothing of ours to
+                check, so the page says so rather than imply it would (T-53). */}
+            <p className="m-0 max-w-prose text-pretty text-muted-foreground">
+              {t("recountNotYetBody")}
+            </p>
           </div>
           <ul className="m-0 grid list-none gap-2 p-0">
             <li>

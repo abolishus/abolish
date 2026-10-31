@@ -149,8 +149,8 @@ export interface PollRegisterProps {
  * The whole listing in numbers under the heading, as the register's mockup
  * has them: every listed poll, those open now and those not open yet, from
  * the API's counts rather than the page in hand, at the clock the page read
- * statuses by. Like the list, they leave out delisted and hidden polls, which
- * the lede says (T-68).
+ * statuses by, on the register's first page unsearched. Like the list, they
+ * leave out delisted and hidden polls, which the lede says (T-68).
  */
 function Tally({ counts, asOf }: { counts: RegisterCounts; asOf: List["asOf"] }) {
   const t = useTranslate(catalogs);
@@ -162,29 +162,32 @@ function Tally({ counts, asOf }: { counts: RegisterCounts; asOf: List["asOf"] })
     { term: t("registerCountScheduled"), value: counts.scheduled },
   ];
   return (
-    <dl
-      aria-label={t("registerCounts")}
-      className="m-0 mt-4 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-foreground pt-5 sm:grid-cols-4"
-    >
-      {figures.map(({ term, value }) => (
-        <div key={term} className="grid content-start gap-1">
-          <dt className="text-sm text-muted-foreground">{term}</dt>
-          <dd className="m-0 font-heading text-3xl font-semibold tabular-nums">
-            {number.format(value)}
+    <section aria-labelledby="register-counts" className="mt-4">
+      {/* A named section, since a list of terms takes no name of its own. */}
+      <h2 id="register-counts" className="sr-only">
+        {t("registerCounts")}
+      </h2>
+      <dl className="m-0 grid grid-cols-2 gap-x-8 gap-y-6 border-t border-foreground pt-5 sm:grid-cols-4">
+        {figures.map(({ term, value }) => (
+          <div key={term} className="grid content-start gap-1">
+            <dt className="text-sm text-muted-foreground">{term}</dt>
+            <dd className="m-0 font-heading text-3xl font-semibold tabular-nums">
+              {number.format(value)}
+            </dd>
+          </div>
+        ))}
+        <div className="grid content-start gap-1">
+          <dt className="text-sm text-muted-foreground">{t("registerCountAsOf")}</dt>
+          {/* As `When` does: the two ICU versions can word a date differently. */}
+          <dd className="m-0 pt-2 font-mono text-xs" suppressHydrationWarning>
+            {t("utcTime", {
+              time:
+                asOf.iso === undefined ? asOf.seconds : formatUtcWhole(locale, new Date(asOf.iso)),
+            })}
           </dd>
         </div>
-      ))}
-      <div className="grid content-start gap-1">
-        <dt className="text-sm text-muted-foreground">{t("registerCountAsOf")}</dt>
-        {/* As `When` does: the two ICU versions can word a date differently. */}
-        <dd className="m-0 pt-2 font-mono text-xs" suppressHydrationWarning>
-          {t("utcTime", {
-            time:
-              asOf.iso === undefined ? asOf.seconds : formatUtcWhole(locale, new Date(asOf.iso)),
-          })}
-        </dd>
-      </div>
-    </dl>
+      </dl>
+    </section>
   );
 }
 

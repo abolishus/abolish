@@ -796,7 +796,7 @@ export interface PollList {
   readonly polls: readonly ListedPoll[];
   /** When the page was loaded, for each poll's status. */
   readonly asOf: Instant;
-  /** The whole listing's counts, `undefined` when they couldn't be read. */
+  /** The whole listing's counts on the register's first page unsearched, `undefined` elsewhere or when they couldn't be read. */
   readonly counts: RegisterCounts | undefined;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
@@ -831,7 +831,9 @@ export async function loadPollList(
   locale: string,
 ): Promise<RegisterPage> {
   let elections;
-  const counts = registerCountsOf(api);
+  // The whole listing's, the same on every page and search, so read only
+  // where the register starts: each read counts every listed poll (T-52).
+  const counts = after === "" && q === "" ? registerCountsOf(api) : undefined;
   try {
     ({ elections } = await api.elections.list({
       ...(after === "" ? {} : { after }),

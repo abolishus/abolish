@@ -97,7 +97,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByText(/the election registry on chain names every poll/)).toBeVisible();
   await expect(canvas.getByRole("textbox", { name: "Poll ID" })).toBeVisible();
   // The whole listing in numbers, from the API's counts, not the page's four.
-  const tally = canvasElement.querySelector<HTMLElement>('dl[aria-label="The list in numbers"]')!;
+  const tally = canvas.getByRole("region", { name: "The list in numbers" });
   await expect(tally).toBeVisible();
   const figures = [...tally.querySelectorAll("dt")].map((dt) => [
     dt.textContent,

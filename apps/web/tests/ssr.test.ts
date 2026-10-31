@@ -1659,7 +1659,10 @@ describe("poll list", () => {
 
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
     const html = await (await get("/polls")).text();
-    const tally = /<dl aria-label="The list in numbers"[^>]*>([\s\S]*?)<\/dl>/.exec(html)?.[1];
+    const tally =
+      /<section aria-labelledby="register-counts"[^>]*><h2 id="register-counts"[^>]*>The list in numbers<\/h2><dl[^>]*>([\s\S]*?)<\/dl>/.exec(
+        html,
+      )?.[1];
     expect(tally).toBeDefined();
     const pairs = [...tally!.matchAll(/<dt[^>]*>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((m) => [
       m[1],
@@ -1675,9 +1678,19 @@ describe("poll list", () => {
     // Under the heading, before the lookup form.
     expect(html.indexOf("The list in numbers")).toBeGreaterThan(html.indexOf("<h1"));
     expect(html.indexOf("The list in numbers")).toBeLessThan(html.indexOf('name="id"'));
-    // The same figures whatever the page or search: they are the whole listing's.
-    for (const path of [`/polls?after=${listed[19]}`, "/polls?q=bridge"])
-      expect(await (await get(path)).text()).toContain(">1,234</dd>");
+    // Asked for with nothing, as the contract's empty input takes it.
+    const asked = seen.filter((r) => r.path === "/elections/counts");
+    expect(asked.length).toBeGreaterThan(0);
+    for (const r of asked) expect([...r.query]).toEqual([]);
+    // The whole listing's, so read only where the register starts: a later
+    // page or a search doesn't count every listed poll again (T-52).
+    seen.length = 0;
+    for (const path of [`/polls?after=${listed[19]}`, "/polls?q=bridge"]) {
+      const later = await (await get(path)).text();
+      expect(later).toContain("<h1");
+      expect(later).not.toContain("The list in numbers");
+    }
+    expect(seen.filter((r) => r.path === "/elections/counts")).toEqual([]);
   });
 
   test.each([

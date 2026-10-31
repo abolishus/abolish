@@ -424,8 +424,10 @@ export async function countListedPolls(client: Sql, now: bigint): Promise<Listin
   const [row] = await db
     .select({
       listed: q<string>`count(*)::text`,
-      open: q<string>`(count(*) FILTER (WHERE ${s.opensAt} <= ${now} AND ${s.closesAt} > ${now}))::text`,
-      scheduled: q<string>`(count(*) FILTER (WHERE ${s.opensAt} > ${now}))::text`,
+      // Through the columns' own comparisons, which bind `now` as a numeric:
+      // bound bare, it goes as an int8, refused from 2^63 up.
+      open: q<string>`(count(*) FILTER (WHERE ${and(lte(s.opensAt, now), gt(s.closesAt, now))}))::text`,
+      scheduled: q<string>`(count(*) FILTER (WHERE ${gt(s.opensAt, now)}))::text`,
     })
     .from(electionDefinitions)
     .leftJoin(s, eq(s.electionId, electionDefinitions.electionId))

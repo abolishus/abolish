@@ -420,6 +420,13 @@ describe("countListedPolls", () => {
     await readOnly`SET default_transaction_read_only = on`;
     const counts = await countListedPolls(readOnly, T);
     expect(counts.listed).toBeGreaterThan(0n);
+    // Every u64 is a clock it counts at, past an int8's range too.
+    const U64_MAX = (1n << 64n) - 1n;
+    for (const now of [1n << 63n, U64_MAX]) {
+      const late = await countListedPolls(app, now);
+      expect(late.listed).toBe((await countListedPolls(app, T)).listed);
+      expect(late.scheduled).toBe(0n);
+    }
     for (const now of [-1n, 1n << 64n, 5, undefined])
       await expect(countListedPolls(app, now as bigint)).rejects.toThrow(TypeError);
   });

@@ -144,6 +144,8 @@ function wellFormedRule(record: StoredDefinitionRecord) {
  * poll is refused (the live restriction, which this server's releases don't
  * carry yet; T-16, T-45), and as reading a rolling electorate, which
  * admission judges against the registries' step roots (P2-17 part 7a; T-08).
+ * A deployment that passes admission no chain source stores a rolling poll
+ * but admits none of its ballots (`not-open`), which fails closed.
  * A version-7 definition naming an author panel is `unsupported`: no
  * opening or tally here sums its half, so its poll could never be counted
  * (P2-16; T-17). Its `opens_at` and `closes_at` go beside it, for

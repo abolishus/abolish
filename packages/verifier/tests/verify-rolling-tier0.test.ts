@@ -214,6 +214,7 @@ const reported = read("verifier-rolling-report.json") as {
             readonly step: string | null;
             readonly count: string;
           }[];
+          readonly flagged: { readonly eligible: boolean; readonly smallestStep: boolean };
         };
       }[]
     >
@@ -250,6 +251,7 @@ const electoratesOf = (file: string) =>
           count: Number(x.count),
         })),
       }),
+      flagged: e.flagged,
     },
   }));
 
@@ -482,6 +484,12 @@ describe(
       );
       const e = r.tiers?.[0]?.electorate;
       expect(e?.close?.members).toBeLessThan(e?.eligible ?? 0);
+    });
+
+    test("8.2 flags its eligible count and smallest step, both below SMALL_COUNT", () => {
+      const e = r.tiers?.[0]?.electorate;
+      expect(e?.eligible).toBeLessThan(PARAMETERS.SMALL_COUNT);
+      expect(e?.flagged).toEqual({ eligible: true, smallestStep: true });
     });
 
     test("only the counted extent's copies in the tier's own cell name its smallest step", () => {

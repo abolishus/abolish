@@ -16,6 +16,7 @@ import { type ArchiveSources, DEFAULT_MAX_BOARD_BYTES, json, loadBundle } from "
 import { type Gateways, gatewaySource, MAX_GATEWAYS, parseGateway } from "./gateways.ts";
 import { type KeysReport, keysSummary, parseKeysEvidence, runKeys } from "./keys.ts";
 import { PINNED_RELEASE_REGISTRY, type ReleaseRegistryPin } from "./registry.ts";
+import type { RollingElectorateReport } from "./rolling-report.ts";
 import {
   type ArchiveReadOptions,
   authenticated,
@@ -163,6 +164,21 @@ export function printable(text: string): string {
 }
 
 /**
+ * A rolling tier's turnout: its counted ballots among the people who could
+ * answer during the poll, never a share of a fixed population, rounded down
+ * so it never reads as a share it didn't reach, and no ratio over none (8.1;
+ * T-13, T-16).
+ */
+function among(counted: number, electorate: RollingElectorateReport | undefined): string {
+  if (electorate === undefined) return "";
+  const { eligible } = electorate;
+  const text = ` among ${eligible} who could answer during the poll`;
+  if (eligible === 0) return text;
+  const tenths = (BigInt(counted) * 1000n) / BigInt(eligible);
+  return `${text} (${tenths / 10n}.${tenths % 10n}%)`;
+}
+
+/**
  * The summary's results: each tier on its own line, and its cells under it
  * where it has more than one. No line sums two tiers, so Tier 0's figures
  * never join a Sybil-resistant tier's (T-01), and the header says the
@@ -201,9 +217,31 @@ function resultLines(report: Report): string[] {
     ];
   };
   for (const t of report.tiers) {
-    const label = t.tier === 0 ? "tier 0 (not Sybil-resistant)" : `tier ${t.tier}`;
+    const { electorate } = t;
+    const label =
+      t.tier !== 0
+        ? `tier ${t.tier}`
+        : electorate === undefined
+          ? "tier 0 (not Sybil-resistant)"
+          : "tier 0 (not Sybil-resistant; open to new identities during the poll)";
     const [end, perQuestion] = results("    ", t, "an opening of its cells didn't pass 7.2");
-    lines.push(`  ${label}: ${t.counted} counted${end}`, ...perQuestion);
+    lines.push(
+      `  ${label}: ${t.counted} counted${among(t.counted, electorate)}${end}`,
+      ...perQuestion,
+    );
+    if (electorate !== undefined) {
+      const small = [
+        ...(electorate.flagged.eligible ? [`${electorate.eligible} could answer`] : []),
+        ...(electorate.flagged.smallestStep && electorate.smallestStep !== null
+          ? [
+              `smallest step used ${electorate.smallestStep.step}, ` +
+                `${electorate.smallestStep.members} members`,
+            ]
+          : []),
+      ];
+      if (small.length > 0)
+        lines.push(`    small counts, which can reveal votes: ${small.join(", ")}`);
+    }
     const cells = (report.cells ?? []).filter((c) => c.tier === t.tier);
     if (cells.length < 2) continue;
     for (const c of cells) {

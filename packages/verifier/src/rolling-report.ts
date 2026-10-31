@@ -8,11 +8,14 @@
 // judged against, never read from the definition, a release or a submitter
 // (T-16, T-13, T-01, T-06). A rolling result describes the people who
 // answered, from an electorate that grew during the poll, so no single size
-// stands for it.
+// stands for it. 8.2's small-count rule flags the eligible count and the
+// smallest step's, the anonymity set of the worst-placed ballot (P2-17 part
+// 4e-2b).
 
 import {
   type AnchorClock,
   type ElectionDefinitionV7Record,
+  PARAMETERS,
   type RollingBallotChain,
   rollingTierReport,
 } from "@abolishus/crypto";
@@ -50,6 +53,16 @@ export interface RollingElectorateReport {
     readonly step: number | null;
     readonly count: number;
   }[];
+  /** 8.2's small-count rule on the eligible count and the smallest step's (`false` with none). */
+  readonly flagged: { readonly eligible: boolean; readonly smallestStep: boolean };
+}
+
+/**
+ * 8.2's small count: at least 1 and below `SMALL_COUNT`. A count of 0 opens
+ * no vote, so it is never flagged (T-13, T-16).
+ */
+export function smallCount(count: number): boolean {
+  return count >= 1 && count < PARAMETERS.SMALL_COUNT;
 }
 
 /** A release a rolling tier chose: snapshot `r`, from 1, the board through segment `σ_r`. */
@@ -132,6 +145,10 @@ export function rollingElectorates(
           };
         }),
       }),
+      flagged: {
+        eligible: smallCount(r.eligible),
+        smallestStep: r.smallestStep !== null && smallCount(r.smallestStep.members),
+      },
     };
   });
 }

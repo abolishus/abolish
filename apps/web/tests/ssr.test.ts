@@ -34,6 +34,7 @@ import {
   brokenProofs,
   CELLS_ID,
   CELLS_MISFIT_ID,
+  COUNTED_ID,
   CHECKPOINTS,
   CODE,
   CODE_FAILS_ID,
@@ -1641,6 +1642,38 @@ describe("poll list", () => {
       [OVERRIDE_ID]: ["/discover?topic=food"],
     });
     expect(first).not.toContain("\u202e");
+  });
+
+  // P2-19 part 20: a closed poll counted, on the register.
+  test("says a closed poll is counted only once every tier's results are read, linking to them", async () => {
+    /** Each row of `html` that says it is counted, by its poll, and the results it links to. */
+    const countedOf = (html: string) =>
+      html
+        .split(/<article\b/)
+        .slice(1)
+        .filter((row) => row.includes("· <!-- -->counted") || row.includes("· counted"))
+        .map((row) => [
+          /href="\/polls\/([0-9a-f]{64})"/.exec(row)?.[1],
+          /href="([^"]*)">See the results</.exec(row)?.[1],
+        ]);
+    // Of the first page, only the poll counted in both its tiers: unopened,
+    // not counted here, not ready, failing, and results that don't fit the
+    // definition or leave a tier unopened all say nothing (T-34, T-52).
+    expect(countedOf(await (await get("/polls")).text())).toEqual([
+      [COUNTED_ID, `/polls/${COUNTED_ID}/results`],
+    ]);
+    seen.length = 0;
+    const second = await (await get(`/polls?after=${LOST_ID}`)).text();
+    // The version-5 poll's results name only Tier 0 of its two tiers, and the
+    // version-1 poll's Tier 2 is still partly unopened, so neither is counted.
+    expect(countedOf(second)).toEqual([]);
+    // Only polls whose definitions the page reads are asked about, the
+    // swapped one not among them.
+    const asked = seen
+      .filter((r) => r.path === "/elections/results")
+      .map((r) => r.query.get("electionId"));
+    expect(asked).toContain(STREAM_V5);
+    expect(asked).not.toContain(SWAPPED_ID);
   });
 
   // P2-19 part 18: searching the register by the polls' words.

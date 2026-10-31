@@ -18,7 +18,11 @@ const COLUMN_HEAD = "font-mono text-xs tracking-widest text-muted-foreground upp
 // Each cell's label, shown above it on a phone, where the column heads are hidden.
 const CELL_TERM = `${COLUMN_HEAD} md:sr-only`;
 
-function Status({ poll, asOf }: { poll: PollView; asOf: Instant }) {
+/**
+ * Its status at `asOf`, and once it closed and is counted (`counted`), that
+ * it is, with a link to its results page.
+ */
+function Status({ poll, asOf, counted }: { poll: PollView; asOf: Instant; counted: boolean }) {
   const t = useTranslate(catalogs);
   const status = pollStatus(poll, asOf);
   const { icon: Icon, tone, label } = STATUS_MARK[status];
@@ -27,11 +31,22 @@ function Status({ poll, asOf }: { poll: PollView; asOf: Instant }) {
       <span className="flex items-center gap-2 text-sm font-medium">
         <Icon aria-hidden="true" className={cn("size-4", tone)} />
         {t(label)}
+        {counted ? (
+          <span className="font-normal text-muted-foreground">· {t("listCounted")}</span>
+        ) : null}
       </span>
       <span className="text-sm text-muted-foreground">
         {t(status === "scheduled" ? "listOpens" : status === "open" ? "listCloses" : "listClosed")}{" "}
         <When instant={status === "scheduled" ? poll.opensAt : poll.closesAt} />
       </span>
+      {counted ? (
+        <a
+          className="text-sm underline underline-offset-4"
+          href={`/polls/${poll.electionId}/results`}
+        >
+          {t("followResultsSee")}
+        </a>
+      ) : null}
     </span>
   );
 }
@@ -137,7 +152,7 @@ function Row({
             <div className="grid content-start gap-1 md:col-span-3">
               <dt className={CELL_TERM}>{t("listStatus")}</dt>
               <dd className="m-0">
-                <Status poll={entry.poll} asOf={asOf} />
+                <Status poll={entry.poll} asOf={asOf} counted={entry.counted} />
               </dd>
             </div>
             {/* A failed read shows no count, as on a stream card. */}
@@ -165,8 +180,9 @@ function Row({
  * poll, in its own words where they can be shown and by its ID, with where
  * it is listed, its counting rule, its status, read from the definition's
  * times at `asOf` (the server's clock when it loaded them, so the page and
- * its hydration agree), and how many have answered it so far, with Tier 0
- * named by the deployment's phone setting (`phoneVerification`).
+ * its hydration agree) with whether a closed one is counted, and how many
+ * have answered it so far, with Tier 0 named by the deployment's phone
+ * setting (`phoneVerification`).
  */
 export function PollRows({
   polls,

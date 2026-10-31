@@ -30,6 +30,7 @@ import {
   type Instant,
   instant,
   NO_TAGS,
+  pollStatus,
   type PollTags,
   type PollView,
 } from "../poll.ts";
@@ -649,6 +650,8 @@ export type ListedPoll =
       readonly answered: CardAnswered | undefined;
       /** Where it is listed, as `tagsOf` reads it. */
       readonly tags: PollTags;
+      /** Whether it closed with every tier's results read (`countedOf`). */
+      readonly counted: boolean;
     }
   | {
       readonly kind: "unavailable";
@@ -690,8 +693,9 @@ export type RegisterPage = PollList | { readonly kind: "search-refused" };
  * definition is decoded and checked here as on its own page, and its display
  * text as a stream card's (src/server/stream-card.ts), so the list shows
  * nothing the poll page wouldn't (T-31, T-34, T-41), how many have
- * answered it so far as a card's (`answeredOf`), and where it is listed as
- * its page reads it (`tagsOf`). A poll stops being
+ * answered it so far as a card's (`answeredOf`), where it is listed as
+ * its page reads it (`tagsOf`), and whether a closed one is counted
+ * (`countedOf`). A poll stops being
  * served between the listing and its definition only if the database lost
  * it, so it drops out of the page.
  */
@@ -712,6 +716,9 @@ export async function loadPollList(
     if (q !== "" && searchRefused(error)) return { kind: "search-refused" };
     throw error;
   }
+  // The clock each row's status is read at, here to choose whose results to
+  // ask for and on the page to show it, so the two agree.
+  const asOf = now();
   const answers = await Promise.all(
     elections.map(async (electionId) => {
       try {
@@ -721,7 +728,9 @@ export async function loadPollList(
           answeredOf(api, electionId),
           tagsOf(api, electionId),
         ]);
-        return { electionId, definition, displayText, answered, tags };
+        const view = definitionView(electionId, definition);
+        const counted = view.ok && (await countedOf(api, view.poll, asOf));
+        return { electionId, definition, view, displayText, answered, tags, counted };
       } catch (error) {
         if (notFound(error)) return undefined;
         throw error;
@@ -731,7 +740,7 @@ export async function loadPollList(
   const polls: ListedPoll[] = [];
   for (const answer of answers) {
     if (answer === undefined) continue;
-    const view = definitionView(answer.electionId, answer.definition);
+    const { view } = answer;
     polls.push(
       view.ok
         ? {
@@ -741,6 +750,7 @@ export async function loadPollList(
             answered:
               answer.answered === undefined ? undefined : cardAnswered(view.poll, answer.answered),
             tags: answer.tags,
+            counted: answer.counted,
           }
         : { kind: "unavailable", electionId: answer.electionId, problem: view.problem },
     );
@@ -748,10 +758,31 @@ export async function loadPollList(
   return {
     kind: "list",
     polls,
-    asOf: now(),
+    asOf,
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
     next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
   };
+}
+
+/**
+ * Whether `poll` had closed at `asOf` and its results are read in every tier
+ * its electorate names, as its results page shows them (`resultsView`): only
+ * a closed poll's are asked for, so an open one costs the register nothing
+ * more, and a results read that fails, is slow or isn't ready yet says
+ * nothing, as on the poll page (T-52). These are the board's results, not
+ * the verifier's verdict; the results page says so (T-29, T-34).
+ */
+async function countedOf(api: Api, poll: PollView, asOf: Instant): Promise<boolean> {
+  if (pollStatus(poll, asOf) !== "closed") return false;
+  const served = await resultsOf(api, poll.electionId);
+  if (!("state" in served)) return false;
+  const results = resultsView(poll, served);
+  return (
+    results.kind === "read" &&
+    poll.electorate.every((g) =>
+      results.tiers.some((t) => t.tier === g.tier && t.questions !== undefined),
+    )
+  );
 }
 
 /**

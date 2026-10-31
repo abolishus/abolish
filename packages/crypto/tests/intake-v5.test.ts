@@ -350,7 +350,7 @@ describe("intakeBallotV5", () => {
     expect(r).toMatchObject({ ok: false, code: "share-hash" });
   });
 
-  test("refuses an unsettled step before the ciphertext is hashed against the record", () => {
+  test("refuses an unsettled step before the ciphertext's hash is compared or anything opened", () => {
     const b = vector("ok-newest-step");
     const seat = b.registered[0] as number;
     const r = intakeBallotV5(

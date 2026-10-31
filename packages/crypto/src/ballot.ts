@@ -1886,6 +1886,12 @@ function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTier
   throw new TypeError(`${caller}: chain.events[${at}].kind: expected "add" or "remove"`);
 }
 
+// Whether a step's boundary `tau` is inside the poll: after the definition's
+// registration and at or before its close. The clock alone decides it, so no
+// tree is computed for a step outside (membership.md, Accepted steps).
+const inPoll = (ctx: RollingTierContext, tau: bigint): boolean =>
+  tau > ctx.registeredAt && tau <= ctx.closesAt;
+
 /**
  * Step `step` of `cell`'s tier if the poll accepts it, else undefined
  * (docs/spec/membership.md, Root clock and steps, Accepted steps): a step
@@ -1896,8 +1902,7 @@ function copyEvent(caller: string, e: RollingTierEvent, at: number): RollingTier
 function acceptedStep(state: RollingState, cell: number, step: number): StepTree | undefined {
   const ctx = state.tiers[cell] as RollingTierContext;
   const trees = state.trees[cell] as readonly StepTree[];
-  const tau = rootClockBoundary(BigInt(step));
-  if (tau <= ctx.registeredAt || tau > ctx.closesAt) return undefined;
+  if (!inPoll(ctx, rootClockBoundary(BigInt(step)))) return undefined;
   // The newest distinct tree at or before `step`; the first is the first
   // step after registration, so one exists.
   let lo = 0;
@@ -2107,7 +2112,7 @@ export function admitForIntakeV5(
   const target = (): Target | { readonly code: "root-step-range" | "step-unsettled" } => {
     const tier = state.tiers[cell] as RollingTierContext;
     const tau = rootClockBoundary(BigInt(step));
-    if (tau <= tier.registeredAt || tau > tier.closesAt) return { code: "root-step-range" };
+    if (!inPoll(tier, tau)) return { code: "root-step-range" };
     if (tau >= safeAt) return { code: "step-unsettled" };
     const at = acceptedStep(state, cell, step);
     if (at === undefined) return { code: "root-step-range" };

@@ -78,7 +78,6 @@ import {
   RollingTierTree,
   rollingTierSteps,
   SEAT_PANELS,
-  type Share,
 } from "@abolishus/crypto";
 import { bytesToHex, concatBytes } from "@noble/hashes/utils.js";
 import { startApi } from "./api.ts";
@@ -1096,7 +1095,6 @@ async function run(
         cell: record.cell,
         nullifier: record.nullifier,
       };
-      const shares = new Map<number, readonly Share[]>();
       const receipts = c.secrets.map((s) => {
         const r = intakeBallotV5(
           casting.election,
@@ -1134,10 +1132,9 @@ async function run(
           )
         )
           throw new Error(`seat ${s.index}'s receipt doesn't bind the rolling ballot's step`);
-        shares.set(s.index, r.shares);
         return r.receipt;
       });
-      return { voter, ballot, receipts, shares };
+      return { voter, ballot, receipts };
     });
     writeFileSync(
       join(OUT, "rolling", "receipts.json"),

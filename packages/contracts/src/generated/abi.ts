@@ -66,6 +66,69 @@ export const ballotCheckAbi = [
     stateMutability: "view",
   },
   {
+    type: "function",
+    inputs: [
+      { name: "record", internalType: "bytes", type: "bytes" },
+      {
+        name: "registry",
+        internalType: "contract IElectionParameters",
+        type: "address",
+      },
+      { name: "root", internalType: "uint256", type: "uint256" },
+      { name: "qualified", internalType: "uint256", type: "uint256" },
+      { name: "authorQualified", internalType: "uint256", type: "uint256" },
+    ],
+    name: "checkRolling",
+    outputs: [
+      {
+        name: "",
+        internalType: "struct BallotCheckLib.Admitted",
+        type: "tuple",
+        components: [
+          { name: "definitionHash", internalType: "bytes32", type: "bytes32" },
+          { name: "version", internalType: "uint8", type: "uint8" },
+          { name: "cell", internalType: "uint8", type: "uint8" },
+          { name: "tier", internalType: "uint8", type: "uint8" },
+          { name: "nullifier", internalType: "uint256", type: "uint256" },
+          { name: "ballotHash", internalType: "bytes32", type: "bytes32" },
+          { name: "message", internalType: "bytes32", type: "bytes32" },
+          { name: "opensAt", internalType: "uint64", type: "uint64" },
+          { name: "closesAt", internalType: "uint64", type: "uint64" },
+        ],
+      },
+      {
+        name: "",
+        internalType: "struct BallotCheckLib.Layout",
+        type: "tuple",
+        components: [
+          { name: "vssCount", internalType: "uint256", type: "uint256" },
+          { name: "degreesK", internalType: "bool", type: "bool" },
+          { name: "shareHashesAt", internalType: "uint256", type: "uint256" },
+          { name: "shareCount", internalType: "uint256", type: "uint256" },
+          { name: "authorVssCount", internalType: "uint256", type: "uint256" },
+          { name: "authorDegreesK", internalType: "bool", type: "bool" },
+          {
+            name: "authorShareHashesAt",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          {
+            name: "authorShareCount",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          {
+            name: "optionProofCount",
+            internalType: "uint256",
+            type: "uint256",
+          },
+          { name: "sumAt", internalType: "uint256", type: "uint256" },
+        ],
+      },
+    ],
+    stateMutability: "view",
+  },
+  {
     type: "error",
     inputs: [
       {
@@ -355,6 +418,16 @@ export const boardAbi = [
   },
   {
     type: "function",
+    inputs: [
+      { name: "root", internalType: "bytes32", type: "bytes32" },
+      { name: "record", internalType: "bytes", type: "bytes" },
+    ],
+    name: "submitRollingBallot",
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
     inputs: [],
     name: "trusteeRegistry",
     outputs: [{ name: "", internalType: "contract IBoardTrustees", type: "address" }],
@@ -473,6 +546,32 @@ export const boardAbi = [
       { name: "record", internalType: "bytes", type: "bytes", indexed: false },
     ],
     name: "RelayedBallotSubmitted",
+  },
+  {
+    type: "event",
+    anonymous: false,
+    inputs: [
+      {
+        name: "definitionHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "ballotHash",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: true,
+      },
+      {
+        name: "root",
+        internalType: "bytes32",
+        type: "bytes32",
+        indexed: false,
+      },
+      { name: "record", internalType: "bytes", type: "bytes", indexed: false },
+    ],
+    name: "RollingBallotSubmitted",
   },
   {
     type: "event",

@@ -20,9 +20,10 @@
 // independent generators. The election registry declares version 9's three,
 // so versions 1 to 8 are compared with it less AuthorPanelRegistered, which
 // they lack; the board declares version 8's eleven, which versions 9 to 12
-// keep, so only versions 8 to 12 are compared with it, less the two rolling
-// ballots versions 10 to 12 add, which the board doesn't take until P2-17
-// part 5; the group registry declares version 7's seven, so only versions 7
+// keep, and version 10's rolling ballot, so only versions 8 to 12 are
+// compared with it, versions 8 and 9 less the rolling ballot, which they
+// lack, and versions 11 and 12 less the relayed rolling ballot version 11
+// adds, which the board doesn't take until P2-17 part 5; the group registry declares version 7's seven, so only versions 7
 // to 12 are compared with it; and the trustee registry logs each panel's
 // kind, so only version 12 is compared with it: no trustee registry that
 // logs the kind may be deployed beside an election registry serving a
@@ -104,19 +105,22 @@ const versions = [
 // to 8 lack the election registry's AuthorPanelRegistered, and every other
 // event the registry declares must still match their rows.
 const AUTHOR_PANEL = "AuthorPanelRegistered(bytes32,bytes32,bytes)";
+// Versions 8 and 9 lack the board's rolling ballot, which version 10 adds.
+const ROLLING = "RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)";
 // The events a table names that the contract doesn't declare yet: the
-// rolling ballot version 10 adds and the relayed one version 11 adds, which
-// the board takes in P2-17 part 5.
-const ROLLING = [
-  "RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)",
-  "RelayedRollingBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes32,bytes)",
-];
+// relayed rolling ballot version 11 adds, which the board takes in a later
+// part of P2-17 part 5.
+const RELAYED_ROLLING =
+  "RelayedRollingBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes32,bytes)";
 const cases = [
   ...versions.slice(11).map((file) => [file, ...trusteeRegistry, [], []] as const),
   ...versions.slice(6).map((file) => [file, ...groupRegistry, [], []] as const),
   ...versions
     .slice(7)
-    .map((file, i) => [file, ...board, [], ROLLING.slice(0, Math.max(0, i - 1))] as const),
+    .map(
+      (file, i) =>
+        [file, ...board, i < 2 ? [ROLLING] : [], i < 3 ? [] : [RELAYED_ROLLING]] as const,
+    ),
   ...versions.map(
     (file, i) => [file, ...electionRegistry, i < 8 ? [AUTHOR_PANEL] : [], []] as const,
   ),

@@ -1366,6 +1366,7 @@ export const esUS: Messages = {
     "La apelación no se envió. No cambió nada; inténtalo de nuevo en un rato.",
   moderationFailure_unloaded: "No se pudo cargar la moderación de esta encuesta en este momento.",
   moderationReload: "Volver a cargar su moderación",
+  moderationLogAt: "Verla en el registro de moderación",
   moderationNone: "La moderación no ha decidido nada sobre esta encuesta.",
   pollsFailure_tooManyInSetup:
     "Tienes tantas encuestas en preparación como una cuenta puede tener a la vez. Envía esta cuando una de ellas se haya abierto.",

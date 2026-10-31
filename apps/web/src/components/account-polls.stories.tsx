@@ -561,8 +561,10 @@ export const AppealADecision: Story = {
     });
     const moderation = within(block);
     await expect(moderation.getByText(/stays open at its address/)).toBeVisible();
-    const log = moderation.getByRole("link", { name: "See the moderation log" });
-    await expect(log).toHaveAttribute("href", "/moderation");
+    // The log opens at the decision the heading names (P2-29, the author's
+    // list's iteration 26).
+    const log = moderation.getByRole("link", { name: "See it in the moderation log" });
+    await expect(log).toHaveAttribute("href", "/moderation?after=40");
     // The history's actions are drawn as the row's, 48px targets (P2-29,
     // the author's list's iteration 13).
     for (const action of [moderation.getByRole("button", { name: "Appeal this decision…" }), log])
@@ -698,6 +700,15 @@ const showsModeration: Story["play"] = async ({ canvasElement }) => {
   await expect(
     restored.getByText(/upheld on October 17, 2026 at 3:00 PM UTC, and the poll restored\./),
   ).toBeVisible();
+  // Each block's log link opens the log at the decision its heading names,
+  // not at the log's first page (P2-29, the author's list's iteration 26).
+  await expect(hidden.getByRole("link", { name: "See it in the moderation log" })).toHaveAttribute(
+    "href",
+    "/moderation?after=51",
+  );
+  await expect(
+    restored.getByRole("link", { name: "See it in the moderation log" }),
+  ).toHaveAttribute("href", "/moderation?after=59");
   // A poll nothing was decided about, and a draft, show no moderation at all.
   await expect(canvas.getAllByRole("group")).toHaveLength(2);
 };
@@ -739,7 +750,7 @@ export const ModerationHistoryDesktop: Story = {
         reason.getBoundingClientRect().width,
       );
     const row = canvas.getAllByRole("link", { name: "Go to its page" })[0]!.getBoundingClientRect();
-    for (const log of canvas.getAllByRole("link", { name: "See the moderation log" })) {
+    for (const log of canvas.getAllByRole("link", { name: "See it in the moderation log" })) {
       await expect(log.getBoundingClientRect().height).toBe(row.height);
       const history = log.closest('[role="group"]');
       await expect(history?.getBoundingClientRect().bottom).toBe(

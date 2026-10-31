@@ -12,6 +12,7 @@ import { ceremonyChecks } from "../src/ceremony.ts";
 import { authorRunOf, decodeDefinition, readDefinition } from "../src/definition.ts";
 import {
   archivedChain,
+  BUNDLE_FORMAT_BLOCKS,
   BUNDLE_FORMAT_CEREMONY,
   type Bundle,
   type CheckResult,
@@ -25,6 +26,7 @@ import {
 import type { ContractSequence } from "../src/replay.ts";
 import { definitionRegistered } from "./registration-logs.ts";
 import { logs, release, rollingEvents, type RollingVectorEvent } from "./registry-logs.ts";
+import { anchoredL1, receiptKeyStorage } from "./state.ts";
 
 // A live rolling poll whose only tier is Tier 0, through `verifyBundle` end
 // to end (docs/spec/verifier.md, Electorate, The rolling chain, From the
@@ -280,3 +282,107 @@ describe("a live Tier-0-only rolling poll through verifyBundle", { timeout: 60_0
     expect(row(r, "4.1")).toEqual({ status: "unverifiable", code: "not-reached" });
   });
 });
+
+// The same poll sealed (verifier-ballots-v5-tier0-sealed.json, from
+// packages/crypto/scripts/verifier-ballots-v5-tier0-sealed-vectors.py; P2-17
+// part 4d-2b-2b-2b-2b-2b-2b): its honest ballots naming a run of L1 headers,
+// every registered seat's receipts and openings, and no rejection resting on
+// the chain, anchored in an L1 state built here (state.ts) so 4.1 and 4.2
+// pass. Selection (6.1) is reached, and through it delivery, the counted
+// set and the releases (verifier.md, Selection, Counted set and tally and
+// Releases).
+const sealed = read("verifier-ballots-v5-tier0-sealed.json") as {
+  readonly definition: string;
+  readonly definitionHash: string;
+  readonly panel: unknown;
+  readonly clock: Readonly<Record<string, string>>;
+  readonly l1Blocks: readonly string[];
+  readonly board: string;
+  readonly expected: Readonly<Record<string, Record<string, unknown>>>;
+  readonly ballots: NonNullable<Report["ballots"]>;
+  readonly delivery: NonNullable<Report["delivery"]>;
+  readonly cells: NonNullable<Report["cells"]>;
+  readonly tallies: NonNullable<Report["tallies"]>;
+  readonly releases: NonNullable<Report["releases"]>;
+};
+
+function sealedBundle(): Bundle {
+  const entries = splitEntries(hex(sealed.board)).entries;
+  const clock = {
+    epoch: BigInt(sealed.clock["epoch"] as string),
+    period: BigInt(sealed.clock["period"] as string),
+    deadline: BigInt(sealed.clock["deadline"] as string),
+    lastSegment: Number(sealed.clock["lastSegment"]),
+  };
+  // Well after the seal's window closes.
+  const now = clock.epoch + BigInt(clock.lastSegment + 1) * clock.period + clock.deadline + 1n;
+  const bundle = parseBundle(
+    JSON.stringify({
+      format: BUNDLE_FORMAT_BLOCKS,
+      definition: sealed.definition,
+      clock: sealed.clock,
+      // The definition's receipt keys registered at its registration, so
+      // before opens_at and never retired (2.9).
+      l1: anchoredL1(
+        v.election_id,
+        v.l1_anchor,
+        entries,
+        6,
+        clock,
+        // B, after the run of headers in number as in time.
+        { number: 21_000_100n, timestamp: now },
+        receiptKeyStorage(v.receipt_keys, BigInt(file.registeredAt)),
+      ),
+      panel: sealed.panel,
+      l1Blocks: sealed.l1Blocks,
+    }),
+    hex(sealed.board),
+  );
+  return {
+    ...bundle,
+    archive: {
+      count: 1n,
+      walk: { latest: 0n, manifests: 1, reads: 1, findings: [] },
+      replay: replayOf(file.events),
+    },
+  };
+}
+
+describe(
+  "the same poll sealed, through the counted set and the releases",
+  { timeout: 60_000 },
+  () => {
+    test("it is verifier-ballots-v5-tier0.json's definition", () => {
+      expect(sealed.definition).toBe(c.definition);
+      expect(sealed.definitionHash).toBe(c.definitionHash);
+    });
+
+    const r = verifyBundle(sealedBundle(), pins, registries);
+
+    test("4.1, 4.2 and 2.9 pass: the copy is the board, and the receipt keys judge it", () => {
+      for (const id of ["4.1", "4.2", "2.9"]) expect(row(r, id), id).toEqual({ status: "pass" });
+    });
+
+    test("admission, selection, delivery, the counted set and the releases give the vectors' rows", () => {
+      for (const [id, want] of Object.entries(sealed.expected))
+        expect(row(r, id), id).toEqual(want);
+    });
+
+    test("the report gives the vectors' ballots, delivery, cells and tallies", () => {
+      expect(r.ballots).toEqual(sealed.ballots);
+      expect(r.delivery).toEqual(sealed.delivery);
+      expect(r.cells).toEqual(sealed.cells);
+      expect(r.tallies).toEqual(sealed.tallies);
+    });
+
+    // The poll is shorter than live_every periods, so it has no scheduled
+    // snapshot (tally.md, Schedule): the releases run over none.
+    test("the releases ran, with the vectors' report", () => {
+      expect(r.releases).toEqual(sealed.releases);
+    });
+
+    test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {
+      expect(r.verdictAgainstInputs).toBe("unverifiable");
+    });
+  },
+);

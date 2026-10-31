@@ -66,9 +66,10 @@ import { run, toHex } from "./headers.ts";
 // boards, from an independent generator with snarkjs's verdict on every
 // membership proof (packages/crypto/scripts/verifier-ballots-v5-vectors.py),
 // under their own sealed definition: what `LiveCopies` reads doesn't depend
-// on the mode. No vector reaches a sealed live rolling board with ballots
-// (P2-17 part 4d-2b-2b-2b-2b-2b-2b), so `releaseChecks` runs on an election
-// cast here, as live-election.ts casts one for live.test.ts: the `board`
+// on the mode. verify-rolling-tier0.test.ts reaches a sealed live rolling
+// board's releases through `verifyBundle`, but its poll is shorter than
+// `live_every` periods, so it has no snapshot; `releaseChecks` runs on an
+// election cast here, as live-election.ts casts one for live.test.ts: the `board`
 // case's definition, kept to its Tier 0 rolling tier and made live, with
 // @abolishus/crypto's client and trustee paths, never with the checks under
 // test, and the expected releases follow from tally.md's rules by hand.

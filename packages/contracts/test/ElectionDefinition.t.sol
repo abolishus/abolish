@@ -74,6 +74,39 @@ contract ElectionDefinitionVectorsTest is TestBase {
         _checkFile(DEFINITIONS_V7, 7);
     }
 
+    /// `rolling-tier`'s search for a group in two tiers, against a naive
+    /// reference: three rolling tiers whose groups are the set bits of three
+    /// masks over 0 to 15, so repeats land anywhere in an earlier tier (first,
+    /// middle or last, found from either later tier). The definition is well
+    /// formed exactly when no two masks share a bit (T-01, T-16).
+    function testFuzz_RollingTierFindsEveryCrossTierRepeat(uint16[3] memory masks) public view {
+        string memory json = vm.readFile(DEFINITIONS_V7);
+        ElectionDefinitionLib.Definition memory d = lib.decode(_bytes(json, _key(0, ".encoding")));
+        assertEq(d.electorateMode, 2, "a rolling vector");
+        d.rolling = new ElectionDefinitionLib.RollingTier[](3);
+        bool shared;
+        for (uint256 t; t < 3; t++) {
+            // Each tier needs a group, or `rolling-tier` fails for that.
+            if (masks[t] == 0) masks[t] = uint16(1 << t);
+            for (uint256 u; u < t; u++) {
+                if (masks[t] & masks[u] != 0) shared = true;
+            }
+            d.rolling[t].tier = uint8(t);
+            uint256 n;
+            for (uint256 b; b < 16; b++) {
+                if (masks[t] & (1 << b) != 0) n++;
+            }
+            d.rolling[t].groups = new uint64[](n);
+            n = 0;
+            for (uint256 b; b < 16; b++) {
+                if (masks[t] & (1 << b) != 0) d.rolling[t].groups[n++] = uint64(b);
+            }
+        }
+        ElectionDefinitionLib.Rule expected =
+            shared ? ElectionDefinitionLib.Rule.RollingTier : ElectionDefinitionLib.Rule.None;
+        assertTrue(lib.rule(DefinitionEncoder.encode(d)) == expected, "rolling-tier");
+    }
+
     /// The rules each file exercises, so a vector file that stopped covering
     /// one (or a mapping that stopped reading it) fails here.
     function test_VectorsCoverEveryRule() public view {

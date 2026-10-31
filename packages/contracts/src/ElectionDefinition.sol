@@ -941,6 +941,8 @@ library ElectionDefinitionLib {
     /// at `transcriptOffset` and `author_transcript_hash` at
     /// `authorTranscriptOffset` zeroed, and version 7's fields after it kept
     /// (docs/spec/election-definition.md, Stub hash and the ceremony).
+    /// Defined only for those versions, the only ones with an author panel:
+    /// below version 6 `authorTranscriptOffset` is 0 and the slice reverts.
     function authorStubHash(
         bytes calldata d,
         uint256 transcriptOffset,

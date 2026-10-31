@@ -32,6 +32,9 @@ import {
 } from "@abolishus/crypto";
 import { definitionHash, type FixtureDefinition, type SeatKeys } from "./election.ts";
 
+/** The definitions the fixture tallies: one question, or questions, each over a fixed electorate. */
+type Tallied = Exclude<FixtureDefinition, { readonly version: 7 }>;
+
 /** A ballot as every seat took it in: its share receipts to board, and each seat's shares. */
 export interface Intake {
   /** Each seat's share receipt (`0x000b`), in seat order: the ballot's delivery records. */
@@ -74,7 +77,7 @@ export interface Counted {
 }
 
 /** The ballot's VSS commitments, decoded under the ballot version the definition pins. */
-function vssOf(d: FixtureDefinition, payload: Uint8Array): CommittedVote["vss"] {
+function vssOf(d: Tallied, payload: Uint8Array): CommittedVote["vss"] {
   return d.version === 1
     ? decodeBallot(payload, 1).committed_vote.vss
     : decodeBallot(payload, 3).committed_vote.vss;
@@ -90,7 +93,7 @@ function vssOf(d: FixtureDefinition, payload: Uint8Array): CommittedVote["vss"] 
  * never reach the board ([[0015-tally-publication]]; T-15).
  */
 export function tallyOpening(
-  d: FixtureDefinition,
+  d: Tallied,
   registered: readonly RegisteredKeys[],
   secrets: readonly SeatKeys[],
   counted: readonly Counted[],
@@ -155,10 +158,7 @@ export function tallyOpening(
  * node has seen every cell's opening anchored: the signing key's last use
  * (docs/spec/tally.md, Destruction; T-14, T-40, T-69).
  */
-export function destructionStatements(
-  d: FixtureDefinition,
-  secrets: readonly SeatKeys[],
-): Uint8Array[] {
+export function destructionStatements(d: Tallied, secrets: readonly SeatKeys[]): Uint8Array[] {
   const hash = definitionHash(d);
   return secrets.map((s) =>
     encodeDestructionStatement(

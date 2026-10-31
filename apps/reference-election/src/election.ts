@@ -22,13 +22,20 @@ import {
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
   type ElectionDefinitionV5,
+  electionDefinitionV7Hash,
+  electionDefinitionV7Rule,
+  type ElectionDefinitionV7,
+  type ElectionDefinitionV7Failure,
+  ELECTORATE_MODES,
   electionId,
   electionStubHash,
   electionStubV5Hash,
+  electionStubV7Hash,
   encodeBoardEntry,
   encodeCeremonyTranscript,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   identityKey,
   keysMessage,
   type KemSecretKey,
@@ -37,10 +44,13 @@ import {
   type Panel,
   panelId,
   pinnedVersion,
+  POLL_CLASSES,
   QUESTION_METHODS,
   type Question,
   RECORD_TYPES,
+  RESULTS_MODES,
   revealsMessage,
+  type RollingTier,
   TALLY_SCHEMES,
 } from "@abolishus/crypto";
 import { keccak_256 } from "@noble/hashes/sha3.js";
@@ -52,10 +62,10 @@ export const PANEL = Object.freeze({ threshold: 4, size: 7 });
 export const STUBS = Object.freeze({
   l2: "the L2 is a second local Anvil, not Base Sepolia, with forge's MockL1Block at the L1Block predeploy reporting the L1 Anvil's latest block as each event's origin; the verifier reads nothing from it yet (verifier 2.1, 2.4, 3.1 and 4.4, P1-19)",
   groupRegistrars:
-    "the group registry's two registrars are placeholder addresses: no group is created (stage 3, P3-2)",
+    "the group registry's two registrars are keys the fixture makes fresh each run and holds, threshold 2, which sign every addition and removal of the rolling poll's group themselves: no registration service batches them (stage 2, P3-2)",
   l1Relay: "the L1 relay is a placeholder address: no relay is deployed (P4-2)",
   electorate:
-    "one Tier 0 group whose root is the tier tree of the fixture's voters' commitments, computed by the fixture: no group is created in the group registry and no voter registers (stages 2 and 3, P2-6, P3-2)",
+    "the elections with a fixed electorate name one Tier 0 group whose root is the tier tree of the fixture's voters' commitments, computed by the fixture, not created in the group registry; the rolling poll's group is created there and filled by the registrars' signed records, but no voter registers through the registration service (stages 2 and 3, P2-6, P3-2)",
   panel:
     "the panel's identity keys are fresh random keys, given to the verifier as a local file: no release pins a panel yet ([[0006-trustees]], P1-7)",
   anchorAuthority:
@@ -111,24 +121,33 @@ export interface L2Deployment {
   readonly l1Relay: Uint8Array;
 }
 
-/** A definition the fixture writes: version 1 (one question) or version 5 (questions). */
+/**
+ * A definition the fixture writes: version 1 (one question), version 5
+ * (questions) or version 7 (a rolling electorate).
+ */
 export type FixtureDefinition =
   | { readonly version: 1; readonly value: ElectionDefinition }
-  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 }
+  | { readonly version: 7; readonly value: ElectionDefinitionV7 };
 
 /** The definition's encoding, as the registry and the bundle take it. */
 export function definitionBytes(d: FixtureDefinition): Uint8Array {
-  return d.version === 1 ? encodeElectionDefinition(d.value) : encodeElectionDefinitionV5(d.value);
+  if (d.version === 1) return encodeElectionDefinition(d.value);
+  return d.version === 5
+    ? encodeElectionDefinitionV5(d.value)
+    : encodeElectionDefinitionV7(d.value);
 }
 
 /** The hash the election registry holds for the definition once registered. */
 export function definitionHash(d: FixtureDefinition): Uint8Array {
-  return d.version === 1 ? electionDefinitionHash(d.value) : electionDefinitionV5Hash(d.value);
+  if (d.version === 1) return electionDefinitionHash(d.value);
+  return d.version === 5 ? electionDefinitionV5Hash(d.value) : electionDefinitionV7Hash(d.value);
 }
 
 /** The stub hash every seat's registration signs (docs/spec/election-definition.md, Stub hash and the ceremony). */
 export function stubHash(d: FixtureDefinition): Uint8Array {
-  return d.version === 1 ? electionStubHash(d.value) : electionStubV5Hash(d.value);
+  if (d.version === 1) return electionStubHash(d.value);
+  return d.version === 5 ? electionStubV5Hash(d.value) : electionStubV7Hash(d.value);
 }
 
 /**
@@ -190,6 +209,21 @@ const PINNED_V5: ReadonlyMap<number, number> = new Map([
   [RECORD_TYPES.electionDefinition, 5],
   [RECORD_TYPES.ballot, 3],
   [RECORD_TYPES.spoiledBallotOpening, 2],
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 13],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+/**
+ * A rolling version-7 definition's pins, as rule 9 serves them: ballot
+ * version 5, whose ballots name their step of the root clock, the
+ * spoiled-ballot opening version 3 that opens its cores, and display-text
+ * version 2 (T-34, T-53).
+ */
+const PINNED_ROLLING: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.electionDefinition, 7],
+  [RECORD_TYPES.ballot, 5],
+  [RECORD_TYPES.spoiledBallotOpening, 3],
   [RECORD_TYPES.boardEntry, 5],
   [RECORD_TYPES.contractEvent, 13],
   [RECORD_TYPES.displayText, 2],
@@ -463,6 +497,89 @@ export function runQuestionCeremony(
   const failure = electionDefinitionV5Rule(definition);
   if (failure !== undefined) throw new Error(`the fixture's definition breaks ${failure.rule}`);
   return { panel, definition: { version: 5, value: definition }, transcript, seats, secrets };
+}
+
+/** The rolling poll's one question: pick one of three. */
+export const ROLLING_QUESTIONS: readonly Question[] = Object.freeze([selection(3, 0, 1)]);
+
+/** The rolling poll's display text. */
+export function rollingDisplayText(): DisplayTextV2 {
+  return {
+    salt: newDisplayTextSalt(),
+    translations: [
+      {
+        language: utf8("en"),
+        title: utf8("Reference election: a poll anyone can join while it runs"),
+        description: utf8(
+          "A fixture run by the reference election (P1-20, P2-17). It counts for nothing.",
+        ),
+        questions: ROLLING_QUESTIONS.map((q) => ({
+          question: utf8("Which option do you prefer?"),
+          description: utf8(""),
+          options: Array.from({ length: q.option_count }, (_, j) => ({
+            label: utf8(`Option ${String.fromCharCode(65 + j)}`),
+            description: utf8(""),
+          })),
+        })),
+      },
+    ],
+  };
+}
+
+export interface RollingCeremonyOptions {
+  /** The election registry's counter of the election's creation. */
+  readonly counter: bigint;
+  /** Everyday, or a class on the civic record, which `rolling-class` refuses. */
+  readonly pollClass: (typeof POLL_CLASSES)[keyof typeof POLL_CLASSES];
+  /** The one rolling tier: Tier 0 over its groups, with its opening state. */
+  readonly tier: RollingTier;
+  /** The receipt keys the anchor registered before the poll opens (verifier 2.9). */
+  readonly receiptKeys: readonly Uint8Array[];
+}
+
+/**
+ * `runCeremony` for a rolling poll ([[0028-rolling-electorates]]): a
+ * version-7 definition under `electorate_mode` 2, sealed and without an author
+ * panel, with `ROLLING_QUESTIONS` and the one rolling tier, whose `root` and
+ * `group_size` are the tier tree's opening state at its `root_l2_block`, as
+ * verifier 2.4 recomputes them from the group registry's events (T-08, T-34).
+ * Every seat takes part. Returns the first rule the definition breaks beside
+ * it, so a control can carry one to the registry, which must refuse it too.
+ */
+export function runRollingCeremony(
+  timing: Timing,
+  l2: L2Deployment,
+  trustees: Trustees,
+  text: DisplayTextV2,
+  { counter, pollClass, tier, receiptKeys }: RollingCeremonyOptions,
+): {
+  readonly ceremony: Ceremony<{ readonly version: 7; readonly value: ElectionDefinitionV7 }>;
+  readonly failure: ElectionDefinitionV7Failure | undefined;
+} {
+  const { panel } = trustees;
+  const stub: ElectionDefinitionV7 = {
+    profile: profile(PINNED_ROLLING),
+    ...stubFields(timing, l2, panel, counter),
+    questions: [...ROLLING_QUESTIONS],
+    electorate: [],
+    display_text_commitment: displayTextV2Commitment(text),
+    receipt_keys: [...receiptKeys].sort((a, b) => compare(a, b)),
+    poll_class: pollClass,
+    results_mode: RESULTS_MODES.sealed,
+    live_every: 0,
+    live_batch: 0,
+    author_threshold: 0,
+    author_keys: [],
+    author_transcript_hash: new Uint8Array(32),
+    electorate_mode: ELECTORATE_MODES.rolling,
+    rolling_electorate: [tier],
+  };
+  const { transcript, seats, secrets } = keyCeremony(stub, electionStubV7Hash(stub), trustees, 0);
+  const definition = { ...stub, ceremony_transcript_hash: ceremonyTranscriptHash(transcript) };
+  return {
+    ceremony: { panel, definition: { version: 7, value: definition }, transcript, seats, secrets },
+    failure: electionDefinitionV7Rule(definition),
+  };
 }
 
 function compare(a: Uint8Array, b: Uint8Array): number {

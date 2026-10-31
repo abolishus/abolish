@@ -17,6 +17,7 @@ import {
   signCeremonyRegistration,
 } from "@abolishus/crypto";
 import { p256 } from "@noble/curves/nist.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import { bytesToHex, concatBytes, hexToBytes } from "@noble/hashes/utils.js";
 import { l2RegistrationCheck, type RegistrationCheck } from "@abolishus/trustee-node";
@@ -102,6 +103,23 @@ export interface L2 extends L2Deployment {
   readonly rpc: Rpc;
   /** The account that deployed the contracts and creates the elections. */
   readonly operator: string;
+  /** The group registry's registrars' secret keys, in seat order (seat 1 first). */
+  readonly registrarSecrets: readonly Uint8Array[];
+}
+
+/** The Ethereum address of a secp256k1 secret key. */
+export function ethAddress(secret: Uint8Array): Uint8Array {
+  return keccak_256(secp256k1.getPublicKey(secret, false).slice(1)).slice(12);
+}
+
+/**
+ * `count` fresh registrar keys in seat order: ascending by address, the one
+ * order the group registry seats a set in.
+ */
+export function newRegistrars(count: number): Uint8Array[] {
+  return Array.from({ length: count }, () => secp256k1.utils.randomSecretKey()).sort((a, b) =>
+    hex(ethAddress(a)) < hex(ethAddress(b)) ? -1 : 1,
+  );
 }
 
 /** The deployment's fixed inputs. */
@@ -136,12 +154,12 @@ export async function deployL2(rpc: Rpc, l1: Rpc, inputs: L2Inputs): Promise<L2>
     return unhex(receipt.contractAddress);
   };
   const trusteeRegistry = await deploy("TrusteeRegistry", panelInputs(inputs.panel, inputs.quorum));
-  // Two placeholder registrars in ascending order, threshold 2: no group is
-  // created yet (STUBS.groupRegistrars). The pinned panel is the Tier 2
-  // scope's initial panel too; no nullifier key is recorded.
-  const registrars = [placeholder("registrar-1"), placeholder("registrar-2")].sort((a, b) =>
-    hex(a) < hex(b) ? -1 : 1,
-  );
+  // Two registrars with fresh keys, in ascending order of their addresses,
+  // as the registry seats them, threshold 2, so no single key changes a group
+  // (T-62; STUBS.groupRegistrars). The pinned panel is the Tier 2 scope's
+  // initial panel too; no nullifier key is recorded.
+  const registrarSecrets = newRegistrars(2);
+  const registrars = registrarSecrets.map(ethAddress);
   const groupRegistry = await deploy(
     "GroupRegistry",
     concatBytes(
@@ -178,6 +196,7 @@ export async function deployL2(rpc: Rpc, l1: Rpc, inputs: L2Inputs): Promise<L2>
   return {
     rpc,
     operator,
+    registrarSecrets,
     l2ChainId: inputs.l2ChainId,
     electionRegistry,
     board,
@@ -296,7 +315,7 @@ async function revertOf(l2: L2, to: Uint8Array, data: Uint8Array): Promise<strin
  * signature) and nothing is sent. Each is tried with `eth_call` first, so a
  * refusal shows its error rather than a bare revert.
  */
-async function transact(
+export async function transact(
   l2: L2,
   l1: Rpc,
   to: Uint8Array,

@@ -584,15 +584,19 @@ export const AppealADecision: Story = {
       moderation.getByRole("group", { name: /^Appeal this decision\?.* Name the new ferry$/ }),
     ).toBeVisible();
     await userEvent.click(moderation.getByRole("button", { name: "Send appeal" }));
-    await expect(await moderation.findByRole("status")).toHaveTextContent(
-      "Your appeal is filed. A different moderator will review it.",
-    );
+    await expect((await moderation.findByRole("status")).textContent).toBe("Your appeal is filed.");
     await outcomeUnderTheDecision(block, moderation.getByRole("status"));
     await expect(
       moderation.getByText(
         "You appealed decision No. 41 on October 18, 2026 at 9:30 AM UTC: waiting for a moderator other than the one who decided.",
       ),
     ).toBeVisible();
+    // Who reviews it is said once, in the appeal's own line: the notice
+    // above it said it again in other words (P2-29, the author's list's
+    // iteration 22).
+    await expect(
+      block.textContent!.match(/other than the one who decided|different moderator/g),
+    ).toHaveLength(1);
     // Once filed, the decision can't be appealed again.
     await expect(moderation.queryByRole("button", { name: /Appeal/ })).toBeNull();
     const decision = moderation.getByText("Delisted: Spam").closest("p");

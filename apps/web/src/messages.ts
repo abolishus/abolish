@@ -1314,7 +1314,7 @@ const enUS = {
     "Appeal this decision? A moderator other than the one who decided reviews it. You can appeal a decision only once.",
   moderationAppealConfirm: "Send appeal",
   moderationAppealCancel: "Not now",
-  moderationAppealFiled: "Your appeal is filed. A different moderator will review it.",
+  moderationAppealFiled: "Your appeal is filed.",
   moderationFailure_signedOut:
     "You've been signed out. Sign in again to see this poll's moderation.",
   moderationFailure_gone: "That poll is no longer here.",

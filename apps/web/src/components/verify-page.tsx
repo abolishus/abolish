@@ -65,10 +65,23 @@ export const CHECK_GROUPS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 const TRUSTED = ["Servers", "L1", "L2", "Gateways"] as const;
 
+/**
+ * The community node's mirror, on the directory the copy step fills and the
+ * reports the verify step writes (apps/node/README.md, Running it). It keeps
+ * the node's own default of loopback: open to others it needs a proxy that
+ * limits each address (T-52), which the page says rather than a `--host`.
+ */
+export const NODE_SERVE =
+  "vp run --filter @abolishus/node start -- serve --blocks boards --reports reports";
+
+/** What a running node does, each said as far as the node does it today. */
+const NODE_DUTIES = ["Keeps", "Serves", "Verifies", "Needs"] as const;
+
 const SECTIONS = [
   { id: "run", mark: "recountRunMark" },
   { id: "checks", mark: "recountChecksMark" },
   { id: "trust", mark: "recountTrustMark" },
+  { id: "node", mark: "recountNodeMark" },
 ] as const satisfies readonly { id: string; mark: Key }[];
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -77,7 +90,7 @@ function Contents() {
   const t = useTranslate(catalogs);
   return (
     <nav aria-label={t("howContents")} className="border-t-2 border-foreground pt-4">
-      <ol className="m-0 grid list-none gap-x-6 p-0 sm:grid-cols-3">
+      <ol className="m-0 grid list-none gap-x-6 p-0 sm:grid-cols-2 lg:grid-cols-4">
         {SECTIONS.map((s, i) => (
           <li key={s.id} className="border-b border-border">
             <a
@@ -227,7 +240,51 @@ function Trust() {
   );
 }
 
-/** `/verify`: how to count a poll again without us, and what that run trusts. */
+/**
+ * The mockup's "Run a node, keep a copy", narrowed to what the node does:
+ * it serves what the copy step fetched and the reports the verify step
+ * wrote, and runs neither step on its own yet (apps/node/README.md,
+ * Known-weak), so the page promises no hourly run. Each node running is
+ * another copy of the boards that doesn't depend on us (T-49, T-51).
+ */
+function KeepACopy() {
+  const t = useTranslate(catalogs);
+  return (
+    <Section
+      id="node"
+      index="04"
+      mark={t("recountNodeMark")}
+      title={t("recountNodeTitle")}
+      lede={t("recountNodeLede")}
+    >
+      <div className="grid gap-12 lg:grid-cols-12 lg:gap-x-6">
+        <div className="grid min-w-0 content-start gap-3 lg:col-span-7">
+          <h3 className="m-0 font-heading text-lg font-semibold">{t("recountNodeServeTitle")}</h3>
+          <p className="m-0 max-w-prose text-base text-pretty">{t("recountNodeServeBody")}</p>
+          <pre className="m-0 border border-foreground bg-muted p-4 font-mono text-sm whitespace-pre-wrap wrap-anywhere">
+            <code translate="no">{NODE_SERVE}</code>
+          </pre>
+          <p className="m-0 max-w-prose text-sm text-pretty text-muted-foreground">
+            {t("recountNodeOpen")}
+          </p>
+        </div>
+        <dl className="m-0 grid min-w-0 content-start border-t border-foreground lg:col-span-5">
+          {NODE_DUTIES.map((duty) => (
+            <div
+              key={duty}
+              className="grid gap-1 border-b border-border py-4 text-sm sm:grid-cols-[6rem_1fr] sm:gap-4"
+            >
+              <dt className="font-medium">{t(`recountNode${duty}`)}</dt>
+              <dd className="m-0 text-muted-foreground">{t(`recountNode${duty}Means`)}</dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </Section>
+  );
+}
+
+/** `/verify`: how to count a poll again without us, what that run trusts, and keeping a copy. */
 export function VerifyPage() {
   const t = useTranslate(catalogs);
   return (
@@ -247,6 +304,7 @@ export function VerifyPage() {
       <Run />
       <Checks />
       <Trust />
+      <KeepACopy />
       {/* Text, not a link: pages link only to this site (tests/ssr.test.ts). */}
       <p className="m-0 max-w-prose border-t border-border pt-16 text-lg text-pretty">
         {t("recountSource")}

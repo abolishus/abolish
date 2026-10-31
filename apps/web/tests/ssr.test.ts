@@ -2856,7 +2856,7 @@ describe("verify it yourself", () => {
     const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
     expect(current).toHaveLength(2);
     for (const link of current) expect(link).toContain('href="/verify"');
-    for (const id of ["run", "checks", "trust"]) {
+    for (const id of ["run", "checks", "trust", "node"]) {
       expect(html).toContain(`id="${id}"`);
       expect(html).toContain(`href="#${id}"`);
     }
@@ -3029,11 +3029,11 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${ID}`]: { html: 9, js: 217, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 187, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 178, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 173, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 170, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 199, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 200, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 174, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 175, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

@@ -72,14 +72,21 @@ type Story = StoryObj<typeof meta>;
 /** Opens "How do we know this is real?", where the definition and board facts are. */
 async function openEvidence(canvasElement: HTMLElement) {
   const canvas = within(canvasElement);
-  const summary = canvas.getByRole("heading", { name: "How do we know this is real?" });
+  // The question and its answer in plain words are on the surface; the evidence is one step down.
+  const section = canvas.getByRole("region", { name: "How do we know this is real?" });
+  await expect(
+    within(section).getByText(/^Every answer is sealed on the device that sends it/),
+  ).toBeVisible();
   // Closed, the evidence is in the page but not shown.
   const details = canvasElement.querySelector("details");
   await expect(details).not.toHaveAttribute("open");
   await expect(canvas.getByText(/^Definition hash/, { selector: "figcaption" })).not.toBeVisible();
-  await userEvent.click(summary);
+  await userEvent.click(within(section).getByText("Show the evidence"));
   await expect(details).toHaveAttribute("open");
   await expect(canvas.getByRole("figure", { name: /^Definition hash/ })).toBeVisible();
+  // Its words follow it: opened, it offers to hide the evidence.
+  await expect(within(section).getByText("Hide the evidence")).toBeVisible();
+  await expect(within(section).getByText("Show the evidence")).not.toBeVisible();
 }
 
 const play: Story["play"] = async ({ canvasElement }) => {

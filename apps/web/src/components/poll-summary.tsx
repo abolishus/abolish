@@ -498,8 +498,12 @@ export function PollSummary({
         <PollFollow electionId={poll.electionId} client={follows} />
       )}
 
-      <details ref={evidence} className="group border-t border-border pt-8">
-        <summary className="flex min-h-12 cursor-pointer list-none items-center gap-4 underline-offset-4 hover:underline focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+      {/* As both poll mockups lay it out: the question and its answer in
+          plain words are on the surface, and the evidence they rest on one
+          step down. The summary says what it does, its words following the
+          disclosure's state without script. */}
+      <section aria-labelledby="evidence-title" className="grid gap-6 border-t border-border pt-8">
+        <div className="flex items-center gap-4">
           {/* A seal only: the evidence below names the same fingerprint. */}
           <span aria-hidden="true" className="contents">
             <Fingerprint
@@ -508,123 +512,132 @@ export function PollSummary({
               size={44}
             />
           </span>
-          <h2 className="m-0 font-heading text-2xl font-semibold">{t("evidenceSummary")}</h2>
-          <ChevronDown aria-hidden="true" className="size-5 group-open:rotate-180" />
-        </summary>
-        {/* The link's target is inside the disclosure, not the disclosure
+          <h2 id="evidence-title" className="m-0 font-heading text-2xl font-semibold">
+            {t("evidenceSummary")}
+          </h2>
+        </div>
+        <p className="m-0 max-w-prose text-lg text-pretty">{t("evidenceLede")}</p>
+        <details ref={evidence} className="group">
+          <summary className="inline-flex h-12 cursor-pointer list-none items-center gap-2 border border-border px-5 text-base hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+            <span className="group-open:hidden">{t("evidenceShow")}</span>
+            <span className="hidden group-open:inline">{t("evidenceHide")}</span>
+            <ChevronDown aria-hidden="true" className="size-4 group-open:rotate-180" />
+          </summary>
+          {/* The link's target is inside the disclosure, not the disclosure
             itself, so a fragment to it opens it (HTML's ancestor revealing);
             the margin keeps the summary above it in view. */}
-        <div id="evidence" className="grid scroll-mt-20 gap-12 pt-8">
-          <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
-            {t("pollClaim")}
-          </p>
+          <div id="evidence" className="grid scroll-mt-20 gap-12 pt-8">
+            <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
+              {t("pollClaim")}
+            </p>
 
-          <section aria-labelledby="fingerprint-title" className="grid gap-4">
-            <h3 id="fingerprint-title" className="m-0 font-heading text-xl font-semibold">
-              {t("evidenceFingerprintTitle")}
-            </h3>
-            <p className="m-0 max-w-prose text-muted-foreground">{t("evidenceFingerprint")}</p>
-            <div className="flex min-w-0 items-start gap-4">
-              <Fingerprint
-                value={poll.definitionHash}
-                label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
-                size={64}
-              />
-              <div className="min-w-0">
-                <Hash value={poll.definitionHash} label={t("definitionHash")} />
+            <section aria-labelledby="fingerprint-title" className="grid gap-4">
+              <h3 id="fingerprint-title" className="m-0 font-heading text-xl font-semibold">
+                {t("evidenceFingerprintTitle")}
+              </h3>
+              <p className="m-0 max-w-prose text-muted-foreground">{t("evidenceFingerprint")}</p>
+              <div className="flex min-w-0 items-start gap-4">
+                <Fingerprint
+                  value={poll.definitionHash}
+                  label={t("fingerprintDefinition", { prefix: poll.definitionHash.slice(0, 8) })}
+                  size={64}
+                />
+                <div className="min-w-0">
+                  <Hash value={poll.definitionHash} label={t("definitionHash")} />
+                </div>
               </div>
-            </div>
-            <Hash value={poll.electionId} label={t("pollId")} />
-          </section>
+              <Hash value={poll.electionId} label={t("pollId")} />
+            </section>
 
-          <section aria-labelledby="definition-title" className="grid gap-4">
-            <h3 id="definition-title" className="m-0 font-heading text-xl font-semibold">
-              {t("evidenceDefinitionTitle")}
-            </h3>
-            <dl className="m-0">
-              <Fact term={t("factType")}>{counting}</Fact>
-              <Fact term={t("factOptions")}>
-                <Count value={options} />
-              </Fact>
-              {poll.version === 5 ? (
-                <Fact term={t("factQuestions")}>
-                  {/* Each question's limits as the proof enforces them, and no
+            <section aria-labelledby="definition-title" className="grid gap-4">
+              <h3 id="definition-title" className="m-0 font-heading text-xl font-semibold">
+                {t("evidenceDefinitionTitle")}
+              </h3>
+              <dl className="m-0">
+                <Fact term={t("factType")}>{counting}</Fact>
+                <Fact term={t("factOptions")}>
+                  <Count value={options} />
+                </Fact>
+                {poll.version === 5 ? (
+                  <Fact term={t("factQuestions")}>
+                    {/* Each question's limits as the proof enforces them, and no
                       figure across questions (T-29, T-34). */}
-                  <ol className="m-0 grid list-none gap-1 p-0">
-                    {poll.questions.map((q, i) => {
-                      const instruction = instructionMessage(instructionOf(q));
-                      return (
-                        <li key={i}>
-                          <span className="font-medium">
-                            {t("questionNumber", { number: i + 1 })}
-                          </span>
-                          {": "}
-                          {t("questionLimits", {
-                            instruction: t(instruction.key, instruction.values),
-                            options: t("optionCount", { count: q.optionCount }),
-                            min: q.minSelections,
-                            max: q.maxSelections,
-                          })}
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </Fact>
-              ) : (
-                poll.questions.map((q, i) => (
-                  <Fact key={i} term={t("factSelections")}>
-                    {t("selectionsRange", { min: q.minSelections, max: q.maxSelections })}
+                    <ol className="m-0 grid list-none gap-1 p-0">
+                      {poll.questions.map((q, i) => {
+                        const instruction = instructionMessage(instructionOf(q));
+                        return (
+                          <li key={i}>
+                            <span className="font-medium">
+                              {t("questionNumber", { number: i + 1 })}
+                            </span>
+                            {": "}
+                            {t("questionLimits", {
+                              instruction: t(instruction.key, instruction.values),
+                              options: t("optionCount", { count: q.optionCount }),
+                              min: q.minSelections,
+                              max: q.maxSelections,
+                            })}
+                          </li>
+                        );
+                      })}
+                    </ol>
                   </Fact>
-                ))
-              )}
-              <Fact term={t("factElectorate")}>
-                <ul className="m-0 grid list-none gap-1 p-0">
-                  {poll.electorate.map((group, i) => (
-                    <li key={i}>
-                      {t(tierMessage(group.tier, phoneVerification))}:{" "}
-                      <span className="tabular-nums">
-                        {t("groupMembers", { count: BigInt(group.groupSize) })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </Fact>
-              <Fact term={t("factTrustees")}>
-                <span className="tabular-nums">
-                  {t("trusteesOf", { threshold: poll.threshold, size: poll.panelSize })}
-                </span>
-              </Fact>
-              <Fact term={t("factOpens")}>
-                <When instant={poll.opensAt} />
-              </Fact>
-              <Fact term={t("factCloses")}>
-                <When instant={poll.closesAt} />
-              </Fact>
-              {code === undefined ? null : (
-                <Fact term={t("factShortLink")}>
-                  <a className="font-mono underline underline-offset-4" href={`/p/${code}`}>
-                    /p/{code}
-                  </a>
+                ) : (
+                  poll.questions.map((q, i) => (
+                    <Fact key={i} term={t("factSelections")}>
+                      {t("selectionsRange", { min: q.minSelections, max: q.maxSelections })}
+                    </Fact>
+                  ))
+                )}
+                <Fact term={t("factElectorate")}>
+                  <ul className="m-0 grid list-none gap-1 p-0">
+                    {poll.electorate.map((group, i) => (
+                      <li key={i}>
+                        {t(tierMessage(group.tier, phoneVerification))}:{" "}
+                        <span className="tabular-nums">
+                          {t("groupMembers", { count: BigInt(group.groupSize) })}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </Fact>
-              )}
-            </dl>
-          </section>
+                <Fact term={t("factTrustees")}>
+                  <span className="tabular-nums">
+                    {t("trusteesOf", { threshold: poll.threshold, size: poll.panelSize })}
+                  </span>
+                </Fact>
+                <Fact term={t("factOpens")}>
+                  <When instant={poll.opensAt} />
+                </Fact>
+                <Fact term={t("factCloses")}>
+                  <When instant={poll.closesAt} />
+                </Fact>
+                {code === undefined ? null : (
+                  <Fact term={t("factShortLink")}>
+                    <a className="font-mono underline underline-offset-4" href={`/p/${code}`}>
+                      /p/{code}
+                    </a>
+                  </Fact>
+                )}
+              </dl>
+            </section>
 
-          <section aria-labelledby="board-title" className="grid gap-4">
-            <h3 id="board-title" className="m-0 font-heading text-xl font-semibold">
-              {t("boardTitle")}
-            </h3>
-            <BoardHeadFacts head={board} />
-            <a
-              className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
-              href={`/polls/${poll.electionId}/board`}
-            >
-              {t("boardLink")}
-              <ArrowRight aria-hidden="true" className="size-4" />
-            </a>
-          </section>
-        </div>
-      </details>
+            <section aria-labelledby="board-title" className="grid gap-4">
+              <h3 id="board-title" className="m-0 font-heading text-xl font-semibold">
+                {t("boardTitle")}
+              </h3>
+              <BoardHeadFacts head={board} />
+              <a
+                className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+                href={`/polls/${poll.electionId}/board`}
+              >
+                {t("boardLink")}
+                <ArrowRight aria-hidden="true" className="size-4" />
+              </a>
+            </section>
+          </div>
+        </details>
+      </section>
 
       {/* Not for a hidden poll: moderators have already removed its text (T-68). */}
       {report === undefined || moderation.state === "hidden" ? null : (

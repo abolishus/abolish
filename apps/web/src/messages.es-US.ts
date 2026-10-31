@@ -821,6 +821,10 @@ export const esUS: Messages = {
   pollFailure_openTimeout:
     "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   evidenceSummary: "¿Cómo sabemos que esto es real?",
+  evidenceLede:
+    "Cada respuesta se sella en el dispositivo que la envía y se publica en el tablero público, que cualquiera puede descargar y volver a contar.",
+  evidenceShow: "Mostrar la evidencia",
+  evidenceHide: "Ocultar la evidencia",
   evidenceFingerprintTitle: "La huella de esta encuesta",
   evidenceFingerprint:
     "Se dibuja a partir del hash de la definición de la encuesta, que fija sus reglas antes de la primera respuesta. Una definición con cualquier cambio dibuja una forma distinta.",

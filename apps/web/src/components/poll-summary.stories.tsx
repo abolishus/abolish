@@ -716,6 +716,19 @@ const inShortPlay: Story["play"] = async ({ canvasElement }) => {
     "Which days should the library open on Sundays and holidays?" +
       "Most picked: ⁨Sundays⁩, by 62.5% of those who answered.",
   ]);
+  // The summary's link to what it rests on opens the evidence and takes the reader there.
+  const evidence = canvasElement.querySelector("details");
+  await expect(evidence).not.toHaveAttribute("open");
+  const link = canvas.getByRole("link", { name: "How do we know this is real?" });
+  await expect(link).toHaveAttribute("href", "#evidence");
+  // The test runner's frame mustn't navigate, even to a fragment; the
+  // page's own handler still runs, which is what opens the disclosure.
+  const stay = (event: Event) => event.preventDefault();
+  canvasElement.addEventListener("click", stay, { capture: true });
+  await userEvent.click(link);
+  canvasElement.removeEventListener("click", stay, { capture: true });
+  await expect(evidence).toHaveAttribute("open");
+  await expect(canvas.getByText(/^Everything below is what our server says/)).toBeVisible();
 };
 
 /** A closed poll counted in its one tier, each question's lead under its heading. */
@@ -783,5 +796,6 @@ export const InShortNone: Story = {
     await expect(canvas.getByRole("heading", { name: "Results" })).toBeVisible();
     await expect(canvas.queryByRole("list", { name: "In short" })).toBeNull();
     await expect(canvas.queryByText(/^Final results/)).toBeNull();
+    await expect(canvas.queryByRole("link", { name: "How do we know this is real?" })).toBeNull();
   },
 };

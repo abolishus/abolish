@@ -650,6 +650,18 @@ describe("results", () => {
     expect(inShort?.match(/<li/g)).toHaveLength(2);
   });
 
+  test("a closed poll's summary links down to its evidence, which the link's fragment opens", async () => {
+    const html = await (await get(`/polls/${CELLS_ID}`)).text();
+    const header = /<article[^>]*>\s*<header[^>]*>([\s\S]*?)<\/header>/.exec(html)?.[1] ?? "";
+    const link = /<a href="#evidence"[^>]*>([\s\S]*?)<\/a>/.exec(header)?.[1] ?? "";
+    expect(link.replace(/<[^>]+>/g, "")).toBe("How do we know this is real?");
+    // The target sits inside the closed disclosure, after its summary, so
+    // following the link reveals it without script.
+    const details = /<details[^>]*>([\s\S]*?)<\/details>/.exec(html)?.[1] ?? "";
+    expect(details).toMatch(/<\/summary>\s*<div id="evidence"/);
+    expect(html.match(/id="evidence"/g)).toHaveLength(1);
+  });
+
   test.each([
     // T-16: no lead across tiers, nor a summary of a tier still partly unopened.
     ["several tiers", STREAM_V1],
@@ -660,6 +672,7 @@ describe("results", () => {
     const html = await (await get(`/polls/${id}`)).text();
     expect(html).not.toContain('aria-label="In short"');
     expect(html).not.toContain("Final results.");
+    expect(html).not.toContain('href="#evidence"');
   });
 
   test("the API is asked for the results by the poll's ID alone", async () => {

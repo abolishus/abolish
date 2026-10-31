@@ -40,7 +40,16 @@ const LINK =
   "inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none aria-[current=page]:border-foreground aria-[current=page]:bg-foreground aria-[current=page]:text-background";
 
 /** The orders, as links: each one a plain GET, so they work before the page's script loads. */
-function Sorts({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
+function Sorts({
+  sort,
+  filter,
+  unavailable,
+}: {
+  sort: StreamSort;
+  filter: StreamFilter;
+  /** Whether the chosen order couldn't be drawn, which the box below says. */
+  unavailable: boolean;
+}) {
   const t = useTranslate(catalogs);
   return (
     <nav aria-label={t("discoverSorts")} className="grid gap-3">
@@ -63,7 +72,13 @@ function Sorts({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
           </li>
         ))}
       </ul>
-      <p className="m-0 text-sm text-muted-foreground">{t(SORT_NOTE[sort])}</p>
+      {/* An order that couldn't be drawn has no note: over the box saying
+          the server can't count this week's answers, it told how they are
+          counted, five lines a phone read before the box (P2-29, the
+          stream's iteration 18). */}
+      {unavailable ? null : (
+        <p className="m-0 text-sm text-muted-foreground">{t(SORT_NOTE[sort])}</p>
+      )}
     </nav>
   );
 }
@@ -665,7 +680,7 @@ export function StreamPage({
             narrowed={place !== undefined && !refused}
           />
         ) : null}
-        <Sorts sort={sort} filter={filter} />
+        <Sorts sort={sort} filter={filter} unavailable={stream.kind === "sort-unavailable"} />
         <Narrowing sort={sort} filter={filter} typedPlace={typedPlace} withPlace={!placeShown} />
         {refused ? null : <TopicClear sort={sort} filter={filter} />}
       </div>

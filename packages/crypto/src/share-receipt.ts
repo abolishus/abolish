@@ -14,6 +14,8 @@ import {
   type BallotHashContextV3,
   ballotHashV3,
   ballotHashV4,
+  type BallotHashContextV5,
+  ballotHashV5,
   checkValidity,
   checkValidityV3,
   type CommittedVote,
@@ -30,12 +32,14 @@ import { bytesFixed, type CodecValue, encode, struct, u8 } from "./codec.ts";
 import {
   admitForIntake,
   admitForIntakeV4,
+  admitForIntakeV5,
   type BallotElection,
   type BallotV2Code,
   type CellBallotElection,
   type IntakeAdmissionCode,
   type PanelBallotElection,
   type QuestionBallotElection,
+  type RollingBallotElection,
   SEAT_PANELS,
   type SeatPanel,
 } from "./ballot.ts";
@@ -453,6 +457,72 @@ export function intakeBallotV4(
   };
 }
 
+export type IntakeCodeV5 = IntakeCodeV4 | "root-step-range" | "step-unsettled";
+
+/** Version 4's intake result, with the step a version-5 ballot names. */
+export type IntakeResultV5 =
+  | (Extract<IntakeResultV4, { readonly ok: true }> & { readonly step: number })
+  | (Omit<Extract<IntakeResultV4, { readonly ok: false }>, "code"> & {
+      readonly ok: false;
+      readonly code: IntakeCodeV5;
+    });
+
+/**
+ * Trustee intake of one delivered version-5 ballot, a rolling poll's, at a
+ * seat of either panel (docs/spec/share-encryption.md, Ballot version 5):
+ * version 4's intake, decryption and version-2 receipt unchanged, with the
+ * rolling electorate's admission, so a seat receipts only a ballot whose
+ * membership proof verifies against the root of a settled step it computed
+ * itself from the group registry's events (T-08, T-25, T-52). A step it
+ * hasn't seen settle is refused with `step-unsettled` before anything is
+ * decrypted or stored, as `admitForIntakeV5` says, with `safeAt` the
+ * timestamp of the newest safe L2 block the context's events run through.
+ * `election` is the context `rollingBallotElection` made from the definition,
+ * key sets and chain the node checked, and `keys.seat` must be a seat of
+ * `keys.panel`'s registered key set whose KEM key matches `keys.kemSecret`.
+ */
+export function intakeBallotV5(
+  election: RollingBallotElection,
+  keys: IntakeKeysV4,
+  record: Uint8Array,
+  ciphertext: Uint8Array,
+  safeAt: bigint,
+): IntakeResultV5 {
+  const { panel, seat } = keys;
+  const shareHash = shareCiphertextHash(ciphertext);
+  const admitted = admitForIntakeV5(election, record, panel, seat, shareHash, safeAt);
+  if (!admitted.ok) return admitted;
+  const { ctx, vote } = admitted;
+  const opened = openSharesV4(ctx, panel, seat, keys.kemSecret, vote, ciphertext);
+  if (!opened.ok) return opened;
+  return {
+    ok: true,
+    ballotHash: admitted.ballotHash,
+    shareHash,
+    shares: opened.shares,
+    // Version 4's receipt: its ballot hash is version 5's, which binds the step.
+    receipt: signStatement(
+      keys.signingSecret,
+      TAG_V4,
+      shareReceiptStatementV4({
+        definition_hash: ctx.definitionHash,
+        ballot_hash: admitted.ballotHash,
+        panel,
+        seat,
+        share_hash: shareHash,
+      }),
+    ),
+    panel,
+    tier: admitted.tier,
+    cell: admitted.cell,
+    nullifier: admitted.nullifier,
+    message: admitted.message,
+    l1RefNumber: admitted.l1RefNumber,
+    l1RefHash: admitted.l1RefHash,
+    step: admitted.step,
+  };
+}
+
 /**
  * Each panel's registered per-election signing keys, from its own checked
  * ceremony transcript: a receipt is checked only against its own panel's.
@@ -510,6 +580,41 @@ export function checkShareReceiptV4With(
     {
       definition_hash: ctx.definitionHash,
       ballot_hash: ballotHashV4(ctx, vote),
+      panel,
+      seat,
+      share_hash: hashes[seat - 1] as Uint8Array,
+    },
+    signature,
+  );
+}
+
+/**
+ * `share-receipt` under ballot version 5 (docs/spec/share-encryption.md,
+ * Ballot version 5): version 4's receipt and check, over version 5's
+ * recomputed ballot hash, which binds the step, so a receipt for a ballot at
+ * one step is never one for the same vote relabelled to another (T-38).
+ * `registered.author` must be empty, as for `checkShareReceiptV4`.
+ */
+export function checkShareReceiptV5(
+  registered: PanelReceiptSigners,
+  ctx: BallotHashContextV5,
+  vote: CommittedVoteV4,
+  panel: SeatPanel,
+  seat: number,
+  signature: Uint8Array,
+): boolean {
+  if (registered.author.length !== 0)
+    throw new RangeError(
+      "checkShareReceiptV5: an author panel's signing keys come from its own ceremony (P2-16 part 4d-3)",
+    );
+  if (panel !== SEAT_PANELS.default && panel !== SEAT_PANELS.author) return false;
+  const hashes = panel === SEAT_PANELS.author ? vote.author_share_hashes : vote.share_hashes;
+  if (!Number.isSafeInteger(seat) || seat < 1 || seat > hashes.length) return false;
+  return checkReceiptStatementV4(
+    registered,
+    {
+      definition_hash: ctx.definitionHash,
+      ballot_hash: ballotHashV5(ctx, vote),
       panel,
       seat,
       share_hash: hashes[seat - 1] as Uint8Array,

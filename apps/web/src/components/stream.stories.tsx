@@ -5,7 +5,7 @@ import { NO_TAGS, type PollView } from "../poll.ts";
 import type { StreamCard } from "../stream.ts";
 import { streamHref } from "../stream.ts";
 import { StreamPage } from "./stream.tsx";
-import { ViewerTimeZone } from "./when.tsx";
+import { ViewerNow, ViewerTimeZone } from "./when.tsx";
 
 const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView => ({
   electionId,
@@ -28,6 +28,7 @@ const BUS = "30".repeat(32);
 const UNREADABLE = "40".repeat(32);
 const NEXT = "50".repeat(32);
 const BALLOT = "https://ballot.example/";
+const NEW_YEAR = "2026-01-01T17:00:00.000Z";
 
 const cards: StreamCard[] = [
   {
@@ -94,12 +95,15 @@ const meta = {
     ballot: BALLOT,
     phoneVerification: false,
   },
-  // A visitor on New York's clock, so the cards' closing times don't depend
-  // on the machine drawing the story; a story sets `timeZone` for another.
+  // A visitor on New York's clock on New Year's Day, a week before the
+  // first close, so the cards' closing times don't depend on the machine
+  // drawing the story or when; a story sets `timeZone` or `now` for another.
   decorators: [
     (Story, { parameters }) => (
       <ViewerTimeZone.Provider value={(parameters["timeZone"] as string) ?? "America/New_York"}>
-        <Story />
+        <ViewerNow.Provider value={() => new Date((parameters["now"] as string) ?? NEW_YEAR)}>
+          <Story />
+        </ViewerNow.Provider>
       </ViewerTimeZone.Provider>
     ),
   ],
@@ -398,6 +402,55 @@ export const SpanishClock: Story = {
     const closes = list.getAllByText(/^Cierra/);
     await expect(closes[0]!.textContent).toMatch(
       /^Cierra 8 ene 2026, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
+    );
+  },
+};
+
+/**
+ * On the morning of the library's close, its card says "today" in place of
+ * a date the visitor would have to know was today's; the park's, a week
+ * on, keeps its date (P2-29, the stream's iteration 23).
+ */
+export const ClosesToday: Story = {
+  parameters: { now: "2026-01-07T15:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const list = questions(canvasElement);
+    const closes = list.getAllByText(/^Closes/);
+    await expect(closes[0]!.textContent).toBe("Closes today, 7:00\u00a0PM\u00a0EST");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 2026, 7:00\u00a0PM\u00a0EST");
+    await expect(within(closes[0]!).getByRole("time")).toHaveAttribute(
+      "datetime",
+      "2026-01-08T00:00:00.000Z",
+    );
+    // Still one line on a phone, as the date was.
+    const line = document.createRange();
+    line.selectNodeContents(closes[0]!);
+    await expect(new Set([...line.getClientRects()].map((r) => Math.round(r.top))).size).toBe(1);
+  },
+};
+
+/**
+ * The day before, "tomorrow", by the visitor's calendar: on the morning of
+ * January 6 in New York the library closes tomorrow evening there, though
+ * in UTC its close falls two days on, on January 8.
+ */
+export const ClosesTomorrow: Story = {
+  parameters: { now: "2026-01-06T15:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const closes = questions(canvasElement).getAllByText(/^Closes/);
+    await expect(closes[0]!.textContent).toBe("Closes tomorrow, 7:00\u00a0PM\u00a0EST");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 2026, 7:00\u00a0PM\u00a0EST");
+  },
+};
+
+/** In Spanish, "mañana" on the visitor's own clock east of UTC. */
+export const SpanishTomorrow: Story = {
+  parameters: { locale: "es-US", timeZone: "Europe/Berlin", now: "2026-01-07T09:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
+    const closes = list.getAllByText(/^Cierra/);
+    await expect(closes[0]!.textContent).toMatch(
+      /^Cierra mañana, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
     );
   },
 };

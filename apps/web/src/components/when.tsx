@@ -7,13 +7,21 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 
 import { catalogs } from "../messages.ts";
 import type { Instant } from "../poll.ts";
-import { formatUtcWhole, formatZonedWhole } from "./format.ts";
+import { formatUtcWhole, formatZonedNear } from "./format.ts";
 
 /**
  * The visitor's time zone, where a story fixes one so its words don't depend
  * on the machine drawing it. Unset, `When` asks the browser.
  */
 export const ViewerTimeZone = createContext<string | undefined>(undefined);
+
+/**
+ * The visitor's clock, where a story fixes one so "today" and "tomorrow"
+ * don't depend on when it is drawn. Unset, `When` reads the browser's.
+ */
+export const ViewerNow = createContext<(() => Date) | undefined>(undefined);
+
+const browserNow = () => new Date();
 
 const noSubscription = () => () => {};
 const browserZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -42,7 +50,10 @@ function useViewerZone(): string | undefined {
  * the Americas reads as the next day's (the stream's iteration 22). The
  * served page, and a visitor without scripts, keep UTC, which is never wrong,
  * only unfamiliar. The evidence face keeps UTC always
- * (`docs/design/language.md`).
+ * (`docs/design/language.md`). On the visitor's clock a close today or
+ * tomorrow says so in place of its date (the stream's iteration 23): the
+ * day is read only once the page runs, never on the server, which knows
+ * neither the visitor's zone nor when a cached page is read.
  */
 export function When({
   instant,
@@ -56,13 +67,16 @@ export function When({
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
   const zone = useViewerZone();
+  const now = useContext(ViewerNow) ?? browserNow;
   if (instant.iso === undefined) return <span className="tabular-nums">{instant.seconds}</span>;
   const date = new Date(instant.iso);
   const style = short ? "medium" : "long";
+  const zoned = ({ day, ...words }: { time: string; zone: string; day?: string }) =>
+    day === undefined ? t("zonedTime", words) : t("zonedDayTime", { day, ...words });
   return (
     <time dateTime={instant.iso} suppressHydrationWarning>
       {local && zone !== undefined
-        ? t("zonedTime", formatZonedWhole(locale, zone, date, style))
+        ? zoned(formatZonedNear(locale, zone, date, now(), style))
         : t("utcTime", { time: formatUtcWhole(locale, date, style) })}
     </time>
   );

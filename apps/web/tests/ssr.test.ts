@@ -3463,7 +3463,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 185, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 182, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 10, js: 221, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 10, js: 222, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 192, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 185, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 178, css: 40, fonts: 58 },

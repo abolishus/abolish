@@ -125,6 +125,10 @@ export const Default: Story = {
     );
     await expect(within(items[0]!).getByText("Latest")).toBeVisible();
     await expect(within(items[1]!).queryByText("Latest")).toBeNull();
+    // Each checkpoint's size as a bar against the latest's, drawn as SVG geometry, not an inline width.
+    await expect(
+      items.map((item) => item.querySelector("svg rect:last-child")?.getAttribute("width")),
+    ).toEqual(["100", "90", "80", "70", "60", "50"]);
     await expect(
       canvas.getByRole("img", { name: "Fingerprint of the checkpoint after period 8" }),
     ).toBeVisible();

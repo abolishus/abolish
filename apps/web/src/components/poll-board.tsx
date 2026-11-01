@@ -23,6 +23,7 @@ import {
   type AnchorRow,
   type BoardRow,
   type EntryKind,
+  sizeShare,
 } from "../board.ts";
 import { ENTRY_KINDS } from "../entry-kinds.ts";
 import { catalogs, type Messages } from "../messages.ts";
@@ -30,6 +31,7 @@ import type { PollView } from "../poll.ts";
 import type { BoardHead, Histories, Inclusion } from "../server/load.ts";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { FilterGroup } from "./filter-group.tsx";
+import { Bar } from "./poll-results.tsx";
 
 export interface PollBoardProps {
   poll: PollView;
@@ -343,6 +345,7 @@ export function PollBoard({
                       <Count value={BigInt(anchor.size)} />
                     </dd>
                   </dl>
+                  <Bar share={sizeShare(anchor, anchors[0]!)} lead={false} />
                   <div className="flex min-w-0 items-start gap-4">
                     <Fingerprint
                       value={anchor.hash}

@@ -519,6 +519,63 @@ export const SpanishOpened: Story = {
   },
 };
 
+/**
+ * A poll nobody has answered yet says so once, not "0 people" per tier; one
+ * with answers in some tier keeps every tier's line, its zeros too (P2-29,
+ * the stream's iteration 25).
+ */
+const unanswered: StreamCard[] = cards.map((card, i) =>
+  card.kind !== "poll"
+    ? card
+    : i === 0
+      ? { ...card, answered: [{ tier: 0, answered: "0" }] }
+      : i === 1
+        ? {
+            ...card,
+            answered: [
+              { tier: 0, answered: "0" },
+              { tier: 2, answered: "0" },
+            ],
+          }
+        : {
+            ...card,
+            answered: [
+              { tier: 0, answered: "3" },
+              { tier: 2, answered: "0" },
+            ],
+          },
+);
+
+export const NoAnswersYet: Story = {
+  args: { stream: { kind: "stream", cards: unanswered, next: NEXT } },
+  parameters: { now: "2026-01-01T03:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const list = questions(canvasElement);
+    const [library, riverside, bus] = list.getAllByRole("article");
+    for (const card of [library!, riverside!]) {
+      const box = within(card);
+      await expect(box.getByText("Answered since it opened today")).toBeVisible();
+      await expect(box.getByText("No one yet")).toBeVisible();
+      await expect(box.queryByText(/^0 /)).toBeNull();
+      await expect(box.queryByRole("list", { name: /^Answered since/ })).toBeNull();
+    }
+    const counts = within(
+      within(bus!).getByRole("list", { name: "Answered since it opened today" }),
+    );
+    await expect(counts.getByText("3 people with a verified e-mail")).toBeVisible();
+    await expect(counts.getByText("0 people verified with a passport or ID")).toBeVisible();
+  },
+};
+
+export const SpanishNoAnswersYet: Story = {
+  args: { stream: { kind: "stream", cards: unanswered, next: NEXT } },
+  parameters: { locale: "es-US", now: "2026-01-01T03:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
+    await expect(list.getAllByText("Nadie todavía")).toHaveLength(2);
+  },
+};
+
 /** Where Tier 0 asks for a phone, each count names it so (P2-31 part 6a). */
 export const PhoneVerification: Story = {
   args: { phoneVerification: true },

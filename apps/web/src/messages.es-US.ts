@@ -1823,6 +1823,7 @@ export const esUS: Messages = {
   pollFormReviewDescription: "Descripción",
   pollFormReviewQuestions: "Preguntas",
   pollFormReviewQuestionCount: { one: "{count} pregunta", other: "{count} preguntas" },
+  pollFormReviewLimits: "{options}. {rule}",
   pollFormReviewWho: "Quién puede responder",
   pollFormReviewCloses: "Cierra",
   pollFormReviewKey: "Quién tiene la clave",

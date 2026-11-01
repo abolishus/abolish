@@ -801,15 +801,29 @@ function PollReview({
             // A question emptied since the save reads as one, as the title
             // does, where it left a bare number (iteration 18).
             <ol className="m-0 mt-1 grid list-decimal gap-1 ps-5">
-              {form.questions.map((q) => (
-                <li key={q.key}>
-                  {q.question === "" ? (
-                    <span className="text-muted-foreground">{t("pollFormReviewNoQuestion")}</span>
-                  ) : (
-                    q.question
-                  )}
-                </li>
-              ))}
+              {form.questions.map((q) => {
+                // Each question's limits are recorded for good with its
+                // words, so the review says them, in the ballot client's
+                // words as the preview does, with its options' count, from
+                // the create mockup's "(choose one, 3 options)" (P2-19 part 68).
+                const { min, max } = selectionRange(q);
+                const rule = instructionText(t, min, max, q.options.length);
+                return (
+                  <li key={q.key}>
+                    {q.question === "" ? (
+                      <span className="text-muted-foreground">{t("pollFormReviewNoQuestion")}</span>
+                    ) : (
+                      q.question
+                    )}
+                    <span className="block text-sm text-muted-foreground">
+                      {t("pollFormReviewLimits", {
+                        options: t("optionCount", { count: q.options.length }),
+                        rule: min === 0 ? rule : `${rule} ${t("pollFormPreviewCantSkip")}`,
+                      })}
+                    </span>
+                  </li>
+                );
+              })}
             </ol>
           )}
         </>

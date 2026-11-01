@@ -31,7 +31,13 @@ import {
   type WholeOpeningVersion,
 } from "@abolishus/crypto";
 import { type ElectionAdmissionCode, readElection } from "./admission.ts";
-import { ALL_ROWS, ballotChecks, type BallotOutcome, type BallotTally } from "./ballots.ts";
+import {
+  ALL_ROWS,
+  ballotChecks,
+  type BallotOutcome,
+  type BallotTally,
+  type RollingBallotStep,
+} from "./ballots.ts";
 import {
   type CellReport,
   cellTiers,
@@ -47,6 +53,7 @@ import {
 import { isRolling, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
+import { type RollingElectorateReport, rollingElectorates } from "./rolling-report.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
 import { partitionSize } from "./tallies.ts";
 
@@ -168,6 +175,13 @@ export type CountedTallyResult =
       /** Each cell's tier, in partition order (`cellTiers`). */
       readonly tiers: readonly number[];
       readonly pinned: WholeOpeningVersion;
+      /**
+       * Under a rolling definition, each rolling tier's electorate, in cell
+       * order (`rolling_electorate`'s), from the same chain its ballots were
+       * judged against and the counted extent's copies whose membership
+       * proofs verify, admitted or not (Counted set and tally, step 8).
+       */
+      readonly electorates?: readonly RollingElectorateReport[];
     }
   | Exclude<CountedSetResult, { readonly ok: true }>;
 
@@ -205,6 +219,20 @@ export function countedTally(inputs: CountedExtentInputs): CountedTallyResult {
     counted: counted.cells.map((cell) => cell.length),
     tiers: cellTiers(counted.record),
     pinned,
+    // The verifier's own reading of the sealed board's electorate (step 8),
+    // over the counted extent, which is the sealed board's anchored one: a
+    // result shown from it says who could answer as a recount does, never a
+    // count taken from the definition or a submitter (T-16, T-13, T-01).
+    ...(counted.record.version === 7 &&
+      counted.rolling !== undefined && {
+        electorates: rollingElectorates(
+          counted.record,
+          counted.rolling.chain,
+          inputs.clock,
+          counted.rolling.steps,
+          inputs.entries.length,
+        ),
+      }),
   };
 }
 
@@ -227,7 +255,8 @@ export interface CountedResults {
     readonly question?: number;
   };
   readonly cells: readonly CellReport[];
-  readonly tiers: readonly TierReport[];
+  /** Each tier's report and, for a rolling tier, its electorate (Counted set and tally, step 8). */
+  readonly tiers: readonly (TierReport & { readonly electorate?: RollingElectorateReport })[];
   /** Under definition versions 5 to 7, each question's limits and method. */
   readonly questions?: readonly QuestionReport[];
 }
@@ -248,9 +277,12 @@ export function countedResults(
   tally: FixedCountedTally,
   payloads: readonly Uint8Array[],
 ): CountedResults {
-  const { election, aggregates, counted, tiers, pinned } = tally;
+  const { election, aggregates, counted, tiers, pinned, electorates } = tally;
   if (counted.length !== aggregates.length || tiers.length !== aggregates.length)
     throw new RangeError("countedResults: one count and one tier per cell");
+  // A rolling tier is its own cell (tally.md, Rolling tiers).
+  if (electorates !== undefined && electorates.length !== aggregates.length)
+    throw new RangeError("countedResults: one electorate per rolling tier's cell");
   const checked = checkCountedTally(
     election,
     aggregates.map((aggregate, cell) => ({ aggregate, counted: counted[cell] as number })),
@@ -278,7 +310,14 @@ export function countedResults(
     ok: checked.ok,
     ...(checked.failure !== undefined && { failure: checked.failure }),
     cells,
-    tiers: tierResults(tiers, rules, cells),
+    tiers: tierResults(tiers, rules, cells).map((t) => {
+      if (electorates === undefined) return t;
+      // Paired by tier, never by position, as `verifyBundle` pairs them.
+      const electorate = electorates[tiers.indexOf(t.tier)];
+      if (electorate === undefined)
+        throw new Error("countedResults: a rolling tier without its electorate");
+      return { ...t, electorate };
+    }),
     ...questionReports(rules),
   };
 }
@@ -314,6 +353,15 @@ function countedCells(
         readonly record: Uint8Array;
         readonly vss: BallotTally["vss"];
       }[])[];
+      /**
+       * Under a rolling definition, the chain its ballots were judged against
+       * and every copy whose membership proof verifies against its step's
+       * root, admitted or not, in copy order.
+       */
+      readonly rolling?: {
+        readonly chain: RollingBallotChain;
+        readonly steps: readonly RollingBallotStep[];
+      };
     }
   | Exclude<CountedSetResult, { readonly ok: true }> {
   const { entries, clock, blocks } = inputs;
@@ -396,8 +444,12 @@ function countedCells(
       };
   }
   const { candidates } = admission;
-  // Settled rows mean 5.5 ran, and with it the candidates.
+  // Settled rows mean 5.5 ran, and with it the candidates and, under a
+  // rolling definition, the steps.
   if (candidates === undefined) throw new Error("countedSet: settled admission without candidates");
+  const rollingSteps = admission.steps;
+  if (rolling !== undefined && rollingSteps === undefined)
+    throw new Error("countedSet: settled rolling admission without its steps");
   // An ordinary ballot's window rests on its record's `l2_timestamp`
   // (Selection, condition 4; T-35, T-71). The board through `C_S` fixes the
   // counted extent, so the seal (condition 3) and the floor of `s_S`
@@ -444,5 +496,13 @@ function countedCells(
     if (into === undefined) throw new Error("countedSet: a selected ballot outside the partition");
     into.push({ record: ballot, vss: tally.vss });
   });
-  return { ok: true, definitionHash: hash, record, registered, cells };
+  return {
+    ok: true,
+    definitionHash: hash,
+    record,
+    registered,
+    cells,
+    ...(rolling !== undefined &&
+      rollingSteps !== undefined && { rolling: { chain: rolling.chain, steps: rollingSteps } }),
+  };
 }

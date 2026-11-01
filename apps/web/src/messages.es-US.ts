@@ -393,6 +393,8 @@ export const esUS: Messages = {
     "Abiertas ahora, según cuántas personas respondieron en los últimos siete días, cada persona una vez sin importar cuántas veces cambió su respuesta. Cualquiera puede volver a contarlo desde el tablero público.",
   streamQuestions: "Preguntas",
   streamAnsweredSoFar: "Han respondido hasta ahora",
+  streamAnsweredSinceDay: "Han respondido desde que abrió {day}",
+  streamAnsweredSinceDate: "Han respondido desde que abrió el\u00a0{date}",
   streamAnswered_email: {
     one: "{count} persona con correo verificado",
     other: "{count} personas con correo verificado",

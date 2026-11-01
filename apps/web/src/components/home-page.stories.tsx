@@ -137,7 +137,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(main.getByText(/The newest open questions\. Choose an answer/)).toBeVisible();
   await expect(newest.getByText("These answers are for question 1 of 2.")).toBeVisible();
   // A card says how many have answered so far, by tier, as in the stream.
-  const counts = newest.getAllByRole("list", { name: "Answered so far" });
+  const counts = newest.getAllByRole("list", { name: /^Answered since it opened / });
   await expect(counts).toHaveLength(1);
   await expect(within(counts[0]!).getByRole("listitem")).toHaveTextContent(
     "86 people with a verified e-mail",

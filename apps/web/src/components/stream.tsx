@@ -6,7 +6,7 @@ import { ArrowRight, ChevronDown, Search } from "lucide-react";
 import { useId } from "react";
 
 import { catalogs, type Messages, POLL_TOPIC_MESSAGES } from "../messages.ts";
-import type { Tier } from "../poll.ts";
+import type { Instant, Tier } from "../poll.ts";
 import type { Stream, StreamFilter } from "../server/load.ts";
 import {
   type CardAnswered,
@@ -22,7 +22,7 @@ import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
 import { PageHeader } from "./page-parts.tsx";
-import { When } from "./when.tsx";
+import { useViewerDaySince, When } from "./when.tsx";
 
 const SORT_LABEL = {
   new: "sort_new",
@@ -393,13 +393,21 @@ function answeredMessage(tier: Tier, phoneVerification: boolean) {
  */
 function Answered({
   answered,
+  opensAt,
   phoneVerification,
 }: {
   answered: CardAnswered;
+  opensAt: Instant;
   phoneVerification: boolean;
 }) {
   const t = useTranslate(catalogs);
   const titleId = useId();
+  // A count says how long it has been gathering: 38 answers since this
+  // morning and 38 over two weeks read the same, and under "New", the order
+  // about how recently a poll was asked, no card said when (P2-29, the
+  // stream's iteration 24). The day is the visitor's, so only the browser
+  // says it; the served page keeps "Answered so far".
+  const since = useViewerDaySince(opensAt);
   return (
     // On a phone the band reaches the card's borders and its words start
     // where the question's do: inset in the card's own padding, a count at
@@ -407,7 +415,11 @@ function Answered({
     // (P2-29, the stream's iteration 10).
     <div className="-mx-5 grid max-w-xl gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4">
       <p id={titleId} className="m-0 font-medium">
-        {t("streamAnsweredSoFar")}
+        {since === undefined
+          ? t("streamAnsweredSoFar")
+          : since.relative
+            ? t("streamAnsweredSinceDay", { day: since.day })
+            : t("streamAnsweredSinceDate", { date: since.day })}
       </p>
       <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
         {answered.map(({ tier, answered: count }) => (
@@ -536,7 +548,11 @@ export function StreamCard({
       {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
       <ListedUnder tags={tags} linked />
       {card.answered === undefined ? null : (
-        <Answered answered={card.answered} phoneVerification={phoneVerification} />
+        <Answered
+          answered={card.answered}
+          opensAt={poll.opensAt}
+          phoneVerification={phoneVerification}
+        />
       )}
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>

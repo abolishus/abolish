@@ -631,6 +631,7 @@ const enUS = {
   pollQuestionsFixed:
     "The poll's definition fixes these words, so they can't be edited before it opens or while it runs.",
   pollPickFrom: "{instruction} from {options}",
+  pollPickRule: "{instruction}. {pick}",
   pollFinal: {
     one: "Final results. {count} person answered; here is what they said.",
     other: "Final results. {count} people answered; here is what they said.",

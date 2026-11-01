@@ -676,7 +676,11 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   const asks = canvas.getByRole("region", { name: "What it asks" });
   // The question heading the page isn't said again: its answers, numbered by question.
   await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();
-  await expect(within(asks).getByText("Pick one from 3 options")).toBeVisible();
+  // One line above the answers that open the ballot app, not "Pick one from
+  // 3 options" over it as a second: the boxes count themselves and "Choose an
+  // answer" says "Pick one" (P2-29, the poll page's iteration 8).
+  await expect(within(asks).queryByText(/Pick one/)).toBeNull();
+  await expect(within(asks).queryByText(/from 3 options/)).toBeNull();
   await expect(
     within(asks)
       .getAllByRole("listitem")
@@ -821,6 +825,9 @@ export const WordedQuestions: Story = {
       ).getByRole("link", { name: "No" }),
     ).toHaveAttribute("href", `${BALLOT}#election=${poll.electionId}&pick=1`);
     await expect(canvas.getByText(/^Choose an answer to question 1 of 2 to open it/)).toBeVisible();
+    // Question 1's rule is said by its one line; question 2's, whose answers
+    // are words, keeps its own (P2-29, the poll page's iteration 8).
+    await expect(canvas.queryByText("Pick one from 3 options")).toBeNull();
     await expect(canvas.queryByRole("link", { name: "Public holidays" })).toBeNull();
     await expect(canvas.getByText("Public holidays")).toHaveStyle({ borderTopWidth: "0px" });
     await expect(canvas.getByRole("link", { name: "Answer 2 questions" })).toBeVisible();
@@ -828,6 +835,29 @@ export const WordedQuestions: Story = {
     await expect(
       canvas.getByText(/^2 questions, answered together\. You can change your answers until/),
     ).toBeVisible();
+  },
+};
+
+/**
+ * A first question that takes more than one answer: a link carries one pick,
+ * so its rule leads the line above the answers, the one line there (P2-29,
+ * the poll page's iteration 8).
+ */
+export const WordedApproval: Story = {
+  args: {
+    ...WORDED,
+    ballot: BALLOT,
+    poll: { ...poll, questions: [{ optionCount: 3, minSelections: 0, maxSelections: 2 }] },
+  },
+  play: async ({ canvasElement }) => {
+    const asks = within(within(canvasElement).getByRole("region", { name: "What it asks" }));
+    await expect(
+      asks.getByText(
+        "Pick up to 2. Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",
+      ),
+    ).toBeVisible();
+    await expect(asks.queryByText(/from 3 options/)).toBeNull();
+    await expect(asks.getAllByRole("link")).toHaveLength(3);
   },
 };
 

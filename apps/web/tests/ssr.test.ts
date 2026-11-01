@@ -1807,7 +1807,7 @@ describe("poll list", () => {
     for (const path of ["/polls", "/polls?q=bridge", "/polls?topic=housing&place=Old+Town"]) {
       const html = await (await get(path)).text();
       expect(suggested(html), path).toEqual(LISTED_PLACES);
-      expect(html).toContain("As you type, it suggests the places listed polls are filed at.");
+      expect(html).toContain("It suggests the places listed polls are filed at.");
     }
     // Asked for with nothing, as the contract's empty input takes it.
     const asked = seen.filter((r) => r.path === "/elections/places");
@@ -1829,7 +1829,7 @@ describe("poll list", () => {
       expect(response.status).toBe(200);
       const html = await response.text();
       expect(html).not.toContain("<datalist");
-      expect(html).not.toContain("it suggests the places");
+      expect(html).not.toContain("suggests the places");
       expect(linked(html).length).toBeGreaterThan(0);
     } finally {
       stub.listedPlaces = LISTED_PLACES;

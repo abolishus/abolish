@@ -565,7 +565,7 @@ export const PlacesSuggested: Story = {
     const place = within(search).getByRole("combobox", { name: "Place" });
     await expect(place).toHaveValue("");
     await expect(place).toHaveAccessibleDescription(
-      /the whole name must match\. As you type, it suggests the places listed polls are filed at\.$/,
+      /the whole name must match\. It suggests the places listed polls are filed at\.$/,
     );
     const list = place.getAttribute("list");
     await expect(list).not.toBeNull();
@@ -587,7 +587,7 @@ export const NoPlacesSuggested: Story = {
     const place = canvas.getByRole("textbox", { name: "Place" });
     await expect(place).not.toHaveAttribute("list");
     await expect(canvasElement.querySelector("datalist")).toBeNull();
-    await expect(canvas.queryByText(/it suggests the places/)).toBeNull();
+    await expect(canvas.queryByText(/suggests the places/)).toBeNull();
   },
 };
 

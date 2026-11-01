@@ -463,7 +463,7 @@ export const esUS: Messages = {
   streamPlaceHint:
     "Un pueblo, barrio o escuela, tal como lo escriben quienes preguntan. No importan las mayúsculas ni los espacios, pero el nombre completo debe coincidir.",
   registerPlaceSuggested:
-    "Al escribir, sugiere los lugares en los que están clasificadas las encuestas de la lista.",
+    "Sugiere los lugares en los que están clasificadas las encuestas de la lista.",
   streamPlaceFiltering: "Solo preguntas clasificadas en este lugar.",
   streamPlaceClear: "Borrar el lugar",
   streamTopicClear: "Ver todos los temas",

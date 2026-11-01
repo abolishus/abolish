@@ -871,15 +871,16 @@ describe("elections.list (T-68)", () => {
       };
       const town = `Mill ${hex(b32()).slice(0, 8)}`;
       const hidden = `Mill ${hex(b32()).slice(0, 8)}`;
-      for (const place of [town, town.toUpperCase(), town.toUpperCase()])
+      // The commonest spelling is the last by code point, not the first.
+      for (const place of [town.toUpperCase(), town, town.toLowerCase(), town.toLowerCase()])
         await insertPollTags(app, (await election()).id, { place });
       const h = await election();
       await insertPollTags(app, h.id, { place: hidden });
-      expect(await places()).toEqual(expect.arrayContaining([town.toUpperCase(), hidden]));
+      expect(await places()).toEqual(expect.arrayContaining([town.toLowerCase(), hidden]));
       await moderate(app, h.id, { action: "hide", reason: "threat", moderator: "mod-1" });
       const now = await places();
       expect(now.filter((p) => p.toLowerCase() === town.toLowerCase())).toEqual([
-        town.toUpperCase(),
+        town.toLowerCase(),
       ]);
       expect(now).not.toContain(hidden);
       expect((await get("/elections/places", { limit: "1" })).status).toBe(400);

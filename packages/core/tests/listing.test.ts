@@ -20,6 +20,7 @@ import {
   MAX_LISTING_PAGE,
   moderate,
   moderationStatus,
+  placeKey,
   REMOVAL_REASONS,
   recordRegistration,
   refilePoll,
@@ -546,16 +547,19 @@ describe("listedPlaces", () => {
   }
 
   test("suggests each place once, in the spelling most of its polls carry, the first by code point on a tie", async () => {
+    // The commonest spelling sorts last by code point, so the first by code
+    // point (a `min`) would pick another.
     const common = fresh();
+    await filed(common.toUpperCase());
     await filed(common);
-    await filed(common.toUpperCase());
-    await filed(common.toUpperCase());
+    await filed(common.toLowerCase());
+    await filed(common.toLowerCase());
     const tied = fresh();
     await filed(tied.toLowerCase());
     await filed(tied);
     const places = await listedPlaces(app);
-    expect(places.filter((p) => p.toLowerCase().includes(common.toLowerCase()))).toEqual([
-      common.toUpperCase(),
+    expect(places.filter((p) => p.toLowerCase() === common.toLowerCase())).toEqual([
+      common.toLowerCase(),
     ]);
     // "P" (U+0050) sorts before "p" (U+0070) whatever the database's collation.
     expect(places.filter((p) => p.toLowerCase() === tied.toLowerCase())).toEqual([tied]);
@@ -590,13 +594,18 @@ describe("listedPlaces", () => {
   });
 
   test("returns at most MAX_LISTED_PLACES, the places with the most polls, in order of key", async () => {
-    // Two polls each: more than any place filed once, so every one fits.
-    const many = Array.from({ length: 3 }, fresh);
-    for (const place of many) for (let i = 0; i < 2; i++) await filed(place);
+    // More places than fit, each filed once, and one filed twice whose key
+    // sorts after every other: it fits only by its count.
+    const once = Array.from({ length: MAX_LISTED_PLACES + 1 }, fresh);
+    for (const place of once) await filed(place);
+    const twice = `zzz ${fresh()}`;
+    await filed(twice);
+    await filed(twice);
     const places = await listedPlaces(app);
-    expect(places.length).toBeLessThanOrEqual(MAX_LISTED_PLACES);
-    expect(places).toEqual(expect.arrayContaining(many));
-    const keys = places.map((p) => p.replace(/\s+/gu, " ").trim().normalize("NFKC").toLowerCase());
+    expect(places).toHaveLength(MAX_LISTED_PLACES);
+    expect(places.at(-1)).toBe(twice);
+    expect(once.filter((p) => !places.includes(p)).length).toBeGreaterThan(0);
+    const keys = places.map((p) => placeKey(p)!);
     const byCodePoint = (a: string, b: string) => {
       const [x, y] = [Array.from(a), Array.from(b)];
       for (let i = 0; i < Math.min(x.length, y.length); i++)
@@ -608,8 +617,9 @@ describe("listedPlaces", () => {
   });
 
   test("reads in a read-only session", async () => {
+    // Filed often enough to fit among the places the cap keeps.
     const place = fresh();
-    await filed(place);
+    for (let i = 0; i < 5; i++) await filed(place);
     const readOnly = await db.as("abolish_app");
     await readOnly`SET default_transaction_read_only = on`;
     expect(await listedPlaces(readOnly)).toContain(place);

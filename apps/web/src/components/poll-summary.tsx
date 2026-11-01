@@ -171,18 +171,21 @@ function PollQuestions({
                     </span>
                   </h3>
                 )}
-                {instruction === undefined ? null : (
-                  <p className="m-0 text-sm text-muted-foreground">
-                    {t("pollPickFrom", {
-                      instruction: t(instruction.key, instruction.values),
-                      options: t("optionCount", { count: q.options.length }),
-                    })}
-                  </p>
-                )}
                 {picks !== null ? (
                   <>
+                    {/* One line above the answers that open the ballot app,
+                        where "Pick one from 3 options" stood over "Choose an
+                        answer…" as a second muted line: the boxes count
+                        themselves and "Choose an answer" says "Pick one", so
+                        only a rule a pick doesn't say leads the sentence
+                        (P2-29, the poll page's iteration 8). */}
                     <p className="m-0 text-sm text-pretty text-muted-foreground">
-                      {t("streamPick", { count: words.questions.length })}
+                      {instruction === undefined || instruction.key === "instruction_one"
+                        ? t("streamPick", { count: words.questions.length })
+                        : t("pollPickRule", {
+                            instruction: t(instruction.key, instruction.values),
+                            pick: t("streamPick", { count: words.questions.length }),
+                          })}
                     </p>
                     <ul
                       // Named by the question it answers, as a card's list is: on a
@@ -206,18 +209,28 @@ function PollQuestions({
                     </ul>
                   </>
                 ) : (
-                  <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-                    {q.options.map((label, j) => (
-                      <li
-                        key={j}
-                        lang={words.language}
-                        dir="auto"
-                        className="min-w-0 bg-muted px-3 py-1 text-sm break-words"
-                      >
-                        {label}
-                      </li>
-                    ))}
-                  </ul>
+                  <>
+                    {instruction === undefined ? null : (
+                      <p className="m-0 text-sm text-muted-foreground">
+                        {t("pollPickFrom", {
+                          instruction: t(instruction.key, instruction.values),
+                          options: t("optionCount", { count: q.options.length }),
+                        })}
+                      </p>
+                    )}
+                    <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+                      {q.options.map((label, j) => (
+                        <li
+                          key={j}
+                          lang={words.language}
+                          dir="auto"
+                          className="min-w-0 bg-muted px-3 py-1 text-sm break-words"
+                        >
+                          {label}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
               </div>
             </li>

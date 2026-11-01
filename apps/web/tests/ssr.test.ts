@@ -401,7 +401,9 @@ describe("poll page", () => {
     expect(html).toContain(`Poll ${OPEN_ONE.slice(0, 16)}…`);
     const page = html.replace(/<[^>]+>/g, "");
     expect(page).toContain("What it asks");
-    expect(page).toContain("Pick one from 3 options");
+    // The answers that open the ballot app are under one line, which says
+    // "Pick one" as "Choose an answer" (P2-29, the poll page's iteration 8).
+    expect(page).not.toContain("Pick one from 3 options");
     // Its one question heads the page, so it isn't said a second time, only numbered.
     expect(html).not.toMatch(/<h3[^>]*>(?:<[^>]+>)*[^<]*Should the park/);
     expect(html).toContain('<h3 id="question-0" class="sr-only">Question 1</h3>');
@@ -430,7 +432,10 @@ describe("poll page", () => {
     const page = html.replace(/<[^>]+>/g, "");
     expect(page).toContain("Question 1: Should the park stay open late?");
     expect(page).toContain("Question 2: Should the library open on Sundays?");
-    expect(page).toMatch(/Pick [a-z ]+ from 3 options/);
+    // Question 1's answers open the ballot app under their one line;
+    // question 2's are words, with their rule (P2-29, the poll page's
+    // iteration 8).
+    expect(page).not.toContain("Pick one from 3 options");
     expect(page).toMatch(/Pick [a-z ]+ from 2 options/);
     expect(page).toContain("Answer 2 questions");
     expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}"`);

@@ -635,6 +635,7 @@ export const esUS: Messages = {
   pollQuestionsFixed:
     "La definición de la encuesta fija estas palabras, así que no se pueden editar antes de que abra ni mientras está abierta.",
   pollPickFrom: "{instruction} entre {options}",
+  pollPickRule: "{instruction}. {pick}",
   pollFinal: {
     one: "Resultados finales. Respondió {count} persona; esto es lo que dijo.",
     other: "Resultados finales. Respondieron {count} personas; esto es lo que dijeron.",

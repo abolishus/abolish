@@ -626,6 +626,19 @@ export function PollSummary({
             open poll's mockup says who can open the answers: the asker can't,
             and during launch the key is ours alone (T-14). */}
         <p className="m-0 max-w-prose text-lg text-pretty">{t("evidenceKey")}</p>
+        {/* Where that key came from, as the scheduled poll's mockup shows its
+            ceremony: the board page's record of it, on the board's first
+            page, which the link opens. Not before the board holds an entry,
+            since until then there is no record to show (T-14, T-40). */}
+        {board.treeSize === "0" ? null : (
+          <a
+            className="inline-flex min-h-12 items-center gap-2 justify-self-start text-lg underline underline-offset-4 focus-text"
+            href={`/polls/${poll.electionId}/board#ceremony-title`}
+          >
+            {t("boardCeremonyTitle")}
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </a>
+        )}
         <details ref={evidence} className="group">
           <summary className="inline-flex h-12 cursor-pointer list-none items-center gap-2 border border-border px-5 text-base hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&::-webkit-details-marker]:hidden">
             <span className="group-open:hidden">{t("evidenceShow")}</span>

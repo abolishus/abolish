@@ -24,6 +24,13 @@ export interface TierResults {
    * docs/spec/membership.md, Reported counts). Absent for a fixed tier.
    */
   readonly couldAnswer?: number;
+  /**
+   * Set where the verifier's small-count rule flags `couldAnswer`: so few
+   * could answer that the results can show how individuals answered (8.2, T-16).
+   * The flag is the verifier's word, carried by our server, never recomputed
+   * here; it never withholds a result.
+   */
+  readonly fewCouldAnswer?: true;
 }
 
 /**
@@ -70,6 +77,7 @@ export function resultsView(
       counted: t.counted,
       questions,
       ...(t.electorate !== undefined && { couldAnswer: t.electorate.eligible }),
+      ...(t.electorate?.flagged.eligible === true && { fewCouldAnswer: true }),
     });
   }
   return { kind: "read", tiers };

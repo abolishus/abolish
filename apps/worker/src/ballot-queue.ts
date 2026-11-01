@@ -166,9 +166,16 @@ export const RESULTS_OUTCOME = z.union([
           counted: SMALL,
           counts: COUNTS.optional(),
           byQuestion: BY_QUESTION.optional(),
-          // A rolling tier's electorate: its members at the opening root and
-          // who could answer by the close, the verifier's `E(n_c)`.
-          electorate: z.strictObject({ opening: SMALL, eligible: SMALL }).optional(),
+          // A rolling tier's electorate: its members at the opening root,
+          // who could answer by the close, the verifier's `E(n_c)`, and 8.2's
+          // small-count flag on that count.
+          electorate: z
+            .strictObject({
+              opening: SMALL,
+              eligible: SMALL,
+              flagged: z.strictObject({ eligible: z.boolean() }),
+            })
+            .optional(),
         }),
       )
       .max(MAX_CELLS),

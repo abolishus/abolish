@@ -308,7 +308,11 @@ describe("elections.getResults' answers", () => {
               counted: small,
               counts,
               byQuestion,
-              electorate: fc.record({ opening: small, eligible: small }),
+              electorate: fc.record({
+                opening: small,
+                eligible: small,
+                flagged: fc.record({ eligible: fc.boolean() }),
+              }),
             },
             { requiredKeys: ["tier", "counted"] },
           ),

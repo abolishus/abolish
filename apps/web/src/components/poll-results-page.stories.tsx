@@ -359,6 +359,56 @@ export const RollingAtClose: Story = {
   },
 };
 
+/**
+ * A rolling poll whose Tier 2 so few could answer that the verifier flags
+ * the count: the results stand, in the tier's panel and the side-by-side
+ * header, saying what so few can reveal (verifier 8.2; T-16).
+ */
+export const RollingFewCouldAnswer: Story = {
+  args: {
+    poll: { ...meta.args.poll, version: 7, rolling: true },
+    results: {
+      kind: "read",
+      tiers: [
+        {
+          tier: 0,
+          counted: 1234,
+          questions: [
+            ["700", "434", "100"],
+            ["600", "600"],
+          ],
+          couldAnswer: 8000,
+        },
+        {
+          tier: 2,
+          counted: 12,
+          questions: [
+            ["6", "4", "2"],
+            ["7", "5"],
+          ],
+          couldAnswer: 15,
+          fewCouldAnswer: true,
+        },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Tier 0's panel is open first, and isn't flagged.
+    await expect(canvas.queryByText(/So few could answer/)).toBeNull();
+    const side = within(canvas.getByRole("region", { name: "The groups side by side" }));
+    await expect(side.getAllByText("Few could answer")).toHaveLength(2);
+    await userEvent.click(canvas.getByRole("tab", { name: /Tier 2/ }));
+    await waitFor(() =>
+      expect(
+        within(canvas.getByRole("tabpanel")).getByText(
+          "So few could answer that these results can show how some of them answered.",
+        ),
+      ).toBeVisible(),
+    );
+  },
+};
+
 /** A cell whose openings failed the board's check, beside one not yet opened and one no seat signed. */
 export const CellFailed: Story = {
   args: {

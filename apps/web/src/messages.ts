@@ -586,6 +586,9 @@ const enUS = {
     one: "{count} person could answer by the close",
     other: "{count} people could answer by the close",
   },
+  resultsFewCouldAnswer:
+    "So few could answer that these results can show how some of them answered.",
+  resultsFewCouldAnswerShort: "Few could answer",
   resultsTurnoutIs: "Turnout: {turnout}",
   resultsTierPending:
     "Part of this group's count isn't published yet. Its results appear here once it all is.",

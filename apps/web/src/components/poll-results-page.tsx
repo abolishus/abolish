@@ -174,6 +174,11 @@ function SideBySide({
                           {t("resultsTurnoutIs", { turnout: turnouts[j].text })}
                         </span>
                       )}
+                      {tier.fewCouldAnswer === true ? (
+                        <span className="block text-xs font-normal">
+                          {t("resultsFewCouldAnswerShort")}
+                        </span>
+                      ) : null}
                     </TableHead>
                   ))}
                 </TableRow>
@@ -405,6 +410,11 @@ function TierPanel({
   return (
     <div className="grid gap-10">
       <Turnout poll={poll} tier={tier} />
+      {/* The verifier's small-count flag on who could answer: the results
+          stand, and say what so few can reveal (8.2, T-16). */}
+      {tier.fewCouldAnswer === true ? (
+        <p className="m-0 max-w-prose text-base">{t("resultsFewCouldAnswer")}</p>
+      ) : null}
       {tier.questions === undefined ? (
         <p role="status" className="m-0 max-w-prose text-base">
           {t("resultsTierPending")}

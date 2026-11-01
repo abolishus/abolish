@@ -178,8 +178,10 @@ describe("resultsView of a rolling poll", () => {
     rolling: true,
     electorate: [{ tier: 0 as const, groupSize: "40" }],
   };
-  const tier = (electorate: { opening: number; eligible: number }, counted = 4) =>
-    read([{ tier: 0, counted, electorate }]);
+  const tier = (
+    electorate: { opening: number; eligible: number; flagged?: { eligible: boolean } },
+    counted = 4,
+  ) => read([{ tier: 0, counted, electorate: { flagged: { eligible: false }, ...electorate } }]);
 
   test("takes each rolling tier's count at the close as who could answer", () => {
     expect(resultsView(rolling, tier({ opening: 40, eligible: 57 }))).toEqual({
@@ -190,6 +192,16 @@ describe("resultsView of a rolling poll", () => {
     expect(resultsView(rolling, read([{ tier: 0, counted: 4 }]))).toEqual({
       kind: "read",
       tiers: [{ tier: 0, counted: 4, questions: undefined }],
+    });
+  });
+
+  // 8.2: the verifier's flag, carried as served and never recomputed (T-16).
+  test("carries the small-count flag on who could answer", () => {
+    expect(
+      resultsView(rolling, tier({ opening: 40, eligible: 7, flagged: { eligible: true } })),
+    ).toEqual({
+      kind: "read",
+      tiers: [{ tier: 0, counted: 4, questions: undefined, couldAnswer: 7, fewCouldAnswer: true }],
     });
   });
 

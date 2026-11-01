@@ -28,6 +28,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
   for (const graphic of canvas.getAllByTestId("trust-graphic"))
     await expect(graphic).toHaveAttribute("aria-hidden", "true");
   await expect(canvasElement.querySelector("[style]")).toBeNull();
+  // The scene ends on where to read more and where to count again, after
+  // its four steps, as the home page's mockup does.
+  const more = canvas.getByRole("link", { name: "How it works, in full" });
+  await expect(more).toHaveAttribute("href", "/how-it-works");
+  const verify = canvas.getByRole("link", { name: "How to verify a result yourself" });
+  await expect(verify).toHaveAttribute("href", "/verify");
+  await expect(scene.compareDocumentPosition(more) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 };
 
 export const Default: Story = { play };
@@ -64,5 +71,36 @@ export const Phone: Story = {
     });
     await expect(scene.querySelector("[data-active]")).not.toBeNull();
     await expect(new Set(borders).size).toBe(1);
+    // The links wrap rather than push the page sideways.
+    for (const name of ["How it works, in full", "How to verify a result yourself"]) {
+      const link = within(canvasElement).getByRole("link", { name });
+      await expect(link.getBoundingClientRect().right).toBeLessThanOrEqual(360);
+      await expect(link.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
+    }
+  },
+};
+
+/**
+ * The Spanish links are the longest words the scene ends on: on a phone
+ * each wraps inside the screen rather than pushing the page sideways.
+ */
+export const SpanishPhone: Story = {
+  parameters: { locale: "es-US" },
+  // The site's frame keeps a 16px gutter each side, as the page does.
+  decorators: [
+    (Story) => (
+      <div className="px-4">
+        <Story />
+      </div>
+    ),
+  ],
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const width = canvasElement.ownerDocument.documentElement.clientWidth;
+    await expect(width).toBe(360);
+    for (const name of ["Cómo funciona, en detalle", "Cómo verificar un resultado por tu cuenta"]) {
+      const link = within(canvasElement).getByRole("link", { name });
+      await expect(link.getBoundingClientRect().right).toBeLessThanOrEqual(width - 16);
+    }
   },
 };

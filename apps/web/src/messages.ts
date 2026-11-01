@@ -29,6 +29,7 @@ const enUS = {
   trustTitle: "Why you can trust a casual poll",
   trustLede:
     "A question about street trees is sealed, posted and counted the same way as a referendum. Here is what happens to an answer, in four steps.",
+  trustHowItWorks: "How it works, in full",
   trustLabel: "What happens to an answer",
   trustStep: "Step {step} of {total}",
   trust1Title: "Sealed on your device",

@@ -1,4 +1,4 @@
-import { cn, useTranslate } from "@abolishus/ui";
+import { buttonVariants, cn, useTranslate } from "@abolishus/ui";
 import { ArrowRight, Check, KeyRound, Lock } from "lucide-react";
 import type { ReactNode } from "react";
 
@@ -164,6 +164,31 @@ export function TrustScene() {
         ))}
         graphic={(step) => <TrustGraphic step={step} />}
       />
+      {/* The mockup's band ends on where to read more and where to count
+          again. The second link keeps how it works' words for the verify
+          page: that page says no poll of ours can be recounted until boards
+          are anchored (P4-1), so the link promises the how, not a result.
+          Both wrap, since the Spanish words outgrow a phone's width. */}
+      <div className="flex flex-wrap gap-3">
+        <a
+          href="/how-it-works"
+          className={cn(
+            buttonVariants({ size: "lg" }),
+            "h-auto min-h-12 max-w-full py-3 whitespace-normal",
+          )}
+        >
+          {t("trustHowItWorks")}
+        </a>
+        <a
+          href="/verify"
+          className={cn(
+            buttonVariants({ size: "lg", variant: "outline" }),
+            "h-auto min-h-12 max-w-full py-3 whitespace-normal",
+          )}
+        >
+          {t("howVerify")}
+        </a>
+      </div>
     </section>
   );
 }

@@ -27,6 +27,7 @@ export const esUS: Messages = {
   trustTitle: "Por qué puedes confiar en una encuesta informal",
   trustLede:
     "Una pregunta sobre los árboles de la calle se sella, se publica y se cuenta igual que un referéndum. Esto es lo que pasa con una respuesta, en cuatro pasos.",
+  trustHowItWorks: "Cómo funciona, en detalle",
   trustLabel: "Qué pasa con una respuesta",
   trustStep: "Paso {step} de {total}",
   trust1Title: "Sellada en tu dispositivo",

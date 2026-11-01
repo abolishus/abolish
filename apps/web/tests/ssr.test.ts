@@ -3158,6 +3158,9 @@ describe("home", () => {
     // The ID lookup is the register's, not the front page's.
     expect(html).not.toContain('name="id"');
     expect(html).toContain("Why you can trust a casual poll");
+    // P2-19 part 65: the trust scene ends on where to read more and where to count again.
+    expect(html).toMatch(/<a href="\/how-it-works"[^>]*>How it works, in full</);
+    expect(html).toMatch(/<a href="\/verify"[^>]*>How to verify a result yourself</);
   });
 
   test("asks the API for one short page of the stream (T-52)", async () => {

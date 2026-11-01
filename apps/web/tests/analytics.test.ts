@@ -102,10 +102,26 @@ describe("pages", () => {
       runs,
     );
     expect(
-      ["/", "/discover", "/polls", "/moderation", "/account", "/how-it-works", "/verify"].map(
-        pageOf,
-      ),
-    ).toEqual(["/", "/discover", "/polls", "/moderation", "/account", "/how-it-works", "/verify"]);
+      [
+        "/",
+        "/discover",
+        "/polls",
+        "/moderation",
+        "/account",
+        "/how-it-works",
+        "/verify",
+        "/trustees",
+      ].map(pageOf),
+    ).toEqual([
+      "/",
+      "/discover",
+      "/polls",
+      "/moderation",
+      "/account",
+      "/how-it-works",
+      "/verify",
+      "/trustees",
+    ]);
     expect(pageOf(`/account/polls/${"a".repeat(32)}`)).toBe("/account/polls/:id");
     expect(pageOf("/account/polls/new")).toBe("/account/polls/:id");
     // Its setup's page keeps no ID either (P2-22 part 6d).
@@ -129,6 +145,7 @@ describe("pages", () => {
       "/moderation/",
       "/how-it-works/",
       "/verify/",
+      "/trustees/",
       "/discover/",
       "/x",
     ])

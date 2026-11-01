@@ -216,6 +216,7 @@ describe("every page", () => {
     "/account/verify",
     "/how-it-works",
     "/verify",
+    "/trustees",
     "/discover",
     `/by/${PROFILE_HANDLE}`,
     "/nowhere",
@@ -3164,6 +3165,30 @@ describe("verify it yourself", () => {
   });
 });
 
+describe("who holds the keys", () => {
+  test("says every seat is ours, from the server without asking the API, linked from the footer", async () => {
+    seen.length = 0;
+    const response = await get("/trustees");
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(html).toContain("<title>Who holds the keys");
+    // Only the footer links it, so the footer's link is the one marked.
+    const current = [...html.matchAll(/<a\b[^>]*aria-current="page"[^>]*>/g)].map((m) => m[0]);
+    expect(current).toHaveLength(1);
+    expect(current[0]).toContain('href="/trustees"');
+    for (const id of ["seats", "ours", "promises", "next"]) {
+      expect(html).toContain(`id="${id}"`);
+      expect(html).toContain(`href="#${id}"`);
+    }
+    // The label comes before anything else the page says about seats (T-14).
+    const label = html.indexOf("During launch, Abolish alone holds the key");
+    expect(label).toBeGreaterThan(0);
+    expect(label).toBeLessThan(html.indexOf('id="seats"'));
+    expect(seen).toHaveLength(0);
+    expect(await (await get("/verify")).text()).toContain('href="/trustees"');
+  });
+});
+
 describe("failures", () => {
   test("a short link while the API is unreachable fails uncached, quoting no error", async () => {
     stub.down = true;
@@ -3319,16 +3344,17 @@ const KB = 1024;
  * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box with its topics and place, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 182, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 179, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 219, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 189, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 182, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 175, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 172, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 201, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 256, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 176, css: 40, fonts: 58 },
+  "/": { html: 10, js: 184, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 181, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 220, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 191, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 184, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 177, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 173, css: 40, fonts: 58 },
+  "/trustees": { html: 6, js: 176, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 203, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 258, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 178, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

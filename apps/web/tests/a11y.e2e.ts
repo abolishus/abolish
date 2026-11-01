@@ -70,6 +70,7 @@ const PAGES = [
   "/discover?q=park",
   "/how-it-works",
   "/verify",
+  "/trustees",
   "/polls",
   "/polls?q=park",
   "/polls?topic=housing&place=Old+Town",

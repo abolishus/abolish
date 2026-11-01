@@ -322,6 +322,81 @@ const enUS = {
     "A machine left on, an Ethereum node, a node of the poll's network, and disk for the boards you copy. Restart it to serve what a later copy added.",
   recountSource:
     "The verifier's source is in packages/verifier and its specification in docs/spec/verifier.md, both published at github.com/abolishus/abolish.",
+  navKeys: "Who holds the keys",
+  keysEyebrow: "Trustees · The launch panel",
+  keysTitle: "During launch, Abolish alone holds the key",
+  keysLede:
+    "Every answer is sealed so that only a poll's trustee seats, working together, can open it. Until independent trustees are named, every seat is ours, so for now the answers to a poll here are not secret from us.",
+  keysFigureSeats: "Trustee seats",
+  keysFigureSeatsScope: "every one run by Abolish",
+  keysFigureThreshold: "Needed to open a count",
+  keysFigureThresholdScope: "any {threshold} of the {seats}",
+  keysFigureAlone: "Seats that can open anything alone",
+  keysFigureAloneScope: "a share by itself reveals nothing",
+  keysFigureOthers: "Seats held by anyone else",
+  keysFigureOthersScope: "until independent trustees are named",
+  keysSeatsMark: "The seats",
+  keysSeatsTitle: "{seats} seats, and any {threshold} open a count",
+  keysSeatsLede:
+    "A seat is a trustee's node. When you answer, the ballot app splits what opens your sealed answer into one share for each seat, each encrypted to that seat alone.",
+  keysSeat1Title: "No seat opens anything alone",
+  keysSeat1Body:
+    "One share, or any {fewer} of them, reveals nothing about an answer. No single seat can open a count early, or at all.",
+  keysSeat2Title: "{threshold} seats open the totals",
+  keysSeat2Body:
+    "After a poll closes, each seat adds up its shares and {threshold} of those sums open each total. Every opening is signed by the seat that made it and checked against the board, so a wrong one shows in public.",
+  keysSeat3Title: "The same {threshold} could open one answer",
+  keysSeat3Body:
+    "Seats that meet the threshold together could open single answers, not only totals. That is why it matters who holds them, and why each poll's page says how many it takes.",
+  keysOursMark: "During launch",
+  keysOursTitle: "For now, every seat is ours",
+  keysOursLede:
+    "Independent trustees aren't named yet, so the launch panel's seats are all run by Abolish. Here is what that means, stated plainly.",
+  keysOursCould: "What we could do",
+  keysOursCouldMeans:
+    "Open any single answer to a poll under the launch panel, while it runs and until its shares are destroyed.",
+  keysOursShows: "What an opened answer shows",
+  keysOursShowsMeans:
+    "What one anonymous voting identity answered, not who it is, unless it is joined to the network address the ballot arrived from. Our seats receive each ballot with that address and promise not to keep it, a promise no one can check.",
+  keysOursCompel: "Who could make us",
+  keysOursCompelMeans:
+    "Anyone who can compel us, by law or by force, could make us open answers or hand over the shares before they are destroyed.",
+  keysOursPolls: "Which polls",
+  keysOursPollsMeans:
+    "Only everyday polls. Civic referendums and organisational votes wait for an independent panel, and every poll's page says who holds its key.",
+  keysPromiseMark: "What we promise",
+  keysPromiseTitle: "Our commitments, and what no one can check",
+  keysPromiseLede:
+    "These are promises, not proofs. Where something can be checked, it says how; where it can't, it says that too.",
+  keysPromise1Title: "Separate machines, providers and keyholders",
+  keysPromise1Body:
+    "No one machine, hosting provider or person who can reach a seat holds {threshold} seats. That guards against one breach or one rogue insider, not against anyone who can compel Abolish itself.",
+  keysPromise1Check: "No one outside can check this.",
+  keysPromise2Title: "Shares destroyed after each final count",
+  keysPromise2Body:
+    "Once a poll's final count is published, each seat destroys its keys and shares and signs a statement saying it has.",
+  keysPromise2Check:
+    "The signed statements are on the poll's board. The destruction itself can't be checked by anyone.",
+  keysPromise3Title: "Said on every poll",
+  keysPromise3Body:
+    "Every poll's page says that during launch, Abolish alone holds the key for that poll, in the everyday pages as well as the evidence.",
+  keysPromise3Check: "Anyone can see it on each poll's page.",
+  keysNextMark: "What comes next",
+  keysNextTitle: "Independent trustees, before the first civic vote",
+  keysNextLede:
+    "The launch panel is meant to end. Until it does, this page says so rather than showing trustees who don't exist yet.",
+  keysNext1Title: "The handover",
+  keysNext1Body:
+    "Seats move to named, independent trustees before any civic referendum runs, each move a new panel pinned on chain and in a new release. A handover protects only polls opened after it: polls opened before stay readable with our shares until we destroy them.",
+  keysNext2Title: "Your own trustees",
+  keysNext2Body:
+    "Askers will be able to add trustees of their own to a poll. Its answers then open only with the launch panel and the asker's trustees together, which protects that poll from us. The poll form doesn't offer it yet.",
+  keysNext3Title: "Names and the key ceremony",
+  keysNext3Body:
+    "Once independent trustees are named, this page lists each one, where they are and the public record of the ceremony that made their keys.",
+  keysMore:
+    "What else is weak, and how to check a count without us, is set out on the pages below.",
+  keysMoreWeak: "Where it is weak, stated plainly",
   dgTitle: "{section}: step {step} of {total}",
   dgFake: "To fake one",
   dgFake0: "another passkey",

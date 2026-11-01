@@ -440,6 +440,11 @@ describe("poll page", () => {
     // iteration 8).
     expect(page).not.toContain("Pick one from 3 options");
     expect(page).toMatch(/Pick [a-z ]+ from 2 options/);
+    // Its card is numbered and the lede counts the questions, so the line
+    // over its answers doesn't say "question 1 of 2" (P2-29, the poll page's
+    // iteration 10).
+    expect(page).toContain("Choose an answer to open it in the ballot app.");
+    expect(page).not.toContain("question 1\u00a0of\u00a02");
     expect(page).toContain("Answer 2 questions");
     expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}"`);
     // A link carries one pick, for question 1: its 3 answers, not question 2's.

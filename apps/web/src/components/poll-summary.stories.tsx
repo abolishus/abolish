@@ -871,7 +871,15 @@ export const WordedQuestions: Story = {
         canvas.getByRole("list", { name: "Question 1: Should the park stay open late?" }),
       ).getByRole("link", { name: "No" }),
     ).toHaveAttribute("href", `${BALLOT}#election=${poll.electionId}&pick=1`);
-    await expect(canvas.getByText(/^Choose an answer to question 1 of 2 to open it/)).toBeVisible();
+    // The card is numbered and the lede counts the questions, so its line
+    // doesn't say "to question 1 of 2" a third time (P2-29, the poll page's
+    // iteration 10).
+    await expect(
+      within(asks).getByText(
+        "Choose an answer to open it in the ballot app. Nothing is sent until you cast your ballot there.",
+      ),
+    ).toBeVisible();
+    await expect(within(asks).queryByText(/question 1 of/)).toBeNull();
     // Question 1's rule is said by its one line; question 2's, whose answers
     // are words, keeps its own (P2-29, the poll page's iteration 8).
     await expect(canvas.queryByText("Pick one from 3 options")).toBeNull();
@@ -902,6 +910,13 @@ export const WordedQuestionsPhone: Story = {
       }),
     ).getByRole("link", { name: "Yes" });
     await expect(first.getBoundingClientRect().bottom).toBeLessThanOrEqual(640);
+    // The line above the answers keeps to four lines in the numbered
+    // card's 182px at 360, where "to question 1 of 2" made it five (P2-29,
+    // the poll page's iteration 10).
+    const line = within(canvasElement).getByText(/^Choose an answer to open it/);
+    await expect(
+      line.getBoundingClientRect().height / parseFloat(getComputedStyle(line).lineHeight),
+    ).toBeLessThanOrEqual(4.1);
   },
 };
 

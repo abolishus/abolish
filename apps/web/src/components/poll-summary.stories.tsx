@@ -193,6 +193,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getAllByText("18446744073709551615")).toHaveLength(3);
   await expectWhen(canvasElement, "Closes", undefined);
   await expect(canvas.getByRole("figure", { name: "Chain head" })).toBeVisible();
+  await expect(canvas.getByText(/with the same head hold the same 1,234 entries\.$/)).toBeVisible();
   await expect(canvas.queryByRole("note")).toBeNull();
   await expect(canvas.getByRole("link", { name: "/p/mhanrsz" })).toHaveAttribute(
     "href",

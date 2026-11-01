@@ -1029,6 +1029,11 @@ export const esUS: Messages = {
   boardEntries: "Entradas",
   boardEmpty: "Todavía no hay entradas.",
   boardHead: "Cabeza de la cadena",
+  boardHeadMeaning: {
+    one: "La cabeza de la cadena es el enlace de la última entrada, y cada enlace incluye en su hash el anterior, así que la cabeza compromete todas las entradas en orden. Dos copias de este tablero con la misma cabeza contienen la misma única entrada.",
+    other:
+      "La cabeza de la cadena es el enlace de la última entrada, y cada enlace incluye en su hash el anterior, así que la cabeza compromete todas las entradas en orden. Dos copias de este tablero con la misma cabeza contienen las mismas {count} entradas.",
+  },
   boardRoot: "Raíz del árbol",
   boardUnanchored:
     "Hasta que un punto de control en L1 cubra estos valores, solo cuentan con la palabra de este servidor. Guárdalos: un tablero posterior que no los extienda es evidencia de manipulación.",

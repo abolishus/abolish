@@ -951,6 +951,8 @@ describe("results page", () => {
     expect(html).toContain(HEAD.chainHead);
     expect(html).toContain(HEAD.root);
     expect(html).toContain(`Fingerprint of the chain head ${HEAD.chainHead.slice(0, 8)}`);
+    // What the head commits to, at the size it claims (the stub's head is the real chain's).
+    expect(page).toContain(`with the same head hold the same ${HEAD.treeSize} entries.`);
     expect(page).toContain("only this server&#x27;s word");
   });
 
@@ -1080,6 +1082,7 @@ describe("board page", () => {
     expect(page).toContain("Key ceremony");
     expect(page).toContain("Chain event");
     expect(page).toContain(HEAD.chainHead);
+    expect(page).toContain("with the same head hold the same 30 entries.");
     expect(page).toContain("they are only this server");
     expect(page).not.toContain("Earlier entries");
     expect(html).toContain(`href="/polls/${ID}/board?from=25"`);

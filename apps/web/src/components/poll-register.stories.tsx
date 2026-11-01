@@ -135,10 +135,13 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(shown(canvasElement)).toEqual(
     [OPEN, SCHEDULED, CLOSED, UNREADABLE].map((id) => `/polls/${id}`),
   );
-  await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
+  // The first page links on, but not back to itself.
+  const pages = canvas.getByRole("navigation", { name: "Pages of the list" });
+  await expect(within(pages).getByRole("link", { name: "More polls" })).toHaveAttribute(
     "href",
     `/polls?after=${NEXT}`,
   );
+  await expect(within(pages).queryByRole("link", { name: "First page" })).toBeNull();
 };
 
 export const Default: Story = { play };
@@ -166,6 +169,50 @@ export const Filtered: Story = {
     await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
       "href",
       `/polls?after=${NEXT}&status=closed&counting=plurality`,
+    );
+    // A later page leads back to the first, with the same filters.
+    await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls?status=closed&counting=plurality",
+    );
+  },
+};
+
+/** The last page of the list: back to the first, and nothing further. */
+export const LastPage: Story = {
+  args: { after: OPEN, page: { ...LIST, next: undefined } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const pages = canvas.getByRole("navigation", { name: "Pages of the list" });
+    await expect(within(pages).getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls",
+    );
+    await expect(canvas.queryByRole("link", { name: "More polls" })).toBeNull();
+  },
+};
+
+/**
+ * A page past the last poll, as a full last page's "More polls" leads to:
+ * the list ends before it, not "No polls listed.", and it leads back to the
+ * first page with the search and filters it came with.
+ */
+export const PastTheEnd: Story = {
+  args: {
+    after: NEXT,
+    page: { ...LIST, polls: [], next: undefined },
+    typed: "library",
+    filters: { q: "library", status: "open", counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "No more polls" })).toBeVisible();
+    await expect(canvas.getByText(/ends before this page/)).toBeVisible();
+    await expect(canvas.queryByText("No polls listed.")).toBeNull();
+    await expect(canvas.queryByRole("heading", { name: "No listed poll matches" })).toBeNull();
+    await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls?q=library&status=open",
     );
   },
 };
@@ -298,6 +345,10 @@ export const Searched: Story = {
     await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
       "href",
       `/polls?after=${NEXT}&q=Park%20%20library&status=closed`,
+    );
+    await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls?q=Park%20%20library&status=closed",
     );
   },
 };

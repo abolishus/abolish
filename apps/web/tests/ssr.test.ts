@@ -1657,6 +1657,24 @@ describe("poll list", () => {
     expect(first).toContain("One choice");
   });
 
+  // P2-19 part 47: the register's pages.
+  test("leads from a later page back to the first, and past the last poll says the list ended", async () => {
+    const pages = (html: string) =>
+      /<nav [^>]*aria-label="Pages of the list"[\s\S]*?<\/nav>/.exec(html)?.[0] ?? "";
+    const first = await (await get("/polls")).text();
+    expect(pages(first)).toContain(`href="/polls?after=${listed[19]}"`);
+    expect(pages(first)).not.toContain("First page");
+    const second = await (await get(`/polls?after=${listed[19]}&status=closed`)).text();
+    expect(pages(second)).toMatch(/href="\/polls\?status=closed"[^>]*>.*First page<\/a>/);
+    // A cursor at the last listed poll, as a full last page's link gives.
+    const past = await (await get(`/polls?after=${listed.at(-1)}&q=park`)).text();
+    expect(linked(past)).toEqual([]);
+    expect(past).toContain("No more polls");
+    expect(past).not.toContain("No polls listed.");
+    expect(past).not.toContain("No listed poll matches");
+    expect(past).toMatch(/href="\/polls\?q=park"[^>]*>First page<\/a>/);
+  });
+
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
     const html = await (await get("/polls")).text();
     const tally =

@@ -1,7 +1,8 @@
 import { Button, buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
-import { ArrowRight, Search } from "lucide-react";
+import { Pagination, PaginationContent, PaginationItem } from "@abolishus/ui/ui/pagination";
+import { ArrowLeftToLine, ArrowRight, Search } from "lucide-react";
 import { type ReactNode, useId } from "react";
 
 import { catalogs } from "../messages.ts";
@@ -257,6 +258,16 @@ export function PollRegister({
           >
             {t("streamSearchRefused", { words: MAX_STREAM_TERMS, characters: MAX_STREAM_QUERY })}
           </Empty>
+        ) : page.polls.length === 0 && after !== undefined ? (
+          // A page past the last poll, searched or not: the page before it
+          // was full, or polls left the list since it was read.
+          <Empty
+            title={t("registerPastEnd")}
+            href={registerHref(undefined, filters)}
+            action={t("registerFirst")}
+          >
+            {t("registerPastEndLede")}
+          </Empty>
         ) : page.polls.length === 0 && q !== undefined ? (
           <Empty title={t("registerSearchEmpty")} href={unsearched} action={t("streamSearchClear")}>
             {t("registerSearchEmptyLede")}
@@ -276,7 +287,7 @@ export function PollRegister({
   );
 }
 
-/** A page of the list, with its filters over the page in hand and the link to the next. */
+/** A page of the list, with its filters over the page in hand and the links between pages. */
 function ListPage({
   list,
   after,
@@ -360,15 +371,50 @@ function ListPage({
           />
         )}
       </div>
-      {list.next !== undefined ? (
-        <a
-          className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
-          href={registerHref(list.next, filters)}
-        >
-          {t("listMore")}
-          <ArrowRight aria-hidden="true" className="size-4" />
-        </a>
-      ) : null}
+      <Pages after={after} next={list.next} filters={filters} />
     </>
+  );
+}
+
+const PAGE_LINK = "inline-flex min-h-12 items-center gap-2 underline underline-offset-4";
+
+/**
+ * The ways on from a page of the list, each keeping the search and filters:
+ * back to the first page from a later one, since the listing reads only
+ * forward from a poll and a reader deep in the register otherwise has only
+ * the browser's history, and on to the next page while this one was full.
+ */
+function Pages({
+  after,
+  next,
+  filters,
+}: {
+  after: string | undefined;
+  next: string | undefined;
+  filters: RegisterFilters;
+}) {
+  const t = useTranslate(catalogs);
+  if (after === undefined && next === undefined) return null;
+  return (
+    <Pagination aria-label={t("registerPages")} className="justify-start">
+      <PaginationContent className="flex-wrap gap-x-6 gap-y-2">
+        {after === undefined ? null : (
+          <PaginationItem>
+            <a className={PAGE_LINK} href={registerHref(undefined, filters)}>
+              <ArrowLeftToLine aria-hidden="true" className="size-4" />
+              {t("registerFirst")}
+            </a>
+          </PaginationItem>
+        )}
+        {next === undefined ? null : (
+          <PaginationItem>
+            <a className={PAGE_LINK} href={registerHref(next, filters)}>
+              {t("listMore")}
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </a>
+          </PaginationItem>
+        )}
+      </PaginationContent>
+    </Pagination>
   );
 }

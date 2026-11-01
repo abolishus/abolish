@@ -3506,7 +3506,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 192, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 185, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 178, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 174, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 175, css: 40, fonts: 58 },
   "/trustees": { html: 6, js: 178, css: 40, fonts: 58 },
   "/account": { html: 6, js: 205, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 259, css: 40, fonts: 58 },

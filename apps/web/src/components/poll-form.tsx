@@ -843,6 +843,16 @@ function PollReview({
       label: t("pollFormReviewResults"),
       value: t("pollFormReviewResultsValue"),
     },
+    // The definition's `opens_at` is recorded for good with its close, but
+    // the worker sets it when it builds the stub, `SETUP_SECONDS` on, and
+    // later again if registration misses it (ADR 0032, rule 10), so the
+    // review says when rather than a time the draft doesn't hold, from the
+    // create mockup's "Opens" row (P2-19 part 70; T-34). Nothing on the
+    // page changes it, so the row has no "Change".
+    {
+      label: t("pollFormReviewOpens"),
+      value: t("pollFormReviewOpensValue"),
+    },
     {
       label: t("pollFormReviewCloses"),
       value:

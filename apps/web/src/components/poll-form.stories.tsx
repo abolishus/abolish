@@ -434,6 +434,7 @@ export const TopicAndPlace: Story = {
       "Questions",
       "Who can answer",
       "Results",
+      "Opens",
       "Closes",
       "Who holds the key",
       "Place",
@@ -459,6 +460,12 @@ export const TopicAndPlace: Story = {
       review.getByText(/^Sealed until it closes\. No running count is published/),
     ).toBeVisible();
     await expect(review.queryByRole("link", { name: "Change Results" })).toBeNull();
+    // When it opens is the worker's, set after setup, so the review says
+    // when in words, with no choice to change.
+    await expect(
+      review.getByText(/^About half an hour after you submit it, once it's set up\./),
+    ).toBeVisible();
+    await expect(review.queryByRole("link", { name: "Change Opens" })).toBeNull();
     // Who holds the key is recorded for good with the rest, said as every
     // page of the poll says it, with the trustees page one step away (T-14).
     await expect(
@@ -832,8 +839,8 @@ function wordLines(element: Element, word: string): number {
 
 /**
  * Each review row's value lies as far below its row's top as every other
- * row's, the rows with no "Change" included (who can answer, the results
- * and who holds the key), which drew its value 20px higher at 360 and its row 24px shorter
+ * row's, the rows with no "Change" included (who can answer, the results,
+ * when it opens and who holds the key), which drew its value 20px higher at 360 and its row 24px shorter
  * from 640px (P2-29, creating a poll's iteration 8).
  */
 async function valuesLineUp(review: HTMLElement) {
@@ -844,7 +851,7 @@ async function valuesLineUp(review: HTMLElement) {
       if (term.parentElement === null || value === null) throw new Error("a term with no value");
       return value.getBoundingClientRect().top - term.parentElement.getBoundingClientRect().top;
     });
-  await expect(offsets).toHaveLength(9);
+  await expect(offsets).toHaveLength(10);
   const [first = 0] = offsets;
   for (const offset of offsets) await expect(Math.abs(offset - first)).toBeLessThanOrEqual(1);
 }

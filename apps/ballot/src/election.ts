@@ -138,6 +138,13 @@ export function checkElection(
   definitionBytes: Uint8Array,
   displayTextBytes: Uint8Array,
 ): ElectionCheck {
+  // The show check reads version 7, but this client casts no version-5
+  // ballot yet ([[P2-17]] part 8, the rolling path), and a fixed version-7
+  // poll pins ballot version 4, which it doesn't seal either: so it refuses
+  // version 7 by its version byte, at the step and with the code it did
+  // before the show check read it, rather than show a poll it can't cast in.
+  if (isDefinitionVersion7(definitionBytes))
+    return { ok: false, problem: "definition-undecodable" };
   const checked = checkElectionRecordToShow(
     electionId,
     registeredHash,
@@ -179,6 +186,8 @@ export function checkElection(
       },
     };
   }
+  // Unreachable: version 7 is refused above.
+  if (checked.version === 7) throw new TypeError("a version-7 definition passed the show check");
   const { definition, displayText } = checked;
   // The well-formedness check refuses a definition that pins no board-entry
   // version this release reads (`unsupported-version`), so this holds.
@@ -213,6 +222,12 @@ export function checkElection(
     },
   };
 }
+
+const isDefinitionVersion7 = (bytes: Uint8Array) =>
+  bytes.length >= 3 &&
+  bytes[0] === 0 &&
+  bytes[1] === RECORD_TYPES.electionDefinition &&
+  bytes[2] === 7;
 
 /**
  * The hash of a definition the check decoded, under its own version, before

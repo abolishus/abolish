@@ -12,6 +12,7 @@ const poll: PollView = {
   definitionHash: "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750",
   version: 1,
   illFormed: undefined,
+  rolling: false,
   counting: "plurality",
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [
@@ -145,6 +146,36 @@ export const PhoneVerification: Story = {
     await openEvidence(canvasElement);
     await expect(canvas.getByText(/^Tier 0 \(verified e-mail and phone\):/)).toBeVisible();
     await expect(canvas.queryByText(/^Tier 0 \(verified e-mail\)/)).toBeNull();
+  },
+};
+
+/**
+ * A rolling poll (version 7): each tier is open to whoever joins it before the
+ * close, Tier 0 to new identities, and its count is its members when the poll
+ * opened, never the electorate at the close ([[0028-rolling-electorates]]).
+ */
+export const Rolling: Story = {
+  args: {
+    poll: {
+      ...poll,
+      version: 7,
+      rolling: true,
+      counting: "questions",
+      electorate: [
+        { tier: 0, groupSize: "5000" },
+        { tier: 2, groupSize: "1" },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // On the surface, each tier says so, Tier 0's newcomers as new identities.
+    await expect(canvas.getAllByText("Open to new identities until it closes")[0]).toBeVisible();
+    await expect(canvas.getAllByText("Open to new members until it closes")[0]).toBeVisible();
+    await openEvidence(canvasElement);
+    await expect(canvas.getByText("5,000 members when it opened")).toBeVisible();
+    await expect(canvas.getByText("1 member when it opened")).toBeVisible();
+    await expect(canvas.queryByText("5,000 members")).toBeNull();
   },
 };
 

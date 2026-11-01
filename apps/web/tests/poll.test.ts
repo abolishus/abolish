@@ -336,6 +336,97 @@ describe("definitionView, version 5", () => {
   });
 });
 
+interface VectorV7 {
+  id: string;
+  value?: {
+    election_id: string;
+    electorate_mode: string;
+    electorate: { tier: string; regions: string[]; cells: { members: string }[] }[];
+    rolling_electorate: { tier: string; group_size: string }[];
+  };
+  encoding: string;
+  hash?: string;
+  illFormed?: string;
+  error?: string;
+}
+
+const vectorsV7 = load<VectorV7>("election-definition-v7.json");
+const decodableV7 = vectorsV7.filter((v) => v.value !== undefined);
+
+// Version 7 (P2-17): version 5's questions with an electorate mode. A rolling
+// tier is one cell whose count is its members at the opening root, which is
+// all the definition states: whoever joins by the close can answer too
+// ([[0028-rolling-electorates]]; T-01, T-16, T-34).
+describe("definitionView, version 7", () => {
+  test("has rolling and fixed vectors, well formed and not", () => {
+    const rolling = decodableV7.filter((v) => v.value!.electorate_mode === "2");
+    expect(rolling.filter((v) => v.illFormed === undefined).length).toBeGreaterThan(1);
+    expect(rolling.filter((v) => v.illFormed !== undefined).length).toBeGreaterThan(5);
+    expect(decodableV7.filter((v) => v.value!.electorate_mode === "1").length).toBeGreaterThan(1);
+    expect(vectorsV7.filter((v) => v.error !== undefined).length).toBeGreaterThan(5);
+  });
+
+  test.each(decodableV7.map((v) => [v.id, v] as const))(
+    "%s: its version, hash, first broken rule, mode, electorate and cells",
+    (_, v) => {
+      const value = v.value!; // `decodableV7` holds only vectors with a value
+      const result = definitionView(value.election_id, v.encoding);
+      if (!result.ok) throw new Error(`refused: ${result.problem}`);
+      expect(result.poll.version).toBe(7);
+      expect(result.poll.definitionHash).toBe(v.hash);
+      expect(result.poll.illFormed?.rule).toBe(v.illFormed);
+      expect(result.poll.counting).toBe("questions");
+      const rolling = value.electorate_mode === "2";
+      expect(result.poll.rolling).toBe(rolling);
+      if (rolling) {
+        const tiers = value.rolling_electorate.map((t) => ({
+          tier: Number(t.tier),
+          groupSize: t.group_size,
+        }));
+        expect(result.poll.electorate).toEqual(tiers);
+        expect(result.cells).toEqual(
+          tiers.map((t) => ({ tier: t.tier, members: t.groupSize, regions: undefined })),
+        );
+      } else {
+        expect(result.poll.electorate).toEqual(
+          value.electorate.map((t) => ({
+            tier: Number(t.tier),
+            groupSize: t.regions.reduce((sum, r) => sum + BigInt(r), 0n).toString(),
+          })),
+        );
+        expect(result.cells.map((c) => [c.tier, c.members])).toEqual(
+          value.electorate.flatMap((t) => t.cells.map((c) => [Number(t.tier), c.members])),
+        );
+      }
+    },
+  );
+
+  test("a question rule names its question, as under version 5", () => {
+    const v = decodableV7.find((x) => x.id === "definition-v7-selections-and-electorate-broken")!;
+    const result = definitionView(v.value!.election_id, v.encoding);
+    expect(result.ok && result.poll.illFormed).toEqual({
+      rule: "selections",
+      question: expect.any(Number),
+    });
+  });
+
+  test.each(vectorsV7.filter((v) => v.error !== undefined).map((v) => [v.id, v] as const))(
+    "%s is refused as undecodable",
+    (_, v) => {
+      expect(definitionView("00".repeat(32), v.encoding)).toEqual({
+        ok: false,
+        problem: "undecodable",
+      });
+    },
+  );
+
+  test("names another election as such", () => {
+    const v = decodableV7[0]!;
+    const other = v.value!.election_id.replace(/^./, (c) => (c === "0" ? "1" : "0"));
+    expect(definitionView(other, v.encoding)).toEqual({ ok: false, problem: "another-election" });
+  });
+});
+
 describe("instructionOf", () => {
   const q = (optionCount: number, minSelections: number, maxSelections: number) => ({
     optionCount,

@@ -21,7 +21,7 @@ import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { BoardHeadFacts } from "./board-head.tsx";
 import { ListedUnder } from "./listed-under.tsx";
-import { PollFacts, StatusMark } from "./poll-facts.tsx";
+import { PollFacts, RollingTier, StatusMark } from "./poll-facts.tsx";
 import { PollFollow } from "./poll-follow.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollResults, useResultsWords } from "./poll-results.tsx";
@@ -562,7 +562,7 @@ export function PollSummary({
                 <Fact term={t("factOptions")}>
                   <Count value={options} />
                 </Fact>
-                {poll.version === 5 ? (
+                {poll.version !== 1 ? (
                   <Fact term={t("factQuestions")}>
                     {/* Each question's limits as the proof enforces them, and no
                       figure across questions (T-29, T-34). */}
@@ -599,8 +599,11 @@ export function PollSummary({
                       <li key={i}>
                         {t(tierMessage(group.tier, phoneVerification))}:{" "}
                         <span className="tabular-nums">
-                          {t("groupMembers", { count: BigInt(group.groupSize) })}
+                          {t(poll.rolling ? "groupMembersAtOpening" : "groupMembers", {
+                            count: BigInt(group.groupSize),
+                          })}
                         </span>
+                        {poll.rolling ? <RollingTier tier={group.tier} /> : null}
                       </li>
                     ))}
                   </ul>

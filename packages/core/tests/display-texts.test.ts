@@ -1,7 +1,9 @@
 import {
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   QUESTION_METHODS,
 } from "@abolishus/crypto";
 import { randomBytes } from "node:crypto";
@@ -384,6 +386,48 @@ describe("a poll of several questions", () => {
       );
       expect(await stored(id), v.id).toEqual([]);
     }
+  });
+
+  // A rolling poll (definition version 7, P2-17) reads its questions as
+  // version 5's, under its own hash and rules, so its text is stored too,
+  // and another record's text is refused as before (T-34, T-41).
+  test("a rolling version-7 poll's text is stored under a definition that commits to it", async () => {
+    const rolling = decodeElectionDefinitionV7(
+      hex(
+        (
+          JSON.parse(
+            readFileSync(
+              new URL("../../../docs/spec/vectors/verifier-ballots-v5.json", import.meta.url),
+              "utf8",
+            ),
+          ) as { cases: { id: string; definition: string }[] }
+        ).cases.find((c) => c.id === "board")!.definition,
+      ),
+    );
+    const id = new Uint8Array(randomBytes(32));
+    const committed = goodV2.definition!;
+    await storeDefinition(
+      app,
+      encodeElectionDefinitionV7({
+        ...rolling,
+        election_id: id,
+        questions: committed.optionCounts.map((n) => ({
+          method: QUESTION_METHODS.selection,
+          option_count: Number(n),
+          min_selections: 0,
+          max_selections: 1,
+        })),
+        display_text_commitment: hex(committed.displayTextCommitment),
+      }),
+    );
+    const other = v2.find(
+      (v) => v.id !== goodV2.id && v.error === undefined && v.illFormed === undefined,
+    )!;
+    const [code, cause] = await refusedWith(storeDisplayText(app, id, hex(other.encoding)));
+    expect(code).toBe("refused");
+    expect(cause).toEqual({ ok: false, problem: "display-text-ill-formed", rule: "commitment" });
+    await storeDisplayText(app, id, hex(goodV2.encoding));
+    expect(await stored(id)).toEqual([hex(goodV2.encoding)]);
   });
 
   test("version-1 text is refused for a poll of several questions", async () => {

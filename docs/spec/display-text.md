@@ -66,7 +66,7 @@ The record is pinned by the election's profile like any other ([[versioning]]): 
 
 ## Layout (version 2)
 
-Record type `0x0009`, version 2, for definition version 5's questions ([[election-definition]], Layout (version 5); [[0026-multi-question-ballots]]), frozen by its vectors. The commitment is unchanged: the same tag over the record's full encoding, whose header's version byte keeps the two versions apart. A profile pins display-text version 2 with definition version 5 only, and definition version 5 pins it only ([[verifier]] 2.3, `profile-combination`).
+Record type `0x0009`, version 2, for definition version 5's questions ([[election-definition]], Layout (version 5); [[0026-multi-question-ballots]]), frozen by its vectors. The commitment is unchanged: the same tag over the record's full encoding, whose header's version byte keeps the two versions apart. A profile pins display-text version 2 with definition versions 5, 6 and 7 only, and those definition versions pin it only ([[verifier]] 2.3, `profile-combination`).
 
 | Field          | Type                       | Meaning                                                                                     |
 | -------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
@@ -119,7 +119,7 @@ A verifier ([[verifier]]):
 
 Software that shows an election to a voter (the ballot client, and anything that labels a Benaloh opening, such as a challenge checker):
 
-- MUST recompute the commitment from the display-text record it shows, compare it with the commitment in the election definition whose hash is registered on L2, and check that the record is well formed for the definition (under version 2, exactly the definition's questions, each with exactly its options). On any mismatch it MUST refuse to show the ballot or label the opening. Otherwise whoever serves the text could swap option labels for one voter: the client would honestly encrypt the index the voter picked under a false label, and a challenge labelled from the same text would not catch it (T-34, T-41, G-6).
+- MUST recompute the commitment from the display-text record it shows, compare it with the commitment in the election definition whose hash is registered on L2, and check that the record is well formed for the definition (under version 2, exactly the definition's questions, each with exactly its options). On any mismatch it MUST refuse to show the ballot or label the opening. Otherwise whoever serves the text could swap option labels for one voter: the client would honestly encrypt the index the voter picked under a false label, and a challenge labelled from the same text would not catch it (T-34, T-41, G-6). A version-7 definition's questions are read as version 5's, under its own hash and well-formedness rules (so its electorate under its mode, and a rolling poll only if it is everyday); showing an election this way never implies a client can cast in it, and a client that can't build the ballot version the profile pins refuses that separately ([[election-definition]], Layout (version 7); [[P2-17]]).
 
 ## Owned elsewhere
 

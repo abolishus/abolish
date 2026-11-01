@@ -4,8 +4,9 @@
 // another election, is refused rather than shown (T-31, T-34). Whether the
 // definition is the one registered on chain is for the verifier; the page
 // shows its hash so a reader can compare (T-34). The page reads the
-// definition versions the API stores, 1 and 5 (several questions), and no
-// other: a version it can't read is undecodable here, never guessed at.
+// definition versions the API stores, 1, 5 (several questions) and 7 (an
+// electorate mode, so a rolling one), and no other: a version it can't read
+// is undecodable here, never guessed at.
 // The server's alone: pages get the view this builds (src/poll.ts), never
 // the decoders, which would ship to every visitor (P2-28 part 2b).
 
@@ -15,6 +16,7 @@ import {
   DecodeError,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   ELECTION_TYPES,
   electionDefinitionHash,
   type ElectionDefinition,
@@ -22,6 +24,11 @@ import {
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
   electionDefinitionV5Rule,
+  type ElectionDefinitionV7,
+  type ElectionDefinitionV7Failure,
+  electionDefinitionV7Hash,
+  electionDefinitionV7Rule,
+  ELECTORATE_MODES,
   foldRegions,
   pinnedVersion,
   RECORD_TYPES,
@@ -48,11 +55,10 @@ export type DefinitionResult =
 // Only the version byte routes the record, as the API's store routes it
 // (packages/core, `decodeStoredDefinition`); each decoder checks the
 // definition's own pin again, and version 1's refuses every later version.
-const isVersion5 = (bytes: Uint8Array) =>
-  bytes.length >= 3 &&
-  bytes[0] === 0 &&
-  bytes[1] === RECORD_TYPES.electionDefinition &&
-  bytes[2] === 5;
+const versionOf = (bytes: Uint8Array) =>
+  bytes.length >= 3 && bytes[0] === 0 && bytes[1] === RECORD_TYPES.electionDefinition
+    ? bytes[2]
+    : undefined;
 
 function times(d: {
   readonly threshold: number;
@@ -69,11 +75,39 @@ function times(d: {
 }
 
 function viewV5(d: ElectionDefinitionV5): PollView {
-  const failure = electionDefinitionV5Rule(d);
+  return questionsView(d, 5, electionDefinitionV5Hash(d), electionDefinitionV5Rule(d));
+}
+
+/**
+ * Version 7's view: version 5's under a fixed electorate; under a rolling
+ * one, each rolling tier with its members at the opening root, which is what
+ * the definition states and the verifier replays (2.4), never a count at the
+ * close, which no definition holds.
+ */
+function viewV7(d: ElectionDefinitionV7): PollView {
+  const view = questionsView(d, 7, electionDefinitionV7Hash(d), electionDefinitionV7Rule(d));
+  if (d.electorate_mode !== ELECTORATE_MODES.rolling) return view;
+  return {
+    ...view,
+    rolling: true,
+    electorate: d.rolling_electorate.map((t) => ({
+      tier: t.tier,
+      groupSize: t.group_size.toString(),
+    })),
+  };
+}
+
+function questionsView(
+  d: ElectionDefinitionV5,
+  version: 5 | 7,
+  hash: Uint8Array,
+  failure: ElectionDefinitionV7Failure | undefined,
+): PollView {
   return {
     electionId: toHex(d.election_id),
-    version: 5,
-    definitionHash: toHex(electionDefinitionV5Hash(d)),
+    version,
+    rolling: false,
+    definitionHash: toHex(hash),
     illFormed:
       failure === undefined
         ? undefined
@@ -122,6 +156,7 @@ function viewV1(d: ElectionDefinition): PollView {
   return {
     electionId: toHex(d.election_id),
     version: 1,
+    rolling: false,
     definitionHash: toHex(electionDefinitionHash(d)),
     illFormed: rule === undefined ? undefined : { rule, question: undefined },
     counting: d.election_type === ELECTION_TYPES.approval ? "approval" : "plurality",
@@ -142,23 +177,40 @@ export function definitionView(electionId: string, definitionHex: string): Defin
   let definition;
   try {
     const bytes = fromHex(definitionHex);
-    definition = isVersion5(bytes)
-      ? { version: 5 as const, value: decodeElectionDefinitionV5(bytes) }
-      : { version: 1 as const, value: decodeElectionDefinition(bytes) };
+    const version = versionOf(bytes);
+    definition =
+      version === 5
+        ? { version: 5 as const, value: decodeElectionDefinitionV5(bytes) }
+        : version === 7
+          ? { version: 7 as const, value: decodeElectionDefinitionV7(bytes) }
+          : { version: 1 as const, value: decodeElectionDefinition(bytes) };
   } catch (error) {
     if (error instanceof DecodeError || error instanceof RangeError)
       return { ok: false, problem: "undecodable" };
     throw error;
   }
-  const poll = definition.version === 5 ? viewV5(definition.value) : viewV1(definition.value);
-  const cells =
-    definition.version === 5
-      ? cellsV5(definition.value)
-      : definition.value.electorate.map((g) => ({
-          tier: g.tier,
-          members: g.group_size.toString(),
-          regions: undefined,
-        }));
+  let poll: PollView;
+  let cells: PartitionCell[];
+  if (definition.version === 1) {
+    poll = viewV1(definition.value);
+    cells = definition.value.electorate.map((g) => ({
+      tier: g.tier,
+      members: g.group_size.toString(),
+      regions: undefined,
+    }));
+  } else if (definition.version === 5) {
+    poll = viewV5(definition.value);
+    cells = cellsV5(definition.value);
+  } else {
+    poll = viewV7(definition.value);
+    // A rolling tier is one cell, numbered in the rolling electorate's order
+    // (docs/spec/election-definition.md, Tally partition); a fixed version 7's
+    // cells are version 5's.
+    cells =
+      definition.value.electorate_mode === ELECTORATE_MODES.rolling
+        ? poll.electorate.map((t) => ({ tier: t.tier, members: t.groupSize, regions: undefined }))
+        : cellsV5(definition.value);
+  }
   if (poll.electionId !== electionId) return { ok: false, problem: "another-election" };
   const pinned = pinnedVersion(definition.value, RECORD_TYPES.boardEntry);
   const boardEntryVersion =

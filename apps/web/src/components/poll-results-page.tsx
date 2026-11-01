@@ -40,6 +40,7 @@ export interface PollResultsPageProps {
     PollView,
     | "electionId"
     | "version"
+    | "rolling"
     | "definitionHash"
     | "counting"
     | "questions"
@@ -276,7 +277,9 @@ function Cells({
             <TableBody>
               {cells.map((c, i) => {
                 const counts = c.questions?.[index];
-                const members = t("groupMembers", { count: BigInt(c.cell.members) });
+                const members = t(poll.rolling ? "groupMembersAtOpening" : "groupMembers", {
+                  count: BigInt(c.cell.members),
+                });
                 const regions = regionsOf(c.cell, list, (number) => t("resultsRegion", { number }));
                 const leaders = counts === undefined ? [] : leadersOf(counts);
                 return (
@@ -332,9 +335,13 @@ function Cells({
  * How many of the tier's members answered: a share of the members the
  * definition names for it. Only for a tier the definition names once, so the
  * members are that tier's alone, and only where the figure can be a share
- * (`turnoutOf`). The tiers' turnouts are never added up (T-16).
+ * (`turnoutOf`). The tiers' turnouts are never added up (T-16). None for a
+ * rolling poll: its definition names a tier's members at the opening only,
+ * and whoever joined by the close could answer too, so a share of the first
+ * would overstate turnout ([[0028-rolling-electorates]]).
  */
 function turnout(poll: PollResultsPageProps["poll"], tier: TierResults) {
+  if (poll.rolling) return undefined;
   const groups = poll.electorate.filter((g) => g.tier === tier.tier);
   const members = groups.length === 1 ? groups[0]?.groupSize : undefined;
   const share = members === undefined ? undefined : turnoutOf(tier.counted, members);

@@ -59,6 +59,7 @@ const meta = {
     poll: {
       electionId,
       version: 5,
+      rolling: false,
       definitionHash,
       counting: "questions",
       questions: [
@@ -234,6 +235,7 @@ export const ByNumber: Story = {
     poll: {
       electionId,
       version: 1,
+      rolling: false,
       definitionHash,
       counting: "plurality",
       questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
@@ -297,6 +299,22 @@ export const TurnoutUnstated: Story = {
     await expect(
       panel.getByText("Most picked: ⁨Yes⁩, by 56.7% of those who answered."),
     ).toBeVisible();
+  },
+};
+
+/**
+ * A rolling poll's results: no turnout, since its definition names each
+ * tier's members at the opening only and whoever joined by the close could
+ * answer too ([[0028-rolling-electorates]]).
+ */
+export const Rolling: Story = {
+  args: { poll: { ...meta.args.poll, version: 7, rolling: true } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getAllByText("Open to new identities until it closes")[0]).toBeVisible();
+    const panel = within(canvas.getByRole("tabpanel"));
+    await expect(panel.queryByText("Turnout")).toBeNull();
+    await expect(canvas.queryByText(/^Turnout: /)).toBeNull();
   },
 };
 

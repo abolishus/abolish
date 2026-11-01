@@ -21,8 +21,9 @@
 // far, one count per tier its draft opened it to, as the API serves the count
 // to anyone and the poll's page shows it (P2-19 part 57), all in one read of
 // the API (part 58; T-52). The API is asked by election IDs alone, from this
-// server, so it learns nothing of the account (T-10); the count is the API's
-// claim, as on every page that shows it.
+// server, so it learns nothing of the account beyond that the polls in one
+// request share an author (T-10); the count is the API's claim, as on every
+// page that shows it.
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -327,7 +328,12 @@ export function createDraftsHandler({
           } catch {
             return refuse(503, "UNAVAILABLE");
           }
+          // An answer naming an election twice or one not asked about is no
+          // answer to this question, so nothing is shown rather than a guess.
+          const asked = new Set(open.map((p) => p.electionId));
           const byElection = new Map(served.map((e) => [e.electionId, e.tiers]));
+          if (byElection.size !== served.length || served.some((e) => !asked.has(e.electionId)))
+            return refuse(503, "UNAVAILABLE");
           return answer(200, {
             // A poll the API doesn't know is left out, as a failed read shows
             // nothing, never a zero. The rest are placed on the tiers the

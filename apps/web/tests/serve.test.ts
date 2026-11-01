@@ -108,6 +108,8 @@ const answeredServed = new Map<string, { tier: number; answered: string }[]>();
 const answeredAsked: (readonly string[])[] = [];
 /** An election the API is to say it doesn't know: left out of its answer. */
 const answeredUnknown = new Set<string>();
+/** Entries the API is to add to its answer, as a broken or hostile API might. */
+const answeredExtra: { electionId: string; tiers: { tier: number; answered: string }[] }[] = [];
 /** The drafts handler's clock. */
 const NOW = new Date("2026-10-17T12:00:00Z");
 /** The push handler's VAPID public key. */
@@ -261,12 +263,13 @@ beforeAll(async () => {
       now: () => NOW,
       answered: async (electionIds) => {
         answeredAsked.push(electionIds);
-        return electionIds.flatMap((electionId) => {
+        const counted = electionIds.flatMap((electionId) => {
           if (answeredUnknown.has(electionId)) return [];
           const tiers = answeredServed.get(electionId);
           if (tiers === undefined) throw new Error("the API didn't answer");
           return [{ electionId, tiers }];
         });
+        return [...counted, ...answeredExtra];
       },
     }),
     email: createEmailHandler({
@@ -814,16 +817,29 @@ describe("poll drafts under /drafts", () => {
     expect(await (await answered()).json()).toEqual({
       polls: [{ id, tiers: [{ tier: 0, answered: "38" }] }],
     });
-    expect(answeredAsked).toHaveLength(3);
+    // An answer naming a poll twice, or one not asked about, shows nothing rather than a guess.
+    for (const extra of [
+      { electionId: hex, tiers: [{ tier: 0, answered: "1" }] },
+      { electionId: randomBytes(32).toString("hex"), tiers: [] },
+    ]) {
+      answeredExtra.splice(0, 1, extra);
+      const refused = await answered();
+      expect([refused.status, await refused.json()]).toEqual([
+        503,
+        { code: "UNAVAILABLE", status: 503 },
+      ]);
+    }
+    answeredExtra.length = 0;
+    expect(answeredAsked).toHaveLength(5);
     // Another account's polls are none of this one's.
     const other = new Browser();
     await register(other, new SoftAuthenticator(RP_ID), true);
     expect(await (await other.call("POST", "/drafts/answered", {})).json()).toEqual({ polls: [] });
-    expect(answeredAsked).toHaveLength(3);
+    expect(answeredAsked).toHaveLength(5);
     // The route takes nothing: not even a poll to choose.
     expect((await author.call("POST", "/drafts/answered", { id: drafted })).status).toBe(400);
     expect((await new Browser().call("POST", "/drafts/answered", {})).status).toBe(401);
-    expect(answeredAsked).toHaveLength(3);
+    expect(answeredAsked).toHaveLength(5);
     expect(logged.at(-1)).toMatchObject({ route: "drafts" });
   });
 

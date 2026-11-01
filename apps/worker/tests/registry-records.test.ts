@@ -116,6 +116,9 @@ describe("the registries' proven records", () => {
     const { source, asked } = accumulators();
     const read = await sourceOf(source).read();
     expect(read.at).toBe(AT);
+    // The block's number too, which the counted tally checks against every
+    // rolling tier's `root_l2_block`.
+    expect(read.block).toBe(BLOCK);
     expect(read.records.map(strip)).toEqual(
       [
         ...groupRecords.map((r, i) => ({ ...r, n: BigInt(i) })),

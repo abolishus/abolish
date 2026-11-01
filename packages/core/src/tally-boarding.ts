@@ -31,13 +31,19 @@ import {
   type WholeOpeningVersion,
 } from "@abolishus/crypto";
 import {
+  type CountedChain,
   countedResults,
   type CountedResults,
   countedTally,
   type L1Header,
+  type PinnedPanel,
   readElection,
+  rollingChain,
+  type RollingChainRelease,
+  type RollingElectorateReport,
 } from "@abolishus/verifier";
 import type { Sql } from "postgres";
+import type { RegistryRecordSource } from "./admission.ts";
 import { type AnchorChain, readCheckpoints } from "./anchoring.ts";
 import {
   appendEntry,
@@ -49,7 +55,12 @@ import {
   readEntryAt,
 } from "./board.ts";
 import { isBytes } from "./bytes.ts";
-import { decodeStoredDefinition, readDefinition, storedDefinitionHash } from "./definitions.ts";
+import {
+  decodeStoredDefinition,
+  isRollingDefinition,
+  readDefinition,
+  storedDefinitionHash,
+} from "./definitions.ts";
 
 const MAX_SEGMENT = 2 ** 32 - 1;
 
@@ -85,6 +96,11 @@ export type CountedTally =
       readonly pinned: WholeOpeningVersion;
       /** `s_S`, the counted extent's last segment: no opening is labelled at or before it. */
       readonly lastSegment: number;
+      /**
+       * Under a rolling definition, each rolling tier's electorate, in cell
+       * order, as `countedTally` gives it from the proven chain.
+       */
+      readonly electorates?: readonly RollingElectorateReport[];
     }
   /** Not yet decided: before `t_S`, or while finalized L1 hasn't reached every ballot's reference. */
   | { readonly state: "waiting" }
@@ -110,6 +126,26 @@ export interface AnchoredCountedTallyOptions {
    * the system clock unless a test moves it.
    */
   readonly now?: () => bigint;
+  /**
+   * The panels the release pins for 2.3, as `countedTally` takes them: the
+   * verifier's `PINNED_PANELS` unless given. Only tests give it, for vectors
+   * whose panels no release pins; a deployment never does, so a live poll is
+   * counted only under a panel this release pins (T-64).
+   */
+  readonly pins?: readonly PinnedPanel[];
+  /**
+   * Where a rolling poll's chain comes from: the registries' records the
+   * caller proved under one output root on L1, with that block's number and
+   * timestamp (the worker's `ProvenRegistryRecordSource`, as for ballot
+   * admission), built into the chain by the verifier's `rollingChain` under
+   * the registries `release` pins (`PINNED_REGISTRIES`). Without it a rolling
+   * poll is refused, as the verifier's counted set refuses one without a
+   * chain (T-08, T-71).
+   */
+  readonly rolling?: {
+    readonly source: RegistryRecordSource;
+    readonly release: RollingChainRelease;
+  };
 }
 
 // Undecided outcomes a later read of finalized L1 can settle, at 5.8 only:
@@ -148,7 +184,14 @@ export const ANCHOR_FINALITY_MARGIN = 1_800n;
 export function anchoredCountedTally(
   options: AnchoredCountedTallyOptions,
 ): (client: Sql, electionId: Uint8Array) => Promise<CountedTally> {
-  const { panels, anchor, l1, now = () => BigInt(Math.floor(Date.now() / 1000)) } = options;
+  const {
+    panels,
+    anchor,
+    l1,
+    pins,
+    rolling,
+    now = () => BigInt(Math.floor(Date.now() / 1000)),
+  } = options;
   if (panels.length === 0) throw new RangeError("panels must name at least one panel");
   // A malformed panel throws PanelError here, at start, not on an opening.
   for (const panel of panels) panelId(panel);
@@ -159,13 +202,14 @@ export function anchoredCountedTally(
   return async (client, electionId) => {
     const definition = await readDefinition(client, electionId);
     if (definition === undefined) throw new OpeningError("unknown-election");
-    let d;
+    let record;
     try {
-      d = decodeStoredDefinition(definition).value;
+      record = decodeStoredDefinition(definition);
     } catch (e) {
       if (e instanceof DecodeError) return { state: "refused", reason: "an unread definition" };
       throw e;
     }
+    const d = record.value;
     // Its verifier reads no other anchor's checkpoints (T-52).
     if (d.l1_chain_id !== anchor.chainId || !equal(d.l1_anchor, anchor.address))
       return { state: "refused", reason: "a definition naming another anchor" };
@@ -217,6 +261,15 @@ export function anchoredCountedTally(
           state: "refused",
           reason: "an entry at or before s_S past the counted checkpoint",
         };
+    let chain: CountedChain | undefined;
+    if (record.version === 7 && isRollingDefinition(record)) {
+      if (rolling === undefined)
+        return { state: "refused", reason: "a rolling poll with no proven registry read" };
+      const read = await provenChain(rolling, record);
+      if (read === "waiting") return { state: "waiting" };
+      if (typeof read === "string") return { state: "refused", reason: read };
+      chain = read;
+    }
     const blocks = await l1.run({
       before: d.opens_at > L1_REF_MARGIN ? d.opens_at - L1_REF_MARGIN : 0n,
       after: d.closes_at,
@@ -231,6 +284,8 @@ export function anchoredCountedTally(
           clock: { ...clock, lastSegment: sS },
           blocks,
           eventsAuthenticated: false,
+          ...(pins !== undefined && { pins }),
+          ...(chain !== undefined && { rolling: chain }),
         });
       } catch (e) {
         // The entries aren't the counted extent the board checks pass.
@@ -246,6 +301,7 @@ export function anchoredCountedTally(
           tiers: result.tiers,
           pinned: result.pinned,
           lastSegment: sS,
+          ...(result.electorates !== undefined && { electorates: result.electorates }),
         };
       if ("code" in result) {
         if (result.code === "panel-unpinned") continue;
@@ -257,6 +313,36 @@ export function anchoredCountedTally(
     }
     return { state: "refused", reason: "the definition names no pinned panel" };
   };
+}
+
+/**
+ * A rolling poll's chain over one proven read of both registries, or why
+ * not: `waiting` while the read's block isn't yet past the close and every
+ * rolling tier's `root_l2_block`, so a step's tree could still gain events
+ * and a member added later would fail `membership-proof` and drop out of
+ * the set (T-14, T-16); a refusal where 2.4's recount or the registration
+ * stops the chain over records proven past both, which no later read
+ * changes. Throws where the read fails, or holds a record after its own
+ * block, so the caller tries again (T-08).
+ */
+async function provenChain(
+  rolling: NonNullable<AnchoredCountedTallyOptions["rolling"]>,
+  definition: Extract<ReturnType<typeof decodeStoredDefinition>, { readonly version: 7 }>,
+): Promise<CountedChain | string> {
+  const { at, block, records } = await rolling.source.read();
+  if (typeof at !== "bigint" || at < 0n) throw new RangeError("at must be a bigint ≥ 0");
+  if (typeof block !== "bigint" || block < 0n) throw new RangeError("block must be a bigint ≥ 0");
+  if (records.some((r) => r.l2_timestamp > at))
+    throw new RangeError("the registries' records run past their block's timestamp");
+  const rootBlock = definition.value.rolling_electorate.reduce(
+    (b, t) => (t.root_l2_block > b ? t.root_l2_block : b),
+    0n,
+  );
+  if (at <= definition.value.closes_at || block < rootBlock) return "waiting";
+  const outcome = rollingChain(definition, records, rolling.release);
+  if (!("status" in outcome))
+    return `the rolling chain stops at ${outcome.check}: ${outcome.outcome.code}`;
+  return { chain: outcome.chain, through: { block, timestamp: at } };
 }
 
 export type OpeningErrorCode =
@@ -595,12 +681,20 @@ export class OpeningBoardings {
     // these openings, synchronously, for all of them.
     const again = kept();
     if (again !== undefined) return again;
-    const { election, aggregates, counted, tiers, pinned } = tally;
+    const { election, aggregates, counted, tiers, pinned, electorates } = tally;
     const read = {
       state: "read",
       openings: boarded.length,
       results: countedResults(
-        { ok: true, election, aggregates, counted, tiers, pinned },
+        {
+          ok: true,
+          election,
+          aggregates,
+          counted,
+          tiers,
+          pinned,
+          ...(electorates !== undefined && { electorates }),
+        },
         boarded.map((b) => b.payload),
       ),
     } as const;

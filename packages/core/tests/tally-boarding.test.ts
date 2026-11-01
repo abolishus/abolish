@@ -20,13 +20,28 @@ import {
   type TallyElection,
   type WholeOpeningVersion,
 } from "@abolishus/crypto";
-import { countedTally, decodeHeader, type L1Header, splitEntries } from "@abolishus/verifier";
+import {
+  countedTally,
+  decodeHeader,
+  type L1Header,
+  type PinnedPanel,
+  rollingChain,
+  type RollingChainRelease,
+  splitEntries,
+} from "@abolishus/verifier";
 import { getTableConfig } from "drizzle-orm/pg-core";
 import fc from "fast-check";
 import type { Sql } from "postgres";
 import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import { decodeDefinition } from "../../verifier/src/definition.ts";
 import { run } from "../../verifier/tests/headers.ts";
+import { definitionRegistered } from "../../verifier/tests/registration-logs.ts";
+import {
+  logs,
+  release,
+  rollingEvents,
+  type RollingVectorEvent,
+} from "../../verifier/tests/registry-logs.ts";
 import {
   ANCHOR_FINALITY_MARGIN,
   anchoredCountedTally,
@@ -37,6 +52,7 @@ import {
   type CountedTally,
   OpeningBoardings,
   OpeningError,
+  type ProvenRegistryRecords,
   readBoard,
   readCheckpoints,
   readBoardedOpenings,
@@ -807,6 +823,33 @@ describe("reading results", () => {
     expect(calls).toBe(3);
   });
 
+  test("puts a rolling poll's electorates on its tiers, beside the counts", async () => {
+    // As `countedTally` gives them for a rolling poll: one per cell, each
+    // its own tier (P2-17 part 9b-2).
+    const electorate = (members: number) => ({
+      opening: { members },
+      eligible: members + 2,
+      close: { step: 4, members: members + 1, accepted: true },
+      smallestStep: null,
+      growth: [],
+      flagged: { eligible: false, smallestStep: false },
+    });
+    const electorates = [electorate(40), electorate(70)];
+    const rolling: CountedTally = {
+      ...(OWN as Extract<CountedTally, { state: "fixed" }>),
+      electorates,
+    };
+    const id = await newElection(app);
+    const { boarding } = counting(() => rolling);
+    await boarding.submitOpening(app, id, openingOf(1, 1), NOW);
+    const read = await boarding.readResults(app, id);
+    if (read.state !== "read") return expect.fail("no results read");
+    expect(read.results.tiers).toEqual([
+      { tier: 0, counted: 0, electorate: electorates[0] },
+      { tier: 1, counted: 0, counts: ["0", "0", "0"], electorate: electorates[1] },
+    ]);
+  });
+
   test("checks the same openings once for reads sent at once", async () => {
     const id = await newElection(app);
     await boardings(ONE_TIER).submitOpening(app, id, openingOf(0, 1), NOW);
@@ -1266,5 +1309,273 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
       "tally-opening",
     );
     expect(await readBoard(app, d.election_id)).toHaveLength(entries.length);
+  });
+});
+
+// A rolling poll's counted tally (P2-17 part 9b-2): the chain comes from the
+// caller's proven read of both registries, as ballot admission's does, never
+// from the board, a submitter or a relay, and only once that read's block is
+// past the close and every rolling tier's `root_l2_block`; the tally then
+// keeps each rolling tier's electorate (T-08, T-14, T-16, T-71). The poll is
+// verifier-ballots-v5-tier0-sealed.json's, whose ballots, verdicts and
+// electorate counts independent implementations wrote, and its registries'
+// records are the verifier's test logs of verifier-ballots-v5-tier0.json's
+// group events and the definition's registration.
+/** One tier's electorate as verifier-rolling-report.json writes it, its counts as strings. */
+interface ReportedTier {
+  readonly opening: { readonly members: string };
+  readonly eligible: string;
+  readonly close: {
+    readonly step: string;
+    readonly members: string;
+    readonly accepted: boolean;
+  } | null;
+  readonly smallestStep: { readonly step: string; readonly members: string } | null;
+  readonly growth: readonly Readonly<Record<"period" | "added" | "removed" | "members", string>>[];
+  readonly flagged: { readonly eligible: boolean; readonly smallestStep: boolean };
+}
+const electorateOf = (e: ReportedTier) => ({
+  opening: { members: Number(e.opening.members) },
+  eligible: Number(e.eligible),
+  close:
+    e.close === null
+      ? null
+      : {
+          step: Number(e.close.step),
+          members: Number(e.close.members),
+          accepted: e.close.accepted,
+        },
+  smallestStep:
+    e.smallestStep === null
+      ? null
+      : { step: Number(e.smallestStep.step), members: Number(e.smallestStep.members) },
+  growth: e.growth.map((g) => ({
+    period: g.period,
+    added: Number(g.added),
+    removed: Number(g.removed),
+    members: Number(g.members),
+  })),
+  flagged: e.flagged,
+});
+
+describe("the anchored counted tally of a rolling poll", { timeout: 60_000 }, () => {
+  const sealed = read("verifier-ballots-v5-tier0-sealed.json") as {
+    readonly definition: string;
+    readonly definitionHash: string;
+    readonly panel: { readonly threshold: string; readonly keys: readonly string[] };
+    readonly clock: Readonly<Record<string, string>>;
+    readonly l1Blocks: readonly string[];
+    readonly board: string;
+  };
+  const tier0 = read("verifier-ballots-v5-tier0.json") as {
+    readonly events: readonly RollingVectorEvent[];
+    readonly registeredAt: string;
+  };
+  const definition = hex(sealed.definition);
+  const record = decodeDefinition(definition);
+  if (record.version !== 7) throw new Error("not version 7");
+  const d = record.value;
+  const boardVersion = pinnedVersion(d, RECORD_TYPES.boardEntry) as BoardEntryVersion;
+  const panel = { threshold: Number(sealed.panel.threshold), keys: sealed.panel.keys.map(hex) };
+  // The live restriction (2.3): the release pins the panel, k of its seats ours.
+  const pins: PinnedPanel[] = [
+    {
+      panelId: Buffer.from(d.panel_id).toString("hex"),
+      kind: "transitional",
+      seats: Array.from({ length: d.panel_size }, (_, i) => ({
+        holder: `seat ${i + 1}`,
+        ours: i < d.threshold,
+      })),
+    },
+  ];
+  const clock = {
+    epoch: BigInt(sealed.clock["epoch"] as string),
+    period: BigInt(sealed.clock["period"] as string),
+    deadline: BigInt(sealed.clock["deadline"] as string),
+  };
+  const extent = countedExtent(clock, d.closes_at, BigInt(d.l1_inclusion_bound));
+  const sS = Number(extent.segment);
+  const blocks = sealed.l1Blocks.map((b) => decodeHeader(hex(b)));
+  const board = splitEntries(hex(sealed.board)).entries;
+  // The counted extent: the entries through `s_S`.
+  const entries = board.filter((e) => decodeBoardEntry(e, boardVersion).segment <= sS);
+  const pinned: RollingChainRelease = { ...release, electionRegistry: d.election_registry };
+  const records = [
+    ...logs(rollingEvents(tier0.events)),
+    definitionRegistered(
+      record,
+      definition,
+      hex(sealed.definitionHash),
+      99n,
+      BigInt(tier0.registeredAt),
+    ),
+  ];
+  const rootBlock = d.rolling_electorate.reduce(
+    (b, t) => (t.root_l2_block > b ? t.root_l2_block : b),
+    0n,
+  );
+  const lastRecord = records.reduce((m, r) => (r.l2_timestamp > m ? r.l2_timestamp : m), 0n);
+  // A proven read past the close and every root block, as the worker's is
+  // once an output root after the close is posted.
+  const settled: ProvenRegistryRecords = {
+    at: (d.closes_at > lastRecord ? d.closes_at : lastRecord) + 1n,
+    block: rootBlock > 10_000n ? rootBlock : 10_000n,
+    records,
+  };
+
+  const afterAllClose: TestDb[] = [];
+  afterAll(async () => {
+    await Promise.all(afterAllClose.map((x) => x.close()));
+  });
+
+  /** The sealed board stored and anchored through `s_S`, its registries read by `read`. */
+  async function stored(read: () => Promise<ProvenRegistryRecords> = async () => settled) {
+    const own = await testDb();
+    afterAllClose.push(own);
+    const app = await own.as("abolish_app");
+    // Written as the row, not by storeDefinition: the vector's profile
+    // predates the combination rule this release stores definitions under,
+    // and the counted tally reads the stored bytes as they are.
+    await app`INSERT INTO election_definitions (election_id, definition)
+      VALUES (${d.election_id}, ${definition})`;
+    for (const encoded of board) {
+      const e = decodeBoardEntry(encoded, boardVersion);
+      await appendEntry(app, d.election_id, e.segment, e.payload);
+    }
+    const held = new Map<number, Uint8Array>();
+    for (const checkpoint of await takeCheckpoints(app, d.election_id, sS))
+      held.set(checkpoint.segment, checkpointHash(checkpoint));
+    const counts = { reads: 0, l1: 0 };
+    const after = extent.due + ANCHOR_FINALITY_MARGIN + 1n;
+    const options: AnchoredCountedTallyOptions = {
+      panels: [panel],
+      pins,
+      now: () => after,
+      anchor: {
+        chainId: d.l1_chain_id,
+        address: d.l1_anchor,
+        clock,
+        now: async () => after,
+        anchored: async (_, segment) => held.get(segment),
+      },
+      l1: {
+        chainId: d.l1_chain_id,
+        run: async () => {
+          counts.l1++;
+          return blocks;
+        },
+      },
+    };
+    const source = {
+      read: () => {
+        counts.reads++;
+        return read();
+      },
+    };
+    return {
+      app,
+      counts,
+      options,
+      tally: anchoredCountedTally({ ...options, rolling: { source, release: pinned } }),
+    };
+  }
+
+  test("is the verifier's counted tally over the proven chain, with each rolling tier's electorate", async () => {
+    const { app, tally } = await stored();
+    const got = await tally(app, d.election_id);
+    const chain = rollingChain(record, records, pinned);
+    if (!("status" in chain)) return expect.fail("the records give no chain");
+    const want = countedTally({
+      definition,
+      panel,
+      entries,
+      clock: { ...clock, lastSegment: sS },
+      blocks,
+      eventsAuthenticated: false,
+      pins,
+      rolling: { chain: chain.chain, through: { block: settled.block, timestamp: settled.at } },
+    });
+    if (!want.ok) return expect.fail(`the verifier's set is undecided: ${JSON.stringify(want)}`);
+    expect(got).toEqual({
+      state: "fixed",
+      election: want.election,
+      aggregates: want.aggregates,
+      counted: want.counted,
+      tiers: want.tiers,
+      pinned: want.pinned,
+      lastSegment: sS,
+      electorates: want.electorates,
+    });
+    if (got.state !== "fixed") return;
+    expect(got.counted.some((n) => n > 0)).toBe(true);
+    // The independent model's counts (verifier-rolling-report.json, from
+    // packages/crypto/scripts/verifier-rolling-report-vectors.py), but for
+    // the releases, which the counted tally doesn't read.
+    const report = read("verifier-rolling-report.json") as {
+      readonly polls: Readonly<Record<string, readonly { readonly electorate: ReportedTier }[]>>;
+    };
+    const tiers = report.polls["verifier-ballots-v5-tier0-sealed.json"] ?? [];
+    expect(tiers).toHaveLength(d.rolling_electorate.length);
+    expect(got.electorates).toEqual(tiers.map((t) => electorateOf(t.electorate)));
+  });
+
+  test("waits, before reading L1, while the read isn't past the close or every root block", async () => {
+    let read = { ...settled, at: d.closes_at };
+    const { app, counts, tally } = await stored(async () => read);
+    expect(await tally(app, d.election_id)).toEqual({ state: "waiting" });
+    read = { ...settled, block: rootBlock - 1n };
+    expect(await tally(app, d.election_id)).toEqual({ state: "waiting" });
+    expect(counts).toEqual({ reads: 2, l1: 0 });
+    read = settled;
+    expect(await tally(app, d.election_id)).toMatchObject({ state: "fixed" });
+  });
+
+  test("refuses a chain the recount or the registration stops, and a rolling poll with no source", async () => {
+    const unregistered = await stored(async () => ({ ...settled, records: records.slice(0, -1) }));
+    expect(await unregistered.tally(unregistered.app, d.election_id)).toEqual({
+      state: "refused",
+      reason: "the rolling chain stops at registration: definition-unregistered",
+    });
+    // Another release's group registry: the recount refuses it.
+    const other = await stored();
+    const elsewhere = anchoredCountedTally({
+      ...other.options,
+      rolling: {
+        source: { read: async () => settled },
+        release: { ...pinned, registry: new Uint8Array(20).fill(0xee) },
+      },
+    });
+    expect(await elsewhere(other.app, d.election_id)).toEqual({
+      state: "refused",
+      reason: "the rolling chain stops at 2.4: group-registry",
+    });
+    const sourceless = anchoredCountedTally(other.options);
+    expect(await sourceless(other.app, d.election_id)).toEqual({
+      state: "refused",
+      reason: "a rolling poll with no proven registry read",
+    });
+    expect(unregistered.counts.l1 + other.counts.l1).toBe(0);
+  });
+
+  test("throws, so the caller asks again, where the read fails or holds a record past its block", async () => {
+    const failing = await stored(async () => {
+      throw new Error("the index is behind");
+    });
+    await expect(failing.tally(failing.app, d.election_id)).rejects.toThrow("the index is behind");
+    const ahead = await stored(async () => ({ ...settled, at: lastRecord - 1n }));
+    await expect(ahead.tally(ahead.app, d.election_id)).rejects.toThrow(RangeError);
+    expect(failing.counts.l1 + ahead.counts.l1).toBe(0);
+  });
+
+  test("never reads the registries for a fixed poll", async () => {
+    const ballots = read("verifier-ballots.json") as {
+      readonly cases: readonly { readonly id: string; readonly definition: string }[];
+    };
+    const admitted = ballots.cases.find((x) => x.id === "admitted");
+    if (admitted === undefined) return expect.fail("no admitted case");
+    const { app, counts, tally } = await stored();
+    await storeDefinition(app, hex(admitted.definition));
+    await tally(app, decodeDefinition(hex(admitted.definition)).value.election_id);
+    expect(counts.reads).toBe(0);
   });
 });

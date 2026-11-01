@@ -5,10 +5,12 @@
 // L1, with the timestamp of that root's block from the header it commits
 // to. Core's `rollingChains` builds each poll's chain from them with the
 // verifier's `rollingChain`, and its admission judges a ballot only against
-// a step whose boundary is before that timestamp. So no step root comes
-// from a ballot, a relay, the index or the L2 node: an index that drops,
-// adds, alters or moves a record fails its accumulator, and a node that
-// lies fails the proof (T-08, T-25, T-34, T-71). Every read is of public
+// a step whose boundary is before that timestamp; the operator's counted
+// tally builds a closed poll's chain from them too, with the block's
+// number. So no step root comes from a ballot, a relay, the index or the
+// L2 node: an index that drops, adds, alters or moves a record fails its
+// accumulator, and a node that lies fails the proof (T-08, T-25, T-34,
+// T-71). Every read is of public
 // chain data, and nothing here logs or throws what it read or any URL (T-10).
 
 import {
@@ -123,7 +125,7 @@ export class ProvenRegistryRecordSource implements RegistryRecordSource {
     // rather than wait for the game to be shown false (T-08).
     if (proven.timestamp > BigInt(Math.floor(this.#now() / 1000)) + MAX_CLOCK_SKEW_SECONDS)
       throw new Error("the output root's block is stamped ahead of this worker's clock");
-    return { at: proven.timestamp, records };
+    return { at: proven.timestamp, block: proven.block, records };
   }
 }
 

@@ -1,5 +1,6 @@
 import {
   anchoredCountedTally,
+  type AnchoredCountedTallyOptions,
   BallotAdmissions,
   type BallotAdmissionOptions,
   type ContractEventArchive,
@@ -174,6 +175,12 @@ if (
 let ballots: WorkerOptions["ballots"];
 let ballotAdmission: BallotAdmissionOptions | undefined;
 let openings: WorkerOptions["openings"];
+let openingTally:
+  | {
+      readonly clock: { readonly epoch: bigint; readonly period: bigint };
+      readonly options: AnchoredCountedTallyOptions;
+    }
+  | undefined;
 let destructions: WorkerOptions["destructions"];
 const ballotEnv = [env.BALLOT_PINNED_PANELS, env.BALLOT_ANCHOR_EPOCH, env.BALLOT_ANCHOR_PERIOD];
 if (env.BALLOT_L1_RPC_URL !== undefined || env.BALLOT_L1_CHAIN_ID !== undefined) {
@@ -260,16 +267,15 @@ if (ballotEnv.some((v) => v !== undefined)) {
         throw new Error("the tally openings' anchor check couldn't reach the node");
       throw e;
     }
-    openings = {
-      boardings: new OpeningBoardings({
-        tally: anchoredCountedTally({
-          panels,
-          anchor: new ViemAnchorReader({ client, chainId, anchor, clock: anchorClock }),
-          l1: headers,
-        }),
-        target: openingTargets(panels),
-        clock,
-      }),
+    // Built once the registry sync's nodes are known: a rolling poll's
+    // counted tally reads its chain through them.
+    openingTally = {
+      clock,
+      options: {
+        panels,
+        anchor: new ViemAnchorReader({ client, chainId, anchor, clock: anchorClock }),
+        l1: headers,
+      },
     };
   }
 }
@@ -593,6 +599,26 @@ if (ballotAdmission !== undefined) {
     admissions: new BallotAdmissions({
       ...ballotAdmission,
       ...(rolling !== undefined && { rolling }),
+    }),
+  };
+}
+
+// The tally openings' counted tally, with a rolling poll's chain built from
+// the same proven reads of the registries as its ballots' admission (P2-17
+// part 9b-2), under the registries the release pins. Without them a rolling
+// poll's counted tally is refused, as the verifier refuses it without a
+// chain (T-08, T-71).
+if (openingTally !== undefined) {
+  const { clock, options } = openingTally;
+  const rolling =
+    PINNED_REGISTRIES !== undefined && rollingRecords !== undefined
+      ? { source: rollingRecords.source, release: PINNED_REGISTRIES }
+      : undefined;
+  openings = {
+    boardings: new OpeningBoardings({
+      tally: anchoredCountedTally({ ...options, ...(rolling !== undefined && { rolling }) }),
+      target: openingTargets(options.panels),
+      clock,
     }),
   };
 }

@@ -211,6 +211,11 @@ export interface RollingChains {
  */
 export interface ProvenRegistryRecords {
   readonly at: bigint;
+  /**
+   * That block's number, which the counted set checks against every rolling
+   * tier's `root_l2_block` (the verifier's `CountedChain.through`).
+   */
+  readonly block: bigint;
   readonly records: readonly ContractEventRecord[];
 }
 

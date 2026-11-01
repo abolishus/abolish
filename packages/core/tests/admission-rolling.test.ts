@@ -294,6 +294,8 @@ describe("rollingChains", () => {
   const t = rollingTree("chain-order");
   const d = rolling([t.tier], t.closesAt);
   const pinned: RollingChainRelease = { ...release, electionRegistry: d.value.election_registry };
+  // The proven block's number, which only the counted tally reads.
+  const block = 10_000n;
   const records = [
     ...t.records,
     definitionRegistered(d, undefined, undefined, 99n, t.registeredAt),
@@ -301,14 +303,16 @@ describe("rollingChains", () => {
 
   test("gives the verifier's chain over the records, settled at their block's timestamp", async () => {
     const at = t.closesAt + 1n;
-    const read = await rollingChains({ read: async () => ({ at, records }) }, pinned).read(d);
+    const read = await rollingChains({ read: async () => ({ at, block, records }) }, pinned).read(
+      d,
+    );
     expect(read).toEqual({ settledAt: at, outcome: rollingChain(d, records, pinned) });
     expect("status" in read.outcome && read.outcome.status).toBe("pass");
   });
 
   test("keeps a poll's chain while the block stays, and computes it again when it moves", async () => {
     let at = t.closesAt + 1n;
-    const chains = rollingChains({ read: async () => ({ at, records }) }, pinned);
+    const chains = rollingChains({ read: async () => ({ at, block, records }) }, pinned);
     const first = await chains.read(d);
     expect(await chains.read(d)).toBe(first);
     at += 1n;
@@ -320,13 +324,13 @@ describe("rollingChains", () => {
   test("records past the block they are read at are refused, never judged against", async () => {
     const at = records.reduce((m, r) => (r.l2_timestamp > m ? r.l2_timestamp : m), 0n) - 1n;
     await expect(
-      rollingChains({ read: async () => ({ at, records }) }, pinned).read(d),
+      rollingChains({ read: async () => ({ at, block, records }) }, pinned).read(d),
     ).rejects.toThrow(RangeError);
   });
 
   test("a definition sharing another's election_id gets its own chain, not the other's", async () => {
     const at = t.closesAt + 1n;
-    const chains = rollingChains({ read: async () => ({ at, records }) }, pinned);
+    const chains = rollingChains({ read: async () => ({ at, block, records }) }, pinned);
     const first = await chains.read(d);
     const other = { ...d, value: { ...d.value, closes_at: d.value.closes_at + 1n } };
     const read = await chains.read(other);
@@ -336,7 +340,7 @@ describe("rollingChains", () => {
 
   test("records the recount doesn't pass give no chain", async () => {
     const read = await rollingChains(
-      { read: async () => ({ at: t.closesAt + 1n, records: records.slice(1) }) },
+      { read: async () => ({ at: t.closesAt + 1n, block, records: records.slice(1) }) },
       pinned,
     ).read(d);
     expect("status" in read.outcome).toBe(false);

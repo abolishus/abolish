@@ -114,7 +114,11 @@ function Topics({
   const { topic, ...rest } = filter;
   return (
     <nav aria-label={t("discoverTopics")} className="grid gap-3">
-      <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+      {/* The search box's width, as the notes and the cards keep it: across
+          the page's, sixteen topics ran to 1,224px at 1280px, a third right
+          edge 512px past the column the fold opened in (P2-29, the stream's
+          iteration 34). */}
+      <ul className="m-0 flex max-w-2xl list-none flex-wrap gap-2 p-0">
         <li>
           <a
             href={streamHref(sort, rest)}

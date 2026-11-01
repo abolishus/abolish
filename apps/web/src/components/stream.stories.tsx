@@ -998,6 +998,12 @@ export const Topic: Story = {
     );
     await userEvent.click(canvas.getByText("Topic and place"));
     const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
+    // The opened topics wrap within the search box's width, one right edge
+    // down the column: across the page's they ran 512px past it at 1280px
+    // (P2-29, the stream's iteration 34).
+    const searchRight = searchForm(canvasElement).getBoundingClientRect().right;
+    for (const link of topics.getAllByRole("link"))
+      await expect(link.getBoundingClientRect().right).toBeLessThanOrEqual(searchRight);
     await expect(topics.getByRole("link", { name: "Transport" })).toHaveAttribute(
       "aria-current",
       "page",

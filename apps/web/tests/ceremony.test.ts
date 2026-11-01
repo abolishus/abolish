@@ -137,7 +137,8 @@ describe("ceremonyView", () => {
       }),
       runs,
     );
-  });
+    // Each run decodes and hashes a transcript of several KiB; CI runs 1000.
+  }, 60_000);
 
   test("a changed byte of the committed transcript is never the committed one", () => {
     const bytes = fromHex(vector("honest-4").transcript);
@@ -154,5 +155,6 @@ describe("ceremonyView", () => {
       ),
       runs,
     );
-  });
+    // Each run decodes and hashes a transcript of several KiB; CI runs 1000.
+  }, 60_000);
 });

@@ -403,10 +403,12 @@ function Answered({
   answered,
   opensAt,
   phoneVerification,
+  measure,
 }: {
   answered: CardAnswered;
   opensAt: Instant;
   phoneVerification: boolean;
+  measure: string;
 }) {
   const t = useTranslate(catalogs);
   const titleId = useId();
@@ -421,7 +423,7 @@ function Answered({
     // where the question's do: inset in the card's own padding, a count at
     // 320px had 166px of the screen and wrapped "e-mail" alone at 360px
     // (P2-29, the stream's iteration 10).
-    <div className="-mx-5 grid max-w-xl gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4">
+    <div className={cn("-mx-5 grid gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4", measure)}>
       <p id={titleId} className="m-0 font-medium">
         {since === undefined
           ? t("streamAnsweredSoFar")
@@ -468,14 +470,26 @@ export function StreamCard({
   phoneVerification = false,
   explained = false,
   narrowed = {},
+  fitted = false,
 }: {
   card: Card;
   ballot: string | null;
   phoneVerification?: boolean;
   explained?: boolean;
   narrowed?: StreamFilter;
+  /**
+   * The card is already a reading width (the stream's column), so its band
+   * and answers fill it. Elsewhere a card can run a page's width, and they
+   * keep their own.
+   */
+  fitted?: boolean;
 }) {
   const t = useTranslate(catalogs);
+  // In the stream's 672px column the band and answers stopped at 576px, 46px
+  // inside the card's right border against 25px at its left, so every card
+  // drew a second right edge inside its first (P2-29, the stream's
+  // iteration 30).
+  const measure = fitted ? "" : "max-w-xl";
   const titleId = useId();
   const questionId = useId();
   if (card.kind === "unavailable") {
@@ -577,12 +591,13 @@ export function StreamCard({
           answered={card.answered}
           opensAt={poll.opensAt}
           phoneVerification={phoneVerification}
+          measure={measure}
         />
       )}
       {ballot === null ? (
         <p className="m-0 text-sm text-muted-foreground">{t("streamNoBallot")}</p>
       ) : (
-        <div className="grid max-w-xl gap-3">
+        <div className={cn("grid gap-3", measure)}>
           {explained && questions === 1 ? null : (
             <p className="m-0 text-sm text-pretty text-muted-foreground">
               {explained
@@ -884,6 +899,7 @@ export function StreamPage({
                     phoneVerification={phoneVerification}
                     explained
                     narrowed={filter}
+                    fitted
                   />
                 </li>
               ))}

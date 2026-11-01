@@ -1657,6 +1657,24 @@ describe("poll list", () => {
     expect(first).toContain("One choice");
   });
 
+  // P2-19 part 47: the register's pages.
+  test("leads from a later page back to the first, and past the last poll says the list ended", async () => {
+    const pages = (html: string) =>
+      /<nav [^>]*aria-label="Pages of the list"[\s\S]*?<\/nav>/.exec(html)?.[0] ?? "";
+    const first = await (await get("/polls")).text();
+    expect(pages(first)).toContain(`href="/polls?after=${listed[19]}"`);
+    expect(pages(first)).not.toContain("First page");
+    const second = await (await get(`/polls?after=${listed[19]}&status=closed`)).text();
+    expect(pages(second)).toMatch(/href="\/polls\?status=closed"[^>]*>.*First page<\/a>/);
+    // A cursor at the last listed poll, as a full last page's link gives.
+    const past = await (await get(`/polls?after=${listed.at(-1)}&q=park`)).text();
+    expect(linked(past)).toEqual([]);
+    expect(past).toContain("No more polls");
+    expect(past).not.toContain("No polls listed.");
+    expect(past).not.toContain("No listed poll matches");
+    expect(past).toMatch(/href="\/polls\?q=park"[^>]*>First page<\/a>/);
+  });
+
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
     const html = await (await get("/polls")).text();
     const tally =
@@ -3082,14 +3100,14 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box and counts.
+ * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 181, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 178, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 179, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 180, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
   "/account": { html: 6, js: 200, css: 40, fonts: 58 },

@@ -515,6 +515,11 @@ export const esUS: Messages = {
   filterApply: "Mostrar encuestas que coinciden",
   filterClear: "Borrar filtros",
   registerMatches: "{shown} de {total} encuestas de esta página coinciden.",
+  registerPages: "Páginas de la lista",
+  registerFirst: "Primera página",
+  registerPastEnd: "No hay más encuestas",
+  registerPastEndLede:
+    "La lista termina antes de esta página. Va en orden de ID de encuesta, así que una encuesta añadida desde que empezó puede estar en una página anterior.",
   registerNoMatchTitle: "Ninguna encuesta de esta página coincide",
   registerNoMatch:
     "Nada en esta página de la lista coincide con estos filtros. Una encuesta que moderación retiró de la lista no aparece aquí, pero se sigue abriendo por su ID, y el registro de elecciones en la cadena todavía la nombra.",

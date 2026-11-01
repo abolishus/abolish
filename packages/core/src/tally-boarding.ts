@@ -308,10 +308,6 @@ export function anchoredCountedTally(
       }
       const code = result.outcome.code ?? "";
       if (GROWS.has(code) && result.row === "5.8") return { state: "waiting" };
-      // A chain not yet proven past the close and every root block, which
-      // `provenChain` waits for already: a later read may decide it.
-      if (chain !== undefined && code === "not-reached" && result.row === "5.1")
-        return { state: "waiting" };
       return { state: "refused", reason: `the counted set is undecided at ${result.row}: ${code}` };
     }
     return { state: "refused", reason: "the definition names no pinned panel" };

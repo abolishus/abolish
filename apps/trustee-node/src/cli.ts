@@ -189,7 +189,8 @@ function registrationOf(config: NodeConfig): RegistrationCheck {
  * A rolling poll's chain over the seat's L2 node, where the configuration
  * names the group registry; without it, intake refuses every rolling
  * poll's ballot (`intake-chain`), as the electorate check refuses its stub,
- * and the counted source refuses its counted set.
+ * the view refuses it (`ViewError` `rolling`) and the counted source
+ * refuses its counted set.
  */
 function rollingOf(
   l2ChainId: bigint,
@@ -903,6 +904,9 @@ export function dutyWiring(
     registryFromBlock: a.registryFromBlock,
     board: a.board,
     boardFromBlock: a.boardFromBlock,
+    // A rolling poll's view is judged against the chain intake reads, read
+    // afresh through a block past the close.
+    ...rollingOf(config.l2ChainId, a),
     // Only an attesting seat sets up the reader, so a seat that didn't
     // attest decides over its own intake whatever the L1 reader says.
     extent: async (election) =>
@@ -924,9 +928,7 @@ export function dutyWiring(
     board: view.board,
     boardFromBlock: view.boardFromBlock,
     counted: a.anchorClock,
-    // A rolling poll's counted set is judged against the chain intake reads,
-    // read afresh through a block past the close.
-    ...rollingOf(config.l2ChainId, a),
+    ...(view.rolling === undefined ? {} : { rolling: view.rolling }),
     extent: async (election) => {
       const point = AVAILABILITY_POINTS.countedExtent;
       if (!(await attested(s.store, election.definitionHash, point))) return undefined;

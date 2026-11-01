@@ -39,6 +39,7 @@ import {
   L1_REF_MARGIN,
   type Panel,
   pinnedVersion,
+  type RollingBallotChain,
   RECORD_TYPES,
   RESULTS_MODES,
   type ViewBallot,
@@ -93,6 +94,12 @@ export interface ViewOptions {
   readonly extent: (election: ApprovedElection) => Promise<HeldExtent | undefined>;
   /** The most bytes of L1 headers one read holds (`headerRun`'s `maxBytes`). */
   readonly maxRunBytes?: number;
+  /**
+   * A rolling poll's chain from the seat's own proven, final read of both
+   * registries (`l2RollingChain`), the one intake judges its ballots
+   * against. Without it a rolling poll's view is refused (`"rolling"`).
+   */
+  readonly rolling?: RollingChainCheck;
 }
 
 /** Why a view can't be read for an election: none of these changes on a retry. */
@@ -110,7 +117,9 @@ export type ViewRefusal =
   /** The blocks the seat pinned before attesting no longer hold the ballot extent it attested. */
   | "extent-lost"
   /** The seat holds no copy of the transcript it approved: it approved before it kept one. */
-  | "transcript";
+  | "transcript"
+  /** A rolling poll's view, with no rolling chain check configured to judge its ballots by. */
+  | "rolling";
 
 export class ViewError extends Error {
   override readonly name = "ViewError";
@@ -124,6 +133,17 @@ export class ViewError extends Error {
 const BALLOT_SUBMITTED = keccak256(toBytes("BallotSubmitted(bytes32,bytes32,bytes)"), "bytes");
 const RELAYED_BALLOT_SUBMITTED = keccak256(
   toBytes("RelayedBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes)"),
+  "bytes",
+);
+// A rolling poll's direct and relayed submissions (contract-event versions 10 and 11).
+const ROLLING_BALLOT_SUBMITTED = keccak256(
+  toBytes("RollingBallotSubmitted(bytes32,bytes32,bytes32,bytes)"),
+  "bytes",
+);
+const RELAYED_ROLLING_BALLOT_SUBMITTED = keccak256(
+  toBytes(
+    "RelayedRollingBallotSubmitted(bytes32,bytes32,uint64,uint64,uint64,uint64,bytes32,bytes)",
+  ),
   "bytes",
 );
 
@@ -157,7 +177,10 @@ export function obligationView(
 ): (election: ApprovedElection) => Promise<ObligationView> {
   return async (election) => {
     const { l2 } = options;
-    const { definition, boardVersion, eventVersion, l2Head } = await registered(options, election);
+    const { definition, decoded, boardVersion, eventVersion, l2Head } = await registered(
+      options,
+      election,
+    );
     const { l1: finalized, low } = await finalizedL1(options, election);
     const extent = await options.extent(election);
     const view = { l1: finalized, low };
@@ -171,7 +194,14 @@ export function obligationView(
         "the L2 node's finalized history doesn't reach the contract-event window's end",
       );
     const entries = extent.entries.map((e) => decodeBoardEntry(e, boardVersion));
-    const admission = electionAdmission(definition, options.panel, extent.entries);
+    const rolling = await viewChain(options, decoded);
+    const admission = electionAdmission(
+      definition,
+      options.panel,
+      extent.entries,
+      undefined,
+      rolling,
+    );
     // The seat attested this extent, so it carries the transcript it approved;
     // an election the verifier can't admit ballots of fails at 3.2 for
     // everyone, and the seat holds no copy that could count.
@@ -188,11 +218,20 @@ export function obligationView(
       if (copy !== undefined) board.push(copy);
     });
     const recorded = await contractBallots(options, election.definitionHash, l2Head, eventVersion);
-    admission.admitAll(recorded.copies.map((c) => c.record)).forEach((a, i) => {
-      const c = recorded.copies[i] as (typeof recorded.copies)[number];
-      const copy = copyOf(a, c.entry);
-      if (copy !== undefined) board.push(copy);
-    });
+    // A rolling path's copy is judged with the root its event carries, as
+    // the verifier judges it (5.1's `root-step-mismatch`): a copy under
+    // another root is never counted, so it can't stand in the view for a
+    // voter's newer ballot and leave the counted one unowed (T-25, T-54).
+    admission
+      .admitAll(
+        recorded.copies.map((c) => c.record),
+        recorded.copies.map((c) => c.root),
+      )
+      .forEach((a, i) => {
+        const c = recorded.copies[i] as (typeof recorded.copies)[number];
+        const copy = copyOf(a, c.entry);
+        if (copy !== undefined) board.push(copy);
+      });
     // Absent: receipted, carried by no admitted copy of the extent, and named
     // by no ballot log of the board's for the definition, whether or not it
     // passed the event check. A contract event the board archives is the
@@ -255,10 +294,10 @@ export async function tallyDefinition(
   options: Omit<ViewOptions, "store" | "extent">,
   election: ApprovedElection,
 ): Promise<TallyDefinition> {
-  return (await registered(options, election, { rolling: true })).decoded;
+  return (await registered(options, election)).decoded;
 }
 
-export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent"> {
+export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent" | "rolling"> {
   /**
    * The counted extent the seat attested, if it did (`heldExtent` of its
    * point-2 `AvailabilitySeat`): every board entry through `C_S`, read again
@@ -300,7 +339,6 @@ export function countedSource(
     const { definition, decoded, boardVersion, eventVersion, l2Head } = await registered(
       options,
       election,
-      { rolling: true },
     );
     // Only the seat's own attested extent is the counted extent: a copy it
     // didn't check by `C_S`'s CIDs could hold any entries the operator chose.
@@ -494,16 +532,12 @@ async function eventsShown(
  * finalized block, after checking both nodes' chains. Refused (`ViewError`)
  * when a node is on another chain, or the definition isn't the approved
  * one, isn't one this node reads or names another board. A version-7
- * definition is read only by the tally's reads (`rolling`), and only as the
- * stub checks approve one: rolling, sealed and without an author panel. The
- * view and the complaint duty's ballot source take it once [[P1-12f]] part
- * 3c's decision at `c_I` replaces the duties' `roots` answer (P2-17 part
- * 7c-3c-2c); until then they refuse it.
+ * definition is read only as the stub checks approve one: rolling, sealed
+ * and without an author panel.
  */
 async function registered(
-  options: Omit<ViewOptions, "store" | "extent">,
+  options: Omit<ViewOptions, "store" | "extent" | "rolling">,
   election: ApprovedElection,
-  { rolling = false }: { readonly rolling?: boolean } = {},
 ): Promise<{
   readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
   readonly decoded: Exclude<TallyDefinition, ElectionDefinition>;
@@ -531,7 +565,6 @@ async function registered(
   if (decoded.version === 1) hash = electionDefinitionHash(decoded.value);
   else if (decoded.version === 5) hash = electionDefinitionV5Hash(decoded.value);
   else if (
-    rolling &&
     decoded.version === 7 &&
     decoded.value.electorate_mode === ELECTORATE_MODES.rolling &&
     decoded.value.results_mode === RESULTS_MODES.sealed &&
@@ -552,6 +585,35 @@ async function registered(
   )
     throw new ViewError("definition");
   return { definition: reg.definition, decoded, boardVersion, eventVersion, l2Head };
+}
+
+/**
+ * A rolling poll's chain for the view, read afresh from the seat's own
+ * proven, final history as the counted source reads it, never intake's
+ * cached read: the view's ballots are judged against step roots over the
+ * whole poll, so a chain read before a late member joined would drop that
+ * member's ballot from the view and show it absent or unowed (T-14, T-25,
+ * T-71). Undefined for any other definition. Throws `RpcError` while no
+ * chain can be had, or the block it is proven through isn't past the close,
+ * so the decision is retried, and `ViewError("rolling")` without a check.
+ */
+async function viewChain(
+  options: Pick<ViewOptions, "rolling">,
+  decoded: Exclude<TallyDefinition, ElectionDefinition>,
+): Promise<RollingBallotChain | undefined> {
+  if (decoded.version !== 7) return undefined;
+  if (options.rolling === undefined) throw new ViewError("rolling");
+  const read = await options.rolling(decoded);
+  // As `countedSet` bounds the counted source's chain: every step a ballot
+  // can name is settled once its block is past the close and every rolling
+  // tier's `root_l2_block`.
+  const rootBlock = decoded.value.rolling_electorate.reduce(
+    (m, t) => (t.root_l2_block > m ? t.root_l2_block : m),
+    0n,
+  );
+  if (read === undefined || read.safeAt <= decoded.value.closes_at || read.block < rootBlock)
+    throw new RpcError("no rolling chain proven past the close yet");
+  return read.chain;
 }
 
 function copyOf(a: BallotAdmission, entry: ViewBallot["entry"]): ViewBallot | undefined {
@@ -635,7 +697,12 @@ async function contractBallots(
   l2Head: bigint,
   eventVersion: ContractEventVersion,
 ): Promise<{
-  readonly copies: readonly { readonly record: Uint8Array; readonly entry: ViewBallot["entry"] }[];
+  readonly copies: readonly {
+    readonly record: Uint8Array;
+    readonly entry: ViewBallot["entry"];
+    /** The root a rolling path's event carries, which admission judges the copy with. */
+    readonly root: bigint | undefined;
+  }[];
   readonly named: readonly string[];
 }> {
   const { l2, board } = options;
@@ -643,12 +710,20 @@ async function contractBallots(
   const logs = await contractLogs(
     l2,
     board,
-    [[BALLOT_SUBMITTED, RELAYED_BALLOT_SUBMITTED], definitionHash],
+    [
+      [
+        BALLOT_SUBMITTED,
+        RELAYED_BALLOT_SUBMITTED,
+        ROLLING_BALLOT_SUBMITTED,
+        RELAYED_ROLLING_BALLOT_SUBMITTED,
+      ],
+      definitionHash,
+    ],
     options.boardFromBlock,
     l2Head,
   );
   const named: string[] = [];
-  const copies: { record: Uint8Array; entry: ViewBallot["entry"] }[] = [];
+  const copies: { record: Uint8Array; entry: ViewBallot["entry"]; root: bigint | undefined }[] = [];
   const times = new Map<bigint, bigint>();
   for (const log of logs) {
     const topic = log.topics[2];
@@ -656,16 +731,27 @@ async function contractBallots(
     const checked = checkContractEvent(log, boardOnly(board), eventVersion);
     if (!checked.ok) continue;
     const e = checked.event;
-    if (e.event === "RelayedBallotSubmitted") {
+    if (e.event === "RelayedBallotSubmitted" || e.event === "RelayedRollingBallotSubmitted") {
       if (equal(e.definitionHash, definitionHash))
-        copies.push({ record: e.record, entry: { path: "relayed", value: e.stamp } });
-    } else if (e.event === "BallotSubmitted" && equal(e.definitionHash, definitionHash)) {
+        copies.push({
+          record: e.record,
+          entry: { path: "relayed", value: e.stamp },
+          root: e.event === "RelayedRollingBallotSubmitted" ? e.root : undefined,
+        });
+    } else if (
+      (e.event === "BallotSubmitted" || e.event === "RollingBallotSubmitted") &&
+      equal(e.definitionHash, definitionHash)
+    ) {
       let time = times.get(log.l2_block);
       if (time === undefined) {
         time = await l2BlockTime(l2, log.l2_block);
         times.set(log.l2_block, time);
       }
-      copies.push({ record: e.record, entry: { path: "ordinary", value: time } });
+      copies.push({
+        record: e.record,
+        entry: { path: "ordinary", value: time },
+        root: e.event === "RollingBallotSubmitted" ? e.root : undefined,
+      });
     }
   }
   return { copies, named };

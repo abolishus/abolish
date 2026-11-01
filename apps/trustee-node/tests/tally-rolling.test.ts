@@ -1,13 +1,18 @@
-// The counted source and the tally duty over a rolling poll (P2-17 part
-// 7c-3c-2b): a whole ceremony between seats over a rolling version-7 stub,
-// version-5 ballots made as a client makes them (a real Groth16 membership
+// The counted source, the view, the complaint duty's ballot source and the
+// tally duty over a rolling poll (P2-17 parts 7c-3c-2b and 7c-3c-2c): a
+// whole ceremony between seats over a rolling version-7 stub, version-5
+// ballots made as a client makes them (a real Groth16 membership
 // proof against a step's root, naming a real L1 block whose time puts the
 // step in its window, 5.8), taken in by every seat's own intake, then the
 // anchored counted extent read by `countedSource` against the chain the
 // seat's rolling check gives, and the tally duty summing and opening over
 // that set. The set must be exactly the verifier's under that chain, wait
 // while the chain isn't proven past the close, and the duty must open the
-// one rolling tier's cell to the votes cast (T-14, T-16, T-29, T-38).
+// one rolling tier's cell to the votes cast (T-14, T-16, T-29, T-38). The
+// view at `c_I` and the complaint duty's ballot source read the same poll
+// (part 7c-3c-2c): the view judges the extent's ballots and the board
+// contract's rolling copies against a chain read afresh past the close, each
+// contract copy under the root its event carries (T-25, T-54).
 //
 // Stub check 4 refuses every rolling stub until roots can be sent and read
 // ([[P1-12f]] parts 3b and 3c), so this file lifts that one refusal, and
@@ -87,6 +92,7 @@ import {
   type CountedSourceOptions,
   obligationView,
   tallyDefinition,
+  type ViewOptions,
 } from "../src/view.ts";
 import { anvil, type Node } from "./anvil.ts";
 import {
@@ -590,13 +596,212 @@ describe("the reads of a rolling poll's registered definition", () => {
     });
   });
 
-  test("the view and the complaint duty's ballot source still refuse it (7c-3c-2c)", async () => {
-    const view = { ...options(), store: stores[0] as SeatStore };
-    for (const reader of [obligationView(view), complaintBallots(view)])
-      await expect(reader(approved[0] as ApprovedElection)).rejects.toMatchObject({
-        name: "ViewError",
-        code: "definition",
+  test("the view and the complaint duty's ballot source take it", async () => {
+    const view = viewOptions();
+    expect((await obligationView(view)(approved[0] as ApprovedElection)).board).toHaveLength(3);
+    expect(await complaintBallots(view)(approved[0] as ApprovedElection)).toHaveLength(3);
+  });
+});
+
+// The board's two rolling ballot events' topics, from contract-event-v11.json's tables.
+const topicOf = (signature: string) =>
+  `0x${
+    (
+      JSON.parse(
+        readFileSync(
+          new URL("../../../docs/spec/vectors/contract-event-v11.json", import.meta.url),
+          "utf8",
+        ),
+      ) as { events: { signature: string; topic0: string }[] }
+    ).events.find((ev) => ev.signature.startsWith(`${signature}(`))?.topic0
+  }`;
+const ROLLING_SUBMITTED = topicOf("RollingBallotSubmitted");
+const RELAYED_ROLLING_SUBMITTED = topicOf("RelayedRollingBallotSubmitted");
+// The step roots: EARLY's over the opening tree, LATE's with the joiner.
+const EARLY_ROOT = () => treeOf([OPENING]).root();
+const LATE_ROOT = () => treeOf([OPENING, JOINER]).root();
+const RELAY_STAMP = 1_030_000n;
+
+/** The board's `RollingBallotSubmitted` for `c` in L2 block `block`, under the root `root`. */
+function rollingSubmitted(c: Cast, root: bigint, block = 40n): Log {
+  return {
+    address: definition.board,
+    topics: [ROLLING_SUBMITTED, hex(election.definitionHash), hex(hashOf(c))],
+    data: concatBytes(word(root), word(64n), word(BigInt(c.bytes.length)), padded(c.bytes)),
+    block,
+  };
+}
+
+/** The board's `RelayedRollingBallotSubmitted` for `c`, under the root `root`. */
+function relayedRollingSubmitted(c: Cast, root: bigint, block = 41n): Log {
+  return {
+    address: definition.board,
+    topics: [RELAYED_ROLLING_SUBMITTED, hex(election.definitionHash), hex(hashOf(c))],
+    data: concatBytes(
+      word(0n),
+      word(L1_REF + 10n),
+      word(RELAY_STAMP),
+      word(1_000_000n),
+      word(root),
+      word(192n),
+      word(BigInt(c.bytes.length)),
+      padded(c.bytes),
+    ),
+    block,
+  };
+}
+
+/** The view's options over seat 1's store, with the board-ballot extent `entries`. */
+function viewOptions(
+  change: {
+    entries?: readonly Uint8Array[];
+    rolling?: CountedSourceOptions["rolling"] | null;
+    logs?: readonly Log[];
+  } = {},
+): ViewOptions {
+  const { counted: _, extent: __, ...rest } = options(change);
+  const entries = change.entries ?? board();
+  return {
+    ...rest,
+    store: stores[0] as SeatStore,
+    extent: () => Promise.resolve({ entries, boardSegment: BigInt(sS) }),
+  };
+}
+
+const viewOf = (o: ViewOptions) => obligationView(o)(approved[0] as ApprovedElection);
+const plainHex = (b: Uint8Array) => Buffer.from(b).toString("hex");
+
+describe("a rolling poll's view at c_I", () => {
+  test("holds every member's ballot at every step from the attested extent, judged against the seat's own step roots", async () => {
+    const chains: unknown[] = [];
+    const view = await viewOf(
+      viewOptions({
+        rolling: async (d) => {
+          chains.push(d);
+          return PAST_CLOSE();
+        },
+      }),
+    );
+    expect(view.board.map((b) => [plainHex(b.ballotHash), b.nullifier, b.entry])).toEqual(
+      ballots.map((c, i) => [
+        plainHex(hashOf(c)),
+        c.record.nullifier,
+        { path: "board", value: BigInt(3 + i) },
+      ]),
+    );
+    expect(view.absent).toEqual([]);
+    expect(chains).toEqual([{ version: 7, value: definition }]);
+  });
+
+  test("shows a receipted ballot absent from the extent, and one relabelled to a step before its voter joined (T-25, T-38)", async () => {
+    const relabelled = encodeBallotV5({ ...ballots[2]!.record, step: EARLY });
+    for (const casts of [
+      [ballots[0]!.bytes, ballots[1]!.bytes],
+      [ballots[0]!.bytes, ballots[1]!.bytes, relabelled],
+    ]) {
+      const view = await viewOf(viewOptions({ entries: board(casts) }));
+      expect(view.board.map((b) => plainHex(b.ballotHash))).toEqual(
+        [ballots[0]!, ballots[1]!].map((c) => plainHex(hashOf(c))),
+      );
+      expect(view.absent.map(plainHex)).toEqual([plainHex(hashOf(ballots[2]!))]);
+    }
+  });
+
+  test("takes a contract copy from either rolling event under the root of its step", async () => {
+    const without = board([ballots[0]!.bytes, ballots[1]!.bytes]);
+    const direct = await viewOf(
+      viewOptions({
+        entries: without,
+        logs: [...registrationLogs(), rollingSubmitted(ballots[2]!, LATE_ROOT())],
+      }),
+    );
+    expect(direct.board.map((b) => [plainHex(b.ballotHash), b.entry])).toContainEqual([
+      plainHex(hashOf(ballots[2]!)),
+      { path: "ordinary", value: definition.opens_at + 40n * 60n },
+    ]);
+    expect(direct.absent).toEqual([]);
+    const relayed = await viewOf(
+      viewOptions({
+        entries: without,
+        logs: [...registrationLogs(), relayedRollingSubmitted(ballots[2]!, LATE_ROOT())],
+      }),
+    );
+    expect(relayed.board.map((b) => [plainHex(b.ballotHash), b.entry])).toContainEqual([
+      plainHex(hashOf(ballots[2]!)),
+      { path: "relayed", value: RELAY_STAMP },
+    ]);
+  });
+
+  test("never takes a contract copy under another root than its step's, which the verifier rejects (5.1; T-25, T-54)", async () => {
+    const without = board([ballots[0]!.bytes, ballots[1]!.bytes]);
+    for (const log of [
+      rollingSubmitted(ballots[2]!, EARLY_ROOT()),
+      relayedRollingSubmitted(ballots[2]!, EARLY_ROOT()),
+    ]) {
+      const view = await viewOf(
+        viewOptions({ entries: without, logs: [...registrationLogs(), log] }),
+      );
+      expect(view.board.map((b) => plainHex(b.ballotHash))).toEqual(
+        [ballots[0]!, ballots[1]!].map((c) => plainHex(hashOf(c))),
+      );
+      // A ballot log of the board's names it, so it isn't shown absent either.
+      expect(view.absent).toEqual([]);
+    }
+  });
+
+  test("is retried while no chain can be had, or the chain isn't proven past the close and the tier's root block", async () => {
+    for (const chain of [
+      undefined,
+      { chain: { ...CHAIN, events: [OPENING] }, safeAt: INTAKE_AT, block: 30n },
+      { ...PAST_CLOSE(), safeAt: closesAt },
+      { ...PAST_CLOSE(), block: ROOT_BLOCK - 1n },
+    ])
+      await expect(viewOf(viewOptions({ rolling: async () => chain }))).rejects.toMatchObject({
+        name: "RpcError",
       });
+    const bounds = { chain: CHAIN, safeAt: closesAt + 1n, block: ROOT_BLOCK };
+    expect((await viewOf(viewOptions({ rolling: async () => bounds }))).board).toHaveLength(3);
+  });
+
+  test("is refused without a rolling chain check, and for a definition other than the approved one", async () => {
+    await expect(viewOf(viewOptions({ rolling: null }))).rejects.toMatchObject({
+      name: "ViewError",
+      code: "rolling",
+    });
+    const later = { ...definition, closes_at: closesAt + 1n };
+    await expect(viewOf(viewOptions({ logs: registrationLogs(later) }))).rejects.toMatchObject({
+      name: "ViewError",
+      code: "definition",
+    });
+  });
+});
+
+describe("a rolling poll's ballot source for the complaint duty", () => {
+  const source = (o: ViewOptions) => complaintBallots(o)(approved[0] as ApprovedElection);
+
+  test("gives the extent's ballots and the board contract's rolling copies, under any root, with no chain read", async () => {
+    const got = await source(
+      viewOptions({
+        entries: board([ballots[0]!.bytes]),
+        // The source admits nothing: the duty matches each record by the
+        // ballot hash it recomputes (T-38).
+        rolling: null,
+        logs: [
+          ...registrationLogs(),
+          rollingSubmitted(ballots[1]!, EARLY_ROOT()),
+          relayedRollingSubmitted(ballots[2]!, EARLY_ROOT()),
+        ],
+      }),
+    );
+    expect(got.map(plainHex)).toEqual(ballots.map((c) => plainHex(c.bytes)));
+  });
+
+  test("is refused for a definition other than the approved one", async () => {
+    const later = { ...definition, closes_at: closesAt + 1n };
+    await expect(source(viewOptions({ logs: registrationLogs(later) }))).rejects.toMatchObject({
+      name: "ViewError",
+      code: "definition",
+    });
   });
 });
 

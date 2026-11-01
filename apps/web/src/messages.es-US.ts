@@ -1113,6 +1113,32 @@ export const esUS: Messages = {
     "Aquí solo se muestran los {count} puntos de control más recientes. El verificador lee cada uno de los anclados, desde el primero.",
   boardAnchorsUndecodable:
     "Nuestro servidor envió puntos de control de este tablero que no pasan la comprobación: uno no se decodifica, nombra otra encuesta o tiene más entradas que uno posterior. Esta página no muestra ninguno en vez de mostrar puntos de control que no puede leer.",
+  boardCeremonyMark: "Ceremonia de claves",
+  boardCeremonyTitle: "Cómo se hizo la clave de la encuesta",
+  boardCeremonyLede:
+    "Antes de que una encuesta abra, sus puestos de custodio hacen la clave con la que se sellan sus respuestas, en cuatro rondas de mensajes firmados: sus claves, desafíos, respuestas y revelaciones. El registro de las cuatro es la primera entrada del tablero, y la definición de la encuesta se compromete con su hash.",
+  boardCeremonyClaim:
+    "Esta página decodifica ese registro, calcula su hash ella misma y lo compara con el de la definición, y lee qué puestos enviaron un mensaje en cada ronda. No comprueba las pruebas que contiene, ni por tanto qué puestos calificaron: eso le corresponde al verificador, que comprueba el registro contra el panel de custodios que nombra nuestra versión.",
+  boardCeremonyCommitted:
+    "Este es el registro con el que se compromete la definición de la encuesta: esta página calculó su hash y encontró el de la definición.",
+  boardCeremonyNotCommitted:
+    "Este no es el registro con el que se compromete la definición de la encuesta: su hash, calculado aquí, no es el de la definición. Guarde esta página. Un tablero cuya ceremonia no coincide con su encuesta no pasa el verificador.",
+  boardCeremonyHash: "Hash del registro de la ceremonia, calculado aquí",
+  fingerprintCeremony: "Huella del registro de la ceremonia de claves",
+  boardCeremonySeatsTitle: "Puestos que enviaron las cuatro rondas: {count} de {seats}",
+  boardCeremonySeats: "Puestos de custodio, en orden",
+  boardCeremonySeat: "Puesto {index}",
+  boardCeremonyAllRounds: "Las cuatro rondas",
+  boardCeremonySomeRounds: "{count} de las cuatro rondas",
+  boardCeremonyLaunch: "Durante el lanzamiento, Abolish opera todos los puestos.",
+  boardCeremonyMissing:
+    "La primera entrada del tablero no es un registro de ceremonia. El tablero de una encuesta debe empezar con uno, así que el verificador rechaza esta encuesta.",
+  boardCeremonyUndecodable:
+    "La primera entrada del tablero no se decodifica como un registro de ceremonia que esta página lea, en la versión que fija la definición de la encuesta.",
+  boardCeremonyEmpty:
+    "El tablero aún no tiene entradas, así que el registro de la ceremonia no está en él.",
+  boardCeremonyElsewhere: "El registro de la ceremonia es la primera entrada del tablero.",
+  boardCeremonyFirstPage: "Verlo en la primera página",
   fingerprintCheckpoint: "Huella del punto de control después del período {segment}",
   entryKind_ballot: "Boleta sellada",
   entryKind_spoiledOpening: "Boleta anulada, abierta",

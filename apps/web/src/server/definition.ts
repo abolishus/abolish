@@ -54,6 +54,13 @@ export type DefinitionResult =
        * names a version this release reads.
        */
       readonly boardEntryVersion: BoardEntryVersion | undefined;
+      /**
+       * The key ceremony's transcript as the definition commits to it: the
+       * hash its record must have, and whether the profile pins version 1 of
+       * the record, the only one (docs/spec/ceremony.md), which the board
+       * page decodes the board's first entry under (src/ceremony.ts).
+       */
+      readonly transcript: { readonly hash: string; readonly pinned: boolean };
       /** Its tally partition, which the results page reports cell by cell. */
       readonly cells: readonly PartitionCell[];
     }
@@ -237,5 +244,9 @@ export function definitionView(electionId: string, definitionHex: string): Defin
     pinned !== undefined && Object.hasOwn(BOARD_ENTRY.versions, pinned)
       ? (pinned as BoardEntryVersion)
       : undefined;
-  return { ok: true, poll, boardEntryVersion, cells };
+  const transcript = {
+    hash: toHex(definition.value.ceremony_transcript_hash),
+    pinned: pinnedVersion(definition.value, RECORD_TYPES.ceremonyTranscript) === 1,
+  };
+  return { ok: true, poll, boardEntryVersion, transcript, cells };
 }

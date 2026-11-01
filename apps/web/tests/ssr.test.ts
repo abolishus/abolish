@@ -1056,6 +1056,20 @@ describe("board page", () => {
     expect(html).not.toMatch(/<input\b[^>]*name="from"/);
   });
 
+  test("reads the key ceremony from the board's first entry, on its page only (T-34)", async () => {
+    // The stub's first payload is the board vector's placeholder ceremony
+    // record, which doesn't decode as a transcript.
+    const first = await text(`/polls/${ID}/board`);
+    expect(first).toContain("How the poll");
+    expect(first).toContain("doesn&#x27;t decode as a ceremony record this page reads");
+    expect(first).not.toContain("See it on the first page");
+    const later = await get(`/polls/${ID}/board?from=25`);
+    const html = await later.text();
+    expect(html).toContain("is the board&#x27;s first entry.");
+    expect(html).toContain(`href="/polls/${ID}/board?from=0#ceremony-title"`);
+    expect(html).not.toContain("as a ceremony record this page reads");
+  });
+
   test("shows the latest checkpoints, the latest first, with the hashes this page computed (T-23, T-24)", async () => {
     for (const from of ["0", "25", "50"]) {
       const page = await text(`/polls/${ID}/board?from=${from}`);
@@ -3447,17 +3461,17 @@ const KB = 1024;
  * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box with its topics and place, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 184, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 181, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 10, js: 221, css: 40, fonts: 58 },
-  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 191, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 184, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 177, css: 40, fonts: 58 },
-  "/verify": { html: 8, js: 173, css: 40, fonts: 58 },
+  "/": { html: 10, js: 185, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 182, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 10, js: 222, css: 40, fonts: 58 },
+  [`/polls/${CELLS_ID}/results`]: { html: 10, js: 192, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 185, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 178, css: 40, fonts: 58 },
+  "/verify": { html: 8, js: 174, css: 40, fonts: 58 },
   "/trustees": { html: 6, js: 177, css: 40, fonts: 58 },
   "/account": { html: 6, js: 204, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 258, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 178, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 259, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 179, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

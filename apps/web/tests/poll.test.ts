@@ -28,6 +28,7 @@ interface Vector {
     opens_at: string;
     closes_at: string;
     electorate: { tier: string; group_size: string }[];
+    ceremony_transcript_hash: string;
   };
   encoding: string;
   hash?: string;
@@ -118,6 +119,26 @@ describe("definitionView", () => {
       const view = definitionView(typical.value!.election_id, encoding);
       // Such a profile breaks a rule the page reports, but it never picks a version for it.
       expect(view.ok && view.boardEntryVersion).toBeUndefined();
+    }
+  });
+
+  test("carries the transcript hash the definition commits to, pinned only by exactly one version 1", () => {
+    const typical = decodable.find((v) => v.id === "definition-typical")!;
+    const result = definitionView(typical.value!.election_id, typical.encoding);
+    expect(result.ok && result.transcript).toEqual({
+      hash: typical.value!.ceremony_transcript_hash,
+      pinned: true,
+    });
+    const d = decodeElectionDefinition(fromHex(typical.encoding));
+    const others = d.profile.pins.filter((p) => p.record_type !== 5);
+    for (const pins of [
+      others,
+      [...others, { record_type: 5, version: 1 }, { record_type: 5, version: 1 }],
+      [...others, { record_type: 5, version: 2 }],
+    ]) {
+      const encoding = toHex(encodeElectionDefinition({ ...d, profile: { ...d.profile, pins } }));
+      const view = definitionView(typical.value!.election_id, encoding);
+      expect(view.ok && view.transcript.pinned).toBe(false);
     }
   });
 

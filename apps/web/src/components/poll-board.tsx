@@ -25,6 +25,7 @@ import {
   type EntryKind,
   sizeShare,
 } from "../board.ts";
+import { CEREMONY_ROUNDS, type CeremonyView } from "../ceremony.ts";
 import { ENTRY_KINDS } from "../entry-kinds.ts";
 import { catalogs, type Messages } from "../messages.ts";
 import type { PollView } from "../poll.ts";
@@ -44,6 +45,8 @@ export interface PollBoardProps {
   kind: EntryKind | "all" | undefined;
   /** Whether `rows` are in the head's tree; `undefined` with `rows`. */
   inclusion: Inclusion | undefined;
+  /** The key ceremony from the board's first entry, on the page that holds it; `undefined` elsewhere. */
+  ceremony: CeremonyView | undefined;
   /** Entries per page: every page starts at a multiple of it. */
   pageSize: number;
   /** The board's latest checkpoints, checked, or `undefined` when they failed their checks. */
@@ -88,6 +91,7 @@ export function PollBoard({
   rows,
   kind,
   inclusion,
+  ceremony,
   pageSize,
   anchors,
   histories,
@@ -376,6 +380,102 @@ export function PollBoard({
           </p>
         ) : null}
       </Section>
+
+      <Section
+        index="04"
+        mark={t("boardCeremonyMark")}
+        title={t("boardCeremonyTitle")}
+        id="ceremony-title"
+        lede={<p className="m-0">{t("boardCeremonyLede")}</p>}
+      >
+        <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
+          {t("boardCeremonyClaim")}
+        </p>
+        {ceremony !== undefined ? (
+          <Ceremony ceremony={ceremony} />
+        ) : size === 0n ? (
+          <p className="m-0 border-y border-foreground py-8 text-lg" role="status">
+            {t("boardCeremonyEmpty")}
+          </p>
+        ) : (
+          <p className="m-0 border-y border-foreground py-8 text-lg">
+            {t("boardCeremonyElsewhere")}{" "}
+            <a className="underline underline-offset-4" href={`${base}?from=0#ceremony-title`}>
+              {t("boardCeremonyFirstPage")}
+            </a>
+          </p>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+/**
+ * The ceremony's record as this page read it: whether it is the one the
+ * definition commits to (T-34, T-37), its hash, and which seats sent each of
+ * the four rounds, never which qualified, since that takes the proofs the
+ * verifier checks (T-40). Every seat being ours during launch is said beside
+ * them (T-14).
+ */
+function Ceremony({ ceremony }: { ceremony: CeremonyView }) {
+  const t = useTranslate(catalogs);
+  if (ceremony.kind !== "transcript")
+    return (
+      <p className="m-0 border-l-2 border-destructive py-2 ps-3 text-lg font-medium" role="status">
+        {t(ceremony.kind === "missing" ? "boardCeremonyMissing" : "boardCeremonyUndecodable")}
+      </p>
+    );
+  const complete = ceremony.seats.filter((seat) => seat.rounds === CEREMONY_ROUNDS).length;
+  return (
+    <div className="grid gap-8">
+      <div className="grid min-w-0 gap-3">
+        <History ok={ceremony.committed}>
+          {t(ceremony.committed ? "boardCeremonyCommitted" : "boardCeremonyNotCommitted")}
+        </History>
+        <div className="flex min-w-0 items-start gap-4">
+          <Fingerprint value={ceremony.hash} label={t("fingerprintCeremony")} size={36} />
+          <div className="min-w-0">
+            <Hash value={ceremony.hash} label={t("boardCeremonyHash")} />
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-4">
+        <h3 className="m-0 font-heading text-xl font-semibold">
+          {t("boardCeremonySeatsTitle", { count: complete, seats: ceremony.seats.length })}
+        </h3>
+        <ol
+          aria-label={t("boardCeremonySeats")}
+          className="m-0 grid list-none border-t border-foreground p-0 text-sm"
+        >
+          {ceremony.seats.map((seat) => {
+            const all = seat.rounds === CEREMONY_ROUNDS;
+            const Icon = all ? Check : X;
+            return (
+              <li
+                key={seat.index}
+                className="grid grid-cols-[1fr_auto] gap-x-4 border-b border-border py-3"
+              >
+                <span>{t("boardCeremonySeat", { index: seat.index })}</span>
+                <span className="flex items-center gap-1.5 self-center">
+                  <Icon
+                    aria-hidden="true"
+                    className={all ? "size-4 text-recorded" : "size-4 text-muted-foreground"}
+                  />
+                  {all
+                    ? t("boardCeremonyAllRounds")
+                    : t("boardCeremonySomeRounds", { count: seat.rounds })}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+        <p className="m-0 max-w-prose text-pretty">
+          {t("boardCeremonyLaunch")}{" "}
+          <a className="underline underline-offset-4" href="/trustees">
+            {t("navKeys")}
+          </a>
+        </p>
+      </div>
     </div>
   );
 }

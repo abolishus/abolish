@@ -166,6 +166,9 @@ export const RESULTS_OUTCOME = z.union([
           counted: SMALL,
           counts: COUNTS.optional(),
           byQuestion: BY_QUESTION.optional(),
+          // A rolling tier's electorate: its members at the opening root and
+          // who could answer by the close, the verifier's `E(n_c)`.
+          electorate: z.strictObject({ opening: SMALL, eligible: SMALL }).optional(),
         }),
       )
       .max(MAX_CELLS),

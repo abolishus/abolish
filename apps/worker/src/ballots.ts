@@ -308,7 +308,7 @@ export class DestructionSubmissions {
 }
 
 /** `results` as the queue carries it: each report's fields named, so nothing else rides along. */
-function resultsOutcomeOf(results: PollResults): ResultsOutcome {
+export function resultsOutcomeOf(results: PollResults): ResultsOutcome {
   if (results.state === "unopened") return { ok: true, state: "unopened" };
   const { ok, failure, cells, tiers, questions } = results.results;
   const slices = (r: {
@@ -334,7 +334,16 @@ function resultsOutcomeOf(results: PollResults): ResultsOutcome {
       ...(c.code !== undefined && { code: c.code }),
       signers: [...c.signers],
     })),
-    tiers: tiers.map((t) => ({ tier: t.tier, counted: t.counted, ...slices(t) })),
+    tiers: tiers.map((t) => ({
+      tier: t.tier,
+      counted: t.counted,
+      ...slices(t),
+      // The two figures a rolling tier's results state; its growth by period
+      // and its steps' sizes are the verifier's report to give.
+      ...(t.electorate !== undefined && {
+        electorate: { opening: t.electorate.opening.members, eligible: t.electorate.eligible },
+      }),
+    })),
     ...(questions !== undefined && {
       questions: questions.map((q) => ({
         question: q.question,

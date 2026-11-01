@@ -586,6 +586,14 @@ export const esUS: Messages = {
   resultsNoneAnswered: "Nadie respondió.",
   resultsTurnout: "Participación",
   resultsTurnoutOf: { one: "{share} de {count} miembro", other: "{share} de {count} miembros" },
+  resultsTurnoutOfClose: {
+    one: "{share} de {count} persona que podía responder antes del cierre",
+    other: "{share} de {count} personas que podían responder antes del cierre",
+  },
+  resultsCouldAnswer: {
+    one: "{count} persona podía responder antes del cierre",
+    other: "{count} personas podían responder antes del cierre",
+  },
   resultsTurnoutIs: "Participación: {turnout}",
   resultsTierPending:
     "Parte del conteo de este grupo todavía no se publica. Sus resultados aparecen aquí cuando se publique completo.",

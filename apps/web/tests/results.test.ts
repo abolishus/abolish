@@ -16,8 +16,9 @@ const runs = { numRuns: Number(process.env["FC_NUM_RUNS"] ?? 100) };
 
 type Read = Extract<ServedResults, { state: "read" }>;
 
-const one: Pick<PollView, "version" | "questions" | "electorate"> = {
+const one: Pick<PollView, "version" | "rolling" | "questions" | "electorate"> = {
   version: 1,
+  rolling: false,
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [
     { tier: 0, groupSize: "50" },
@@ -25,8 +26,9 @@ const one: Pick<PollView, "version" | "questions" | "electorate"> = {
   ],
 };
 
-const two: Pick<PollView, "version" | "questions" | "electorate"> = {
+const two: Pick<PollView, "version" | "rolling" | "questions" | "electorate"> = {
   version: 5,
+  rolling: false,
   questions: [
     { optionCount: 3, minSelections: 0, maxSelections: 1 },
     { optionCount: 2, minSelections: 0, maxSelections: 2 },
@@ -161,6 +163,60 @@ describe("resultsView", () => {
             kind: "read",
             tiers: [{ tier: 0, counted, questions: [counts] }],
           });
+        },
+      ),
+      runs,
+    );
+  });
+});
+
+describe("resultsView of a rolling poll", () => {
+  // Tier 0 opened with 40 members; more may join it by the close.
+  const rolling = {
+    ...two,
+    version: 7 as const,
+    rolling: true,
+    electorate: [{ tier: 0 as const, groupSize: "40" }],
+  };
+  const tier = (electorate: { opening: number; eligible: number }, counted = 4) =>
+    read([{ tier: 0, counted, electorate }]);
+
+  test("takes each rolling tier's count at the close as who could answer", () => {
+    expect(resultsView(rolling, tier({ opening: 40, eligible: 57 }))).toEqual({
+      kind: "read",
+      tiers: [{ tier: 0, counted: 4, questions: undefined, couldAnswer: 57 }],
+    });
+    // Before the server reads the close, the tier says only who answered.
+    expect(resultsView(rolling, read([{ tier: 0, counted: 4 }]))).toEqual({
+      kind: "read",
+      tiers: [{ tier: 0, counted: 4, questions: undefined }],
+    });
+  });
+
+  // T-34: a count the definition contradicts, or one below who answered, would print a false turnout.
+  test.each([
+    ["an opening count not the definition's", tier({ opening: 41, eligible: 57 })],
+    ["fewer who could answer than answered", tier({ opening: 40, eligible: 3 })],
+  ])("refuses %s", (_, served) => {
+    expect(resultsView(rolling, served)).toEqual({ kind: "unavailable" });
+  });
+
+  test("refuses an electorate on a fixed poll's tier", () => {
+    expect(resultsView({ ...two, version: 7 }, tier({ opening: 50, eligible: 57 }))).toEqual({
+      kind: "unavailable",
+    });
+  });
+
+  test("takes exactly the electorates that fit, whatever their values", () => {
+    fc.assert(
+      fc.property(
+        fc.nat({ max: 100 }),
+        fc.nat({ max: 1000 }),
+        fc.nat({ max: 1000 }),
+        (opening, eligible, counted) => {
+          const poll = { ...rolling, electorate: [{ tier: 0 as const, groupSize: "40" }] };
+          const view = resultsView(poll, tier({ opening, eligible }, counted));
+          expect(view.kind).toBe(opening === 40 && counted <= eligible ? "read" : "unavailable");
         },
       ),
       runs,

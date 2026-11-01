@@ -86,6 +86,38 @@ export const Default: Story = { play };
 
 export const Dark: Story = { parameters: { theme: "dark" }, play };
 
+/**
+ * A rolling poll's tiers with their counts at the close: who could answer by
+ * then, beside who answered ([[0028-rolling-electorates]]).
+ */
+export const Rolling: Story = {
+  args: {
+    results: {
+      kind: "read",
+      tiers: [
+        {
+          tier: 0,
+          counted: 1234,
+          questions: [
+            ["700", "434", "100"],
+            ["600", "600"],
+          ],
+          couldAnswer: 8000,
+        },
+        { tier: 2, counted: 40, questions: undefined, couldAnswer: 150 },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const tier = within(canvas.getByRole("region", { name: "Tier 0 (verified e-mail)" }));
+    await expect(tier.getByText("1,234 people answered")).toBeVisible();
+    await expect(tier.getByText("8,000 people could answer by the close")).toBeVisible();
+    const pending = within(canvas.getByRole("region", { name: "Tier 2 (document-verified)" }));
+    await expect(pending.getByText("150 people could answer by the close")).toBeVisible();
+  },
+};
+
 /** A hidden poll's results, by number: its words are withheld, its count never is. */
 export const ByNumber: Story = {
   args: {

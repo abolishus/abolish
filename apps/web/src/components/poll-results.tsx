@@ -162,6 +162,14 @@ function Tier({
             ? t("resultsNoneAnswered")
             : t("resultsAnswered", { count: result.counted })}
         </p>
+        {/* A rolling tier's count at the close, beside who answered: more
+            than its members at the opening could answer
+            ([[0028-rolling-electorates]]). */}
+        {result.couldAnswer === undefined ? null : (
+          <p className="m-0 text-base text-muted-foreground">
+            {t("resultsCouldAnswer", { count: result.couldAnswer })}
+          </p>
+        )}
       </div>
       {result.questions === undefined ? (
         <p role="status" className="m-0 max-w-prose text-base">

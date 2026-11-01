@@ -28,6 +28,7 @@ import {
   type RunningWorker,
   startWorker,
 } from "../src/index.ts";
+import { resultsOutcomeOf } from "../src/ballots.ts";
 
 // The `{results-read}` queue end to end, against a live Redis and Postgres:
 // the API's ResultsQueue asks for a poll's results and hears what core's
@@ -303,6 +304,55 @@ test("an outcome is parsed strictly: an unknown field, a negative count or a bal
   expect(
     RESULTS_OUTCOME.safeParse({ ...read, tiers: [{ tier: 0, counted: 2, panel: 2 }] }).success,
   ).toBe(false);
+  // A rolling tier's two figures only, never its growth by period.
+  const rolling = { tier: 0, counted: 2, electorate: { opening: 3, eligible: 5 } };
+  expect(RESULTS_OUTCOME.safeParse({ ...read, tiers: [rolling] }).success).toBe(true);
+  expect(
+    RESULTS_OUTCOME.safeParse({
+      ...read,
+      tiers: [{ ...rolling, electorate: { ...rolling.electorate, growth: [] } }],
+    }).success,
+  ).toBe(false);
+  expect(
+    RESULTS_OUTCOME.safeParse({
+      ...read,
+      tiers: [{ ...rolling, electorate: { opening: 3, eligible: -1 } }],
+    }).success,
+  ).toBe(false);
   expect(RESULTS_OUTCOME.safeParse({ ok: false, code: "rejected" }).success).toBe(false);
   expect(RESULTS_OUTCOME.safeParse({ ok: false, code: "unavailable" }).success).toBe(false);
+});
+
+test("a rolling tier's electorate is carried as its members at the opening and who could answer by the close", () => {
+  const electorate = {
+    opening: { members: 3 },
+    eligible: 5,
+    close: { step: 4, members: 4, accepted: true },
+    smallestStep: { step: 1, members: 3 },
+    growth: [{ period: "12", added: 2, removed: 1, members: 4 }],
+    flagged: { eligible: true, smallestStep: true },
+  };
+  const outcome = resultsOutcomeOf({
+    state: "read",
+    openings: 1,
+    results: {
+      ok: true,
+      cells: [{ cell: 0, tier: 0, counted: 2, counts: ["1", "1"], signers: [1] }],
+      tiers: [
+        { tier: 0, counted: 2, counts: ["1", "1"], electorate },
+        { tier: 2, counted: 0 },
+      ],
+    },
+  });
+  expect(RESULTS_OUTCOME.parse(outcome)).toEqual({
+    ok: true,
+    state: "read",
+    openings: 1,
+    passed: true,
+    cells: [{ cell: 0, tier: 0, counted: 2, counts: ["1", "1"], signers: [1] }],
+    tiers: [
+      { tier: 0, counted: 2, counts: ["1", "1"], electorate: { opening: 3, eligible: 5 } },
+      { tier: 2, counted: 0 },
+    ],
+  });
 });

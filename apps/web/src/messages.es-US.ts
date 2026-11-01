@@ -627,6 +627,7 @@ export const esUS: Messages = {
     other:
       "{count} preguntas, que se responden juntas. Puedes cambiar tus respuestas hasta que cierre la encuesta, y solo cuentan las últimas.",
   },
+  pollFactsTitle: "Sobre esta encuesta",
   pollQuestionsTitle: "Lo que pregunta",
   pollQuestionsFixed:
     "La definición de la encuesta fija estas palabras, así que no se pueden editar antes de que abra ni mientras está abierta.",

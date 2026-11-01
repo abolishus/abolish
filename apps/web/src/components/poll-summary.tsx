@@ -139,14 +139,22 @@ function PollQuestions({
           return (
             <li
               key={i}
-              className="grid grid-cols-[2.5rem_1fr] gap-x-4 border border-border p-5 sm:p-6"
+              className={cn(
+                "grid gap-x-4 border border-border p-5 sm:p-6",
+                !headed && "grid-cols-[2.5rem_1fr]",
+              )}
             >
-              <span
-                aria-hidden="true"
-                className="grid size-10 place-items-center bg-muted font-heading text-lg font-semibold"
-              >
-                {i + 1}
-              </span>
+              {/* A poll's one question is its heading, so a "1" beside it
+                  numbers nothing, and its column took a fifth of a phone's
+                  width from the answers (P2-29, the poll page's iteration 2). */}
+              {headed ? null : (
+                <span
+                  aria-hidden="true"
+                  className="grid size-10 place-items-center bg-muted font-heading text-lg font-semibold"
+                >
+                  {i + 1}
+                </span>
+              )}
               <div className="grid min-w-0 gap-3">
                 {headed ? (
                   <h3 id={`question-${i}`} className="sr-only">
@@ -469,19 +477,6 @@ export function PollSummary({
                 })}
           </p>
         ) : null}
-
-        <PollFacts poll={poll} phoneVerification={phoneVerification} />
-
-        {/* A hidden poll's tags are withheld with its text (T-68); a delisted
-            one's stand, but the stream they'd link to doesn't list it. */}
-        {tags === undefined ||
-        moderation.state === "hidden" ||
-        (tags.topic === undefined && tags.place === undefined) ? null : (
-          <div className="grid gap-2">
-            <ListedUnder tags={tags} linked={moderation.state === "visible"} />
-            <p className="m-0 max-w-prose text-sm text-muted-foreground">{t("streamTagsNote")}</p>
-          </div>
-        )}
       </header>
 
       {words === undefined ? null : (
@@ -492,6 +487,28 @@ export function PollSummary({
           answering={answering}
         />
       )}
+
+      {/* After what it asks, as the open poll's mockup orders it: the question
+          and its answers are the page's hero, and with the facts first a
+          phone met its first answer 991px down, past the first screen (P2-29,
+          the poll page's iteration 2). */}
+      <section aria-labelledby="facts-title" className="grid gap-6">
+        <h2 id="facts-title" className="m-0 font-heading text-2xl font-semibold">
+          {t("pollFactsTitle")}
+        </h2>
+        <PollFacts poll={poll} phoneVerification={phoneVerification} />
+
+        {/* A hidden poll's tags are withheld with its text (T-68); a delisted
+              one's stand, but the stream they'd link to doesn't list it. */}
+        {tags === undefined ||
+        moderation.state === "hidden" ||
+        (tags.topic === undefined && tags.place === undefined) ? null : (
+          <div className="grid gap-2">
+            <ListedUnder tags={tags} linked={moderation.state === "visible"} />
+            <p className="m-0 max-w-prose text-sm text-muted-foreground">{t("streamTagsNote")}</p>
+          </div>
+        )}
+      </section>
 
       {/* Shown on a hidden poll too, by number: moderation never withholds a
           result (docs/moderation-policy.md). Nothing is counted before it opens. */}

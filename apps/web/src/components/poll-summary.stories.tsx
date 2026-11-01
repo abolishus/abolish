@@ -649,6 +649,13 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   await expect(within(answers).getByRole("link", { name: "Yes" })).toHaveStyle({
     minHeight: "48px",
   });
+  // The question and its answers before the facts, as the open poll's
+  // mockup orders them, and no "1" numbering the one question that heads the
+  // page (P2-29, the poll page's iteration 2).
+  const facts = canvas.getByRole("region", { name: "About this poll" });
+  await expect(within(facts).getByText("Who can vote")).toBeInTheDocument();
+  await expect(asks.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await expect(within(asks).queryByText("1", { exact: true })).toBeNull();
   await expect(
     within(asks).getByText(/^Choose an answer to open it in the ballot app\./),
   ).toBeVisible();
@@ -704,6 +711,10 @@ export const WordedQuestions: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Park and library");
+    // Questions of their own are numbered beside their words.
+    const asks = canvas.getByRole("region", { name: "What it asks" });
+    await expect(within(asks).getByText("1", { exact: true })).toBeVisible();
+    await expect(within(asks).getByText("2", { exact: true })).toBeVisible();
     await expect(
       canvas.getByRole("heading", { name: "Question 1: Should the park stay open late?" }),
     ).toBeVisible();

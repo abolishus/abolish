@@ -61,12 +61,20 @@ function zonedDay(timeZone: string, date: Date): number {
   return Date.UTC(part("year"), part("month") - 1, part("day")) / 86_400_000;
 }
 
+/** `date`'s year on `timeZone`'s clock. */
+function zonedYear(timeZone: string, date: Date): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" }).format(date);
+}
+
 /**
  * `formatZonedWhole`, with the day said as "today" or "tomorrow" ("hoy",
  * "mañana") where `date` falls on one of them on `timeZone`'s clock at
  * `now`: a card read "Closes Jan 7, 2026, 7:00 PM EST" on the morning of
  * January 7, and only a visitor who knew the date learned it closed that
- * evening (P2-29, the stream's iteration 23). Any other day keeps its date.
+ * evening (P2-29, the stream's iteration 23). Any other day keeps its date,
+ * with its year only when it isn't `now`'s year: "Closes Jan 14, 2026" sat
+ * over the same card's "since it opened Jan 1", which already left this
+ * year out (the stream's iteration 28).
  */
 export function formatZonedNear(
   locale: string,
@@ -77,7 +85,19 @@ export function formatZonedNear(
 ): { time: string; zone: string; day?: string } {
   const { time, zone } = formatZonedWhole(locale, timeZone, date, dateStyle);
   const days = zonedDay(timeZone, date) - zonedDay(timeZone, now);
-  if (days !== 0 && days !== 1) return { time, zone };
+  if (days !== 0 && days !== 1) {
+    if (zonedYear(timeZone, date) !== zonedYear(timeZone, now)) return { time, zone };
+    const thisYear = new Intl.DateTimeFormat(locale, {
+      month: dateStyle === "long" ? "long" : "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone,
+    })
+      .format(date)
+      .replace(/\s(?=\S+$)/, "\u00a0");
+    return { time: thisYear, zone };
+  }
   const day = new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
   const clock = new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone })
     .format(date)
@@ -107,13 +127,11 @@ export function formatZonedDaySince(
       day: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day"),
       relative: true,
     };
-  const year = (d: Date) =>
-    new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" }).format(d);
   const day = new Intl.DateTimeFormat(locale, {
     timeZone,
     month: "short",
     day: "numeric",
-    ...(year(date) === year(now) ? {} : { year: "numeric" }),
+    ...(zonedYear(timeZone, date) === zonedYear(timeZone, now) ? {} : { year: "numeric" }),
   })
     .format(date)
     .replace(/\s/g, "\u00a0");

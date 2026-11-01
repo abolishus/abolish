@@ -10,8 +10,8 @@ import { LanguageSwitch } from "./language-switch.tsx";
 
 type Key = keyof Messages;
 
-// Only routes this server has. The mockups' Board and Trustees join as their
-// pages land (docs/status/P2-19.md); a poll's board is under its own page.
+// Only routes this server has; a poll's board is under its own page
+// (docs/status/P2-19.md).
 const NAV = [
   { href: "/discover", label: "navDiscover" },
   { href: "/polls", label: "navPolls" },
@@ -19,6 +19,13 @@ const NAV = [
   { href: "/verify", label: "navVerify" },
   { href: "/moderation", label: "navModeration" },
 ] as const satisfies readonly { href: string; label: Key }[];
+
+// Only in the footer, as the mockups' footer lists it among the record's
+// pages (everyday-parts.tsx), leaving the header to the ways in (part 55).
+const FOOTER_NAV = [...NAV, { href: "/trustees", label: "navKeys" }] as const satisfies readonly {
+  href: string;
+  label: Key;
+}[];
 
 // A phone's header keeps only the first of them, the everyday ways in, as
 // many as fit one row: in English two, at 320px; in Spanish, whose words are
@@ -126,7 +133,7 @@ export function SiteLayout({
             <div className="grid content-start gap-6 md:col-span-5">
               <nav aria-label={t("footerNav")}>
                 <ul className="m-0 grid list-none gap-1 p-0 text-sm">
-                  {NAV.map((item) => (
+                  {FOOTER_NAV.map((item) => (
                     <li key={item.href}>
                       {/* Marked here too: below 768px How it works and the
                         moderation log are only in the footer, so this is

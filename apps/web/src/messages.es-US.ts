@@ -326,6 +326,81 @@ export const esUS: Messages = {
     "Una máquina encendida, un nodo de Ethereum, un nodo de la red de la encuesta y disco para los tableros que copies. Reinícialo para que entregue lo que añadió una copia posterior.",
   recountSource:
     "El código fuente del verificador está en packages/verifier y su especificación en docs/spec/verifier.md, ambos publicados en github.com/abolishus/abolish.",
+  navKeys: "Quién tiene las llaves",
+  keysEyebrow: "Fideicomisarios · El panel de lanzamiento",
+  keysTitle: "Durante el lanzamiento, solo Abolish tiene la llave",
+  keysLede:
+    "Cada respuesta se sella para que solo los puestos fideicomisarios de la encuesta, trabajando juntos, puedan abrirla. Hasta que se nombren fideicomisarios independientes, todos los puestos son nuestros, así que por ahora las respuestas a una encuesta de aquí no son secretas para nosotros.",
+  keysFigureSeats: "Puestos fideicomisarios",
+  keysFigureSeatsScope: "todos a cargo de Abolish",
+  keysFigureThreshold: "Necesarios para abrir un conteo",
+  keysFigureThresholdScope: "cualesquiera {threshold} de los {seats}",
+  keysFigureAlone: "Puestos que pueden abrir algo solos",
+  keysFigureAloneScope: "una parte por sí sola no revela nada",
+  keysFigureOthers: "Puestos en manos de otros",
+  keysFigureOthersScope: "hasta que se nombren fideicomisarios independientes",
+  keysSeatsMark: "Los puestos",
+  keysSeatsTitle: "{seats} puestos, y cualesquiera {threshold} abren un conteo",
+  keysSeatsLede:
+    "Un puesto es el nodo de un fideicomisario. Cuando respondes, la app de votación divide lo que abre tu respuesta sellada en una parte para cada puesto, cada una cifrada solo para ese puesto.",
+  keysSeat1Title: "Ningún puesto abre nada solo",
+  keysSeat1Body:
+    "Una parte, o cualesquiera {fewer} de ellas, no revela nada de una respuesta. Ningún puesto por sí solo puede abrir un conteo antes de tiempo, ni nunca.",
+  keysSeat2Title: "{threshold} puestos abren los totales",
+  keysSeat2Body:
+    "Cuando una encuesta cierra, cada puesto suma sus partes y {threshold} de esas sumas abren cada total. Cada apertura va firmada por el puesto que la hizo y se comprueba contra el tablero, así que una equivocada se ve en público.",
+  keysSeat3Title: "Los mismos {threshold} podrían abrir una respuesta",
+  keysSeat3Body:
+    "Los puestos que juntos alcanzan el umbral podrían abrir respuestas sueltas, no solo totales. Por eso importa quién los tiene, y por eso la página de cada encuesta dice cuántos hacen falta.",
+  keysOursMark: "Durante el lanzamiento",
+  keysOursTitle: "Por ahora, todos los puestos son nuestros",
+  keysOursLede:
+    "Todavía no se han nombrado fideicomisarios independientes, así que todos los puestos del panel de lanzamiento están a cargo de Abolish. Esto es lo que significa, dicho con claridad.",
+  keysOursCould: "Lo que podríamos hacer",
+  keysOursCouldMeans:
+    "Abrir cualquier respuesta suelta de una encuesta bajo el panel de lanzamiento, mientras está abierta y hasta que se destruyan sus partes.",
+  keysOursShows: "Lo que muestra una respuesta abierta",
+  keysOursShowsMeans:
+    "Lo que respondió una identidad de votación anónima, no quién es, salvo que se una a la dirección de red desde la que llegó la boleta. Nuestros puestos reciben cada boleta con esa dirección y prometen no guardarla, una promesa que nadie puede comprobar.",
+  keysOursCompel: "Quién podría obligarnos",
+  keysOursCompelMeans:
+    "Cualquiera que pueda obligarnos, por ley o por la fuerza, podría hacernos abrir respuestas o entregar las partes antes de que se destruyan.",
+  keysOursPolls: "Qué encuestas",
+  keysOursPollsMeans:
+    "Solo las encuestas cotidianas. Los referendos cívicos y las votaciones de organizaciones esperan a un panel independiente, y la página de cada encuesta dice quién tiene su llave.",
+  keysPromiseMark: "Lo que prometemos",
+  keysPromiseTitle: "Nuestros compromisos, y lo que nadie puede comprobar",
+  keysPromiseLede:
+    "Son promesas, no pruebas. Donde algo se puede comprobar, dice cómo; donde no, también lo dice.",
+  keysPromise1Title: "Máquinas, proveedores y custodios distintos",
+  keysPromise1Body:
+    "Ninguna máquina, proveedor de alojamiento ni persona que pueda llegar a un puesto tiene {threshold} puestos. Eso protege contra una intrusión o una persona desleal, no contra quien pueda obligar a la propia Abolish.",
+  keysPromise1Check: "Nadie de fuera puede comprobarlo.",
+  keysPromise2Title: "Partes destruidas tras cada conteo final",
+  keysPromise2Body:
+    "Cuando se publica el conteo final de una encuesta, cada puesto destruye sus llaves y partes y firma una declaración que lo dice.",
+  keysPromise2Check:
+    "Las declaraciones firmadas están en el tablero de la encuesta. La destrucción en sí nadie la puede comprobar.",
+  keysPromise3Title: "Dicho en cada encuesta",
+  keysPromise3Body:
+    "La página de cada encuesta dice que durante el lanzamiento solo Abolish tiene la llave de esa encuesta, en las páginas cotidianas además de en la evidencia.",
+  keysPromise3Check: "Cualquiera puede verlo en la página de cada encuesta.",
+  keysNextMark: "Lo que viene",
+  keysNextTitle: "Fideicomisarios independientes, antes de la primera votación cívica",
+  keysNextLede:
+    "El panel de lanzamiento está pensado para terminar. Hasta entonces, esta página lo dice en vez de mostrar fideicomisarios que aún no existen.",
+  keysNext1Title: "El traspaso",
+  keysNext1Body:
+    "Los puestos pasan a fideicomisarios independientes y con nombre antes de que se celebre cualquier referendo cívico, cada paso un panel nuevo fijado en la cadena y en una nueva versión. Un traspaso protege solo las encuestas abiertas después: las abiertas antes siguen legibles con nuestras partes hasta que las destruyamos.",
+  keysNext2Title: "Tus propios fideicomisarios",
+  keysNext2Body:
+    "Quien pregunta podrá añadir fideicomisarios propios a una encuesta. Sus respuestas se abrirán entonces solo con el panel de lanzamiento y los fideicomisarios de quien pregunta juntos, lo que protege esa encuesta de nosotros. El formulario de encuestas todavía no lo ofrece.",
+  keysNext3Title: "Nombres y la ceremonia de llaves",
+  keysNext3Body:
+    "Cuando se nombren fideicomisarios independientes, esta página mostrará a cada uno, dónde está y el registro público de la ceremonia que creó sus llaves.",
+  keysMore:
+    "Lo demás que es débil, y cómo comprobar un conteo sin nosotros, se explica en las páginas de abajo.",
+  keysMoreWeak: "Dónde es débil, dicho con claridad",
   dgTitle: "{section}: paso {step} de {total}",
   dgFake: "Para falsificar uno",
   dgFake0: "otra llave de acceso",

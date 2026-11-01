@@ -16,6 +16,7 @@ import { Route as HowItWorksRouteImport } from "./routes/how-it-works.tsx";
 import { Route as ModerationRouteImport } from "./routes/moderation.tsx";
 import { Route as OfflineRouteImport } from "./routes/offline.tsx";
 import { Route as SwDotjsRouteImport } from "./routes/sw[.]js.ts";
+import { Route as TrusteesRouteImport } from "./routes/trustees.tsx";
 import { Route as VerifyRouteImport } from "./routes/verify.tsx";
 import { Route as AccountVerifyRouteImport } from "./routes/account_.verify.tsx";
 import { Route as ByHandleRouteImport } from "./routes/by.$handle.tsx";
@@ -63,6 +64,11 @@ const OfflineRoute = OfflineRouteImport.update({
 const SwDotjsRoute = SwDotjsRouteImport.update({
   id: "/sw.js",
   path: "/sw.js",
+  getParentRoute: () => rootRouteImport,
+} as any);
+const TrusteesRoute = TrusteesRouteImport.update({
+  id: "/trustees",
+  path: "/trustees",
   getParentRoute: () => rootRouteImport,
 } as any);
 const VerifyRoute = VerifyRouteImport.update({
@@ -139,6 +145,7 @@ export interface FileRoutesByFullPath {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/trustees": typeof TrusteesRoute;
   "/verify": typeof VerifyRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
@@ -161,6 +168,7 @@ export interface FileRoutesByTo {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/trustees": typeof TrusteesRoute;
   "/verify": typeof VerifyRoute;
   "/account/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
@@ -184,6 +192,7 @@ export interface FileRoutesById {
   "/moderation": typeof ModerationRoute;
   "/offline": typeof OfflineRoute;
   "/sw.js": typeof SwDotjsRoute;
+  "/trustees": typeof TrusteesRoute;
   "/verify": typeof VerifyRoute;
   "/account_/verify": typeof AccountVerifyRoute;
   "/by/$handle": typeof ByHandleRoute;
@@ -208,6 +217,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/trustees"
     | "/verify"
     | "/account/verify"
     | "/by/$handle"
@@ -230,6 +240,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/trustees"
     | "/verify"
     | "/account/verify"
     | "/by/$handle"
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | "/moderation"
     | "/offline"
     | "/sw.js"
+    | "/trustees"
     | "/verify"
     | "/account_/verify"
     | "/by/$handle"
@@ -275,6 +287,7 @@ export interface RootRouteChildren {
   ModerationRoute: typeof ModerationRoute;
   OfflineRoute: typeof OfflineRoute;
   SwDotjsRoute: typeof SwDotjsRoute;
+  TrusteesRoute: typeof TrusteesRoute;
   VerifyRoute: typeof VerifyRoute;
   AccountVerifyRoute: typeof AccountVerifyRoute;
   ByHandleRoute: typeof ByHandleRoute;
@@ -338,6 +351,13 @@ declare module "@tanstack/react-router" {
       path: "/sw.js";
       fullPath: "/sw.js";
       preLoaderRoute: typeof SwDotjsRouteImport;
+      parentRoute: typeof rootRouteImport;
+    };
+    "/trustees": {
+      id: "/trustees";
+      path: "/trustees";
+      fullPath: "/trustees";
+      preLoaderRoute: typeof TrusteesRouteImport;
       parentRoute: typeof rootRouteImport;
     };
     "/verify": {
@@ -454,6 +474,7 @@ const rootRouteChildren: RootRouteChildren = {
   ModerationRoute: ModerationRoute,
   OfflineRoute: OfflineRoute,
   SwDotjsRoute: SwDotjsRoute,
+  TrusteesRoute: TrusteesRoute,
   VerifyRoute: VerifyRoute,
   AccountVerifyRoute: AccountVerifyRoute,
   ByHandleRoute: ByHandleRoute,

@@ -414,7 +414,9 @@ describe("poll page", () => {
     expect(html).not.toContain("pick=3");
     expect(html).toContain(`href="${BALLOT}#election=${OPEN_ONE}"`);
     expect(page).toContain("Answer the question");
-    expect(page).toContain("Nothing is sent until you cast your answers there.");
+    // Said once, with the answers that open the ballot app (P2-29, the poll
+    // page's iteration 7).
+    expect(page.match(/Nothing is sent until you cast/g)).toHaveLength(1);
   });
 
   test("a poll of several questions is headed by its title, each question with its answers", async () => {

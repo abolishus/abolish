@@ -617,8 +617,6 @@ export const esUS: Messages = {
   pollAnswer:
     "Las respuestas se emiten solo en la app de votación, nunca en este sitio web, y cada una se sella en el propio dispositivo de quien vota antes de enviar nada.",
   pollAnswerOpen: { one: "Responder la pregunta", other: "Responder {count} preguntas" },
-  pollAnswerOpenNote:
-    "Abre la app de votación. No se envía nada hasta que emitas tus respuestas ahí.",
   pollAnswerScheduled: "Podrás responder aquí en cuanto abra la encuesta.",
   pollScheduledLede:
     "No se puede responder nada hasta que abra. Abajo se indica quién puede responder, cuándo y cómo se cuenta.",

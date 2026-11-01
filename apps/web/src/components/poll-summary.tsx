@@ -556,8 +556,12 @@ export function PollSummary({
             phoneVerification={phoneVerification}
           />
         )}
+        {/* No note under the button: the first question's card above it
+            already says what choosing does and that nothing is sent until the
+            ballot is cast, as the stream says it once above its cards, and the
+            lede says where answers are cast (P2-29, the poll page's iteration 7). */}
         {answering === null ? null : (
-          <div className="grid justify-items-start gap-2 pt-2">
+          <div className="grid justify-items-start pt-2">
             <a
               href={ballotLink(answering, poll.electionId)}
               className={cn(
@@ -568,9 +572,6 @@ export function PollSummary({
               {t("pollAnswerOpen", { count: poll.questions.length })}
               <ArrowRight aria-hidden="true" />
             </a>
-            <p className="m-0 text-sm text-pretty text-muted-foreground">
-              {t("pollAnswerOpenNote")}
-            </p>
           </div>
         )}
         {share === undefined ? null : (

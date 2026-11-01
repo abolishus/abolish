@@ -714,7 +714,13 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
     "href",
     `${BALLOT}#election=${poll.electionId}`,
   );
-  await expect(canvas.getByText(/Nothing is sent until you cast your answers there/)).toBeVisible();
+  // What choosing does is said once, on the answers' card, as the stream
+  // says it once above its cards, not again under the button (P2-29, the poll
+  // page's iteration 7).
+  await expect(canvas.getAllByText(/Nothing is sent until you cast/)).toHaveLength(1);
+  await expect(
+    within(canvas.getByRole("region", { name: "Answering" })).queryByText(/Nothing is sent/),
+  ).toBeNull();
 };
 
 /** In its own words, answerable in the ballot client. */
@@ -808,6 +814,7 @@ export const WordedQuestions: Story = {
     await expect(canvas.queryByRole("link", { name: "Public holidays" })).toBeNull();
     await expect(canvas.getByText("Public holidays")).toHaveStyle({ borderTopWidth: "0px" });
     await expect(canvas.getByRole("link", { name: "Answer 2 questions" })).toBeVisible();
+    await expect(canvas.getAllByText(/Nothing is sent until you cast/)).toHaveLength(1);
     await expect(
       canvas.getByText(/^2 questions, answered together\. You can change your answers until/),
     ).toBeVisible();

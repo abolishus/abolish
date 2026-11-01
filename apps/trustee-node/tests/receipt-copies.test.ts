@@ -244,6 +244,12 @@ describe("ReceiptCopySender", () => {
       ["the same statement as a version-1 receipt", () => boarded(resigned(1), true)],
       ["another seat's", () => boarded(v2Of(1, { seat: 3 }), true)],
       [
+        "another definition",
+        () => boarded(v2Of(1, { definition_hash: new Uint8Array(32).fill(0xdd) }), true),
+      ],
+      ["another ballot", () => boarded(v2Of(9), true)],
+      ["its own bytes claimed as earlier", () => boarded(v2Of(1), true)],
+      [
         "another share hash",
         () => boarded(v2Of(1, { share_hash: new Uint8Array(32).fill(0xee) }), true),
       ],

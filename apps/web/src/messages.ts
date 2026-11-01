@@ -385,8 +385,12 @@ const enUS = {
   sort_answered: "Most answered this week",
   sortNote_new: "Open now, the most recently asked first.",
   sortNote_closing: "Open now, the soonest to close first.",
+  // The order counts the last seven days' answers, every tier together, and
+  // each card its own since it opened, tier by tier (T-01): unsaid, a card
+  // showing more than the one above it read as an order gone wrong (P2-29,
+  // the stream's iteration 32).
   sortNote_answered:
-    "Open now, by how many people answered in the last seven days, each person once however often they changed their answer. Anyone can count it again from the public board.",
+    "Open now, the most answered in the last seven days first, each person counted once. A card counts every answer since it opened, so it can show more than the one above it.",
   streamQuestions: "Questions",
   streamAnsweredSoFar: "Answered so far",
   streamAnsweredSinceDay: "Answered since it opened {day}",

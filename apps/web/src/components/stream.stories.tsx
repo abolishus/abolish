@@ -686,8 +686,15 @@ export const MostAnswered: Story = {
       "aria-current",
       "page",
     );
-    const note = canvas.getByText(/each person once/);
+    const note = canvas.getByText(/each person counted once/);
     await expect(note).toBeVisible();
+    // The cards' counts run from each poll's opening, not over the order's
+    // seven days, so the note says a card can show more than the one above
+    // it: unsaid, a long-open poll's larger count below a newer one's read as
+    // the order gone wrong (P2-29, the stream's iteration 32).
+    await expect(note).toHaveTextContent(
+      "A card counts every answer since it opened, so it can show more than the one above it.",
+    );
     await expect(canvas.getByRole("link", { name: "More questions" })).toHaveAttribute(
       "href",
       streamHref("answered", {}, NEXT),

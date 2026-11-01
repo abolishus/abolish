@@ -828,6 +828,34 @@ export const SortUnavailable: Story = {
   },
 };
 
+/**
+ * On a folded phone's 280px, as on a 360px phone zoomed to 125%, the box
+ * leaves its action under 200px, and the action's label held to one line
+ * ran past the box and the screen (P2-29, the stream's iteration 36).
+ */
+export const SortUnavailableFolded: Story = {
+  args: {
+    sort: "answered",
+    filter: { topic: "transport" },
+    stream: { kind: "sort-unavailable" },
+  },
+  globals: { viewport: { value: "folded", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const root = canvasElement.ownerDocument.documentElement;
+    await expect(root.clientWidth).toBe(280);
+    await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+    const action = canvas.getByRole("link", { name: "Show the newest questions" });
+    const box = action.parentElement;
+    if (box === null) throw new Error("The action has no box");
+    const inner =
+      box.getBoundingClientRect().right - parseFloat(getComputedStyle(box).paddingRight);
+    await expect(action.getBoundingClientRect().right).toBeLessThanOrEqual(inner + 0.5);
+    // It wraps rather than shrinking: still a 48px target.
+    await expect(action.getBoundingClientRect().height).toBeGreaterThanOrEqual(48);
+  },
+};
+
 export const CursorLost: Story = {
   args: { sort: "closing", stream: { kind: "cursor-not-found" } },
   play: async ({ canvasElement }) => {

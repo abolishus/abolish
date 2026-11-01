@@ -670,7 +670,17 @@ function Empty({
       <h3 className="m-0 font-heading text-xl font-semibold">{title}</h3>
       <p className="m-0 text-base text-muted-foreground">{children}</p>
       {href === undefined ? null : (
-        <a className={buttonVariants({ variant: "outline" })} href={href}>
+        // The label wraps: the box's padding leaves "Show the newest
+        // questions" 190px on a 360px phone zoomed to 125%, and a label held
+        // to one line ran 30px past the screen's edge (P2-29, the stream's
+        // iteration 36).
+        <a
+          className={cn(
+            buttonVariants({ variant: "outline" }),
+            "h-auto min-h-12 py-3 whitespace-normal",
+          )}
+          href={href}
+        >
           {action ?? t("streamStart")}
         </a>
       )}

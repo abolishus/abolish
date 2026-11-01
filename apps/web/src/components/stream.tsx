@@ -421,13 +421,22 @@ function Answered({
             ? t("streamAnsweredSinceDay", { day: since.day })
             : t("streamAnsweredSinceDate", { date: since.day })}
       </p>
-      <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
-        {answered.map(({ tier, answered: count }) => (
-          <li key={tier} className="text-balance tabular-nums">
-            {t(answeredMessage(tier, phoneVerification), { count: BigInt(count) })}
-          </li>
-        ))}
-      </ul>
+      {/* A poll nobody has answered yet, the top of "New" most of the time,
+          read as a line of zeros per tier, two on a poll open to two, a
+          band of noughts that looked like a count that had failed (P2-29,
+          the stream's iteration 25). Every tier at zero is one fact, so it
+          is said once; that sums nothing (T-01). */}
+      {answered.every(({ answered: count }) => count === "0") ? (
+        <p className="m-0">{t("streamAnsweredNone")}</p>
+      ) : (
+        <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
+          {answered.map(({ tier, answered: count }) => (
+            <li key={tier} className="text-balance tabular-nums">
+              {t(answeredMessage(tier, phoneVerification), { count: BigInt(count) })}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

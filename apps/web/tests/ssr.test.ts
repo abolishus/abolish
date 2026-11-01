@@ -2252,7 +2252,7 @@ describe("stream", () => {
     }
   });
 
-  test("says how many have answered each card's poll so far, tier by tier, or nothing when the read fails", async () => {
+  test("says how many have answered each card's poll so far, tier by tier, or that it couldn't when the read fails", async () => {
     const html = await (await get("/discover?topic=community")).text();
     expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
     const [v5, v1] = html.split(/<article\b/).slice(1);
@@ -2266,8 +2266,10 @@ describe("stream", () => {
     expect(text(v5)).not.toMatch(/Tier \d/);
     expect(text(v5)).not.toContain("vouched");
     expect(text(v5)).not.toMatch(/\b7 people/);
-    // A failed read shows no count, and the card stays.
+    // A failed read shows no count, but says so in the band, and the card
+    // stays (P2-29, the stream's iteration 31).
     expect(text(v1)).not.toContain("Answered so far");
+    expect(text(v1)).toContain("We couldn&#x27;t get how many have answered just now.");
   });
 
   test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {

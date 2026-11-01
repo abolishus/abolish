@@ -395,6 +395,12 @@ function answeredMessage(tier: Tier, phoneVerification: boolean) {
   return tier === 1 ? "streamAnswered_vouched" : "streamAnswered_document";
 }
 
+// On a phone the band reaches the card's borders and its words start where
+// the question's do: inset in the card's own padding, a count at 320px had
+// 166px of the screen and wrapped "e-mail" alone at 360px (P2-29, the
+// stream's iteration 10).
+const BAND = "-mx-5 grid gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4";
+
 /**
  * How many have answered so far, one line per tier: the board's count of
  * distinct voters, never a result and never one figure across tiers (T-01).
@@ -419,11 +425,7 @@ function Answered({
   // says it; the served page keeps "Answered so far".
   const since = useViewerDaySince(opensAt);
   return (
-    // On a phone the band reaches the card's borders and its words start
-    // where the question's do: inset in the card's own padding, a count at
-    // 320px had 166px of the screen and wrapped "e-mail" alone at 360px
-    // (P2-29, the stream's iteration 10).
-    <div className={cn("-mx-5 grid gap-1 bg-muted/60 px-5 py-3 text-sm sm:mx-0 sm:px-4", measure)}>
+    <div className={cn(BAND, measure)}>
       <p id={titleId} className="m-0 font-medium">
         {since === undefined
           ? t("streamAnsweredSoFar")
@@ -586,7 +588,14 @@ export function StreamCard({
       </div>
       {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
       <ListedUnder tags={tags} linked />
-      {card.answered === undefined ? null : (
+      {/* A count the server couldn't read drew no band, so the card read
+          as a poll nobody counts beside its neighbours' counts (P2-29, the
+          stream's iteration 31): the band stays, saying so. */}
+      {card.answered === undefined ? null : card.answered === "unread" ? (
+        <p className={cn(BAND, "my-0 text-muted-foreground", measure)}>
+          {t("streamAnsweredUnread")}
+        </p>
+      ) : (
         <Answered
           answered={card.answered}
           opensAt={poll.opensAt}

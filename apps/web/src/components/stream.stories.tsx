@@ -80,6 +80,7 @@ const cards: StreamCard[] = [
       options: ["Sí", "No"],
     },
     tags: NO_TAGS,
+    answered: "unread",
   },
   { kind: "unavailable", electionId: UNREADABLE, problem: "text" },
 ];
@@ -375,6 +376,26 @@ const play: Story["play"] = async ({ canvasElement }) => {
         list.getByRole("heading", { name: "Library hours" }).getBoundingClientRect().left,
     ).toBe(0);
 
+  // A count the server couldn't read says so in the band where a count
+  // would be, rather than leaving the card bare beside its neighbours'
+  // counts (P2-29, the stream's iteration 31). It claims no figure, not even
+  // nobody (T-01).
+  const busCard = list.getAllByRole("article")[2]!;
+  const unread = within(busCard).getByText("We couldn't get how many have answered just now.");
+  await expect(unread).toBeVisible();
+  await expect(within(busCard).queryByText(/No one yet|\d people/)).toBeNull();
+  // Its band starts and ends where a count's does, before the answers.
+  const countBand = counts[0]!.parentElement!.getBoundingClientRect();
+  const libraryBox = list.getAllByRole("article")[0]!.getBoundingClientRect();
+  const busBox = busCard.getBoundingClientRect();
+  const unreadBand = unread.getBoundingClientRect();
+  await expect(unreadBand.left - busBox.left).toBe(countBand.left - libraryBox.left);
+  await expect(unreadBand.right - busBox.right).toBe(countBand.right - libraryBox.right);
+  await expect(
+    unread.compareDocumentPosition(within(busCard).getByRole("list", { name: /\?$/ })) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
   // The card's top line keeps its facts together rather than spread to the
   // card's two edges and middle at desktop width.
   const riversideCard = list.getAllByRole("article")[1]!;
@@ -432,6 +453,10 @@ export const SpanishClock: Story = {
     const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
     const closes = list.getAllByText(/^Cierra/);
     await expect(closes[0]!.textContent).toMatch(/^Cierra 8 ene, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/);
+    // A count that couldn't be read says so in Spanish too.
+    await expect(
+      list.getByText("Ahora mismo no pudimos saber cuántos han respondido."),
+    ).toBeVisible();
   },
 };
 

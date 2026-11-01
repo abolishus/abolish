@@ -392,6 +392,7 @@ const enUS = {
   streamAnsweredSinceDay: "Answered since it opened {day}",
   streamAnsweredSinceDate: "Answered since it opened {date}",
   streamAnsweredNone: "No one yet",
+  streamAnsweredUnread: "We couldn't get how many have answered just now.",
   streamAnswered_email: {
     one: "{count} person with a verified e-mail",
     other: "{count} people with a verified e-mail",

@@ -613,7 +613,6 @@ const enUS = {
   pollAnswer:
     "Answers are cast only in the ballot app, never on this website, and each is sealed on the voter's own device before anything is sent.",
   pollAnswerOpen: { one: "Answer the question", other: "Answer {count} questions" },
-  pollAnswerOpenNote: "Opens the ballot app. Nothing is sent until you cast your answers there.",
   pollAnswerScheduled: "You can answer here once the poll opens.",
   pollScheduledLede:
     "Nothing can be answered until it opens. Who can answer, when, and how it's counted are set out below.",

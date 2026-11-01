@@ -41,7 +41,7 @@ import {
 import { type MembershipProverArtifacts, proveMembership } from "@abolishus/membership-prover";
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { IntakeSeat, type SeatStore } from "../src/index.ts";
-import { MAX_CLOCK_SKEW, ROLLING_CHAIN_MAX_AGE } from "../src/intake.ts";
+import { MAX_CLOCK_SKEW, ROLLING_CHAIN_MAX_AGE, ROLLING_CHAIN_RETRY } from "../src/intake.ts";
 import { decideObligation } from "../src/obligation.ts";
 import type { RollingIntakeChain } from "../src/rolling-chain.ts";
 import { checkStub, type StubCheck } from "../src/stub.ts";
@@ -380,13 +380,17 @@ describe("intake of a version-5 ballot", () => {
     });
   });
 
-  it("refuses with intake-chain while no chain can be had, reading again on the next delivery", async () => {
+  it("refuses with intake-chain while no chain can be had, reading again once ROLLING_CHAIN_RETRY has passed", async () => {
     const seats = seatsOf({ store: new MemoryStore() });
     const [seat] = seats.intake;
     seats.chain = undefined;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
-    // A failed read isn't kept.
+    // A failed read is kept for ROLLING_CHAIN_RETRY only (T-52).
     seats.chain = { chain: CHAIN, safeAt: SAFE_LATE };
+    seats.clock += ROLLING_CHAIN_RETRY - 1n;
+    expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
+    expect(seats.reads).toHaveLength(1);
+    seats.clock += 1n;
     expect((await deliver(seat!)).ok).toBe(true);
     expect(seats.reads).toHaveLength(2);
   });
@@ -399,9 +403,10 @@ describe("intake of a version-5 ballot", () => {
   it("refuses a proven block stamped further ahead of the node's clock than the skew allows (T-08)", async () => {
     const seats = seatsOf({ store: new MemoryStore() });
     const [seat] = seats.intake;
-    seats.clock = SAFE_LATE - MAX_CLOCK_SKEW - 1n;
+    seats.clock = SAFE_LATE - MAX_CLOCK_SKEW - ROLLING_CHAIN_RETRY;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
-    seats.clock += 1n;
+    // Read again once the failure's ROLLING_CHAIN_RETRY has passed: the block is then at the bound.
+    seats.clock += ROLLING_CHAIN_RETRY;
     expect((await deliver(seat!)).ok).toBe(true);
   });
 

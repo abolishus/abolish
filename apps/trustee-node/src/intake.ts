@@ -107,6 +107,9 @@ export interface IntakeConfig extends Pins {
  */
 export const ROLLING_CHAIN_MAX_AGE = 60n;
 
+/** How long, in seconds, a read that gave no chain is kept before the chain is read again. */
+export const ROLLING_CHAIN_RETRY = 10n;
+
 /**
  * How far, in seconds, a proven block's timestamp may be ahead of the
  * node's clock: the OP Stack's sequencer drift bound, as the worker's.
@@ -228,11 +231,11 @@ export class IntakeSeat {
   // (T-52). Kept in memory only: a restarted node recounts once.
   readonly #stubPassed = new Set<string>();
   // Each rolling election's latest chain read, by stub hash, with the time
-  // it began: reads begun meanwhile share it, and a failed one is dropped,
-  // so the next delivery reads again. Public chain data only.
+  // it began and how long it is kept: reads begun meanwhile share it.
+  // Public chain data only.
   readonly #chains = new Map<
     string,
-    { readonly since: bigint; readonly read: Promise<RollingNow | undefined> }
+    { readonly since: bigint; for: bigint; readonly read: Promise<RollingNow | undefined> }
   >();
 
   constructor(config: IntakeConfig) {
@@ -350,7 +353,10 @@ export class IntakeSeat {
     const definitionHash = opened.rolling ? opened.definitionHash : opened.election.definitionHash;
     const receipt = opened.rolling
       ? encodeShareReceiptV2(
-          shareReceiptRecordV2(definitionHash, keys.seat, { ...taken, panel: SEAT_PANELS.default }),
+          shareReceiptRecordV2(definitionHash, keys.seat, {
+            ...taken,
+            panel: "panel" in taken ? taken.panel : SEAT_PANELS.default,
+          }),
         )
       : encodeShareReceipt(shareReceiptRecord(definitionHash, keys.seat, taken));
     // Kept for the copy the seat boards itself through the board path
@@ -447,13 +453,22 @@ export class IntakeSeat {
     const name = hex(opened.stubHash);
     const now = this.#config.now();
     const held = this.#chains.get(name);
-    if (held !== undefined && now - held.since < ROLLING_CHAIN_MAX_AGE) return held.read;
+    if (held !== undefined && now - held.since < held.for) return held.read;
     const read = this.#readRolling(opened, now);
-    this.#chains.set(name, { since: now, read });
-    const drop = () => {
-      if (this.#chains.get(name)?.read === read) this.#chains.delete(name);
-    };
-    read.then((r) => r === undefined && drop(), drop);
+    const entry = { since: now, for: ROLLING_CHAIN_MAX_AGE, read };
+    this.#chains.set(name, entry);
+    // A failed read is kept for ROLLING_CHAIN_RETRY only, so the chain is
+    // read again soon, but deliveries sent while none can be had don't
+    // each start a full read of the registries (T-52). One that throws
+    // isn't kept at all.
+    read.then(
+      (r) => {
+        if (r === undefined) entry.for = ROLLING_CHAIN_RETRY;
+      },
+      () => {
+        if (this.#chains.get(name) === entry) this.#chains.delete(name);
+      },
+    );
     return read;
   }
 

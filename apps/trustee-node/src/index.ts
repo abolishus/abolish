@@ -100,6 +100,7 @@ export {
   MAX_CLOCK_SKEW,
   type RegistrationCheck,
   ROLLING_CHAIN_MAX_AGE,
+  ROLLING_CHAIN_RETRY,
 } from "./intake.ts";
 export {
   CHANNEL_RETRY_SECONDS,

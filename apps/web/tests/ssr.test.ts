@@ -401,7 +401,10 @@ describe("poll page", () => {
       /<h1 id="poll-heading" lang="en" dir="auto"[^>]*>Should the park stay open late\?<\/h1>/,
     );
     expect(html).toContain("<title>\u2068Should the park stay open late?\u2069 · Abolish</title>");
-    expect(html).toContain(`Poll ${OPEN_ONE.slice(0, 16)}…`);
+    // Its ID is in the evidence, not in a label over its words (P2-29, the
+    // poll page's iteration 11).
+    expect(html).not.toContain(`Poll ${OPEN_ONE.slice(0, 16)}…`);
+    expect(html).toContain(OPEN_ONE);
     const page = html.replace(/<[^>]+>/g, "");
     expect(page).toContain("What it asks");
     // The answers that open the ballot app are under one line, which says
@@ -731,6 +734,11 @@ describe("results", () => {
     // Under the status, before the facts and what it asks.
     expect(one.indexOf("Open for answers")).toBeLessThan(one.indexOf("One question. You can"));
     expect(one.indexOf("One question. You can")).toBeLessThan(one.indexOf("What it asks"));
+    // In its own words an everyday poll opens on its question, with no
+    // label naming its ID, class and counting above it (P2-29, the poll
+    // page's iteration 11); the evidence still says its kind.
+    expect(one).not.toContain("Everyday poll · ");
+    expect(one).toContain("KindEveryday poll");
     const many = (await (await get(`/polls/${OPEN_MANY}`)).text()).replace(/<[^>]+>/g, "");
     expect(many).toContain(
       "2 questions, answered together. You can change your answers until the poll closes, and only your last ones count.",

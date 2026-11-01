@@ -714,9 +714,11 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   const heading = canvas.getByRole("heading", { level: 1 });
   await expect(heading).toHaveTextContent("Should the park stay open late?");
   await expect(heading).toHaveAttribute("lang", "en");
-  await expect(
-    canvas.getByText("Poll 1011121314151617… · Everyday poll · One choice"),
-  ).toBeVisible();
+  // No monospace label over an everyday poll's own words: the page opens on
+  // its question, the ID one step down in the evidence (P2-29, the poll
+  // page's iteration 11).
+  await expect(heading).toBe(canvasElement.querySelector("article > header")?.firstElementChild);
+  await expect(canvas.queryByText(/^Poll 1011121314151617…/)).toBeNull();
   const asks = canvas.getByRole("region", { name: "What it asks" });
   // The question heading the page isn't said again: its answers, numbered by question.
   await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();
@@ -904,12 +906,19 @@ export const WordedQuestionsPhone: Story = {
   play: async ({ canvasElement }) => {
     await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
     await fromTheLede(canvasElement);
-    const first = within(
+    const answers = within(
       within(canvasElement).getByRole("list", {
         name: "Question 1: Should the park stay open late?",
       }),
-    ).getByRole("link", { name: "Yes" });
+    );
+    const first = answers.getByRole("link", { name: "Yes" });
     await expect(first.getBoundingClientRect().bottom).toBeLessThanOrEqual(640);
+    // With no monospace label over the title, the second answer is on the
+    // first screen too, where the label's two lines held it under (P2-29,
+    // the poll page's iteration 11).
+    await expect(
+      answers.getByRole("link", { name: "No" }).getBoundingClientRect().bottom,
+    ).toBeLessThanOrEqual(640);
     // The line above the answers keeps to four lines in the numbered
     // card's 182px at 360, where "to question 1 of 2" made it five (P2-29,
     // the poll page's iteration 10).

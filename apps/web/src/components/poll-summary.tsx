@@ -415,10 +415,18 @@ export function PollSummary({
   return (
     <article className="grid gap-16">
       <header className="grid gap-6 pt-2 md:pt-10">
-        <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase">
-          {text === undefined ? t("pollTitle") : t("pollHeading", { prefix })} · {pollClass} ·{" "}
-          {counting}
-        </p>
+        {/* An everyday poll in its own words opens on its question, as the
+            open poll's mockup does: the ID's prefix is evidence, which the
+            everyday register keeps one step down, and the counting is the
+            facts' to say. Above the title they took two monospace lines at
+            360 (P2-29, the poll page's iteration 11). A poll by its ID, or
+            one on the civic record, keeps the label. */}
+        {text !== undefined && poll.pollClass === "everyday" ? null : (
+          <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase">
+            {text === undefined ? t("pollTitle") : t("pollHeading", { prefix })} · {pollClass} ·{" "}
+            {counting}
+          </p>
+        )}
         {/* In the poll's own words where the definition commits to them,
             in their own language and direction (T-34, T-41); by its ID
             otherwise, which wraps anywhere rather than push the page sideways. */}

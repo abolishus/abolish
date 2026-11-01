@@ -911,10 +911,18 @@ const inShortPlay: Story["play"] = async ({ canvasElement }) => {
   await expect(
     canvas.getByText("Final results. 8 people answered; here is what they said."),
   ).toBeVisible();
-  // Closed, nothing opens the ballot client with an answer chosen.
+  // Counted, the results name every question and answer, so "What it asks"
+  // isn't said again, and they come straight after the summary, before the
+  // facts, as the closed poll's mockup orders them (P2-29, the poll page's
+  // iteration 6).
+  await expect(canvas.queryByRole("region", { name: "What it asks" })).toBeNull();
+  const results = canvas.getByRole("heading", { level: 2, name: "Results" });
+  const facts = canvas.getByRole("heading", { level: 2, name: "About this poll" });
   await expect(
-    within(canvas.getByRole("region", { name: "What it asks" })).queryByRole("link"),
-  ).toBeNull();
+    results.compareDocumentPosition(facts) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  for (const answer of ["Abstain", "School holidays", "Every evening"])
+    await expect(canvas.getByText(answer)).toBeVisible();
   const items = within(canvas.getByRole("list", { name: "In short" })).getAllByRole("listitem");
   await expect(items.map((li) => li.textContent)).toEqual([
     "Should the park stay open late?" +
@@ -1001,6 +1009,11 @@ export const InShortNone: Story = {
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { name: "Results" })).toBeVisible();
     await expect(canvas.queryByRole("list", { name: "In short" })).toBeNull();
+    // With no summary, the questions keep their own section; closed,
+    // nothing in it opens the ballot client.
+    await expect(
+      within(canvas.getByRole("region", { name: "What it asks" })).queryByRole("link"),
+    ).toBeNull();
     await expect(canvas.queryByText(/^Final results/)).toBeNull();
     await expect(canvas.queryByRole("link", { name: "How do we know this is real?" })).toBeNull();
   },

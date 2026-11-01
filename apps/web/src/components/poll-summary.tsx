@@ -358,6 +358,25 @@ export function PollSummary({
   // its results are (docs/moderation-policy.md).
   const final = status === "closed" && results !== undefined ? finalOf(poll, results) : undefined;
   const evidence = useRef<HTMLDetailsElement>(null);
+  // A counted poll's results name every question and every answer, each with
+  // its share, so "What it asks" said them all again between the results in
+  // short and the results themselves, and the facts stood there too: the
+  // closed poll's mockup goes from the one to the other (P2-29, the poll
+  // page's iteration 6). A hidden poll's results go by number, so its
+  // questions keep their own section.
+  const counted = final !== undefined && moderation.state !== "hidden";
+  // Shown on a hidden poll too, by number: moderation never withholds a
+  // result (docs/moderation-policy.md). Nothing is counted before it opens.
+  const shownResults =
+    results === undefined || status === "scheduled" ? null : (
+      <PollResults
+        poll={poll}
+        results={results}
+        status={status}
+        words={moderation.state === "hidden" ? undefined : words}
+        phoneVerification={phoneVerification}
+      />
+    );
 
   return (
     <article className="grid gap-16">
@@ -479,7 +498,7 @@ export function PollSummary({
         ) : null}
       </header>
 
-      {words === undefined ? null : (
+      {words === undefined || counted ? null : (
         <PollQuestions
           poll={poll}
           words={words}
@@ -487,6 +506,8 @@ export function PollSummary({
           answering={answering}
         />
       )}
+
+      {counted ? shownResults : null}
 
       {/* After what it asks, as the open poll's mockup orders it: the question
           and its answers are the page's hero, and with the facts first a
@@ -510,17 +531,7 @@ export function PollSummary({
         )}
       </section>
 
-      {/* Shown on a hidden poll too, by number: moderation never withholds a
-          result (docs/moderation-policy.md). Nothing is counted before it opens. */}
-      {results === undefined || status === "scheduled" ? null : (
-        <PollResults
-          poll={poll}
-          results={results}
-          status={status}
-          words={moderation.state === "hidden" ? undefined : words}
-          phoneVerification={phoneVerification}
-        />
-      )}
+      {counted ? null : shownResults}
 
       <section
         aria-labelledby="answer-title"

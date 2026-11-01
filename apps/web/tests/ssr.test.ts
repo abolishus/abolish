@@ -3030,15 +3030,15 @@ const KB = 1024;
  * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 180, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 177, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 217, css: 40, fonts: 58 },
+  "/": { html: 10, js: 181, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 178, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 179, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
   "/account": { html: 6, js: 200, css: 40, fonts: 58 },
-  "/account/polls/new": { html: 5, js: 254, css: 40, fonts: 58 },
+  "/account/polls/new": { html: 5, js: 255, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 175, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };

@@ -49,6 +49,42 @@ export function formatZonedWhole(
   return { time, zone };
 }
 
+/** `date`'s calendar day on `timeZone`'s clock, as days since 1970-01-01. */
+function zonedDay(timeZone: string, date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return Date.UTC(part("year"), part("month") - 1, part("day")) / 86_400_000;
+}
+
+/**
+ * `formatZonedWhole`, with the day said as "today" or "tomorrow" ("hoy",
+ * "mañana") where `date` falls on one of them on `timeZone`'s clock at
+ * `now`: a card read "Closes Jan 7, 2026, 7:00 PM EST" on the morning of
+ * January 7, and only a visitor who knew the date learned it closed that
+ * evening (P2-29, the stream's iteration 23). Any other day keeps its date.
+ */
+export function formatZonedNear(
+  locale: string,
+  timeZone: string,
+  date: Date,
+  now: Date,
+  dateStyle: "long" | "medium" = "long",
+): { time: string; zone: string; day?: string } {
+  const { time, zone } = formatZonedWhole(locale, timeZone, date, dateStyle);
+  const days = zonedDay(timeZone, date) - zonedDay(timeZone, now);
+  if (days !== 0 && days !== 1) return { time, zone };
+  const day = new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day");
+  const clock = new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone })
+    .format(date)
+    .replace(/\s(?=\S+$)/, "\u00a0");
+  return { time: clock, zone, day };
+}
+
 /** A UTC day, `YYYY-MM-DD`, for `locale`. */
 export function formatUtcDay(locale: string, day: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(

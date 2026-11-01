@@ -60,11 +60,16 @@ function Sorts({
 }) {
   const t = useTranslate(catalogs);
   return (
-    <nav aria-label={t("discoverSorts")} className="grid gap-3">
+    <nav aria-label={t("discoverSorts")} className="@container grid gap-3">
       {/* Below `sm` the three share one row, each label wrapping in its own
           box and the longest narrowing most: wrapped as whole links, the
-          third took a row alone. */}
-      <ul className="m-0 flex list-none gap-2 p-0 sm:flex-wrap">
+          third took a row alone. In a column under 272px they wrap whole
+          again: in Spanish the one row's longest words ("Cierran",
+          "respondidas") needed 243px, past a folded phone's column, and the
+          page scrolled sideways; on two rows each label reads on one line
+          (P2-29, the stream's iteration 37). The column's width, not the
+          screen's, since the frame's gutter sets what is left. */}
+      <ul className="m-0 flex list-none gap-2 p-0 @max-[17rem]:flex-wrap sm:flex-wrap">
         {STREAM_SORTS.map((option) => (
           <li key={option} className="flex flex-auto sm:flex-none">
             <a

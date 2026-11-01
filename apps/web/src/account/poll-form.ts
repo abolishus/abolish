@@ -520,6 +520,23 @@ export function closesErrors(form: PollForm, now: bigint): FieldError[] {
 export const earliestClose = (now: bigint) => now + BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS);
 
 /**
+ * How long a poll closing at `closesAt` stays open if submitted at `now`,
+ * to the nearest hour, in whole days and the hours left over: from the
+ * earliest `opens_at` the worker sets, `SETUP_SECONDS` after submission
+ * (ADR 0032, rule 10). Only for a closing time a submission at `now` would
+ * take; otherwise the field's error says what is wrong instead.
+ */
+export function openLength(
+  closesAt: bigint,
+  now: bigint,
+): { days: number; hours: number } | undefined {
+  if (closesAt < earliestClose(now) || closesAt > now + BigInt(MAX_CLOSE_SECONDS)) return undefined;
+  const open = closesAt - now - BigInt(SETUP_SECONDS);
+  const hours = Number((open + 1800n) / 3600n);
+  return { days: Math.floor(hours / 24), hours: hours % 24 };
+}
+
+/**
  * The draft to save at `now`, or every problem keeping it from being saved.
  * Past the field checks, the handler's own rules decide: a draft they refuse
  * is refused here too, as a whole (its encoding over the size cap, or a rule

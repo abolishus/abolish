@@ -1616,6 +1616,11 @@ const enUS = {
   pollFormDateLabel: "Closing date",
   pollFormTimeLabel: "Closing time",
   pollFormUtc: "People answering see it as {when} UTC, the clock every poll keeps.",
+  pollFormOpenFor:
+    "Submitted now, it opens after about half an hour of setup and stays open for about {length}.",
+  pollFormOpenDays: { one: "{count} day", other: "{count} days" },
+  pollFormOpenHours: { one: "{count} hour", other: "{count} hours" },
+  pollFormOpenDaysHours: "{days} and {hours}",
   pollFormPreviewTitle: "What people will see",
   pollFormPreviewEmpty: "Your poll's title",
   pollFormPreviewQuestionEmpty: "Your question",

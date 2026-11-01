@@ -273,6 +273,12 @@ export const WriteAndSave: Story = {
         "People answering see it as November 4, 2026 at 3:00 PM UTC, the clock every poll keeps.",
       ),
     ).toBeVisible();
+    // And how long that leaves it open, setup's half hour taken out.
+    await expect(
+      canvas.getByText(
+        "Submitted now, it opens after about half an hour of setup and stays open for about 17 days and 3 hours.",
+      ),
+    ).toBeVisible();
     // The preview reads as the poll will.
     const preview = within(canvas.getByRole("complementary", { name: "What people will see" }));
     await expect(preview.getByText("What should the new ferry be called?")).toBeVisible();
@@ -1240,6 +1246,8 @@ export const ClosesTooSoon: Story = {
     // Date and time fields take a whole value, as a picker gives one.
     fireEvent.change(date, { target: { value: "2026-10-18" } });
     fireEvent.change(time, { target: { value: "09:00" } });
+    // A time submission wouldn't take has no length, only its error.
+    await expect(canvas.queryByText(/^Submitted now/)).toBeNull();
     await userEvent.click(canvas.getByRole("button", { name: "Save draft" }));
     await expect(
       await canvas.findByRole("region", { name: "Your draft wasn't saved" }),

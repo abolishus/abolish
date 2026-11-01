@@ -1648,6 +1648,11 @@ export const esUS: Messages = {
   pollFormTimeLabel: "Hora de cierre",
   pollFormUtc:
     "Quienes respondan la verán como el {when} UTC, el reloj que usan todas las encuestas.",
+  pollFormOpenFor:
+    "Si la envías ahora, se abre tras una media hora de preparación y queda abierta alrededor de {length}.",
+  pollFormOpenDays: { one: "{count} día", other: "{count} días" },
+  pollFormOpenHours: { one: "{count} hora", other: "{count} horas" },
+  pollFormOpenDaysHours: "{days} y {hours}",
   pollFormPreviewTitle: "Lo que se verá",
   pollFormPreviewEmpty: "El título de tu encuesta",
   pollFormPreviewQuestionEmpty: "Tu pregunta",

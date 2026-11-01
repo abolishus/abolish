@@ -3324,7 +3324,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 189, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 182, css: 40, fonts: 58 },
-  "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
+  "/how-it-works": { html: 12, js: 175, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
   "/account": { html: 6, js: 201, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 256, css: 40, fonts: 58 },

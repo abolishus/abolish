@@ -35,6 +35,7 @@ import {
   newOption,
   newPollForm,
   newQuestion,
+  openLength,
   type PollForm,
   selectionRange,
   type TextField,
@@ -117,6 +118,14 @@ function utcBeside(locale: string, timeZone: string, date: Date): string {
   return day(timeZone) === day("UTC")
     ? new Intl.DateTimeFormat(locale, { timeStyle: "short", timeZone: "UTC" }).format(date)
     : formatUtc(locale, date);
+}
+
+/** A length in days and hours in words, leaving out a part that is zero. */
+function lengthText(t: Translate, { days, hours }: { days: number; hours: number }): string {
+  const d = t("pollFormOpenDays", { count: days });
+  const h = t("pollFormOpenHours", { count: hours });
+  if (days === 0) return h;
+  return hours === 0 ? d : t("pollFormOpenDaysHours", { days: d, hours: h });
 }
 
 /**
@@ -1240,6 +1249,7 @@ export function PollFormPage({
     );
 
   const closesAt = closesAtOf(form);
+  const length = closesAt === undefined ? undefined : openLength(closesAt, seconds());
   // A saved draft with nothing unsaved has one next step, submitting, so its
   // button is the page's primary one and "Save draft" steps back; any edit
   // gives the primary back to saving (P2-29, creating a poll's iteration 5).
@@ -1515,6 +1525,14 @@ export function PollFormPage({
                   {t("pollFormUtc", {
                     when: formatUtc(locale, new Date(Number(closesAt) * 1000)),
                   })}
+                </p>
+              )}
+              {/* How long it stays open, from the mockup's step 5: a closing
+                  time alone left the author to work out the length, and
+                  setup's half hour comes out of it (P2-19 part 53). */}
+              {length === undefined ? null : (
+                <p className="m-0 text-sm text-muted-foreground" suppressHydrationWarning>
+                  {t("pollFormOpenFor", { length: lengthText(t, length) })}
                 </p>
               )}
             </div>

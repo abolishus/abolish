@@ -25,6 +25,7 @@ import {
   type FormQuestion,
   formOf,
   newPollForm,
+  openLength,
   type PollForm,
   tidyPlace,
 } from "../src/account/poll-form.ts";
@@ -423,6 +424,45 @@ describe("the poll form's checks", () => {
     }
     expect(closesAtOf({ closesDate: "2026-11-04", closesTime: "15:00", timeZone: "UTC" })).toBe(
       1793804400n,
+    );
+  });
+
+  test("say how long a poll submitted now stays open, after setup", () => {
+    const earliest = NOW + BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS);
+    const latest = NOW + BigInt(MAX_CLOSE_SECONDS);
+    expect(openLength(earliest, NOW)).toEqual({ days: 0, hours: 1 });
+    expect(openLength(earliest - 1n, NOW)).toBeUndefined();
+    expect(openLength(latest + 1n, NOW)).toBeUndefined();
+    // 366 days less the half hour of setup rounds up to 366 days.
+    expect(openLength(latest, NOW)).toEqual({ days: 366, hours: 0 });
+    const open = (seconds: number) => NOW + BigInt(SETUP_SECONDS + seconds);
+    expect(openLength(open(24 * 3600), NOW)).toEqual({ days: 1, hours: 0 });
+    expect(openLength(open(3 * 86400 + 4 * 3600 + 1799), NOW)).toEqual({ days: 3, hours: 4 });
+    expect(openLength(open(3 * 86400 + 4 * 3600 + 1800), NOW)).toEqual({ days: 3, hours: 5 });
+    expect(openLength(open(23 * 3600 + 1800), NOW)).toEqual({ days: 1, hours: 0 });
+  });
+
+  test("give every allowed closing time a length within half an hour of its own", () => {
+    fc.assert(
+      fc.property(
+        fc.bigInt({ min: 0n, max: 2n ** 40n }),
+        fc.bigInt({
+          min: BigInt(SETUP_SECONDS + MIN_OPEN_SECONDS),
+          max: BigInt(MAX_CLOSE_SECONDS),
+        }),
+        (now, ahead) => {
+          const length = openLength(now + ahead, now);
+          expect(length).toBeDefined();
+          const { days, hours } = length!;
+          expect(hours).toBeGreaterThanOrEqual(0);
+          expect(hours).toBeLessThan(24);
+          const said = BigInt((days * 24 + hours) * 3600);
+          const open = ahead - BigInt(SETUP_SECONDS);
+          expect(said - open <= 1800n && open - said < 1800n).toBe(true);
+          expect(days * 24 + hours).toBeGreaterThanOrEqual(1);
+        },
+      ),
+      runs,
     );
   });
 });

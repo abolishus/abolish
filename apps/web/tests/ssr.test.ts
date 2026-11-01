@@ -1712,6 +1712,8 @@ describe("poll list", () => {
     // `after` wins when a link carries both, and the address drops `before`.
     const both = await (await follow(`/polls?after=${listed[19]}&before=${listed[3]}`)).text();
     expect(linked(both)).toEqual(listed.slice(20));
+    expect(both).not.toContain('name="before"');
+    expect(pages(both)).not.toContain(`before=${listed[3]}`);
   });
 
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {

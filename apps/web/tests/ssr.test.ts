@@ -1970,18 +1970,20 @@ describe("poll list", () => {
     }
   });
 
-  test.each(["?status=bogus", "?status=open&status=closed", "?counting=ranked", "?kind=referendum"])(
-    "%s is no filter, quoting nothing",
-    async (search) => {
-      const response = await follow(`/polls${search}`);
-      expect(response.status).toBe(200);
-      const html = await response.text();
-      expect(linked(html)).toEqual(listed.slice(0, 19));
-      expect(html).not.toContain("bogus");
-      expect(html).not.toContain("ranked");
-      expect(html).not.toContain("kind=referendum");
-    },
-  );
+  test.each([
+    "?status=bogus",
+    "?status=open&status=closed",
+    "?counting=ranked",
+    "?kind=referendum",
+  ])("%s is no filter, quoting nothing", async (search) => {
+    const response = await follow(`/polls${search}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).not.toContain("bogus");
+    expect(html).not.toContain("ranked");
+    expect(html).not.toContain("kind=referendum");
+  });
 
   test("a filter asks the API for the same page as no filter", async () => {
     seen.length = 0;

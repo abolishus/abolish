@@ -619,7 +619,9 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   const heading = canvas.getByRole("heading", { level: 1 });
   await expect(heading).toHaveTextContent("Should the park stay open late?");
   await expect(heading).toHaveAttribute("lang", "en");
-  await expect(canvas.getByText("Poll 1011121314151617… · Everyday poll · One choice")).toBeVisible();
+  await expect(
+    canvas.getByText("Poll 1011121314151617… · Everyday poll · One choice"),
+  ).toBeVisible();
   const asks = canvas.getByRole("region", { name: "What it asks" });
   // The question heading the page isn't said again: its answers, numbered by question.
   await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();

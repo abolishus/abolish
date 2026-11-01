@@ -323,5 +323,9 @@ describe("a rolling tier's electorate beside the counted tally", { timeout: WHOL
     const [first] = tally.electorates ?? [];
     if (first === undefined) return expect.fail("no electorate");
     expect(() => countedResults({ ...tally, electorates: [first] }, [])).toThrow(RangeError);
+    // Nor electorates beside two cells of one tier, as a fixed poll's regions are.
+    expect(() =>
+      countedResults({ ...tally, tiers: [0, 0], electorates: [first, first] }, []),
+    ).toThrow(RangeError);
   });
 });

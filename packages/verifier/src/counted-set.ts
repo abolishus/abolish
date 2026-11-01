@@ -280,8 +280,12 @@ export function countedResults(
   const { election, aggregates, counted, tiers, pinned, electorates } = tally;
   if (counted.length !== aggregates.length || tiers.length !== aggregates.length)
     throw new RangeError("countedResults: one count and one tier per cell");
-  // A rolling tier is its own cell (tally.md, Rolling tiers).
-  if (electorates !== undefined && electorates.length !== aggregates.length)
+  // A rolling tier is its own cell (tally.md, Rolling tiers), so a tally
+  // with electorates has one per cell and no tier with two cells.
+  if (
+    electorates !== undefined &&
+    (electorates.length !== aggregates.length || new Set(tiers).size !== tiers.length)
+  )
     throw new RangeError("countedResults: one electorate per rolling tier's cell");
   const checked = checkCountedTally(
     election,

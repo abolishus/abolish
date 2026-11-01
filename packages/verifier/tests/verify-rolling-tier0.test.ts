@@ -1,10 +1,15 @@
 import { readFileSync } from "node:fs";
 import {
+  type BoardEntryVersion,
   type ContractEventRecord,
   type ContractRole,
+  countedExtent,
+  decodeBoardEntry,
   decodeElectionDefinitionV7,
   ELECTORATE_MODES,
   PARAMETERS,
+  pinnedVersion,
+  RECORD_TYPES,
   RESULTS_MODES,
 } from "@abolishus/crypto";
 import { describe, expect, test } from "vite-plus/test";
@@ -17,6 +22,8 @@ import {
   BUNDLE_FORMAT_CEREMONY,
   type Bundle,
   type CheckResult,
+  countedResults,
+  countedTally,
   parseBundle,
   type PinnedPanel,
   rollingElectorates,
@@ -526,6 +533,50 @@ describe(
       expect(smallestOf([atClose, { entry: extent - 1, cell: 0, step: smallest.step }])).toEqual(
         smallest,
       );
+    });
+
+    // The operator's figure (P2-17 part 9b-1): `countedTally` over the
+    // counted extent, the entries through `s_S`, with the same chain as a
+    // proven read gives it, reports the vectors' electorate, which an
+    // independent model computed, but for the releases, which aren't read
+    // there (verifier.md, Results from the counted tally; T-16, T-13).
+    test("the counted tally over the counted extent gives the same electorate, but its releases", () => {
+      const bundle = sealedBundle();
+      const chain = archivedChain(
+        d,
+        replayOf(file.events, { ...sealed, registeredAt: file.registeredAt }),
+        registries,
+      );
+      if (chain === undefined) throw new Error("fixture: no chain");
+      const sv = decodeElectionDefinitionV7(hex(sealed.definition));
+      const sS = countedExtent(bundle.clock, sv.closes_at, BigInt(sv.l1_inclusion_bound)).segment;
+      const version = pinnedVersion(sv, RECORD_TYPES.boardEntry);
+      if (version === undefined) throw new Error("fixture: no board-entry pin");
+      const entries = splitEntries(hex(sealed.board)).entries.filter(
+        (e) => BigInt(decodeBoardEntry(e, version as BoardEntryVersion).segment) <= sS,
+      );
+      const panel = sealed.panel as { readonly threshold: string; readonly keys: string[] };
+      const tally = countedTally({
+        definition: hex(sealed.definition),
+        panel: { threshold: Number(panel.threshold), keys: panel.keys.map(hex) },
+        entries,
+        clock: bundle.clock,
+        blocks: "l1Blocks" in bundle ? bundle.l1Blocks : [],
+        eventsAuthenticated: false,
+        pins,
+        rolling: { chain, through: { block: 10_000n, timestamp: sv.closes_at + 1n } },
+      });
+      if (!tally.ok) return expect.fail(`undecided: ${JSON.stringify(tally)}`);
+      const want = electoratesOf("verifier-ballots-v5-tier0-sealed.json").map((t) => {
+        const { releases: _, ...electorate } = t.electorate;
+        return { tier: t.tier, electorate };
+      });
+      expect(tally.electorates).toEqual(want.map((w) => w.electorate));
+      // Its copies' proofs all verify, so the smallest step is read from them.
+      expect(tally.electorates?.[0]?.smallestStep).not.toBeNull();
+      expect(
+        countedResults(tally, []).tiers.map(({ tier, electorate }) => ({ tier, electorate })),
+      ).toEqual(want);
     });
 
     test("the chain is still the archive's word, so the verdict rests on it nowhere", () => {

@@ -748,7 +748,7 @@ export const esUS: Messages = {
     "Cuando el nodo comunitario haya copiado y verificado los tableros, como explica Cómo contarlo tú, el verificador revisa esta encuesta por separado con este comando. Su código de salida es el veredicto.",
   reactionsTitle: "Reacciones",
   reactionsLede:
-    "Reacciona a la encuesta en sí, la respondas o no. Una reacción no es una respuesta y no dice nada sobre si respondiste.",
+    "Reacciona a la encuesta en sí. Una reacción no es una respuesta y no dice nada sobre si respondiste.",
   reactionsLabel: "Reacciones a esta encuesta",
   reaction_heart: "Corazón",
   reaction_laugh: "Risa",
@@ -772,7 +772,7 @@ export const esUS: Messages = {
   reactionsUnread: "No se pudieron cargar las reacciones en este momento.",
   followTitle: "Seguir",
   followLede:
-    "Sigue esta encuesta para recibir un correo cuando estén sus resultados, la respondas o no. Seguirla no es responderla y no dice nada de si la respondiste.",
+    "Recibe un correo cuando estén sus resultados. Seguirla no es responderla y no dice nada de si la respondiste.",
   followJoin: "Seguir esta encuesta",
   followStop: "Dejar de seguir",
   followFollowing: "Estás siguiendo esta encuesta.",

@@ -127,6 +127,27 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(await canvas.findByText("Heart: 4 people")).toBeInTheDocument();
   // And following, alike too.
   await expect(canvas.getByRole("button", { name: "Follow this poll" })).toBeVisible();
+  // Side by side from a tablet's width, stacked on a phone, each saying in
+  // a sentence that it isn't an answer (P2-29, the poll page's iteration 5).
+  const reacting = canvas.getByRole("region", { name: "Reactions" });
+  const following = canvas.getByRole("region", { name: "Follow" });
+  await expect(
+    within(reacting).getByText(
+      "React to the poll itself. A reaction isn't an answer and says nothing about whether you answered.",
+    ),
+  ).toBeVisible();
+  await expect(
+    within(following).getByText(
+      "Get an e-mail when its results are in. Following isn't answering and says nothing about whether you answered.",
+    ),
+  ).toBeVisible();
+  const [reactingBox, followingBox] = [reacting, following].map((r) => r.getBoundingClientRect());
+  if (window.matchMedia("(min-width: 48rem)").matches) {
+    await expect(followingBox?.top).toBe(reactingBox?.top);
+    await expect(followingBox?.left).toBeGreaterThan(reactingBox?.right ?? Infinity);
+  } else {
+    await expect(followingBox?.top).toBeGreaterThan(reactingBox?.bottom ?? Infinity);
+  }
   await openEvidence(canvasElement);
   await expect(canvas.getByText(/what our server says about this poll/)).toBeVisible();
   await expect(canvas.getByRole("figure", { name: "Poll ID" })).toBeVisible();

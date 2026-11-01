@@ -739,7 +739,7 @@ const enUS = {
     "Once the community node has copied and verified the boards, as How to count it yourself sets out, the verifier checks this poll on its own with this command. Its exit code is the verdict.",
   reactionsTitle: "Reactions",
   reactionsLede:
-    "React to the poll itself, whether or not you answer it. A reaction isn't an answer and says nothing about whether you answered.",
+    "React to the poll itself. A reaction isn't an answer and says nothing about whether you answered.",
   reactionsLabel: "Reactions to this poll",
   reaction_heart: "Heart",
   reaction_laugh: "Laugh",
@@ -762,7 +762,7 @@ const enUS = {
   reactionsUnread: "Reactions couldn't be loaded just now.",
   followTitle: "Follow",
   followLede:
-    "Follow this poll to be told by e-mail when its results are in, whether or not you answer it. Following isn't answering and says nothing about whether you answered.",
+    "Get an e-mail when its results are in. Following isn't answering and says nothing about whether you answered.",
   followJoin: "Follow this poll",
   followStop: "Stop following",
   followFollowing: "You're following this poll.",

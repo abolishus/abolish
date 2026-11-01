@@ -390,7 +390,9 @@ describe("poll page", () => {
     const html = await (await get(`/polls/${OPEN_ONE}`)).text();
     // A poll with no title is headed by its question, in its language and
     // direction, and the title isolates it from the site's words (T-75).
-    expect(html).toMatch(/<h1 lang="en" dir="auto"[^>]*>Should the park stay open late\?<\/h1>/);
+    expect(html).toMatch(
+      /<h1 id="poll-heading" lang="en" dir="auto"[^>]*>Should the park stay open late\?<\/h1>/,
+    );
     expect(html).toContain("<title>\u2068Should the park stay open late?\u2069 · Abolish</title>");
     expect(html).toContain(`Poll ${OPEN_ONE.slice(0, 16)}…`);
     const page = html.replace(/<[^>]+>/g, "");
@@ -398,19 +400,26 @@ describe("poll page", () => {
     expect(page).toContain("Pick one from 3 options");
     // Its one question heads the page, so it isn't said a second time, only numbered.
     expect(html).not.toMatch(/<h3[^>]*>(?:<[^>]+>)*[^<]*Should the park/);
-    expect(html).toContain('<h3 class="sr-only">Question 1</h3>');
-    for (const label of ["Yes", "No", "Abstain"])
-      expect(html).toMatch(new RegExp(`<li lang="en" dir="auto"[^>]*>${label}</li>`));
-    // One way in, carrying the poll in the fragment alone, which no server sees (T-10, T-11).
+    expect(html).toContain('<h3 id="question-0" class="sr-only">Question 1</h3>');
+    // Each answer opens the ballot client with it chosen, as a stream card's
+    // and the embed's do, and so does the one way in without a pick, each
+    // carrying the poll in the fragment alone, which no server sees (T-10,
+    // T-11; P2-29, the poll page's iteration 1).
+    for (const [pick, label] of ["Yes", "No", "Abstain"].entries())
+      expect(html).toMatch(
+        new RegExp(
+          `href="${BALLOT}#election=${OPEN_ONE}&amp;pick=${pick}"[^>]*><span lang="en" dir="auto"[^>]*>${label}</span>`,
+        ),
+      );
+    expect(html).not.toContain("pick=3");
     expect(html).toContain(`href="${BALLOT}#election=${OPEN_ONE}"`);
-    expect(html).not.toContain("pick=");
     expect(page).toContain("Answer the question");
     expect(page).toContain("Nothing is sent until you cast your answers there.");
   });
 
   test("a poll of several questions is headed by its title, each question with its answers", async () => {
     const html = await (await get(`/polls/${OPEN_MANY}`)).text();
-    expect(html).toMatch(/<h1 lang="en" dir="auto"[^>]*>Park and library<\/h1>/);
+    expect(html).toMatch(/<h1 id="poll-heading" lang="en" dir="auto"[^>]*>Park and library<\/h1>/);
     expect(html).toContain("<title>\u2068Park and library\u2069 · Abolish</title>");
     const page = html.replace(/<[^>]+>/g, "");
     expect(page).toContain("Question 1: Should the park stay open late?");
@@ -419,12 +428,16 @@ describe("poll page", () => {
     expect(page).toMatch(/Pick [a-z ]+ from 2 options/);
     expect(page).toContain("Answer 2 questions");
     expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}"`);
+    // A link carries one pick, for question 1: its 3 answers, not question 2's.
+    for (const pick of [0, 1, 2])
+      expect(html).toContain(`href="${BALLOT}#election=${OPEN_MANY}&amp;pick=${pick}"`);
+    expect(html).not.toContain("pick=3");
   });
 
   test("the page's words follow its language, as its heading's", async () => {
     const html = await (await get(`/polls/${OPEN_ONE}`, { "accept-language": "es-MX" })).text();
     expect(html).toMatch(
-      /<h1 lang="es-419" dir="auto"[^>]*>¿Debe el parque abrir hasta tarde\?<\/h1>/,
+      /<h1 id="poll-heading" lang="es-419" dir="auto"[^>]*>¿Debe el parque abrir hasta tarde\?<\/h1>/,
     );
     expect(html).toContain("Lo que pregunta");
     expect(html).toContain("Responder la pregunta");

@@ -632,6 +632,26 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
       .slice(1)
       .map((li) => li.textContent),
   ).toEqual(["Yes", "No", "Abstain"]);
+  // Each answer opens the ballot client with it chosen, as a stream card's
+  // does, the pick in the fragment alone (T-10, T-11; P2-29, the poll
+  // page's iteration 1). The list is named by the question heading the page.
+  const answers = within(asks).getByRole("list", { name: "Should the park stay open late?" });
+  await expect(
+    within(answers)
+      .getAllByRole("link")
+      .map((a) => [a.textContent, a.getAttribute("href")]),
+  ).toEqual(
+    ["Yes", "No", "Abstain"].map((label, pick) => [
+      label,
+      `${BALLOT}#election=${poll.electionId}&pick=${pick}`,
+    ]),
+  );
+  await expect(within(answers).getByRole("link", { name: "Yes" })).toHaveStyle({
+    minHeight: "48px",
+  });
+  await expect(
+    within(asks).getByText(/^Choose an answer to open it in the ballot app\./),
+  ).toBeVisible();
   // Said only before it opens, as the scheduled poll's mockup says it.
   await expect(within(asks).queryByText(/^The poll's definition fixes these words/)).toBeNull();
   await expect(canvas.queryByText(/^Nothing can be answered until it opens/)).toBeNull();
@@ -694,6 +714,16 @@ export const WordedQuestions: Story = {
     ).toBeVisible();
     await expect(canvas.getByText("Pick any from 5 options")).toBeVisible();
     await expect(canvas.getByText("Public holidays")).toBeVisible();
+    // A link carries one pick, for question 1: its answers are links, named
+    // by their question, and question 2's are words, with no box to tap.
+    await expect(
+      within(
+        canvas.getByRole("list", { name: "Question 1: Should the park stay open late?" }),
+      ).getByRole("link", { name: "No" }),
+    ).toHaveAttribute("href", `${BALLOT}#election=${poll.electionId}&pick=1`);
+    await expect(canvas.getByText(/^Choose an answer to question 1 of 2 to open it/)).toBeVisible();
+    await expect(canvas.queryByRole("link", { name: "Public holidays" })).toBeNull();
+    await expect(canvas.getByText("Public holidays")).toHaveStyle({ borderTopWidth: "0px" });
     await expect(canvas.getByRole("link", { name: "Answer 2 questions" })).toBeVisible();
     await expect(
       canvas.getByText(/^2 questions, answered together\. You can change your answers until/),
@@ -746,6 +776,9 @@ export const WordedScheduled: Story = {
     await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
     await expect(canvas.getByText("You can answer here once the poll opens.")).toBeVisible();
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+    // Its answers are words until it opens, with no box to tap.
+    await expect(within(asks).queryByRole("link")).toBeNull();
+    await expect(within(asks).getByText("Yes")).toHaveStyle({ borderTopWidth: "0px" });
     await expect(canvas.queryByText(/You can change your answers? until/)).toBeNull();
   },
 };
@@ -759,6 +792,7 @@ export const WordedNoBallot: Story = {
       canvas.getByText("Answering from this page isn't set up on this site yet."),
     ).toBeVisible();
     await expect(canvas.queryByRole("link", { name: /^Answer/ })).toBeNull();
+    await expect(canvas.queryByRole("link", { name: "Yes" })).toBeNull();
     // Nothing to answer here, so nothing promised about answering again.
     await expect(canvas.queryByText(/You can change your answers? until/)).toBeNull();
   },
@@ -794,6 +828,10 @@ const inShortPlay: Story["play"] = async ({ canvasElement }) => {
   await expect(
     canvas.getByText("Final results. 8 people answered; here is what they said."),
   ).toBeVisible();
+  // Closed, nothing opens the ballot client with an answer chosen.
+  await expect(
+    within(canvas.getByRole("region", { name: "What it asks" })).queryByRole("link"),
+  ).toBeNull();
   const items = within(canvas.getByRole("list", { name: "In short" })).getAllByRole("listitem");
   await expect(items.map((li) => li.textContent)).toEqual([
     "Should the park stay open late?" +

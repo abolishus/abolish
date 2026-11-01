@@ -499,7 +499,7 @@ export function PollSummary({
         <PollFacts poll={poll} phoneVerification={phoneVerification} />
 
         {/* A hidden poll's tags are withheld with its text (T-68); a delisted
-              one's stand, but the stream they'd link to doesn't list it. */}
+            one's stand, but the stream they'd link to doesn't list it. */}
         {tags === undefined ||
         moderation.state === "hidden" ||
         (tags.topic === undefined && tags.place === undefined) ? null : (

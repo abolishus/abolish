@@ -943,6 +943,15 @@ export type ShowRecordRefusal =
       readonly rule: DisplayTextRule | DisplayTextV2Rule;
     };
 
+/**
+ * What `checkElectionRecordToShow` found. A consumer switches on `version`
+ * exhaustively: a version-7 definition is structurally a version-5 one, so
+ * code that read every later version as version 5 would compile and hash it
+ * wrongly. The check is for showing, and runs no [[verifier]] 2.3 profile
+ * combination: a client that goes on to cast must run that itself (as the API's
+ * store does before serving a definition), so a definition whose pins its
+ * mode or results don't allow, a live one among them, is never cast in.
+ */
 export type ShowRecordCheck =
   | {
       readonly ok: true;

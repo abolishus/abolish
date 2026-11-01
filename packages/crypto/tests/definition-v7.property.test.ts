@@ -702,6 +702,10 @@ describe("showing a version-7 election (docs/spec/display-text.md, Checks)", () 
       ok: false,
       problem: "display-text-undecodable",
     });
+    // Its own text, committed to, but a question with another option count.
+    expect(
+      show({ ...definition, questions: [questions[0], { ...questions[1], option_count: 3 }] }),
+    ).toEqual({ ok: false, problem: "display-text-ill-formed", rule: "option-count" });
     const other = vector("display-text-v2.json", "display-text-v2-minimal");
     expect(show(definition, hex(other.encoding))).toEqual({
       ok: false,

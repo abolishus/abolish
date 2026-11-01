@@ -400,7 +400,8 @@ function Narrowing({
 }) {
   const t = useTranslate(catalogs);
   return (
-    <details className="group">
+    // A peer: `TopicClear`, its next sibling, steps aside while it is open.
+    <details className="peer group">
       {/* Padded, and pulled back by as much, so its focus ring clears the
           chevron and the last word while the chevron keeps the column's edge. */}
       <summary className="-mx-2 inline-flex min-h-12 cursor-pointer items-center gap-2 px-2 text-base font-semibold focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none">
@@ -723,7 +724,8 @@ function Empty({
 /**
  * A topic's way back to every topic, keeping the rest. A topic needs no
  * words, as the page's title names it, and its page needn't open the
- * fifteen topics to offer one. The search and the place say themselves
+ * fifteen topics to offer one; it is the `Narrowing` fold's next sibling.
+ * The search and the place say themselves
  * under their own boxes (`BoxNote`).
  */
 function TopicClear({ sort, filter }: { sort: StreamSort; filter: StreamFilter }) {
@@ -731,7 +733,11 @@ function TopicClear({ sort, filter }: { sort: StreamSort; filter: StreamFilter }
   const { q, place, topic } = filter;
   if (topic === undefined) return null;
   return (
-    <p className="m-0 text-sm">
+    // Hidden while the topics are open, where "All topics" leads the same
+    // way: under the opened fold it repeated that link below the place's
+    // box, and read as the place's (P2-29, the stream's iteration 39). By
+    // CSS, so it holds before the page's script loads.
+    <p className="m-0 text-sm peer-open:hidden">
       <a
         className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
         href={streamHref(sort, { q, place })}

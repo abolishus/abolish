@@ -1,19 +1,6 @@
 import { SectionMark } from "@abolishus/ui";
 import type { ReactNode, Ref } from "react";
 
-/**
- * A text link's focus: 3px and square in the ring's colour, as every box on
- * the page draws it. Left to the browser, a card's heading, its asker and the
- * lines under the boxes took a thin rounded outline that crossed the link's
- * own underline and a heading's descenders, a second focus style a keyboard
- * user met between the answers' rings (P2-29, the stream's iteration 33). An
- * outline 2px out, not a ring: a heading wrapped onto several lines gets one
- * shape round them all, clear of every line's underline, where a ring drew a
- * box per line, each over the underline of the line above.
- */
-export const TEXT_FOCUS =
-  "focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-ring";
-
 /** A page's opening: its eyebrow, its one `h1` and its lede. */
 export function PageHeader({
   eyebrow,

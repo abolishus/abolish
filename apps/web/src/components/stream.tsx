@@ -21,7 +21,7 @@ import {
 import { ballotLink } from "../values.ts";
 import { AskedBy } from "./asked-by.tsx";
 import { ListedUnder } from "./listed-under.tsx";
-import { PageHeader, TEXT_FOCUS } from "./page-parts.tsx";
+import { PageHeader } from "./page-parts.tsx";
 import { useViewerDaySince, When } from "./when.tsx";
 
 const SORT_LABEL = {
@@ -201,7 +201,7 @@ function BoxNote({
       <span id={id}>{narrowed.note}</span>
       {/* A 24px tap (WCAG 2.5.8; P2-29, the stream's iteration 12). */}
       <a
-        className={cn("inline-flex min-h-6 items-center underline underline-offset-4", TEXT_FOCUS)}
+        className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
         href={narrowed.href}
       >
         {narrowed.clear}
@@ -507,7 +507,7 @@ export function StreamCard({
         {/* Balanced: at 360px "here" wrapped alone under the rest. */}
         <h3 id={titleId} className="m-0 text-lg font-medium text-balance">
           <a
-            className={cn("underline underline-offset-4", TEXT_FOCUS)}
+            className="underline underline-offset-4 focus-text"
             href={`/polls/${card.electionId}`}
             aria-describedby={questionId}
           >
@@ -570,10 +570,7 @@ export function StreamCard({
               colour, so the heading still reads first. */}
           <a
             href={`/polls/${poll.electionId}`}
-            className={cn(
-              "underline decoration-primary decoration-1 underline-offset-4 hover:decoration-2",
-              TEXT_FOCUS,
-            )}
+            className="underline decoration-primary decoration-1 underline-offset-4 hover:decoration-2 focus-text"
           >
             {text.heading}
           </a>
@@ -686,7 +683,7 @@ function TopicClear({ sort, filter }: { sort: StreamSort; filter: StreamFilter }
   return (
     <p className="m-0 text-sm">
       <a
-        className={cn("inline-flex min-h-6 items-center underline underline-offset-4", TEXT_FOCUS)}
+        className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
         href={streamHref(sort, { q, place })}
       >
         {t("streamTopicClear")}
@@ -886,10 +883,7 @@ export function StreamPage({
               <p className="m-0 flex flex-wrap items-center gap-x-3 text-sm">
                 <span>{t("streamLater")}</span>
                 <a
-                  className={cn(
-                    "inline-flex min-h-6 items-center underline underline-offset-4",
-                    TEXT_FOCUS,
-                  )}
+                  className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
                   href={streamHref(sort, filter)}
                 >
                   {t("streamStart")}

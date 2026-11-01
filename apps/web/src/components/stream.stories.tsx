@@ -378,6 +378,25 @@ const play: Story["play"] = async ({ canvasElement }) => {
       .getAllByRole("listitem")
       .map((li) => li.textContent),
   ).toEqual(["38 people with a verified e-mail", "1 person verified with a passport or ID"]);
+  // A tier's line that wraps hangs its continuation in, so its second half
+  // doesn't read as a tier of its own: on a 360px screen in the site's frame
+  // "with a passport or ID" sat flush under "1 person verified", like the row
+  // above it (P2-29, the stream's iteration 35). Every tier's first line
+  // starts at one edge, and every line after it 16px in.
+  const [emailRow, passportRow] = within(counts[1]!).getAllByRole("listitem");
+  const lines = (node: Element) => {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    return [...range.getClientRects()];
+  };
+  for (const row of [emailRow!, passportRow!]) {
+    await expect(getComputedStyle(row).paddingLeft).toBe("16px");
+    await expect(getComputedStyle(row).textIndent).toBe("-16px");
+  }
+  const passportLines = lines(passportRow!);
+  await expect(passportLines[0]!.left).toBe(lines(emailRow!)[0]!.left);
+  for (const line of passportLines.slice(1))
+    await expect(line.left).toBe(passportLines[0]!.left + 16);
   await expect(within(counts[1]!).queryByText(/Tier \d/)).toBeNull();
   // On a phone the band reaches the card's borders, its words starting where
   // the question's do, so a count of one tier keeps one line at 360px, where

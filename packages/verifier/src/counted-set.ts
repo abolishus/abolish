@@ -25,6 +25,7 @@ import {
   type Panel,
   pinnedVersion,
   RECORD_TYPES,
+  type RollingBallotChain,
   type TallyElection,
   tallyRules,
   type WholeOpeningVersion,
@@ -43,7 +44,7 @@ import {
   type TierReport,
   tierResults,
 } from "./counted.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isRolling, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
@@ -82,6 +83,29 @@ export interface CountedExtentInputs {
   readonly eventsAuthenticated: boolean;
   /** The panels the release pins, as `verifyBundle` reads them. */
   readonly pins?: readonly PinnedPanel[];
+  /**
+   * Under a rolling definition, its chain, as `rollingChain` gives it from
+   * the caller's own finalized, proven read of both registries, never a
+   * chain the operator, a submitter or a relay gives: as `electionAdmission`
+   * takes it, so 5.1 to 5.3 judge each ballot against step roots the caller
+   * computed and 5.8 its step's window (T-08, T-25, T-71). Without it a
+   * rolling poll is `unsupported-version`, decided before any ballot is
+   * read. Another definition never reads it.
+   */
+  readonly rolling?: CountedChain;
+}
+
+/**
+ * A rolling poll's chain with the block its records are proven complete
+ * through. A rejection resting on the step roots is decided only over a
+ * chain proven past the close: a chain read mid-poll gives every later
+ * step the last tree it holds, so a member added after it would fail
+ * `membership-proof` and drop out of the set (T-14, T-16).
+ */
+export interface CountedChain {
+  readonly chain: RollingBallotChain;
+  /** The proven, final L2 block the chain's records run through: its number and timestamp. */
+  readonly through: { readonly block: bigint; readonly timestamp: bigint };
 }
 
 /** Each cell's counted set, or why it isn't decided. */
@@ -110,7 +134,11 @@ export type CountedSetResult =
  * entry that doesn't decode under the pinned board-entry version, names
  * another election or lies in a segment past `s_S`: then `entries` isn't the
  * counted extent the board checks passed, and no set over it is the
- * anchored one.
+ * anchored one. Under a rolling definition it also throws one for a chain
+ * whose events don't give the definition's opening state, which no chain
+ * `rollingChain` gives does (2.4's recount passed for it), and the set is
+ * undecided at 5.1 with `not-reached` while the chain isn't proven past
+ * the close and every rolling tier's `root_l2_block`.
  */
 export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
   const counted = countedCells(inputs);
@@ -294,11 +322,29 @@ function countedCells(
     inputs.panel,
     entries,
     inputs.pins ?? PINNED_PANELS,
+    inputs.rolling?.chain,
   );
   if (!election.ok) return election;
   const { record, hash, boardEntryVersion, registered, authorRegistered } = election;
   if (!accept(record)) return { ok: false, code: "unsupported-version" };
   const d = record.value;
+  // As `archivedChain` requires of the archive's: proven past the close and
+  // through every rolling tier's `root_l2_block`, so every event a step
+  // root inside the poll reads is in the chain (verifier.md, Electorate,
+  // The rolling chain). A later read may decide it, never another set.
+  const rolling = isRolling(record) ? inputs.rolling : undefined;
+  if (rolling !== undefined && record.version === 7) {
+    const rootBlock = record.value.rolling_electorate.reduce(
+      (b, t) => (t.root_l2_block > b ? t.root_l2_block : b),
+      0n,
+    );
+    if (rolling.through.timestamp <= d.closes_at || rolling.through.block < rootBlock)
+      return {
+        ok: false,
+        row: "5.1",
+        outcome: { status: "unverifiable", code: "not-reached", at: {} },
+      };
+  }
   // 2.6 fails a definition opening before the clock's epoch: the counted
   // extent can't be placed on the clock.
   if (d.closes_at < clock.epoch)
@@ -338,6 +384,7 @@ function countedCells(
     boardEntryVersion,
     clock,
     blocks,
+    rolling?.chain,
   );
   for (const id of ALL_ROWS) {
     const outcome = admission.rows.get(id);

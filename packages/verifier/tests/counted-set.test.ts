@@ -135,6 +135,12 @@ describe("the counted set from the counted extent", { timeout: WHOLE_BOARDS }, (
     if (!result.ok) return expect.fail(`undecided: ${JSON.stringify(result)}`);
     // One cell per tier of the two-tier electorate.
     expect(result.cells).toEqual([[], []]);
+    // A fixed definition never reads a rolling chain, whatever it holds.
+    const rolling = {
+      chain: { events: [], registeredAt: 0n },
+      through: { block: 0n, timestamp: 0n },
+    };
+    expect(countedSet({ ...inputsOf(admitted, afterClose), rolling })).toEqual(result);
   });
 
   test("is undecided while a reference is pending, with 5.8's own outcome", () => {

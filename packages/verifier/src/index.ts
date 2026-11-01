@@ -85,6 +85,7 @@ export { type RollingElectorateReport, rollingElectorates } from "./rolling-repo
 export { type L1RefCode } from "./references.ts";
 export { type SelectedBallot, type SelectionReport } from "./selection.ts";
 export {
+  type CountedChain,
   type CountedExtentInputs,
   countedResults,
   type CountedResults,

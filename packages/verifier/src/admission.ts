@@ -258,9 +258,8 @@ export interface ReadElection {
  * pins, then the transcript check (2.5's panel, 3.1, 3.2). The first that
  * stops them all is the refusal; otherwise the registered key sets every
  * ballot is judged against (T-37, T-04). A rolling definition is read only
- * where the caller has its chain (`rolling`, from `rollingChain`), which
- * the counted set and the tally reads don't take: they don't read a
- * rolling electorate's cells yet.
+ * where the caller has its chain (`rolling`, from `rollingChain`), as
+ * admission and the counted set take it.
  */
 export function readElection(
   definitionBytes: Uint8Array,

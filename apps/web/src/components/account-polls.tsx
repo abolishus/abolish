@@ -93,41 +93,21 @@ export interface AccountPollsProps {
  * How many have answered one of the author's open or closed polls, one line
  * per tier it is open to, as its page and the stream's card say it: the
  * board's count of distinct voters, never a result and never one figure
- * across tiers (T-01). Read for the row alone, after the list; a read that
+ * across tiers (T-01). Read for the whole list at once, after it; a read that
  * fails shows nothing, as a card's count does, since the poll's page has it.
  */
 function AuthorAnswered({
-  client,
+  answered,
   pollId,
   closed,
   phoneVerification,
-  onSignedOut,
 }: {
-  client: DraftsClient;
+  answered: CardAnswered | undefined;
   pollId: string;
   closed: boolean;
   phoneVerification: boolean;
-  onSignedOut: (() => void) | undefined;
 }) {
   const t = useTranslate(catalogs);
-  const [answered, setAnswered] = useState<CardAnswered | undefined>();
-  // Read once per poll: a new callback from the page is no reason to ask again.
-  const signedOut = useRef(onSignedOut);
-  signedOut.current = onSignedOut;
-  useEffect(() => {
-    let live = true;
-    client.answered(pollId).then(
-      (counts) => {
-        if (live) setAnswered(counts);
-      },
-      (e: unknown) => {
-        if (live && e instanceof DraftsError && e.failure === "signedOut") signedOut.current?.();
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [client, pollId]);
   if (answered === undefined || answered.length === 0) return null;
   const titleId = `poll-${pollId}-answered`;
   return (
@@ -215,6 +195,32 @@ export function AccountPolls({
   const profileHelp = `${useId()}-profile-help`;
 
   const refresh = useCallback(async () => setPolls(await client.list()), [client]);
+
+  // Every open poll's count in one read, once per set of open polls: a new
+  // callback from the page, or an action on a draft, is no reason to ask
+  // again (T-52).
+  const [answered, setAnswered] = useState<ReadonlyMap<string, CardAnswered> | undefined>();
+  const openIds = (polls ?? [])
+    .filter((p) => p.state === "open" && p.electionId !== undefined)
+    .map((p) => p.id)
+    .join(" ");
+  const signedOut = useRef(onSignedOut);
+  signedOut.current = onSignedOut;
+  useEffect(() => {
+    if (openIds === "") return;
+    let live = true;
+    client.answered().then(
+      (counts) => {
+        if (live) setAnswered(counts);
+      },
+      (e: unknown) => {
+        if (live && e instanceof DraftsError && e.failure === "signedOut") signedOut.current?.();
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, openIds]);
 
   const failed = useCallback(
     (e: unknown, otherwise: DraftsFailure | "unlisted") => {
@@ -503,11 +509,10 @@ export function AccountPolls({
                   </div>
                   {(shown === "open" || shown === "closed") && p.electionId !== undefined ? (
                     <AuthorAnswered
-                      client={client}
+                      answered={answered?.get(p.id)}
                       pollId={p.id}
                       closed={shown === "closed"}
                       phoneVerification={phoneVerification}
-                      onSignedOut={onSignedOut}
                     />
                   ) : null}
                   {confirming?.id === p.id ? confirm(p, title, confirming.action) : null}

@@ -14,11 +14,26 @@
 // (src/poll-tags.ts) only filter an order: they rank nothing.
 
 import type { PeriodClock } from "@abolishus/crypto";
-import { and, asc, desc, eq, exists, gt, isNotNull, lt, lte, or, sql as q } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  lt,
+  lte,
+  or,
+  sql as q,
+} from "drizzle-orm";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
 import { POLL_TOPICS, type PollTopic } from "./poll-draft-rules.ts";
+import { MAX_LISTED_POLLS } from "./poll-drafts.ts";
 import { MAX_SEARCH_TERMS } from "./search.ts";
 import {
   boardBallotKeys,
@@ -417,28 +432,62 @@ export async function answeredByTier(
   client: Sql,
   electionId: Uint8Array,
 ): Promise<readonly TierAnswered[] | undefined> {
-  if (!isBytes(electionId) || electionId.length !== 32)
-    throw new TypeError("electionId must be 32 bytes");
-  const id = new Uint8Array(electionId);
+  const [answered] = await answeredByTiers(client, [electionId]);
+  return answered;
+}
+
+/** The most elections `answeredByTiers` reads at once: as many as an account's list of polls holds. */
+export const MAX_ANSWERED_ELECTIONS = MAX_LISTED_POLLS;
+
+/**
+ * `answeredByTier` for each of `electionIds` (1 to `MAX_ANSWERED_ELECTIONS`
+ * distinct IDs), in their order, from one snapshot and one statement over
+ * the board's keys, so a page that shows several polls' counts costs one
+ * read rather than one per poll (T-52). Each election's tiers stay on their
+ * own (T-01), and an election with no stored definition is `undefined`.
+ */
+export async function answeredByTiers(
+  client: Sql,
+  electionIds: readonly Uint8Array[],
+): Promise<(readonly TierAnswered[] | undefined)[]> {
+  if (
+    !Array.isArray(electionIds) ||
+    electionIds.length === 0 ||
+    electionIds.length > MAX_ANSWERED_ELECTIONS
+  )
+    throw new TypeError(`electionIds must hold 1 to ${MAX_ANSWERED_ELECTIONS} IDs`);
+  for (const id of electionIds)
+    if (!isBytes(id) || id.length !== 32) throw new TypeError("electionId must be 32 bytes");
+  const ids = electionIds.map((id) => new Uint8Array(id));
+  const hexes = ids.map(bytesToHex);
+  if (new Set(hexes).size !== hexes.length) throw new TypeError("electionIds must be distinct");
   return drizzle({ client }).transaction(
     async (tx) => {
-      const [stored] = await tx
+      const stored = await tx
         .select({ id: electionDefinitions.electionId })
         .from(electionDefinitions)
-        .where(eq(electionDefinitions.electionId, id));
-      if (stored === undefined) return undefined;
+        .where(inArray(electionDefinitions.electionId, ids));
       // The keys' primary key leads with (election, tier, nullifier), so
-      // this reads the poll's own keys by range.
+      // this reads each poll's own keys by range.
       const rows = await tx
         .select({
+          id: boardBallotKeys.electionId,
           tier: boardBallotKeys.tier,
           voters: q<string>`count(DISTINCT ${boardBallotKeys.nullifier})::text`,
         })
         .from(boardBallotKeys)
-        .where(eq(boardBallotKeys.electionId, id))
-        .groupBy(boardBallotKeys.tier)
+        .where(inArray(boardBallotKeys.electionId, ids))
+        .groupBy(boardBallotKeys.electionId, boardBallotKeys.tier)
         .orderBy(asc(boardBallotKeys.tier));
-      return rows.map((r) => ({ tier: r.tier, voters: BigInt(r.voters) }));
+      const known = new Set(stored.map((r) => bytesToHex(r.id)));
+      const counts = new Map<string, TierAnswered[]>();
+      for (const r of rows) {
+        const key = bytesToHex(r.id);
+        const tiers = counts.get(key) ?? [];
+        tiers.push({ tier: r.tier, voters: BigInt(r.voters) });
+        counts.set(key, tiers);
+      }
+      return hexes.map((key) => (known.has(key) ? (counts.get(key) ?? []) : undefined));
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );

@@ -10,6 +10,7 @@ import {
   ListingError,
   type ListingOrder,
   answeredByTier,
+  answeredByTiers,
   listPolls,
   listPollsBefore,
   lookupShortCode,
@@ -42,6 +43,7 @@ import {
   Tier0RegistrationError,
   type Tier0Registrations,
   type Tier1Relay,
+  type TierAnswered,
   Tier1RelayError,
 } from "@abolishus/core";
 import type { PeriodClock } from "@abolishus/crypto";
@@ -109,6 +111,8 @@ const os = implement(contract).$context<Context>();
 
 const fromHex = (hex: string) => new Uint8Array(Buffer.from(hex, "hex"));
 const toHex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+const served = (tiers: readonly TierAnswered[]) =>
+  tiers.map(({ tier, voters }) => ({ tier, answered: String(voters) }));
 const ZERO_HASH = "00".repeat(32);
 
 /** The board's position errors, as the contract names them. */
@@ -211,7 +215,18 @@ export const router = os.router({
     getAnswered: os.elections.getAnswered.handler(async ({ input, context, errors }) => {
       const tiers = await answeredByTier(context.sql, fromHex(input.electionId));
       if (tiers === undefined) throw errors.ELECTION_NOT_FOUND();
-      return { tiers: tiers.map(({ tier, voters }) => ({ tier, answered: String(voters) })) };
+      return { tiers: served(tiers) };
+    }),
+    // The same counts for a page's several polls, in one read (T-52); an
+    // unknown election is left out, as the contract says.
+    getAnsweredMany: os.elections.getAnsweredMany.handler(async ({ input, context }) => {
+      const counts = await answeredByTiers(context.sql, input.electionIds.map(fromHex));
+      return {
+        elections: input.electionIds.flatMap((electionId, i) => {
+          const tiers = counts[i];
+          return tiers === undefined ? [] : [{ electionId, tiers: served(tiers) }];
+        }),
+      };
     }),
     // The results the boarded openings give, read in the worker by core's
     // OpeningBoardings over the counted tally it judges them against, which

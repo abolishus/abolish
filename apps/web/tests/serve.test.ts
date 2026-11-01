@@ -102,10 +102,12 @@ const analytics: Analytics = {
 };
 /** Every token a poll submission's Turnstile check saw. */
 const submitted: [string | null, TurnstileAction][] = [];
-/** What the drafts handler's API answers for each election's answered counts, by hex ID; none rejects. */
+/** What the drafts handler's API answers for each election's answered counts, by hex ID; one asked with none rejects. */
 const answeredServed = new Map<string, { tier: number; answered: string }[]>();
-/** Every election the drafts handler asked the API about. */
-const answeredAsked: string[] = [];
+/** Each read of the drafts handler's API, with the elections it asked about. */
+const answeredAsked: (readonly string[])[] = [];
+/** An election the API is to say it doesn't know: left out of its answer. */
+const answeredUnknown = new Set<string>();
 /** The drafts handler's clock. */
 const NOW = new Date("2026-10-17T12:00:00Z");
 /** The push handler's VAPID public key. */
@@ -257,11 +259,14 @@ beforeAll(async () => {
       },
       origin: ORIGIN,
       now: () => NOW,
-      answered: async (electionId) => {
-        answeredAsked.push(electionId);
-        const served = answeredServed.get(electionId);
-        if (served === undefined) throw new Error("the API didn't answer");
-        return served;
+      answered: async (electionIds) => {
+        answeredAsked.push(electionIds);
+        return electionIds.flatMap((electionId) => {
+          if (answeredUnknown.has(electionId)) return [];
+          const tiers = answeredServed.get(electionId);
+          if (tiers === undefined) throw new Error("the API didn't answer");
+          return [{ electionId, tiers }];
+        });
       },
     }),
     email: createEmailHandler({
@@ -754,54 +759,70 @@ describe("poll drafts under /drafts", () => {
     });
   });
 
-  test("says how many have answered an open poll on the tiers its draft opened it to, and nothing of any other poll", async () => {
+  test("says how many have answered each open poll on the tiers its draft opened it to, in one read, and nothing of any other poll", async () => {
     const author = new Browser();
     await register(author, new SoftAuthenticator(RP_ID), true);
-    const { id } = (await (await author.call("POST", "/drafts/create", { draft })).json()) as {
-      id: string;
-    };
-    // A draft and a poll in setup have no election to count (T-34), and the API isn't asked.
-    expect(await (await author.call("POST", "/drafts/answered", { id })).json()).toEqual({
-      code: "NOT_OPEN",
-      status: 409,
-    });
+    const create = async () =>
+      ((await (await author.call("POST", "/drafts/create", { draft })).json()) as { id: string })
+        .id;
+    const [id, second, drafted] = [await create(), await create(), await create()];
+    const answered = () => author.call("POST", "/drafts/answered", {});
+    // Drafts and polls in setup have no election to count (T-34), and the API isn't asked.
+    expect(await (await answered()).json()).toEqual({ polls: [] });
     expect((await author.call("POST", "/drafts/submit", { id })).status).toBe(202);
-    expect((await author.call("POST", "/drafts/answered", { id })).status).toBe(409);
+    expect(await (await answered()).json()).toEqual({ polls: [] });
     expect(answeredAsked).toHaveLength(0);
 
-    const electionId = randomBytes(32);
-    await db.admin`
-      UPDATE account_polls SET state = 'open',
-        creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)},
-        election_id = ${electionId}, created_block = 1, l1_origin_timestamp = 1,
-        anchors_checked_block = 1, electorate = '[]', stub_hash = ${randomBytes(32)},
-        ceremony_tx_hash = ${randomBytes(32)}, register_tx_hash = ${randomBytes(32)},
-        registered_block = 2
-      WHERE id = ${id}`;
-    const hex = electionId.toString("hex");
+    const open = async (pollId: string) => {
+      const electionId = randomBytes(32);
+      await db.admin`
+        UPDATE account_polls SET state = 'open',
+          creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)},
+          election_id = ${electionId}, created_block = 1, l1_origin_timestamp = 1,
+          anchors_checked_block = 1, electorate = '[]', stub_hash = ${randomBytes(32)},
+          ceremony_tx_hash = ${randomBytes(32)}, register_tx_hash = ${randomBytes(32)},
+          registered_block = 2, submitted_at = COALESCE(submitted_at, now())
+        WHERE id = ${pollId}`;
+      return electionId.toString("hex");
+    };
+    const hex = await open(id);
+    const secondHex = await open(second);
     // The API is down: unavailable, never a zero.
-    const down = await author.call("POST", "/drafts/answered", { id });
+    const down = await answered();
     expect([down.status, await down.json()]).toEqual([503, { code: "UNAVAILABLE", status: 503 }]);
-    expect(answeredAsked).toEqual([hex]);
+    // Both open polls in one read, and never the draft.
+    expect(answeredAsked).toHaveLength(1);
+    expect(new Set(answeredAsked[0])).toEqual(new Set([hex, secondHex]));
     // A count for a tier the poll isn't open to is left out; Tier 0 is its only tier.
     answeredServed.set(hex, [
       { tier: 0, answered: "38" },
       { tier: 2, answered: "5" },
     ]);
-    const counted = await author.call("POST", "/drafts/answered", { id });
-    expect(counted.headers.get("cache-control")).toBe("no-store");
-    expect(await counted.json()).toEqual({ tiers: [{ tier: 0, answered: "38" }] });
     // A tier with none served is at 0.
-    answeredServed.set(hex, [{ tier: 1, answered: "7" }]);
-    expect(await (await author.call("POST", "/drafts/answered", { id })).json()).toEqual({
-      tiers: [{ tier: 0, answered: "0" }],
+    answeredServed.set(secondHex, [{ tier: 1, answered: "7" }]);
+    const counted = await answered();
+    expect(counted.headers.get("cache-control")).toBe("no-store");
+    const polls = ((await counted.json()) as { polls: { id: string }[] }).polls;
+    expect(polls.sort((a, b) => a.id.localeCompare(b.id))).toEqual(
+      [
+        { id, tiers: [{ tier: 0, answered: "38" }] },
+        { id: second, tiers: [{ tier: 0, answered: "0" }] },
+      ].sort((a, b) => a.id.localeCompare(b.id)),
+    );
+    // A poll the API doesn't know is left out, never shown at 0.
+    answeredUnknown.add(secondHex);
+    expect(await (await answered()).json()).toEqual({
+      polls: [{ id, tiers: [{ tier: 0, answered: "38" }] }],
     });
-    // Another account's poll is no poll of this one's.
+    expect(answeredAsked).toHaveLength(3);
+    // Another account's polls are none of this one's.
     const other = new Browser();
     await register(other, new SoftAuthenticator(RP_ID), true);
-    expect((await other.call("POST", "/drafts/answered", { id })).status).toBe(404);
-    expect((await author.call("POST", "/drafts/answered", { id: "x" })).status).toBe(400);
-    expect((await new Browser().call("POST", "/drafts/answered", { id })).status).toBe(401);
+    expect(await (await other.call("POST", "/drafts/answered", {})).json()).toEqual({ polls: [] });
+    expect(answeredAsked).toHaveLength(3);
+    // The route takes nothing: not even a poll to choose.
+    expect((await author.call("POST", "/drafts/answered", { id: drafted })).status).toBe(400);
+    expect((await new Browser().call("POST", "/drafts/answered", {})).status).toBe(401);
     expect(answeredAsked).toHaveLength(3);
     expect(logged.at(-1)).toMatchObject({ route: "drafts" });
   });

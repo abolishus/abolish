@@ -24,6 +24,7 @@ import {
   IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
   insertPollTags,
+  MAX_ANSWERED_ELECTIONS as CORE_MAX_ANSWERED_ELECTIONS,
   MAX_LISTED_PLACES as CORE_MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH as CORE_MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY as CORE_MAX_SEARCH_QUERY,
@@ -52,6 +53,7 @@ import {
   contract,
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  MAX_ANSWERED_ELECTIONS,
   MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY,
@@ -935,6 +937,51 @@ describe("elections.getAnswered (P2-23 part 2c; T-01, T-68)", () => {
     expect(unknown.status).toBe(404);
     expect((await json(unknown))["code"]).toBe("ELECTION_NOT_FOUND");
     expect((await get("/elections/answered", { electionId: "00" })).status).toBe(400);
+  });
+});
+
+describe("elections.getAnsweredMany (P2-19 part 58; T-01, T-52)", () => {
+  test("serves each known poll's counts in the asked order, as the one-poll route does", async () => {
+    const [a, b] = [await election(), await election()];
+    const cast = (e: { id: Uint8Array }, tier: number, nullifier: bigint) =>
+      appendEntry(app, e.id, 0, Uint8Array.of(0, 2, 1, ...randomBytes(8)), {
+        ballot: { tier, nullifier, message: b32(), ballotHash: b32() },
+      });
+    await cast(a, 0, 1n);
+    await cast(a, 0, 1n);
+    await cast(a, 1, 1n);
+    await cast(b, 2, 4n);
+    const unknown = hex(b32());
+    const r = await post("/elections/answered", { electionIds: [b.idHex, unknown, a.idHex] });
+    expect(r.status).toBe(200);
+    const one = async (e: { idHex: string }) =>
+      (await json(await get("/elections/answered", { electionId: e.idHex })))["tiers"];
+    expect(await json(r)).toEqual({
+      elections: [
+        { electionId: b.idHex, tiers: await one(b) },
+        { electionId: a.idHex, tiers: await one(a) },
+      ],
+    });
+    expect(await one(a)).toEqual([
+      { tier: 0, answered: "1" },
+      { tier: 1, answered: "1" },
+    ]);
+  });
+
+  test("refuses an empty, repeated, oversized or malformed list, and the bound is core's", async () => {
+    expect(MAX_ANSWERED_ELECTIONS).toBe(CORE_MAX_ANSWERED_ELECTIONS);
+    const id = hex(b32());
+    for (const electionIds of [
+      [],
+      [id, id],
+      ["00"],
+      Array.from({ length: MAX_ANSWERED_ELECTIONS + 1 }, () => hex(b32())),
+    ])
+      expect((await post("/elections/answered", { electionIds })).status).toBe(400);
+    const most = Array.from({ length: MAX_ANSWERED_ELECTIONS }, () => hex(b32()));
+    expect(await json(await post("/elections/answered", { electionIds: most }))).toEqual({
+      elections: [],
+    });
   });
 });
 

@@ -28,15 +28,16 @@ function fakeDrafts(
   }: {
     refuse?: DraftsError;
     moderated?: Record<string, PollModerationView>;
-    /** Each open poll's counts, or the refusal its read gets; a poll with none fails to read. */
-    answered?: Record<string, CardAnswered | DraftsError>;
+    /** Each open poll's counts, a poll with none left out, or the refusal the read gets. */
+    answered?: Record<string, CardAnswered> | DraftsError;
   } = {},
-): DraftsClient & { calls: string[]; asked: string[] } {
+): DraftsClient & { calls: string[]; reads: number[] } {
   let list = [...polls];
   const moderation = new Map(Object.entries(moderated));
   const calls: string[] = [];
-  // The counts each row reads: not an action, so not among `calls`.
-  const asked: string[] = [];
+  // How many times the counts were read (one entry a read): not an action,
+  // so not among `calls`.
+  const reads: number[] = [];
   const act = (name: string, id: string, change: () => void) => {
     calls.push(`${name} ${id}`);
     if (refuse !== undefined) throw refuse;
@@ -44,7 +45,7 @@ function fakeDrafts(
   };
   return {
     calls,
-    asked,
+    reads,
     list: async () => list,
     remove: async (id) => act("remove", id, () => (list = list.filter((p) => p.id !== id))),
     discard: async (id) => act("discard", id, () => (list = list.filter((p) => p.id !== id))),
@@ -57,11 +58,10 @@ function fakeDrafts(
     },
     update: async () => {},
     moderation: async (id) => moderation.get(id) ?? VISIBLE,
-    answered: async (id) => {
-      asked.push(id);
-      const counts = answered[id] ?? new DraftsError("failed");
-      if (counts instanceof DraftsError) throw counts;
-      return counts;
+    answered: async () => {
+      reads.push(reads.length);
+      if (answered instanceof DraftsError) throw answered;
+      return new Map(Object.entries(answered));
     },
     appeal: async (id) =>
       act("appeal", id, () => {
@@ -130,6 +130,12 @@ const CLOSED = poll("closed", {
   title: "Light the pier at night?",
   closesAt: 1792195200n, // 2026-10-17T00:00:00Z, before the stories' clock
   electionId: "1e".repeat(32),
+});
+// An open poll the counts' read leaves out, as it does a poll the API doesn't know.
+const UNCOUNTED = poll("uncounted", {
+  state: "open",
+  title: "Move the market to Sundays?",
+  electionId: "2d".repeat(32),
 });
 const TIMED_OUT = poll("timeout", {
   state: "failed",
@@ -1080,11 +1086,12 @@ export const NoProfile: Story = {
  * How many have answered each open or closed poll, under its row, tier by
  * tier as its page says it (`account-page.tsx`'s entries, P2-19 part 57):
  * every tier at zero said once, Tier 0 named by the deployment's checks, and
- * nothing for a draft, a poll in setup or one whose count couldn't be read.
+ * nothing for a draft, a poll in setup or one the read left out, all read
+ * at once (part 58).
  */
 export const AnsweredSoFar: Story = {
   args: {
-    client: fakeDrafts([DRAFT, SETTING_UP, OPEN, CLOSED, TIMED_OUT], {
+    client: fakeDrafts([DRAFT, SETTING_UP, OPEN, CLOSED, TIMED_OUT, UNCOUNTED], {
       answered: {
         [OPEN.id]: [
           { tier: 0, answered: "38" },
@@ -1097,18 +1104,17 @@ export const AnsweredSoFar: Story = {
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const items = await canvas.findAllByRole("listitem");
-    await expect(items).toHaveLength(5);
-    const [draft, setup, open, closed, timedOut] = items.map((i) => within(i));
+    await expect(items).toHaveLength(6);
+    const [draft, setup, open, closed, timedOut, uncounted] = items.map((i) => within(i));
     const counts = await open!.findByRole("group", { name: "Answered so far" });
     await expect(counts).toHaveTextContent(/^38 people · Tier 0 \(verified e-mail\)/);
     await expect(counts).toHaveTextContent(/1 person · Tier 2 \(document-verified\)$/);
     await expect(await closed!.findByText("Answered before it closed")).toBeVisible();
     await expect(closed!.getByText("No one yet")).toBeVisible();
-    for (const row of [draft!, setup!, timedOut!])
+    for (const row of [draft!, setup!, timedOut!, uncounted!])
       await expect(row.queryByText(/^Answered/)).toBeNull();
-    // Only the open and the closed poll are asked about.
-    const asked = (args.client as ReturnType<typeof fakeDrafts>).asked;
-    await expect(new Set(asked)).toEqual(new Set([OPEN.id, CLOSED.id]));
+    // Every poll's counts come from one read.
+    await expect((args.client as ReturnType<typeof fakeDrafts>).reads).toHaveLength(1);
   },
 };
 
@@ -1133,7 +1139,7 @@ export const AnsweredSoFarWithPhones: Story = {
 export const AnsweredSignedOut: Story = {
   args: {
     onSignedOut: fn(),
-    client: fakeDrafts([OPEN], { answered: { [OPEN.id]: new DraftsError("signedOut") } }),
+    client: fakeDrafts([OPEN], { answered: new DraftsError("signedOut") }),
   },
   play: async ({ canvasElement, args }) => {
     await within(canvasElement).findByRole("listitem");

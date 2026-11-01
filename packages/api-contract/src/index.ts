@@ -1,6 +1,7 @@
 export {
   contract,
   type Contract,
+  MAX_ANSWERED_ELECTIONS,
   MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY,

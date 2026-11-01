@@ -8,6 +8,7 @@ import {
   contract,
   MAX_BOARD_PAYLOAD,
   MAX_DISPLAY_TEXT,
+  MAX_ANSWERED_ELECTIONS,
   MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH,
   MAX_RESULT_CELLS,
@@ -328,6 +329,57 @@ describe("a poll's count so far (P2-23 part 2c; T-01)", () => {
   });
 });
 
+describe("several polls' counts at once (P2-19 part 58; T-01, T-52)", () => {
+  const route = contract.elections.getAnsweredMany["~orpc"];
+  const inputIssues = async (value: unknown) =>
+    (await route.inputSchema?.["~standard"].validate(value))?.issues;
+  const outputIssues = async (value: unknown) =>
+    (await route.outputSchema?.["~standard"].validate(value))?.issues;
+  const id = (i: number) => i.toString(16).padStart(64, "0");
+
+  test("asks for 1 to MAX_ANSWERED_ELECTIONS distinct IDs", async () => {
+    for (const n of [1, 2, MAX_ANSWERED_ELECTIONS])
+      expect(
+        await inputIssues({ electionIds: Array.from({ length: n }, (_, i) => id(i)) }),
+      ).toBeUndefined();
+    for (const bad of [
+      [],
+      [id(1), id(1)],
+      [id(0xab).toUpperCase()],
+      [id(1).slice(2)],
+      Array.from({ length: MAX_ANSWERED_ELECTIONS + 1 }, (_, i) => id(i)),
+    ])
+      expect(await inputIssues({ electionIds: bad }), JSON.stringify(bad)).toBeDefined();
+    expect(await inputIssues({ electionIds: [id(1)], extra: 1 })).toBeDefined();
+  });
+
+  test("serves each election's tiers as the one-poll route does", async () => {
+    const at = (tier: number, answered = "1") => ({ tier, answered });
+    expect(
+      await outputIssues({
+        elections: [
+          { electionId: id(2), tiers: [at(0), at(2)] },
+          { electionId: id(1), tiers: [] },
+        ],
+      }),
+    ).toBeUndefined();
+    for (const bad of [
+      [{ electionId: id(1), tiers: [at(1), at(0)] }],
+      [{ electionId: id(1), tiers: [at(0, "01")] }],
+      [{ electionId: id(1) }],
+      [{ electionId: id(1), tiers: [], extra: 1 }],
+      Array.from({ length: MAX_ANSWERED_ELECTIONS + 1 }, (_, i) => ({
+        electionId: id(i),
+        tiers: [],
+      })),
+    ])
+      expect(
+        await outputIssues({ elections: bad }),
+        JSON.stringify(bad).slice(0, 80),
+      ).toBeDefined();
+  });
+});
+
 describe("the Tier 1 relay (docs/spec/tier1-relay.md, Request)", () => {
   const input = contract.registrations.tier1["~orpc"].inputSchema;
   const valid = { record: "0a".repeat(1919), turnstile: "tok.en-1_" };
@@ -419,6 +471,7 @@ describe("the generated OpenAPI document", () => {
       "POST /backups/fetch",
       "POST /ballots",
       "POST /destructions",
+      "POST /elections/answered",
       "POST /moderation/reports",
       "POST /openings",
       "POST /postings",

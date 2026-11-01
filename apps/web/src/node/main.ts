@@ -409,7 +409,8 @@ const drafts = createDraftsHandler({
   accountOf: (headers) => accounts.accountOf(headers),
   turnstile,
   origin,
-  answered: async (electionId) => (await api.elections.getAnswered({ electionId })).tiers,
+  answered: async (electionIds) =>
+    (await api.elections.getAnsweredMany({ electionIds: [...electionIds] })).elections,
 });
 const emailVerification = emailService();
 const email = createEmailHandler({

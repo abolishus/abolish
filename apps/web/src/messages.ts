@@ -1793,6 +1793,7 @@ const enUS = {
   pollFormReviewDescription: "Description",
   pollFormReviewQuestions: "Questions",
   pollFormReviewQuestionCount: { one: "{count} question", other: "{count} questions" },
+  pollFormReviewLimits: "{options}. {rule}",
   pollFormReviewWho: "Who can answer",
   pollFormReviewCloses: "Closes",
   pollFormReviewKey: "Who holds the key",

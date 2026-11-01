@@ -443,6 +443,11 @@ export const TopicAndPlace: Story = {
     ).toBeVisible();
     await expect(review.getByText("Harbor Ward")).toBeVisible();
     await expect(review.getByText("No description")).toBeVisible();
+    // Each question's limits are recorded with its words, so the review
+    // says them under it, in the ballot client's words.
+    await expect(
+      review.getByText("2 options. Choose one. This question can't be skipped."),
+    ).toBeVisible();
     // With phone verification off, Tier 0 is named by the e-mail alone, in words.
     await expect(
       review.getByText(wholeText("People with a verified e-mail address")),
@@ -876,6 +881,15 @@ export const ReviewDesktop: Story = {
     // bare list drew them as an unmarked indent (iteration 15).
     const questions = within(review).getByRole("list");
     await expect(getComputedStyle(questions).listStyleType).toBe("decimal");
+    // Each question's limits are recorded for good with its words, so each
+    // says them under it, as the preview does (P2-19 part 68).
+    const [one, two] = within(questions).getAllByRole("listitem");
+    await expect(one).toHaveTextContent(
+      "Should the harbor library open on Sundays?2 options. Choose one. This question can't be skipped.",
+    );
+    await expect(two).toHaveTextContent(
+      "Which evenings should it stay open late?3 options. Choose up to 2.",
+    );
   },
 };
 

@@ -155,8 +155,11 @@ export type StreamCard =
       readonly tags: PollTags;
       /** Who asked it, where the card says so (the stream's); none on a profile's own page. */
       readonly askedBy?: AskedBy | undefined;
-      /** How many have answered it so far, where the card says so (the stream's). */
-      readonly answered?: CardAnswered | undefined;
+      /**
+       * How many have answered it so far, where the card says so (the
+       * stream's), or `"unread"` where it would and the read failed.
+       */
+      readonly answered?: CardAnswered | "unread" | undefined;
     }
   | { readonly kind: "unavailable"; readonly electionId: string; readonly problem: CardProblem };
 

@@ -396,6 +396,7 @@ export const esUS: Messages = {
   streamAnsweredSinceDay: "Han respondido desde que abrió {day}",
   streamAnsweredSinceDate: "Han respondido desde que abrió el\u00a0{date}",
   streamAnsweredNone: "Nadie todavía",
+  streamAnsweredUnread: "Ahora mismo no pudimos saber cuántos han respondido.",
   streamAnswered_email: {
     one: "{count} persona con correo verificado",
     other: "{count} personas con correo verificado",

@@ -1017,7 +1017,7 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/server/stream-card.ts), and its tags read as the poll
  * page reads them (`tagsOf`), who asked it as `readAskedBy` reads it
- * (`askedByOf`), and how many have answered it so far (`answeredOf`). A poll the database lost between the listing and its
+ * (`askedByOf`), and how many have answered it so far (`answeredOf`, `"unread"` when that read fails). A poll the database lost between the listing and its
  * definition drops out of the page. A page holds `limit` polls at most.
  */
 export async function loadStream(
@@ -1081,7 +1081,7 @@ async function loadCard(
       ? {
           ...card,
           askedBy,
-          answered: answered === undefined ? undefined : cardAnswered(card.poll, answered),
+          answered: answered === undefined ? "unread" : cardAnswered(card.poll, answered),
         }
       : card;
   } catch (error) {
@@ -1124,7 +1124,9 @@ export async function loadFeatured(
   const electionId = elections.find((id) => !shown.includes(id));
   if (electionId === undefined) return undefined;
   const card = await loadCard(api, electionId, locale, readAskedBy);
-  return card?.kind === "poll" && card.answered?.some(({ answered }) => answered !== "0")
+  return card?.kind === "poll" &&
+    Array.isArray(card.answered) &&
+    card.answered.some(({ answered }) => answered !== "0")
     ? card
     : undefined;
 }

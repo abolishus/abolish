@@ -312,8 +312,13 @@ export const TierMeaning: Story = {
     ).toBeVisible();
     await expect(tier0.getByText("Tier 0 (verified e-mail).")).toBeVisible();
     await userEvent.click(canvas.getByRole("tab", { name: /Tier 2/ }));
+    // Tier 0's panel stays in the tree while its exit transition runs, so
+    // wait until the only panel left is the chosen tier's.
+    await waitFor(() =>
+      expect(canvas.getByRole("tabpanel")).toHaveTextContent("Tier 2 (document-verified)."),
+    );
     const tier2 = within(canvas.getByRole("tabpanel"));
-    await waitFor(() => expect(tier2.getByText("Tier 2 (document-verified).")).toBeVisible());
+    await expect(tier2.getByText("Tier 2 (document-verified).")).toBeVisible();
     await expect(tier2.getByText(/the same document can't join twice\.$/)).toBeVisible();
     await expect(tier2.queryByText(/counts accounts, not people/)).toBeNull();
   },

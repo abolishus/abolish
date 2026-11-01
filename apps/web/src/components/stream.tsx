@@ -547,7 +547,15 @@ export function StreamCard({
           dir="auto"
           className="m-0 font-heading text-2xl leading-tight font-semibold text-balance break-words sm:text-3xl"
         >
-          <a href={`/polls/${poll.electionId}`} className="underline-offset-4 hover:underline">
+          {/* Underlined at rest: drawn only on hover, the one way on a card
+              to the poll's own page (its details, how it is counted, its
+              sharing) looked like a plain title, and a phone has no hover
+              (P2-29, the stream's iteration 27). Thin and in the brand's
+              colour, so the heading still reads first. */}
+          <a
+            href={`/polls/${poll.electionId}`}
+            className="underline decoration-primary decoration-1 underline-offset-4 hover:decoration-2"
+          >
             {text.heading}
           </a>
         </h3>

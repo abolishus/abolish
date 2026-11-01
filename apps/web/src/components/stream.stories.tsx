@@ -143,7 +143,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
 
   // Each card's heading names the poll's page; the asker's words keep their own language.
   const library = list.getByRole("heading", { name: "Library hours" });
-  await expect(within(library).getByRole("link")).toHaveAttribute("href", `/polls/${LIBRARY}`);
+  const libraryLink = within(library).getByRole("link");
+  await expect(libraryLink).toHaveAttribute("href", `/polls/${LIBRARY}`);
+  // It looks like a link before any hover, which a phone never has (the
+  // stream's iteration 27).
+  await expect(getComputedStyle(libraryLink).textDecorationLine).toBe("underline");
   await expect(list.getByText("When should the main library open on Sundays?")).toBeVisible();
   await expect(
     list.getByRole("heading", { name: "¿Debería el autobús 23 circular hasta la medianoche?" }),

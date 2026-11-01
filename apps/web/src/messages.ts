@@ -655,6 +655,14 @@ const enUS = {
   resultsAnswered: { one: "{count} person answered", other: "{count} people answered" },
   resultsNoneAnswered: "No one answered.",
   resultsTurnout: "Turnout",
+  resultsTierMeaning_email:
+    "Each account here showed it holds an e-mail address. Anyone with several addresses can open several accounts, so this group counts accounts, not people, and is never added to another.",
+  resultsTierMeaning_phone:
+    "Each account here showed it holds an e-mail address and a phone number, and a number verifies one account only. Someone with several numbers can still open several accounts, so this group counts accounts, not people, and is never added to another.",
+  resultsTierMeaning_vouched:
+    "Each member was vouched for by people already verified, so faking one takes others willing to vouch falsely.",
+  resultsTierMeaning_document:
+    "Each member proved on their own phone, without showing it, that they hold a government-signed passport or ID, and the same document can't join twice.",
   resultsTurnoutOf: { one: "{share} of {count} member", other: "{share} of {count} members" },
   resultsTurnoutOfClose: {
     one: "{share} of {count} person who could answer by the close",
@@ -1983,6 +1991,18 @@ export function tierMessage(tier: number, phoneVerification: boolean): keyof Mes
 export function tierMessage(tier: number, phoneVerification: boolean): keyof Messages | undefined {
   if (tier === 0) return phoneVerification ? "tier0_phone" : "tier0_email";
   return tier === 1 ? "tier1" : tier === 2 ? "tier2" : undefined;
+}
+
+/**
+ * What membership of a tier proved, under its name on a poll's results.
+ * Tier 0 says what this deployment checks, as its name does, and that its
+ * count is of accounts, not people (T-01); Tiers 1 and 2 say what their
+ * proofs rule out and nothing more (T-02, T-03).
+ */
+export function tierMeaning(tier: Tier, phoneVerification: boolean): keyof Messages {
+  if (tier === 0)
+    return phoneVerification ? "resultsTierMeaning_phone" : "resultsTierMeaning_email";
+  return tier === 1 ? "resultsTierMeaning_vouched" : "resultsTierMeaning_document";
 }
 
 // The source catalog is in every page's script; each other one is a chunk of

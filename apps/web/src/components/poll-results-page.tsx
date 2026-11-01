@@ -15,7 +15,7 @@ import {
 } from "@abolishus/ui";
 import { ArrowLeft, ArrowRight, CircleCheckBig } from "lucide-react";
 
-import { catalogs, tierMessage } from "../messages.ts";
+import { catalogs, tierMeaning, tierMessage } from "../messages.ts";
 import type { PollStatus, PollView } from "../poll.ts";
 import {
   type CellResults,
@@ -398,18 +398,28 @@ function TierPanel({
   tier,
   cells,
   words,
+  phoneVerification,
 }: {
   poll: PollResultsPageProps["poll"];
   tier: TierResults;
   cells: readonly CellResults[] | undefined;
   words: PollWords | undefined;
+  phoneVerification: boolean;
 }) {
   const t = useTranslate(catalogs);
   const several = poll.questions.length > 1;
   const own = cells?.filter((c) => c.cell.tier === tier.tier);
   return (
     <div className="grid gap-10">
-      <Turnout poll={poll} tier={tier} />
+      <div className="grid max-w-xl gap-4">
+        <Turnout poll={poll} tier={tier} />
+        {/* What this group's members proved, so its count is read as what it
+            is: Tier 0's as accounts, never people (T-01, T-02, T-03). */}
+        <p className="m-0 border-t border-border pt-4 text-sm text-muted-foreground">
+          <span className="text-foreground">{t(tierMessage(tier.tier, phoneVerification))}.</span>{" "}
+          {t(tierMeaning(tier.tier, phoneVerification))}
+        </p>
+      </div>
       {/* The verifier's small-count flag on who could answer: the results
           stand, and say what so few can reveal (8.2, T-16). */}
       {tier.fewCouldAnswer === true ? (
@@ -626,7 +636,13 @@ export function PollResultsPage({
               {(tab) => {
                 const tier = read.find((r) => String(r.tier) === tab.value);
                 return tier === undefined ? null : (
-                  <TierPanel poll={poll} tier={tier} cells={cells} words={words} />
+                  <TierPanel
+                    poll={poll}
+                    tier={tier}
+                    cells={cells}
+                    words={words}
+                    phoneVerification={phoneVerification}
+                  />
                 );
               }}
             </TierSwitcher>

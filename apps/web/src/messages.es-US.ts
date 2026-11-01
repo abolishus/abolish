@@ -663,6 +663,14 @@ export const esUS: Messages = {
   resultsAnswered: { one: "Respondió {count} persona", other: "Respondieron {count} personas" },
   resultsNoneAnswered: "Nadie respondió.",
   resultsTurnout: "Participación",
+  resultsTierMeaning_email:
+    "Cada cuenta de aquí demostró que tiene una dirección de correo. Quien tenga varias direcciones puede abrir varias cuentas, así que este grupo cuenta cuentas, no personas, y nunca se suma a otro.",
+  resultsTierMeaning_phone:
+    "Cada cuenta de aquí demostró que tiene una dirección de correo y un número de teléfono, y un número verifica una sola cuenta. Quien tenga varios números aún puede abrir varias cuentas, así que este grupo cuenta cuentas, no personas, y nunca se suma a otro.",
+  resultsTierMeaning_vouched:
+    "Por cada miembro respondieron personas ya verificadas, así que falsificar uno exige que otros respondan en falso.",
+  resultsTierMeaning_document:
+    "Cada miembro demostró en su propio teléfono, sin mostrarlo, que tiene un pasaporte o una identificación firmados por un gobierno, y el mismo documento no puede unirse dos veces.",
   resultsTurnoutOf: { one: "{share} de {count} miembro", other: "{share} de {count} miembros" },
   resultsTurnoutOfClose: {
     one: "{share} de {count} persona que podía responder antes del cierre",

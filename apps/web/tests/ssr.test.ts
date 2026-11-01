@@ -787,6 +787,15 @@ describe("results page", () => {
     const turnout = page.indexOf("Turnout0.1% of 7,220 members");
     expect(turnout).toBeGreaterThan(page.indexOf("Results by group"));
     expect(turnout).toBeLessThan(page.indexOf("Tied for most picked"));
+    // What its members proved, between its turnout and its answers: accounts, not people (T-01).
+    const meaning = page.indexOf(
+      "Tier 0 (verified e-mail). Each account here showed it holds an e-mail address.",
+    );
+    expect(meaning).toBeGreaterThan(turnout);
+    expect(meaning).toBeLessThan(page.indexOf("Tied for most picked"));
+    expect(page).toContain(
+      "so this group counts accounts, not people, and is never added to another.",
+    );
     expect(page).toContain(
       "Tied for most picked: \u2068Yes\u2069 and \u2068No\u2069, each by 50% of those who answered.",
     );
@@ -3445,8 +3454,8 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/polls": { html: 12, js: 184, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 177, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 173, css: 40, fonts: 58 },
-  "/trustees": { html: 6, js: 176, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 203, css: 40, fonts: 58 },
+  "/trustees": { html: 6, js: 177, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 204, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 258, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 178, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },

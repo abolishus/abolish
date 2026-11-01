@@ -1,7 +1,6 @@
 import {
   type ContractEventRecord,
   contractEventLog,
-  type ProvenEventAccumulator,
   replayEventAccumulator,
 } from "@abolishus/crypto";
 import { GameBlockError, type Rpc, RpcError } from "@abolishus/node";
@@ -19,7 +18,7 @@ import {
   v1Definition,
   v5Definition,
 } from "../../../packages/verifier/tests/registration-logs.ts";
-import type { RegistryAccumulators } from "../src/output-root.ts";
+import type { ProvenRegistryAccumulator, RegistryAccumulators } from "../src/output-root.ts";
 import { l2RegistrationCheck } from "../src/registration.ts";
 
 // The deployment's registration check (P2-13 parts 3b and 3d): the election
@@ -126,8 +125,10 @@ const provenOf = (
   chainId: bigint,
   contract: Uint8Array,
   block = PROVEN_BLOCK,
-): ProvenEventAccumulator => ({
+): ProvenRegistryAccumulator => ({
   block,
+  // Any timestamp: these checks read the block, not its time.
+  timestamp: block,
   ...replayEventAccumulator(
     chainId,
     contract,

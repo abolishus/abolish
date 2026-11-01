@@ -5,9 +5,13 @@
 // `intakeBallot` runs the admission checks, the membership proof included,
 // and opens the seat's shares; and the node stores the ciphertext and shares
 // under the ballot hash before it hands out the receipt, so a receipt never
-// names a share the seat doesn't hold (T-41, T-52, T-37, T-14). Intake closes
-// at the intake cutoff `c_I`, where the seat decides what it owes through the
-// contract path (docs/spec/delivery.md, What a node owes; T-54).
+// names a share the seat doesn't hold (T-41, T-52, T-37, T-14). A rolling
+// poll's ballots (version 5) go through `intakeBallotV5` instead, against
+// step roots the seat computes from the registries' proven, final history
+// (src/rolling-chain.ts), judged only for steps a proven block is past
+// (T-08, T-25, T-52). Intake closes at the intake cutoff `c_I`, where the
+// seat decides what it owes through the contract path (docs/spec/delivery.md,
+// What a node owes; T-54).
 import { createHash } from "node:crypto";
 import {
   ballotElection,
@@ -18,28 +22,42 @@ import {
   checkCeremonyTranscript,
   decode,
   DecodeError,
+  electionDefinitionV7Hash,
+  type ElectionDefinitionV7Record,
   encode,
   encodeShareReceipt,
+  encodeShareReceiptV2,
   fieldBn254,
   identityKey,
   type IntakeCode,
+  type IntakeCodeV5,
+  type IntakeKeys,
+  type IntakeResult,
+  type IntakeResultV5,
   intakeBallot,
+  intakeBallotV5,
   intakeCutoff,
   keySetEntry,
   keySetHash,
   membershipMessage,
   questionBallotElection,
   type QuestionBallotElection,
+  type RegisteredKeys,
+  rollingBallotElection,
+  type RollingBallotElection,
+  SEAT_PANELS,
   SHARES,
   type Share,
   shareCiphertextHash,
   shareReceiptRecord,
+  shareReceiptRecordV2,
   struct,
   u64,
   u8,
   type ViewBallot,
 } from "@abolishus/crypto";
 import type { CeremonySeat, IntakeSecrets } from "./ceremony.ts";
+import type { RollingChainCheck } from "./rolling-chain.ts";
 import type { SeatStore } from "./store.ts";
 import {
   checkStub,
@@ -74,7 +92,29 @@ export interface IntakeConfig extends Pins {
   readonly store: SeatStore;
   /** The node's clock, in Unix seconds; intake closes at `c_I` by it. */
   readonly now: () => bigint;
+  /**
+   * A rolling poll's chain (`l2RollingChain` in the deployment). Without it
+   * the seat takes no rolling poll's ballot (`intake-chain`).
+   */
+  readonly rolling?: RollingChainCheck;
 }
+
+/**
+ * How long, in seconds, a rolling poll's chain is reused before it is read
+ * again: output roots are posted about hourly, so a minute-old read is
+ * almost always the newest root's, and a stream of deliveries costs no L2
+ * reads of its own (T-52).
+ */
+export const ROLLING_CHAIN_MAX_AGE = 60n;
+
+/** How long, in seconds, a read that gave no chain is kept before the chain is read again. */
+export const ROLLING_CHAIN_RETRY = 10n;
+
+/**
+ * How far, in seconds, a proven block's timestamp may be ahead of the
+ * node's clock: the OP Stack's sequencer drift bound, as the worker's.
+ */
+export const MAX_CLOCK_SKEW = 1_800n;
 
 /** Why a seat refuses an election's intake, before reading the ballot. */
 export type ElectionRefusal =
@@ -87,9 +127,11 @@ export type ElectionRefusal =
   /** Finalized L2 doesn't show the definition registered under the approved key set. */
   | "intake-unregistered"
   /** The intake cutoff `c_I` has passed. */
-  | "intake-closed";
+  | "intake-closed"
+  /** A rolling poll's chain can't be had from proven, final history yet. */
+  | "intake-chain";
 
-export type IntakeRefusal = ElectionRefusal | IntakeCode;
+export type IntakeRefusal = ElectionRefusal | IntakeCode | IntakeCodeV5;
 
 export type IntakeOutcome =
   | {
@@ -128,10 +170,43 @@ const REPEAT = struct([
   ["share_hash", HASH],
 ] as const);
 
-interface Opened {
-  readonly election: BallotElection | QuestionBallotElection;
+interface OpenedCommon {
   readonly stubHash: Uint8Array;
   readonly cutoff: bigint;
+}
+
+/** A fixed election, whose roots are its definition's. */
+interface FixedOpened extends OpenedCommon {
+  readonly rolling: false;
+  readonly election: BallotElection | QuestionBallotElection;
+}
+
+/**
+ * A rolling election, whose step roots come from the chain, read again as
+ * proven history moves on (`#rollingElection`).
+ */
+interface RollingOpened extends OpenedCommon {
+  readonly rolling: true;
+  /** The definition the approval registers: the stub with the approved transcript's hash. */
+  readonly definition: ElectionDefinitionV7Record;
+  readonly definitionHash: Uint8Array;
+  readonly registered: readonly RegisteredKeys[];
+}
+
+type Opened = FixedOpened | RollingOpened;
+
+// One delivery's admission, decryption and receipt signature, under the
+// election's ballot version.
+type Judge = (
+  keys: IntakeKeys,
+  record: Uint8Array,
+  ciphertext: Uint8Array,
+) => IntakeResult | IntakeResultV5;
+
+/** A rolling election's ballot context, over the chain through the proven block at `safeAt`. */
+interface RollingNow {
+  readonly election: RollingBallotElection;
+  readonly safeAt: bigint;
 }
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -155,6 +230,13 @@ export class IntakeSeat {
   // ceremony) doesn't recount the whole registry log on every delivery
   // (T-52). Kept in memory only: a restarted node recounts once.
   readonly #stubPassed = new Set<string>();
+  // Each rolling election's latest chain read, by stub hash, with the time
+  // it began and how long it is kept: reads begun meanwhile share it.
+  // Public chain data only.
+  readonly #chains = new Map<
+    string,
+    { readonly since: bigint; for: bigint; readonly read: Promise<RollingNow | undefined> }
+  >();
 
   constructor(config: IntakeConfig) {
     if (
@@ -182,23 +264,47 @@ export class IntakeSeat {
     const opened = await this.#open(stubBytes, transcript);
     if (!opened.ok) return opened;
     const { stubHash } = opened.value;
+    let judge: Judge;
+    if (opened.value.rolling) {
+      // A rolling election's step roots, read before the secrets are, so
+      // no L2 read holds up destruction. `intakeBallotV5` checks the ballot
+      // against the root of the step it names, computed from the chain
+      // through the proven block at `safeAt`; a step that block isn't past
+      // is `step-unsettled`, and nothing is decrypted or stored (T-08,
+      // T-52). Every seat here is the default panel's: the node reads no
+      // stub with an author panel.
+      const rolling = await this.#rollingElection(opened.value);
+      if (rolling === undefined) return { ok: false, code: "intake-chain" };
+      judge = (keys, record, ciphertext) =>
+        intakeBallotV5(
+          rolling.election,
+          { ...keys, panel: SEAT_PANELS.default },
+          record,
+          ciphertext,
+          rolling.safeAt,
+        );
+    } else {
+      const { election } = opened.value;
+      judge = (keys, record, ciphertext) => intakeBallot(election, keys, record, ciphertext);
+    }
     // The secrets are read for this delivery only, as one use destruction
     // waits for: once it has begun, nothing is opened, stored or signed with
     // them, and no intake record it removed is written again (docs/spec/tally.md,
     // Destruction; T-14, T-40). By then intake has long closed at `c_I`.
     const outcome = await this.#config.ceremony.withSecrets(stubHash, (secrets) =>
-      this.#take(opened.value, secrets, record, ciphertext),
+      this.#take(opened.value, judge, secrets, record, ciphertext),
     );
     return outcome ?? { ok: false, code: "intake-closed" };
   }
 
   async #take(
     opened: Opened,
+    judge: Judge,
     secrets: IntakeSecrets,
     record: Uint8Array,
     ciphertext: Uint8Array,
   ): Promise<IntakeOutcome> {
-    const { election, stubHash } = opened;
+    const { stubHash } = opened;
     const repeat = await this.#repeat(stubHash, record, ciphertext);
     // Its reads may finish past `c_I`, where intake answers nothing.
     if (repeat !== undefined)
@@ -208,7 +314,7 @@ export class IntakeSeat {
       kemSecret: secrets.kemSecret,
       signingSecret: secrets.signingSecret,
     };
-    const taken = intakeBallot(election, keys, record, ciphertext);
+    const taken = judge(keys, record, ciphertext);
     if (!taken.ok)
       return taken.option === undefined
         ? { ok: false, code: taken.code }
@@ -241,9 +347,18 @@ export class IntakeSeat {
     // from `c_I` on, which reads them then, covers every receipt the seat
     // gave (`decideObligation`).
     if (this.#closed(opened)) return { ok: false, code: "intake-closed" };
-    const receipt = encodeShareReceipt(
-      shareReceiptRecord(election.definitionHash, keys.seat, taken),
-    );
+    // Ballot version 5 keeps version 4's receipt, the version-2 record that
+    // names the seat's panel (docs/spec/share-encryption.md, Ballot version 5).
+    // The definition the approval registers, which every receipt names.
+    const definitionHash = opened.rolling ? opened.definitionHash : opened.election.definitionHash;
+    const receipt = opened.rolling
+      ? encodeShareReceiptV2(
+          shareReceiptRecordV2(definitionHash, keys.seat, {
+            ...taken,
+            panel: "panel" in taken ? taken.panel : SEAT_PANELS.default,
+          }),
+        )
+      : encodeShareReceipt(shareReceiptRecord(definitionHash, keys.seat, taken));
     // Kept for the copy the seat boards itself through the board path
     // (`ReceiptCopySender`; docs/spec/delivery.md, Client rules), so a
     // receipted seat reaches the board even when the client goes away
@@ -308,11 +423,6 @@ export class IntakeSeat {
       if (e instanceof DecodeError) return { ok: false, code: "intake-unapproved" };
       throw e;
     }
-    // A rolling stub never passes check 4 yet, so no seat approved one; its
-    // ballots (version 5, against step roots) are [[P2-17]] part 7c-3b's.
-    // Refused before anything is read, so a version-7 value is never read
-    // as version 5 below.
-    if (stub.version === 7) return { ok: false, code: "intake-definition" };
     const stubHash = hashOfStub(stub);
     const transcriptHash = ceremonyTranscriptHash(transcript);
     const name = `${hex(stubHash)}/${hex(transcriptHash)}`;
@@ -333,8 +443,59 @@ export class IntakeSeat {
     return this.#config.now() >= opened.cutoff;
   }
 
+  /**
+   * A rolling election's ballot context over the chain as last read, read
+   * again once `ROLLING_CHAIN_MAX_AGE` has passed; `undefined` when the chain
+   * can't be had, its block is stamped ahead of the node's clock, or it
+   * doesn't give the definition's opening state.
+   */
+  #rollingElection(opened: RollingOpened): Promise<RollingNow | undefined> {
+    const name = hex(opened.stubHash);
+    const now = this.#config.now();
+    const held = this.#chains.get(name);
+    if (held !== undefined && now - held.since < held.for) return held.read;
+    const read = this.#readRolling(opened, now);
+    const entry = { since: now, for: ROLLING_CHAIN_MAX_AGE, read };
+    this.#chains.set(name, entry);
+    // A failed read is kept for ROLLING_CHAIN_RETRY only, so the chain is
+    // read again soon, but deliveries sent while none can be had don't
+    // each start a full read of the registries (T-52). One that throws
+    // isn't kept at all.
+    read.then(
+      (r) => {
+        if (r === undefined) entry.for = ROLLING_CHAIN_RETRY;
+      },
+      () => {
+        if (this.#chains.get(name) === entry) this.#chains.delete(name);
+      },
+    );
+    return read;
+  }
+
+  async #readRolling(opened: RollingOpened, now: bigint): Promise<RollingNow | undefined> {
+    const read = this.#config.rolling;
+    if (read === undefined) return undefined;
+    const got = await read(opened.definition);
+    if (got === undefined) return undefined;
+    // T-08: a block stamped ahead of the clock would settle steps whose
+    // boundary hasn't come; only a game's proposer can post one, and it is
+    // refused here rather than trusted until the game is shown false.
+    if (got.safeAt > now + MAX_CLOCK_SKEW) return undefined;
+    try {
+      return {
+        election: rollingBallotElection(opened.definition.value, opened.registered, got.chain),
+        safeAt: got.safeAt,
+      };
+    } catch (e) {
+      // A chain whose opening state isn't the definition's, which the
+      // recount the chain passed already refuses.
+      if (e instanceof RangeError) return undefined;
+      throw e;
+    }
+  }
+
   async #check(
-    record: Exclude<Stub, { readonly version: 7 }>,
+    record: Stub,
     stubBytes: Uint8Array,
     stubHash: Uint8Array,
     transcript: Uint8Array,
@@ -381,6 +542,29 @@ export class IntakeSeat {
       if (!again.ok) return { ok: false, code: "intake-definition" };
       this.#stubPassed.add(stubName);
     }
+    const cutoff = intakeCutoff(stub.closes_at, BigInt(stub.l1_inclusion_bound), RELEASE_WINDOWS);
+    // A rolling poll's (definition version 7, ballot version 5): its step
+    // roots come from the chain at each delivery (`#rollingElection`), so
+    // only its registration is checked here.
+    if (record.version === 7) {
+      const definition = {
+        version: 7,
+        value: { ...record.value, ceremony_transcript_hash: result.hash },
+      } as const;
+      if (!(await config.registration(definition, secrets.keySetHash)))
+        return { ok: false, code: "intake-unregistered" };
+      return {
+        ok: true,
+        value: {
+          rolling: true,
+          definition,
+          definitionHash: electionDefinitionV7Hash(definition.value),
+          registered: result.registered,
+          stubHash,
+          cutoff,
+        },
+      };
+    }
     // Under definition version 5, ballot version 3: its questions' ranges
     // and the cell each ballot names (P2-14).
     const definition: Stub =
@@ -401,14 +585,7 @@ export class IntakeSeat {
     }
     if (!(await config.registration(definition, secrets.keySetHash)))
       return { ok: false, code: "intake-unregistered" };
-    return {
-      ok: true,
-      value: {
-        election,
-        stubHash,
-        cutoff: intakeCutoff(stub.closes_at, BigInt(stub.l1_inclusion_bound), RELEASE_WINDOWS),
-      },
-    };
+    return { ok: true, value: { rolling: false, election, stubHash, cutoff } };
   }
 }
 

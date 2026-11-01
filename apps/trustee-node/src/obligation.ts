@@ -100,6 +100,10 @@ export async function decideObligation(
   options: ObligationOptions,
   election: ApprovedElection,
 ): Promise<ObligationStatus> {
+  // A rolling election has no `M`: it commits roots whatever its size, which
+  // no seat sends yet ([[P1-12f]] part 3c), and stub check 4 refuses it.
+  if (election.rolling === true)
+    throw new Error("trustee node: a rolling election's obligation is its roots, not batches");
   const key = `obligations/${hex(election.stubHash)}`;
   const written = await options.store.get(key);
   if (written !== undefined) return decided(written);

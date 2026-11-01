@@ -1,7 +1,6 @@
 import {
   type ContractEventRecord,
   contractEventLog,
-  type ProvenEventAccumulator,
   replayEventAccumulator,
 } from "@abolishus/crypto";
 import { GameBlockError, type Rpc, RpcError } from "@abolishus/node";
@@ -24,6 +23,7 @@ import {
   v5,
 } from "../../../packages/verifier/tests/registry-logs.ts";
 import { l2ElectorateCheck } from "../src/electorate.ts";
+import type { ProvenRegistryAccumulator } from "../src/output-root.ts";
 import type { Stub } from "../src/stub.ts";
 
 // The deployment's electorate check (P2-13 part 3): the group registry's
@@ -93,8 +93,10 @@ function l2Node(held: readonly ContractEventRecord[], finalized = ROOT_BLOCK, ch
 const provenOf = (
   records: readonly ContractEventRecord[],
   block = PROVEN_BLOCK,
-): ProvenEventAccumulator => ({
+): ProvenRegistryAccumulator => ({
   block,
+  // Any timestamp: these checks read the block, not its time.
+  timestamp: block,
   ...replayEventAccumulator(
     chainId,
     registry,
@@ -111,7 +113,7 @@ const check = (
   options: {
     fromBlock?: bigint;
     honest?: readonly ContractEventRecord[];
-    accumulator?: () => Promise<ProvenEventAccumulator | undefined>;
+    accumulator?: () => Promise<ProvenRegistryAccumulator | undefined>;
   } = {},
 ) =>
   l2ElectorateCheck({

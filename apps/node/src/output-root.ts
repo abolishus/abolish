@@ -155,7 +155,8 @@ export async function respectedOutputRoots(
 
 /**
  * `contract`'s event accumulator and count after the L2 block `root`
- * claims, proven under it by the verifier's `accumulatorAtOutputRoot`. The
+ * claims, with that block's timestamp, proven under it by the verifier's
+ * `accumulatorAtOutputRoot`. The
  * L2 node's block must hash to the hash its own fields give (`headerRlp`).
  * Throws the verifier's `OutputRootError` when the node's answers don't
  * prove against the root, `GameBlockError` when the root proves another
@@ -167,7 +168,7 @@ export async function accumulatorUnderRoot(
   root: ClaimedOutputRoot,
   contract: Uint8Array,
   maxProofBytes?: number,
-): Promise<ProvenEventAccumulator> {
+): Promise<ProvenEventAccumulator & { readonly timestamp: bigint }> {
   const number = `0x${root.l2Block.toString(16)}`;
   const rlp = headerRlp(await l2.call("eth_getBlockByNumber", [number, false]));
   let header: L1Header;
@@ -200,5 +201,12 @@ export async function accumulatorUnderRoot(
     contract,
   );
   if (proven.block !== root.l2Block) throw new GameBlockError();
-  return { block: proven.block, accumulator: proven.accumulator, count: proven.count };
+  // The timestamp is the header's, which the root commits to (T-71): a
+  // rolling poll's settled steps are read against it.
+  return {
+    block: proven.block,
+    timestamp: proven.timestamp,
+    accumulator: proven.accumulator,
+    count: proven.count,
+  };
 }

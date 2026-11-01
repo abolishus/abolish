@@ -28,6 +28,11 @@ import {
 } from "@abolishus/node";
 import { OutputRootError } from "@abolishus/verifier";
 
+/** A registry's accumulator and count proven at an L2 block, with that block's timestamp from the header the root commits to. */
+export interface ProvenRegistryAccumulator extends ProvenEventAccumulator {
+  readonly timestamp: bigint;
+}
+
 /**
  * The accumulators and counts of `registries`, in their order, all proven
  * under one output root of an L2 block at or after `atLeast`, or undefined
@@ -37,7 +42,7 @@ import { OutputRootError } from "@abolishus/verifier";
 export type RegistryAccumulators = (
   registries: readonly Uint8Array[],
   atLeast: bigint,
-) => Promise<readonly ProvenEventAccumulator[] | undefined>;
+) => Promise<readonly ProvenRegistryAccumulator[] | undefined>;
 
 /**
  * The registries' accumulators under the output root of the highest block
@@ -61,7 +66,7 @@ export function l1OutputRootAccumulators(options: {
     for (const root of await respectedOutputRoots(l1, portal)) {
       if (root.l2Block < atLeast) break;
       try {
-        const proven: ProvenEventAccumulator[] = [];
+        const proven: ProvenRegistryAccumulator[] = [];
         for (const r of registries) proven.push(await accumulatorUnderRoot(l2, root, r));
         return proven;
       } catch (e) {

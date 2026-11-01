@@ -97,7 +97,10 @@ export {
   type IntakeOutcome,
   type IntakeRefusal,
   IntakeSeat,
+  MAX_CLOCK_SKEW,
   type RegistrationCheck,
+  ROLLING_CHAIN_MAX_AGE,
+  ROLLING_CHAIN_RETRY,
 } from "./intake.ts";
 export {
   CHANNEL_RETRY_SECONDS,
@@ -173,8 +176,19 @@ export {
   readIdentityKey,
 } from "./config.ts";
 export { type L2ElectorateOptions, l2ElectorateCheck } from "./electorate.ts";
-export { l1OutputRootAccumulators, provenLog, type RegistryAccumulators } from "./output-root.ts";
+export {
+  l1OutputRootAccumulators,
+  type ProvenRegistryAccumulator,
+  provenLog,
+  type RegistryAccumulators,
+} from "./output-root.ts";
 export { type L2RegistrationOptions, l2RegistrationCheck } from "./registration.ts";
+export {
+  type L2RollingChainOptions,
+  l2RollingChain,
+  type RollingChainCheck,
+  type RollingIntakeChain,
+} from "./rolling-chain.ts";
 export { type NodeEvent, type NodeOptions, TrusteeNode } from "./node.ts";
 export {
   type ApprovalPost,

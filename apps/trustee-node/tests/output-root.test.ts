@@ -1,4 +1,3 @@
-import type { ProvenEventAccumulator } from "@abolishus/crypto";
 import {
   accumulatorUnderRoot,
   type ClaimedOutputRoot,
@@ -9,7 +8,7 @@ import {
 import { OutputRootError } from "@abolishus/verifier";
 import { describe, expect, test, vi } from "vite-plus/test";
 import { registry } from "../../../packages/verifier/tests/registry-logs.ts";
-import { l1OutputRootAccumulators } from "../src/output-root.ts";
+import { l1OutputRootAccumulators, type ProvenRegistryAccumulator } from "../src/output-root.ts";
 
 // The registries' accumulators under an output root the seat's L1 node shows
 // (P2-13 parts 3c and 3d). The games' read and the proof are apps/node's,
@@ -42,8 +41,10 @@ const claim = (l2Block: bigint): ClaimedOutputRoot => ({
   outputRoot: new Uint8Array(32).fill(Number(l2Block)),
   l2Block,
 });
-const provenAt = (block: bigint, contract: Uint8Array): ProvenEventAccumulator => ({
+const provenAt = (block: bigint, contract: Uint8Array): ProvenRegistryAccumulator => ({
   block,
+  // Any timestamp: these checks read the block, not its time.
+  timestamp: block,
   accumulator: Uint8Array.of(contract[0] as number),
   count: block,
 });

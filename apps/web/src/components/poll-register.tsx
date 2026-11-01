@@ -183,19 +183,29 @@ function Empty({
   children,
   href,
   action,
+  back,
 }: {
   title: string;
   children: ReactNode;
   href: string;
   action: string;
+  /** A second way on, before `action`'s: the page before this one. */
+  back?: { readonly href: string; readonly action: string } | undefined;
 }) {
   return (
     <div className="grid justify-items-center gap-4 border border-border px-5 py-16 text-center">
       <h3 className="m-0 font-heading text-2xl font-semibold">{title}</h3>
       <p className="m-0 max-w-md text-sm text-muted-foreground">{children}</p>
-      <a className={cn(buttonVariants({ variant: "outline" }))} href={href}>
-        {action}
-      </a>
+      <div className="flex flex-wrap justify-center gap-3">
+        {back === undefined ? null : (
+          <a className={cn(buttonVariants({ variant: "outline" }))} href={back.href}>
+            {back.action}
+          </a>
+        )}
+        <a className={cn(buttonVariants({ variant: "outline" }))} href={href}>
+          {action}
+        </a>
+      </div>
     </div>
   );
 }
@@ -346,11 +356,20 @@ export function PollRegister({
           </Empty>
         ) : page.polls.length === 0 && at !== undefined ? (
           // A page past the last poll, searched or not: the page before it
-          // was full, or polls left the list since it was read.
+          // was full, or polls left the list since it was read. Back leads
+          // to the polls up to the cursor, the list's last page.
           <Empty
             title={t("registerPastEnd")}
             href={registerHref(undefined, filters)}
             action={t("registerFirst")}
+            back={
+              page.previous === undefined
+                ? undefined
+                : {
+                    href: registerHref({ before: page.previous }, filters),
+                    action: t("registerPrevious"),
+                  }
+            }
           >
             {t("registerPastEndLede")}
           </Empty>

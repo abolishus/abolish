@@ -242,12 +242,13 @@ export const LastPage: Story = {
 /**
  * A page past the last poll, as a full last page's "More polls" leads to:
  * the list ends before it, not "No polls listed.", and it leads back to the
- * first page with the search and filters it came with.
+ * page ending on its cursor's poll and to the first page, with the search
+ * and filters it came with.
  */
 export const PastTheEnd: Story = {
   args: {
     at: { after: NEXT },
-    page: { ...LIST, polls: [], next: undefined },
+    page: { ...LIST, polls: [], next: undefined, previous: `${"50".repeat(31)}51` },
     typed: "library",
     filters: { q: "library", status: "open", counting: undefined },
   },
@@ -261,6 +262,27 @@ export const PastTheEnd: Story = {
       "href",
       "/polls?q=library&status=open",
     );
+    await expect(canvas.getByRole("link", { name: "Previous page" })).toHaveAttribute(
+      "href",
+      `/polls?before=${"50".repeat(31)}51&q=library&status=open`,
+    );
+  },
+};
+
+/** Past the largest poll ID, which no ID follows, there is only the first page to go back to. */
+export const PastTheLastId: Story = {
+  args: {
+    at: { after: "f".repeat(64) },
+    page: { ...LIST, polls: [], next: undefined, previous: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "No more polls" })).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls",
+    );
+    await expect(canvas.queryByRole("link", { name: "Previous page" })).toBeNull();
   },
 };
 

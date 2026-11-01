@@ -14,7 +14,7 @@
 // (src/poll-tags.ts) only filter an order: they rank nothing.
 
 import type { PeriodClock } from "@abolishus/crypto";
-import { and, asc, desc, eq, exists, gt, lte, or, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, lt, lte, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
@@ -120,6 +120,63 @@ function restoredPoll(db: ReturnType<typeof drizzle>) {
   return q`coalesce((${newest}), 'restore') = 'restore'`;
 }
 
+/** Refuses search terms and tags `listPolls` and `listPollsBefore` can't take. */
+function checkFilters(terms: readonly string[], tags: ListingTags): void {
+  if (
+    !Array.isArray(terms) ||
+    terms.length > MAX_SEARCH_TERMS ||
+    !terms.every((t) => typeof t === "string" && t !== "")
+  )
+    throw new TypeError(`terms must be up to ${MAX_SEARCH_TERMS} non-empty strings`);
+  if (
+    typeof tags !== "object" ||
+    tags === null ||
+    (tags.topic !== undefined && !(POLL_TOPICS as readonly unknown[]).includes(tags.topic)) ||
+    (tags.placeKey !== undefined && (typeof tags.placeKey !== "string" || tags.placeKey === ""))
+  )
+    throw new TypeError("tags must be a topic of POLL_TOPICS and a non-empty place key");
+}
+
+/**
+ * The listing's condition on a poll's row: listed (`restoredPoll`), its text
+ * holding every term and filed under the tags.
+ */
+function listedWhere(db: ReturnType<typeof drizzle>, terms: readonly string[], tags: ListingTags) {
+  const restored = restoredPoll(db);
+  // Every term somewhere in the text, through the row's primary key.
+  const matched =
+    terms.length === 0
+      ? undefined
+      : exists(
+          db
+            .select({ one: q`1` })
+            .from(displayTextSearch)
+            .where(
+              and(
+                eq(displayTextSearch.electionId, electionDefinitions.electionId),
+                ...terms.map((t) => q`strpos(${displayTextSearch.searchText}, ${t}) > 0`),
+              ),
+            ),
+        );
+  // The poll's row, through its primary key.
+  const tagged =
+    tags.topic === undefined && tags.placeKey === undefined
+      ? undefined
+      : exists(
+          db
+            .select({ one: q`1` })
+            .from(pollTags)
+            .where(
+              and(
+                eq(pollTags.electionId, electionDefinitions.electionId),
+                tags.topic === undefined ? undefined : eq(pollTags.topic, tags.topic),
+                tags.placeKey === undefined ? undefined : eq(pollTags.placeKey, tags.placeKey),
+              ),
+            ),
+        );
+  return and(restored, matched, tagged);
+}
+
 /**
  * Up to `limit` listed polls after the poll `after` in `order` (or from the
  * first, without it). Fewer than `limit` means the listing ends there for
@@ -183,55 +240,11 @@ export async function listPolls(
     (typeof order.now !== "bigint" || order.now < 0n || order.now > U64_MAX)
   )
     throw new TypeError("now must be a u64 bigint");
-  if (
-    !Array.isArray(terms) ||
-    terms.length > MAX_SEARCH_TERMS ||
-    !terms.every((t) => typeof t === "string" && t !== "")
-  )
-    throw new TypeError(`terms must be up to ${MAX_SEARCH_TERMS} non-empty strings`);
-  if (
-    typeof tags !== "object" ||
-    tags === null ||
-    (tags.topic !== undefined && !(POLL_TOPICS as readonly unknown[]).includes(tags.topic)) ||
-    (tags.placeKey !== undefined && (typeof tags.placeKey !== "string" || tags.placeKey === ""))
-  )
-    throw new TypeError("tags must be a topic of POLL_TOPICS and a non-empty place key");
+  checkFilters(terms, tags);
   const window = order.sort === "answered" ? answeredWindow(order.now, order.clock) : undefined;
   const cursor = after === undefined ? undefined : new Uint8Array(after);
   const db = drizzle({ client });
-  const restored = restoredPoll(db);
-  // Every term somewhere in the text, through the row's primary key.
-  const matched =
-    terms.length === 0
-      ? undefined
-      : exists(
-          db
-            .select({ one: q`1` })
-            .from(displayTextSearch)
-            .where(
-              and(
-                eq(displayTextSearch.electionId, electionDefinitions.electionId),
-                ...terms.map((t) => q`strpos(${displayTextSearch.searchText}, ${t}) > 0`),
-              ),
-            ),
-        );
-  // The poll's row, through its primary key.
-  const tagged =
-    tags.topic === undefined && tags.placeKey === undefined
-      ? undefined
-      : exists(
-          db
-            .select({ one: q`1` })
-            .from(pollTags)
-            .where(
-              and(
-                eq(pollTags.electionId, electionDefinitions.electionId),
-                tags.topic === undefined ? undefined : eq(pollTags.topic, tags.topic),
-                tags.placeKey === undefined ? undefined : eq(pollTags.placeKey, tags.placeKey),
-              ),
-            ),
-        );
-  const listed = and(restored, matched, tagged);
+  const listed = listedWhere(db, terms, tags);
 
   if (order.sort === "id") {
     const rows = await db
@@ -348,6 +361,39 @@ export async function listPolls(
     .orderBy(asc(electionSchedules.closesAt), asc(electionSchedules.electionId))
     .limit(limit);
   return rows.map((r) => new Uint8Array(r.electionId));
+}
+
+/**
+ * Up to `limit` listed polls just before `before` in the `id` order, in
+ * that order (ascending election ID): the page a reader of a later page
+ * turns back to, filtered by `terms` and `tags` as `listPolls` filters it.
+ * Fewer than `limit` means none earlier. Like `after`, `before` need not be
+ * a stored poll. Only the `id` order reads backward: the others are of polls
+ * open now and move as they open, close or are answered, so a page back from
+ * a cursor would not be the page a reader came forward through (T-68).
+ */
+export async function listPollsBefore(
+  client: Sql,
+  before: Uint8Array,
+  limit: number,
+  terms: readonly string[] = [],
+  tags: ListingTags = {},
+): Promise<Uint8Array[]> {
+  if (!isBytes(before) || before.length !== 32) throw new TypeError("before must be 32 bytes");
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LISTING_PAGE)
+    throw new TypeError(`limit must be an integer from 1 to ${MAX_LISTING_PAGE}`);
+  checkFilters(terms, tags);
+  const db = drizzle({ client });
+  // Backward through the primary key, then turned round.
+  const rows = await db
+    .select({ electionId: electionDefinitions.electionId })
+    .from(electionDefinitions)
+    .where(
+      and(lt(electionDefinitions.electionId, new Uint8Array(before)), listedWhere(db, terms, tags)),
+    )
+    .orderBy(desc(electionDefinitions.electionId))
+    .limit(limit);
+  return rows.map((r) => new Uint8Array(r.electionId)).toReversed();
 }
 
 /** How many voters a poll's board holds in one tier. */

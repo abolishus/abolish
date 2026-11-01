@@ -63,6 +63,7 @@ const LIST: PollList = {
     { kind: "unavailable", electionId: UNREADABLE, problem: "another-election" },
   ],
   next: NEXT,
+  previous: undefined,
   asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
   counts: { listed: 1234, open: 212, scheduled: 41 },
 };
@@ -71,7 +72,7 @@ const meta = {
   component: PollRegister,
   args: {
     page: LIST,
-    after: undefined,
+    at: undefined,
     typed: "",
     typedPlace: "",
     filters: { status: undefined, counting: undefined },
@@ -151,7 +152,11 @@ export const Dark: Story = { parameters: { theme: "dark" }, play };
 
 /** Closed plurality polls only: a poll the page can't read never matches a filter. */
 export const Filtered: Story = {
-  args: { after: OPEN, filters: { status: "closed", counting: "plurality" } },
+  args: {
+    at: { after: OPEN },
+    page: { ...LIST, previous: OPEN },
+    filters: { status: "closed", counting: "plurality" },
+  },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const status = canvas.getByRole("radiogroup", { name: "Status" });
@@ -171,23 +176,63 @@ export const Filtered: Story = {
       "href",
       `/polls?after=${NEXT}&status=closed&counting=plurality`,
     );
-    // A later page leads back to the first, with the same filters.
+    // A later page leads back to the first and to the one before, with the same filters.
     await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
       "href",
       "/polls?status=closed&counting=plurality",
     );
+    await expect(canvas.getByRole("link", { name: "Previous page" })).toHaveAttribute(
+      "href",
+      `/polls?before=${OPEN}&status=closed&counting=plurality`,
+    );
+  },
+};
+
+/**
+ * A page turned back to, before a poll: its form and links keep `before`,
+ * never `after`, and it leads back again, to the first page and on.
+ */
+export const TurnedBack: Story = {
+  args: {
+    at: { before: NEXT },
+    page: { ...LIST, previous: OPEN },
+    filters: { status: "open", counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const form = canvasElement.querySelector("form:not([role=search]):has(input[name=status])");
+    await expect(form?.querySelector("input[type=hidden][name=before]")).toHaveValue(NEXT);
+    await expect(form?.querySelector("input[name=after]")).toBeNull();
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      `/polls?before=${NEXT}`,
+    );
+    const pages = canvas.getByRole("navigation", { name: "Pages of the list" });
+    await expect(
+      within(pages)
+        .getAllByRole("link")
+        .map((a) => [a.textContent, a.getAttribute("href")]),
+    ).toEqual([
+      ["First page", "/polls?status=open"],
+      ["Previous page", `/polls?before=${OPEN}&status=open`],
+      ["More polls", `/polls?after=${NEXT}&status=open`],
+    ]);
   },
 };
 
 /** The last page of the list: back to the first, and nothing further. */
 export const LastPage: Story = {
-  args: { after: OPEN, page: { ...LIST, next: undefined } },
+  args: { at: { after: OPEN }, page: { ...LIST, next: undefined, previous: OPEN } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     const pages = canvas.getByRole("navigation", { name: "Pages of the list" });
     await expect(within(pages).getByRole("link", { name: "First page" })).toHaveAttribute(
       "href",
       "/polls",
+    );
+    await expect(within(pages).getByRole("link", { name: "Previous page" })).toHaveAttribute(
+      "href",
+      `/polls?before=${OPEN}`,
     );
     await expect(canvas.queryByRole("link", { name: "More polls" })).toBeNull();
   },
@@ -200,7 +245,7 @@ export const LastPage: Story = {
  */
 export const PastTheEnd: Story = {
   args: {
-    after: NEXT,
+    at: { after: NEXT },
     page: { ...LIST, polls: [], next: undefined },
     typed: "library",
     filters: { q: "library", status: "open", counting: undefined },
@@ -319,7 +364,7 @@ export const InvalidLookup: Story = {
 export const Searched: Story = {
   args: {
     typed: " Park  library ",
-    after: OPEN,
+    at: { after: OPEN },
     filters: { q: "Park  library", status: "closed", counting: undefined },
   },
   play: async ({ canvasElement }) => {
@@ -392,24 +437,36 @@ export const SearchRefused: Story = {
   },
 };
 
-/** The register's address puts `after` first, then the search, then each filter in a fixed order. */
+/**
+ * The register's address puts its cursor (`after` or `before`) first, then
+ * the search, then each filter in a fixed order.
+ */
 export const Addresses: Story = {
   play: async () => {
+    await expect(
+      registerHref({ before: NEXT }, { q: "a b", status: "open", counting: "all" }),
+    ).toBe(`/polls?before=${NEXT}&q=a%20b&status=open`);
     await expect(registerHref(undefined, { status: undefined, counting: "all" })).toBe("/polls");
     await expect(registerHref(undefined, { status: "closed", counting: "approval" })).toBe(
       "/polls?status=closed&counting=approval",
     );
     await expect(
-      registerHref(NEXT, { q: "café & bar #1", status: undefined, counting: "approval" }),
+      registerHref(
+        { after: NEXT },
+        { q: "café & bar #1", status: undefined, counting: "approval" },
+      ),
     ).toBe(`/polls?after=${NEXT}&q=caf%C3%A9%20%26%20bar%20%231&counting=approval`);
     await expect(
-      registerHref(NEXT, {
-        q: "bridge",
-        topic: "transport",
-        place: "Old Town & Quay",
-        status: "open",
-        counting: undefined,
-      }),
+      registerHref(
+        { after: NEXT },
+        {
+          q: "bridge",
+          topic: "transport",
+          place: "Old Town & Quay",
+          status: "open",
+          counting: undefined,
+        },
+      ),
     ).toBe(
       `/polls?after=${NEXT}&q=bridge&topic=transport&place=Old%20Town%20%26%20Quay&status=open`,
     );
@@ -425,7 +482,7 @@ export const Addresses: Story = {
 export const Filed: Story = {
   args: {
     page: { ...LIST, counts: undefined },
-    after: OPEN,
+    at: { after: OPEN },
     typedPlace: " Old  Town ",
     filters: { topic: "housing", place: "Old Town", status: undefined, counting: undefined },
   },

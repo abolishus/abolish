@@ -3,12 +3,18 @@ import { Button, buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
 import { NativeSelect, NativeSelectOption } from "@abolishus/ui/ui/native-select";
-import { ArrowLeftToLine, ArrowRight, Search } from "lucide-react";
+import { ArrowLeft, ArrowLeftToLine, ArrowRight, Search } from "lucide-react";
 import { type ReactNode, useId } from "react";
 
 import { catalogs, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { type Counting, COUNTINGS, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
-import type { ListedPoll, PollList as List, RegisterCounts, RegisterPage } from "../server/load.ts";
+import type {
+  ListedPoll,
+  PollList as List,
+  RegisterAt,
+  RegisterCounts,
+  RegisterPage,
+} from "../server/load.ts";
 import { MAX_STREAM_PLACE, MAX_STREAM_QUERY, MAX_STREAM_TERMS } from "../stream.ts";
 import { FilterGroup } from "./filter-group.tsx";
 import { formatUtc, formatUtcWhole } from "./format.ts";
@@ -40,16 +46,16 @@ const chosen = <T extends string>(value: T | "all" | undefined): T | undefined =
   value === "all" ? undefined : value;
 
 /**
- * The register's address for `after` and `filters`, so the next page keeps
- * the same search and filters. Topics and the groups' values are from fixed
- * lists and `after` is canonical hex; only the search and the place need
- * escaping.
+ * The register's address for the page at `at` and `filters`, so the next
+ * or previous page keeps the same search and filters. Topics and the groups'
+ * values are from fixed lists and the cursor is canonical hex; only the
+ * search and the place need escaping.
  */
-export function registerHref(after: string | undefined, filters: RegisterFilters): string {
+export function registerHref(at: RegisterAt, filters: RegisterFilters): string {
   const status = chosen(filters.status);
   const counting = chosen(filters.counting);
   const search = [
-    ...(after === undefined ? [] : [`after=${after}`]),
+    ...(at === undefined ? [] : "after" in at ? [`after=${at.after}`] : [`before=${at.before}`]),
     ...(filters.q === undefined ? [] : [`q=${encodeURIComponent(filters.q)}`]),
     ...(filters.topic === undefined ? [] : [`topic=${filters.topic}`]),
     ...(filters.place === undefined ? [] : [`place=${encodeURIComponent(filters.place)}`]),
@@ -197,7 +203,7 @@ function Empty({
 export interface PollRegisterProps {
   page: RegisterPage;
   /** Where this page of the list starts, if not at the beginning. */
-  after: string | undefined;
+  at: RegisterAt;
   /** What the search box holds: the visitor's query as it came, or `""`. */
   typed: string;
   /** What the place box holds: the visitor's place as it came, or `""`. */
@@ -266,7 +272,7 @@ function Tally({ counts, asOf }: { counts: RegisterCounts; asOf: List["asOf"] })
  */
 export function PollRegister({
   page,
-  after,
+  at,
   typed,
   typedPlace,
   filters,
@@ -338,7 +344,7 @@ export function PollRegister({
           >
             {t("streamPlaceRefused", { characters: MAX_STREAM_PLACE })}
           </Empty>
-        ) : page.polls.length === 0 && after !== undefined ? (
+        ) : page.polls.length === 0 && at !== undefined ? (
           // A page past the last poll, searched or not: the page before it
           // was full, or polls left the list since it was read.
           <Empty
@@ -359,12 +365,7 @@ export function PollRegister({
         ) : page.polls.length === 0 ? (
           <p className="m-0 text-lg">{t("listEmpty")}</p>
         ) : (
-          <ListPage
-            list={page}
-            after={after}
-            filters={filters}
-            phoneVerification={phoneVerification}
-          />
+          <ListPage list={page} at={at} filters={filters} phoneVerification={phoneVerification} />
         )}
       </Section>
     </div>
@@ -374,12 +375,12 @@ export function PollRegister({
 /** A page of the list, with its filters over the page in hand and the links between pages. */
 function ListPage({
   list,
-  after,
+  at,
   filters,
   phoneVerification,
 }: {
   list: List;
-  after: string | undefined;
+  at: RegisterAt;
   filters: RegisterFilters;
   phoneVerification: boolean;
 }) {
@@ -392,11 +393,15 @@ function ListPage({
   const status = chosen(filters.status);
   const counting = chosen(filters.counting);
   const filtered = status !== undefined || counting !== undefined;
-  const clear = registerHref(after, { q, topic, place, status: undefined, counting: undefined });
+  const clear = registerHref(at, { q, topic, place, status: undefined, counting: undefined });
   return (
     <>
       <form method="get" action="/polls" className="grid gap-4">
-        {after === undefined ? null : <input type="hidden" name="after" value={after} />}
+        {at === undefined ? null : "after" in at ? (
+          <input type="hidden" name="after" value={at.after} />
+        ) : (
+          <input type="hidden" name="before" value={at.before} />
+        )}
         {q === undefined ? null : <input type="hidden" name="q" value={q} />}
         {topic === undefined ? null : <input type="hidden" name="topic" value={topic} />}
         {place === undefined ? null : <input type="hidden" name="place" value={place} />}
@@ -457,7 +462,7 @@ function ListPage({
           />
         )}
       </div>
-      <Pages after={after} next={list.next} filters={filters} />
+      <Pages at={at} next={list.next} previous={list.previous} filters={filters} />
     </>
   );
 }
@@ -466,25 +471,27 @@ const PAGE_LINK = "inline-flex min-h-12 items-center gap-2 underline underline-o
 
 /**
  * The ways on from a page of the list, each keeping the search and filters:
- * back to the first page from a later one, since the listing reads only
- * forward from a poll and a reader deep in the register otherwise has only
- * the browser's history, and on to the next page while this one was full.
+ * back to the first page and to the one before from a later one, so a reader
+ * deep in the register needn't rely on the browser's history, and on to the
+ * next page while this one was full.
  */
 function Pages({
-  after,
+  at,
   next,
+  previous,
   filters,
 }: {
-  after: string | undefined;
+  at: RegisterAt;
   next: string | undefined;
+  previous: string | undefined;
   filters: RegisterFilters;
 }) {
   const t = useTranslate(catalogs);
-  if (after === undefined && next === undefined) return null;
+  if (at === undefined && next === undefined) return null;
   return (
     <nav aria-label={t("registerPages")}>
       <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-2 p-0">
-        {after === undefined ? null : (
+        {at === undefined ? null : (
           <li>
             <a className={PAGE_LINK} href={registerHref(undefined, filters)}>
               <ArrowLeftToLine aria-hidden="true" className="size-4" />
@@ -492,9 +499,17 @@ function Pages({
             </a>
           </li>
         )}
+        {previous === undefined ? null : (
+          <li>
+            <a className={PAGE_LINK} href={registerHref({ before: previous }, filters)}>
+              <ArrowLeft aria-hidden="true" className="size-4" />
+              {t("registerPrevious")}
+            </a>
+          </li>
+        )}
         {next === undefined ? null : (
           <li>
-            <a className={PAGE_LINK} href={registerHref(next, filters)}>
+            <a className={PAGE_LINK} href={registerHref({ after: next }, filters)}>
               {t("listMore")}
               <ArrowRight aria-hidden="true" className="size-4" />
             </a>

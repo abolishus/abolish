@@ -106,10 +106,13 @@ export const sendPollReport = createServerFn({ method: "POST" })
 
 export const fetchPollList = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
-    const { after, q, topic, place, locale } = (input ?? {}) as Record<string, unknown>;
-    // `""` starts the list; `undefined` is refused, so a call must say where it starts.
+    const { after, before, q, topic, place, locale } = (input ?? {}) as Record<string, unknown>;
+    // `""` for both starts the list; `undefined` is refused, so a call must say where it starts.
     if (after !== "" && !isElectionId(after))
       throw new TypeError("expected an election ID or an empty string");
+    if (before !== "" && !isElectionId(before))
+      throw new TypeError("expected an election ID or an empty string");
+    if (after !== "" && before !== "") throw new TypeError("expected after or before, not both");
     // `""` is no search; anything else is a query as `streamQuery` gives it, as for the stream.
     if (q !== "" && (typeof q !== "string" || !isStreamSearch(q)))
       throw new TypeError("expected a search query or an empty string");
@@ -120,13 +123,17 @@ export const fetchPollList = createServerFn({ method: "GET" })
       throw new TypeError("expected a place or an empty string");
     // The page's language picks each poll's translation; one of ours only.
     if (!isLocale(locale)) throw new TypeError("expected a locale");
-    return { after, q, topic: topic as PollTopic | "", place, locale };
+    return { after, before, q, topic: topic as PollTopic | "", place, locale };
   })
   .handler(({ data }) =>
     opaque(async () => ({
       page: await loadPollList(
         api(),
-        data.after,
+        data.after !== ""
+          ? { after: data.after }
+          : data.before !== ""
+            ? { before: data.before }
+            : undefined,
         {
           q: data.q === "" ? undefined : data.q,
           topic: data.topic === "" ? undefined : data.topic,

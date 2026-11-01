@@ -13,6 +13,7 @@ import {
   type ListingOrder,
   type ListingTags,
   listPolls,
+  listPollsBefore,
   MAX_LISTING_PAGE,
   MAX_PLACE_LENGTH,
   moderate,
@@ -382,6 +383,30 @@ describe("the listing's filters", () => {
     expect(await listed({ placeKey: placeKey(place)! }, open, 10, searchTerms(word))).toEqual([
       hex(hit),
     ]);
+  });
+
+  test("filter the register's backward read as its forward one, a page at a time", async () => {
+    const place = `Fen ${hex(randomBytes(4))}`;
+    const word = `beacon${hex(randomBytes(4))}`;
+    for (let i = 0; i < 5; i++) await poll({ place, topic: "transport" }, `Is the ${word} on?`);
+    await poll({ place, topic: "housing" }, `Is the ${word} off?`);
+    await poll({ place }, "Is the ferry late?");
+    await poll({ topic: "transport" }, `Is the ${word} dim?`);
+    const tags: ListingTags = { topic: "transport", placeKey: placeKey(place)! };
+    const terms = searchTerms(word);
+    const forward = await listed(tags, { sort: "id" }, MAX_LISTING_PAGE, terms);
+    expect(forward).toHaveLength(5);
+    for (const limit of [1, 2, 5]) {
+      const pages: string[][] = [];
+      let before: Uint8Array = new Uint8Array(32).fill(0xff);
+      for (;;) {
+        const page = await listPollsBefore(app, before, limit, terms, tags);
+        pages.unshift(page.map(hex));
+        if (page.length < limit) break;
+        before = page[0]!; // a full page holds at least one poll
+      }
+      expect(pages.flat()).toEqual(forward);
+    }
   });
 
   test("leave out delisted and hidden polls", async () => {

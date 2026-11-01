@@ -10,6 +10,7 @@ import {
   type ListingOrder,
   answeredByTier,
   listPolls,
+  listPollsBefore,
   lookupShortCode,
   ModerationError,
   moderationStatus,
@@ -144,10 +145,16 @@ export const router = os.router({
         // Quoting nothing of the place, as of the query (T-11).
         if (input.place !== undefined && placeKeyOf === undefined)
           throw new ORPCError("BAD_REQUEST", { message: "No place is left once normalised." });
-        const elections = await listPolls(context.sql, after, Number(input.limit), order, terms, {
+        const tags = {
           ...(input.topic === undefined ? {} : { topic: input.topic }),
           ...(placeKeyOf === undefined ? {} : { placeKey: placeKeyOf }),
-        });
+        };
+        const limit = Number(input.limit);
+        // The contract takes `before` only alone, under the `id` order.
+        const elections =
+          input.before === undefined
+            ? await listPolls(context.sql, after, limit, order, terms, tags)
+            : await listPollsBefore(context.sql, fromHex(input.before), limit, terms, tags);
         return { elections: elections.map(toHex) };
       } catch (e) {
         if (e instanceof ListingError) throw errors.CURSOR_NOT_FOUND();

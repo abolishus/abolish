@@ -245,6 +245,13 @@ export const Scheduled: Story = {
     await expect(canvas.getByText("Not open yet")).toBeVisible();
     await expect(canvas.queryByText("Open for answers")).toBeNull();
     await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
+    // Before it opens, where its key came from is one link away, on the
+    // surface beside who holds it, as the scheduled poll's mockup shows its
+    // ceremony: the board's record, on the board's first page.
+    const evidence = canvas.getByRole("region", { name: "How do we know this is real?" });
+    await expect(
+      within(evidence).getByRole("link", { name: "How the poll's key was made" }),
+    ).toHaveAttribute("href", `/polls/${poll.electionId}/board#ceremony-title`);
   },
 };
 
@@ -319,8 +326,9 @@ export const NoShortCode: Story = {
     const canvas = within(canvasElement);
     await openEvidence(canvasElement);
     await expect(canvas.queryByText("Short link")).toBeNull();
-    // The board's link is the only one left, beside the report's link to the policy.
+    // The board's links are the only ones left, beside the report's link to the policy.
     await expect(canvas.getAllByRole("link").map((l) => l.textContent)).toEqual([
+      "How the poll's key was made",
       "Read the board, entry by entry",
       "What moderation can and can't do",
     ]);
@@ -333,6 +341,8 @@ export const EmptyBoard: Story = {
     const canvas = within(canvasElement);
     await openEvidence(canvasElement);
     await expect(canvas.getByText("No entries yet.")).toBeVisible();
+    // No ceremony record to point at before the board's first entry.
+    await expect(canvas.queryByRole("link", { name: "How the poll's key was made" })).toBeNull();
     // An empty board's all-zero head is never shown as if it were one.
     await expect(canvas.queryByRole("figure", { name: "Chain head" })).toBeNull();
   },

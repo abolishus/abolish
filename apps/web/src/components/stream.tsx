@@ -505,7 +505,8 @@ function Answered({
  * have answered so far is shown tier by tier, each named as the poll page
  * names it (`phoneVerification`), never summed (T-01). `narrowed` is the
  * page's narrowing: a card leaves out the topic or place every card on the
- * page shares.
+ * page shares. `sort` is the stream's order where the card is on the
+ * stream, and its topic and place links keep it and the page's narrowing.
  */
 export function StreamCard({
   card,
@@ -513,6 +514,7 @@ export function StreamCard({
   phoneVerification = false,
   explained = false,
   narrowed = {},
+  sort,
   fitted = false,
 }: {
   card: Card;
@@ -520,6 +522,7 @@ export function StreamCard({
   phoneVerification?: boolean;
   explained?: boolean;
   narrowed?: StreamFilter;
+  sort?: StreamSort;
   /**
    * The card is already a reading width (the stream's column), so its band
    * and answers fill it. Elsewhere a card can run a page's width, and they
@@ -628,7 +631,11 @@ export function StreamCard({
         )}
       </div>
       {/* The stream lists only polls that aren't delisted or hidden (T-68). */}
-      <ListedUnder tags={tags} linked />
+      <ListedUnder
+        tags={tags}
+        linked
+        within={sort === undefined ? undefined : { sort, filter: narrowed }}
+      />
       {/* A count the server couldn't read drew no band, so the card read
           as a poll nobody counts beside its neighbours' counts (P2-29, the
           stream's iteration 31): the band stays, saying so. */}
@@ -973,6 +980,7 @@ export function StreamPage({
                     phoneVerification={phoneVerification}
                     explained
                     narrowed={filter}
+                    sort={sort}
                     fitted
                   />
                 </li>

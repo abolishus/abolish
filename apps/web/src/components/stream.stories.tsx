@@ -743,6 +743,21 @@ export const MostAnswered: Story = {
     const search = searchForm(canvasElement).getBoundingClientRect().width;
     for (const line of [note, tagsNote])
       await expect(line.getBoundingClientRect().width).toBeLessThanOrEqual(search);
+    // A card's topic and place keep the order, as the topics above do: its
+    // "Culture" led to Culture's newest while the fold's "Culture" kept
+    // "Most answered this week" (P2-29, the stream's iteration 40).
+    const topics = canvas.getByRole("navigation", { name: "Topics" });
+    const list = questions(canvasElement);
+    const [culture] = list.getAllByRole("link", { name: "Culture" });
+    await expect(culture).toHaveAttribute("href", "/discover?sort=answered&topic=culture");
+    await expect(culture).toHaveAttribute(
+      "href",
+      within(topics).getByRole("link", { name: "Culture" }).getAttribute("href") ?? "",
+    );
+    await expect(list.getByRole("link", { name: "Eastside" })).toHaveAttribute(
+      "href",
+      "/discover?sort=answered&place=Eastside",
+    );
   },
 };
 
@@ -1002,6 +1017,11 @@ export const Searching: Story = {
       "href",
       "/discover?sort=closing",
     );
+    // A card's place keeps the order and the search, as the place's box does.
+    await expect(questions(canvasElement).getByRole("link", { name: "Eastside" })).toHaveAttribute(
+      "href",
+      "/discover?sort=closing&place=Eastside&q=library%20%20hours",
+    );
     // The query is never quoted in the page's own words.
     await expect(canvas.queryByText(/library {2}hours/)).toBeNull();
     // The place's form keeps the search as it was accepted.
@@ -1131,7 +1151,10 @@ export const Place: Story = {
     // page names it only in its box, T-67); a card's topic still shows.
     const list = questions(canvasElement);
     await expect(list.queryByText(/Old town/i)).toBeNull();
-    await expect(list.getByRole("link", { name: "Culture" })).toBeVisible();
+    await expect(list.getByRole("link", { name: "Culture" })).toHaveAttribute(
+      "href",
+      "/discover?topic=culture&place=Old%20Town&q=library",
+    );
     await expect(list.queryByRole("link", { name: /Riverside Park|Eastside/ })).toBeNull();
     await expect(within(placeForm(canvasElement)).getByRole("textbox")).toHaveValue(" Old  Town");
     // The place's box stands beside the search's, out of the fold, which

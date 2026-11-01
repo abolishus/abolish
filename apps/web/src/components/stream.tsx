@@ -45,6 +45,14 @@ type Current = "page" | "true";
 const LINK =
   "inline-flex min-h-12 items-center border border-input px-4 text-sm hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none [&[aria-current]]:border-foreground [&[aria-current]]:bg-foreground [&[aria-current]]:text-background";
 
+// One width for both boxes' buttons, so on a place's page, where the two
+// boxes stand one above the other, the fields and buttons share their edges:
+// sized to its label, "Find" left the place's field 17px longer than the
+// search's above it, a ragged seam down the column's middle (P2-29, the
+// stream's iteration 38). 88px holds the longest label, "Search", in either
+// language.
+const SUBMIT = "h-12 min-w-22 shrink-0 px-5";
+
 /** The orders, as links: each one a plain GET, so they work before the page's script loads. */
 function Sorts({
   sort,
@@ -268,7 +276,7 @@ function SearchForm({
             className="h-12 ps-11 text-base md:text-base"
           />
         </div>
-        <Button type="submit" variant="outline" className="h-12 shrink-0 px-5">
+        <Button type="submit" variant="outline" className={SUBMIT}>
           {t("streamSearchSubmit")}
         </Button>
       </div>
@@ -347,7 +355,7 @@ function PlaceForm({
             ))}
           </datalist>
         ) : null}
-        <Button type="submit" variant="outline" className="h-12 shrink-0 px-5">
+        <Button type="submit" variant="outline" className={SUBMIT}>
           {t("streamPlaceSubmit")}
         </Button>
       </div>

@@ -1200,6 +1200,17 @@ export const Place: Story = {
       note.selectNodeContents(form.querySelector("p > span")!);
       await expect(new Set([...note.getClientRects()].map((r) => Math.round(r.top))).size).toBe(1);
     }
+    // The two boxes share their edges: each button sized to its label left
+    // the place's field 17px longer than the search's, so the column had a
+    // ragged seam where field meets button (P2-29, the stream's iteration
+    // 38).
+    const [search, place] = [searchForm(canvasElement), placeForm(canvasElement)].map((form) => ({
+      field: form.querySelector('input:not([type="hidden"])')!.getBoundingClientRect(),
+      button: within(form).getByRole("button").getBoundingClientRect(),
+    }));
+    await expect(Math.round(place!.field.right)).toBe(Math.round(search!.field.right));
+    await expect(Math.round(place!.button.left)).toBe(Math.round(search!.button.left));
+    await expect(Math.round(place!.button.right)).toBe(Math.round(search!.button.right));
   },
 };
 

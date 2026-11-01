@@ -90,10 +90,13 @@ function SearchForm({
   typed,
   typedPlace,
   filters,
+  places,
 }: {
   typed: string;
   typedPlace: string;
   filters: RegisterFilters;
+  /** The places listed polls are filed at, for the box to suggest. */
+  places: readonly string[] | undefined;
 }) {
   const t = useTranslate(catalogs);
   const inputId = useId();
@@ -101,6 +104,8 @@ function SearchForm({
   const topicId = useId();
   const placeId = useId();
   const placeHintId = useId();
+  const placesId = useId();
+  const suggested = places !== undefined && places.length > 0;
   const status = chosen(filters.status);
   const counting = chosen(filters.counting);
   return (
@@ -161,10 +166,21 @@ function SearchForm({
             maxLength={MAX_STREAM_PLACE * 2}
             autoComplete="off"
             aria-describedby={placeHintId}
+            {...(suggested ? { list: placesId } : {})}
             className="h-12 text-base md:text-base"
           />
+          {/* The browser's own suggestions: each place is an asker's tag,
+              offered as typed and never in our words (T-67, T-68). */}
+          {suggested ? (
+            <datalist id={placesId}>
+              {places.map((place) => (
+                <option key={place} value={place} />
+              ))}
+            </datalist>
+          ) : null}
           <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
             {t("streamPlaceHint")}
+            {suggested ? ` ${t("registerPlaceSuggested")}` : null}
           </p>
         </div>
       </div>
@@ -323,7 +339,12 @@ export function PollRegister({
         lede={<p className="m-0">{t("registerFindLede")}</p>}
       >
         <div className="grid gap-3">
-          <SearchForm typed={typed} typedPlace={typedPlace} filters={filters} />
+          <SearchForm
+            typed={typed}
+            typedPlace={typedPlace}
+            filters={filters}
+            places={page.kind === "list" ? page.places : undefined}
+          />
           {!narrowed || refused ? null : (
             <p className="m-0 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
               {q === undefined ? null : <span>{t("registerSearching")}</span>}

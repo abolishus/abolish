@@ -147,6 +147,7 @@ export {
   answeredByTier,
   answeredWindow,
   countListedPolls,
+  listedPlaces,
   LISTING_SORTS,
   ListingError,
   type ListingCounts,
@@ -154,6 +155,7 @@ export {
   type ListingTags,
   listPolls,
   listPollsBefore,
+  MAX_LISTED_PLACES,
   MAX_LISTING_PAGE,
   type TierAnswered,
 } from "./listing.ts";

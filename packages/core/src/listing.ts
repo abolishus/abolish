@@ -14,7 +14,7 @@
 // (src/poll-tags.ts) only filter an order: they rank nothing.
 
 import type { PeriodClock } from "@abolishus/crypto";
-import { and, asc, desc, eq, exists, gt, lt, lte, or, sql as q } from "drizzle-orm";
+import { and, asc, desc, eq, exists, gt, isNotNull, lt, lte, or, sql as q } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import type { Sql } from "postgres";
 import { isBytes } from "./bytes.ts";
@@ -483,4 +483,40 @@ export async function countListedPolls(client: Sql, now: bigint): Promise<Listin
     open: BigInt(row?.open ?? "0"),
     scheduled: BigInt(row?.scheduled ?? "0"),
   };
+}
+
+/** The most places `listedPlaces` returns. */
+export const MAX_LISTED_PLACES = 100;
+
+/**
+ * The places listed polls are filed at, as `GET /elections/places` serves
+ * them for the register's place box to suggest: one spelling per place key
+ * (`placeKey`), the one most of its listed polls carry (the first by code
+ * point where they tie), for the `MAX_LISTED_PLACES` keys with the most
+ * listed polls (by key where they tie), in order of key. Only listed polls
+ * count, so a place filed only on delisted or hidden polls is never
+ * suggested, and a hidden poll's place, its author's words, stays withheld
+ * (T-68). Like the listing, these are the authors' tags under the public
+ * moderation log, the same for everyone and moved by nothing a voter does;
+ * a key's count only chooses which places fit, never their order.
+ */
+export async function listedPlaces(client: Sql): Promise<readonly string[]> {
+  const db = drizzle({ client });
+  const ranked = db
+    .select({
+      key: pollTags.placeKey,
+      place: q<string>`mode() WITHIN GROUP (ORDER BY ${pollTags.place} COLLATE "C")`.as("place"),
+    })
+    .from(pollTags)
+    .innerJoin(electionDefinitions, eq(electionDefinitions.electionId, pollTags.electionId))
+    .where(and(isNotNull(pollTags.placeKey), isNotNull(pollTags.place), restoredPoll(db)))
+    .groupBy(pollTags.placeKey)
+    .orderBy(desc(q`count(*)`), q`${pollTags.placeKey} COLLATE "C"`)
+    .limit(MAX_LISTED_PLACES)
+    .as("ranked");
+  const rows = await db
+    .select({ place: ranked.place })
+    .from(ranked)
+    .orderBy(q`${ranked.key} COLLATE "C"`);
+  return rows.map((r) => r.place);
 }

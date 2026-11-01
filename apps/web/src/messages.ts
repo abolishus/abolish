@@ -459,6 +459,7 @@ const enUS = {
   streamPlaceLabel: "Place",
   streamPlaceHint:
     "A town, neighbourhood or school, as askers write it. Capitals and spacing don't matter, but the whole name must match.",
+  registerPlaceSuggested: "As you type, it suggests the places listed polls are filed at.",
   streamPlaceFiltering: "Only questions filed at this place.",
   streamPlaceClear: "Clear the place",
   streamTopicClear: "Show every topic",

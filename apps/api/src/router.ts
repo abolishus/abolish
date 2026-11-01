@@ -3,6 +3,7 @@ import {
   BoardReadError,
   checkPostingRequest,
   countListedPolls,
+  listedPlaces,
   deleteIdentityBackup,
   hasDefinition,
   IdentityBackupStoreError,
@@ -175,6 +176,10 @@ export const router = os.router({
         scheduled: String(counts.scheduled),
       };
     }),
+    // Listed polls' places only, as the listing leaves out (T-68).
+    getPlaces: os.elections.getPlaces.handler(async ({ context }) => ({
+      places: [...(await listedPlaces(context.sql))],
+    })),
     getDefinition: os.elections.getDefinition.handler(async ({ input, context, errors }) => {
       const definition = await readDefinition(context.sql, fromHex(input.electionId));
       if (definition === undefined) throw errors.ELECTION_NOT_FOUND();

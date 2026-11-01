@@ -49,6 +49,12 @@ export const Default: Story = {
     const limits = canvas.getAllByRole("listitem").filter((li) => li.closest("#weak-points"));
     await expect(limits[0]).toHaveTextContent("During launch, we hold every trustee seat");
     await expect(limits[0]).toHaveTextContent("T-14");
+    // Tier 2 counts documents, not people: one person can hold two (T-03).
+    const documents = limits.find((li) =>
+      li.textContent?.includes("One person can hold two documents"),
+    );
+    await expect(documents).toHaveTextContent("T-03");
+    await expect(documents).toHaveTextContent("Tier 2 isn't open yet.");
     // It ends on how to verify a result, the verify page.
     await expect(
       canvas.getByRole("link", { name: "How to verify a result yourself" }),

@@ -3258,6 +3258,8 @@ describe("how it works", () => {
     }
     // The launch panel is ours, and the page says so ([[0027-trustee-panels-and-live-results]]).
     expect(html).toContain("we hold every trustee seat");
+    // So is a person with two documents joining Tier 2 twice (T-03).
+    expect(html).toContain("One person can hold two documents");
     // Each diagram draws its first step on the server.
     expect([...html.matchAll(/data-testid="diagram-[a-z]+" data-step="0"/g)]).toHaveLength(6);
     // It ends on the verify page, a plain link that needs no script.

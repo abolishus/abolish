@@ -114,6 +114,7 @@ const CHAPTERS: readonly Chapter[] = [
 const WEAK_POINTS = [
   { id: "Panel", threats: ["T-14", "T-11", "T-69"] },
   { id: "Sybil", threats: ["T-01"] },
+  { id: "Documents", threats: ["T-03"] },
   { id: "Watch", threats: ["T-45", "T-46"] },
   { id: "Collude", threats: ["T-14"] },
   { id: "Device", threats: ["T-42", "T-44"] },

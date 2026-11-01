@@ -282,11 +282,10 @@ export const Closed: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    // Its status mark, and the word before when it closed beside it.
-    await expect(canvas.getAllByText("Closed")).toHaveLength(2);
+    await expect(canvas.getByText("Closed")).toBeVisible();
     await expect(canvas.getByText(/This poll has closed/)).toBeVisible();
     await expect(canvas.queryByText(/only in the ballot app/)).toBeNull();
-    await expectWhen(canvasElement, "Closed", "2026-01-08T00:00:00.000Z");
+    await expectWhen(canvasElement, "On", "2026-01-08T00:00:00.000Z");
   },
 };
 

@@ -303,7 +303,7 @@ describe("poll page", () => {
     expect(html).toContain(">Closed</span>");
     // And when, beside its status at the top, in the definition's time
     // (P2-19 part 64).
-    expect(html).toMatch(/>Closed<!-- --> <time datetime="2026-01-08T00:00:00.000Z"/i);
+    expect(html).toMatch(/>On<!-- --> <time datetime="2026-01-08T00:00:00.000Z"/i);
     expect(html).toContain("This poll has closed.");
     // The evidence is one step down, but in the server's HTML, so it opens without script.
     expect(html).toMatch(/<details\b[^>]*>\s*<summary\b/);

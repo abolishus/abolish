@@ -59,15 +59,21 @@ function useViewerZone(): string | undefined {
  * tomorrow says so in place of its date (the stream's iteration 23): the
  * day is read only once the page runs, never on the server, which knows
  * neither the visitor's zone nor when a cached page is read.
+ *
+ * `dated` keeps the date on the visitor's clock where "today" would stand,
+ * for a time said after "On": a closed poll's page read "On today, 7:00 PM
+ * EST" on the day it closed (P2-29, the poll page's iteration 16).
  */
 export function When({
   instant,
   short = false,
   local = false,
+  dated = false,
 }: {
   instant: Instant;
   short?: boolean;
   local?: boolean;
+  dated?: boolean;
 }) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
@@ -81,7 +87,7 @@ export function When({
   return (
     <time dateTime={instant.iso} suppressHydrationWarning>
       {local && zone !== undefined
-        ? zoned(formatZonedNear(locale, zone, date, now(), style))
+        ? zoned(formatZonedNear(locale, zone, date, now(), style, !dated))
         : t("utcTime", { time: formatUtcWhole(locale, date, style) })}
     </time>
   );

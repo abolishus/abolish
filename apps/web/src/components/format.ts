@@ -74,7 +74,8 @@ function zonedYear(timeZone: string, date: Date): string {
  * evening (P2-29, the stream's iteration 23). Any other day keeps its date,
  * with its year only when it isn't `now`'s year: "Closes Jan 14, 2026" sat
  * over the same card's "since it opened Jan 1", which already left this
- * year out (the stream's iteration 28).
+ * year out (the stream's iteration 28). `near` false keeps the date on any
+ * day, for words said after "On" (the poll page's iteration 16).
  */
 export function formatZonedNear(
   locale: string,
@@ -82,10 +83,11 @@ export function formatZonedNear(
   date: Date,
   now: Date,
   dateStyle: "long" | "medium" = "long",
+  near = true,
 ): { time: string; zone: string; day?: string } {
   const { time, zone } = formatZonedWhole(locale, timeZone, date, dateStyle);
   const days = zonedDay(timeZone, date) - zonedDay(timeZone, now);
-  if (days !== 0 && days !== 1) {
+  if (!near || (days !== 0 && days !== 1)) {
     if (zonedYear(timeZone, date) !== zonedYear(timeZone, now)) return { time, zone };
     const thisYear = new Intl.DateTimeFormat(locale, {
       month: dateStyle === "long" ? "long" : "short",

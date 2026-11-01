@@ -569,14 +569,26 @@ export function PollSummary({
         )}
       </section>
 
-      {/* Not for a hidden poll, which takes none and shows no counts (T-68). */}
-      {reactions === undefined || moderation.state === "hidden" ? null : (
-        <PollReactions electionId={poll.electionId} client={reactions} />
-      )}
-
-      {/* Not for a hidden poll, which takes no new followers (T-68). */}
-      {follows === undefined || moderation.state === "hidden" ? null : (
-        <PollFollow electionId={poll.electionId} client={follows} />
+      {/* Side by side from a tablet's width: stacked under Answering they
+          stood as two more full sections between the answers and the
+          evidence, 600px of a 1280px screen (P2-29, the poll page's
+          iteration 5). Neither is shown on a hidden poll, which takes no
+          reactions or new followers and shows no counts (T-68). */}
+      {moderation.state === "hidden" ||
+      (reactions === undefined && follows === undefined) ? null : (
+        <div
+          className={cn(
+            "grid max-w-3xl items-start gap-16",
+            reactions !== undefined && follows !== undefined && "md:grid-cols-2 md:gap-10",
+          )}
+        >
+          {reactions === undefined ? null : (
+            <PollReactions electionId={poll.electionId} client={reactions} />
+          )}
+          {follows === undefined ? null : (
+            <PollFollow electionId={poll.electionId} client={follows} />
+          )}
+        </div>
       )}
 
       {/* As both poll mockups lay it out: the question and its answer in

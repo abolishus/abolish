@@ -870,6 +870,21 @@ function PollReview({
         </p>
         <ReviewList t={t} rows={listing} locked={locked} onJump={onJump} />
       </div>
+      {/* What moderation can and can't do to the poll once it's submitted,
+          from the create mockup's last step (P2-19): said before submitting,
+          so its limits are known before anything is recorded for good
+          (docs/moderation-policy.md; T-68). */}
+      <div className="grid gap-3">
+        <h4 className="m-0 text-base font-semibold">{t("pollFormReviewModeration")}</h4>
+        <p className="m-0 max-w-prose text-sm text-muted-foreground">
+          {t("pollFormReviewModerationLede")}
+        </p>
+        <p className="m-0 text-sm">
+          <a href="/moderation" className="underline underline-offset-4">
+            {t("moderationLogLink")}
+          </a>
+        </p>
+      </div>
     </section>
   );
 }

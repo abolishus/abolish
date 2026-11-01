@@ -443,6 +443,19 @@ export const TopicAndPlace: Story = {
     await expect(
       review.getByText(wholeText("People with a verified e-mail address")),
     ).toBeVisible();
+    // What moderation can do is said before submitting, with the log it
+    // writes to, and that it never reaches the answers or the count.
+    await expect(review.getByRole("heading", { name: "What moderation can do" })).toBeVisible();
+    await expect(
+      review.getByText(/Moderation never touches the answers or the count/),
+    ).toBeVisible();
+    // A hide of an open poll for illegal content or personal data stops
+    // answers through our app (docs/moderation-policy.md, Open polls).
+    await expect(review.getByText(/stops people answering it through our app/)).toBeVisible();
+    await expect(review.getByRole("link", { name: "See the moderation log" })).toHaveAttribute(
+      "href",
+      "/moderation",
+    );
     await userEvent.click(review.getByRole("link", { name: "Change Topic" }));
     await expect(canvas.getByRole("combobox", { name: "Topic (optional)" })).toHaveFocus();
     await expect(writes(args.client)[0]![2]).toMatchObject({

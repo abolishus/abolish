@@ -1795,6 +1795,9 @@ const enUS = {
   pollFormReviewQuestionCount: { one: "{count} question", other: "{count} questions" },
   pollFormReviewLimits: "{options}. {rule}",
   pollFormReviewWho: "Who can answer",
+  pollFormReviewResults: "Results",
+  pollFormReviewResultsValue:
+    "Sealed until it closes. No running count is published while it's open, not even to you; the results appear on its page once they're counted after it closes. Live results aren't offered yet.",
   pollFormReviewCloses: "Closes",
   pollFormReviewKey: "Who holds the key",
   pollFormReviewKeyValue:

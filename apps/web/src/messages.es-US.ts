@@ -1825,6 +1825,9 @@ export const esUS: Messages = {
   pollFormReviewQuestionCount: { one: "{count} pregunta", other: "{count} preguntas" },
   pollFormReviewLimits: "{options}. {rule}",
   pollFormReviewWho: "Quién puede responder",
+  pollFormReviewResults: "Resultados",
+  pollFormReviewResultsValue:
+    "Sellados hasta que cierre. No se publica ningún conteo parcial mientras está abierta, ni siquiera para ti; los resultados aparecen en su página una vez que se cuentan, después de que cierre. Aún no se ofrecen resultados en vivo.",
   pollFormReviewCloses: "Cierra",
   pollFormReviewKey: "Quién tiene la clave",
   pollFormReviewKeyValue:

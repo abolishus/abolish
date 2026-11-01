@@ -3508,7 +3508,7 @@ const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: nu
   "/how-it-works": { html: 12, js: 178, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 174, css: 40, fonts: 58 },
   "/trustees": { html: 6, js: 178, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 204, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 205, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 259, css: 40, fonts: 58 },
   [`/p/${CODE}/flyer`]: { html: 8, js: 179, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },

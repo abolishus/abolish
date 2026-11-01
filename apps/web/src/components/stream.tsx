@@ -446,8 +446,12 @@ function Answered({
         <p className="m-0">{t("streamAnsweredNone")}</p>
       ) : (
         <ul aria-labelledby={titleId} className="m-0 grid list-none gap-1 p-0">
+          {/* A tier's line wrapped at 360px ("1 person verified" over "with
+              a passport or ID") read as two tiers, its second half a row of
+              its own 4px under the first; continuation lines hang in, as a
+              list's do (P2-29, the stream's iteration 35). */}
           {answered.map(({ tier, answered: count }) => (
-            <li key={tier} className="text-balance tabular-nums">
+            <li key={tier} className="pl-4 -indent-4 text-balance tabular-nums">
               {t(answeredMessage(tier, phoneVerification), { count: BigInt(count) })}
             </li>
           ))}

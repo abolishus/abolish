@@ -610,10 +610,11 @@ if (ballotAdmission !== undefined) {
 // chain (T-08, T-71).
 if (openingTally !== undefined) {
   const { clock, options } = openingTally;
-  const rolling =
-    PINNED_REGISTRIES !== undefined && rollingRecords !== undefined
-      ? { source: rollingRecords.source, release: PINNED_REGISTRIES }
-      : undefined;
+  let rolling;
+  if (PINNED_REGISTRIES !== undefined && rollingRecords !== undefined) {
+    checkPinnedRegistries(PINNED_REGISTRIES, rollingRecords.deployment);
+    rolling = { source: rollingRecords.source, release: PINNED_REGISTRIES };
+  }
   openings = {
     boardings: new OpeningBoardings({
       tally: anchoredCountedTally({ ...options, ...(rolling !== undefined && { rolling }) }),

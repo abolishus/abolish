@@ -1043,6 +1043,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
   async function stored(): Promise<{
     app: Sql;
     script: Scripted;
+    options: AnchoredCountedTallyOptions;
     tally: ReturnType<typeof anchoredCountedTally>;
   }> {
     const own = await testDb();
@@ -1079,7 +1080,7 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
         },
       },
     };
-    return { app, script, tally: anchoredCountedTally(options) };
+    return { app, script, options, tally: anchoredCountedTally(options) };
   }
   const afterAllClose: TestDb[] = [];
   afterAll(async () => {
@@ -1110,6 +1111,25 @@ describe("the anchored counted tally", { timeout: 60_000 }, () => {
     // Every ballot is rejected by its reference, so each cell sums nothing.
     if (got.state !== "fixed") return;
     expect(got.aggregates).toEqual(got.aggregates.map(() => aggregateCell(got.election.rules, [])));
+  });
+
+  test("never reads the registries for a fixed poll", async () => {
+    const { app, options } = await stored();
+    let reads = 0;
+    const tally = anchoredCountedTally({
+      ...options,
+      rolling: {
+        source: {
+          read: async () => {
+            reads++;
+            throw new Error("a fixed poll read the registries");
+          },
+        },
+        release: { ...release, electionRegistry: new Uint8Array(20) },
+      },
+    });
+    expect(await tally(app, d.election_id)).toMatchObject({ state: "fixed" });
+    expect(reads).toBe(0);
   });
 
   test("waits until t_S has passed by the anchor's time, before reading L1", async () => {
@@ -1565,17 +1585,5 @@ describe("the anchored counted tally of a rolling poll", { timeout: 60_000 }, ()
     const ahead = await stored(async () => ({ ...settled, at: lastRecord - 1n }));
     await expect(ahead.tally(ahead.app, d.election_id)).rejects.toThrow(RangeError);
     expect(failing.counts.l1 + ahead.counts.l1).toBe(0);
-  });
-
-  test("never reads the registries for a fixed poll", async () => {
-    const ballots = read("verifier-ballots.json") as {
-      readonly cases: readonly { readonly id: string; readonly definition: string }[];
-    };
-    const admitted = ballots.cases.find((x) => x.id === "admitted");
-    if (admitted === undefined) return expect.fail("no admitted case");
-    const { app, counts, tally } = await stored();
-    await storeDefinition(app, hex(admitted.definition));
-    await tally(app, decodeDefinition(hex(admitted.definition)).value.election_id);
-    expect(counts.reads).toBe(0);
   });
 });

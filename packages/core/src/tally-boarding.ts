@@ -128,8 +128,9 @@ export interface AnchoredCountedTallyOptions {
   readonly now?: () => bigint;
   /**
    * The panels the release pins for 2.3, as `countedTally` takes them: the
-   * verifier's `PINNED_PANELS` unless given, which a deployment never gives,
-   * so a live poll is counted only under a panel this release pins (T-64).
+   * verifier's `PINNED_PANELS` unless given. Only tests give it, for vectors
+   * whose panels no release pins; a deployment never does, so a live poll is
+   * counted only under a panel this release pins (T-64).
    */
   readonly pins?: readonly PinnedPanel[];
   /**

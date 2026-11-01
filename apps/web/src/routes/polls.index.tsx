@@ -3,6 +3,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 
 import { PollRegister, type RegisterFilters } from "../components/poll-register.tsx";
 import { fetchPollList } from "../data.ts";
+import { POLL_TOPIC_MESSAGES } from "../messages.ts";
 import { COUNTINGS, POLL_STATUSES } from "../poll.ts";
 import { streamPlace, streamQuery } from "../stream.ts";
 import { titles } from "../titles.ts";
@@ -68,9 +69,18 @@ export const Route = createFileRoute("/polls/")({
               locale,
             },
           }),
+  // A topic's register is named by the topic, from the fixed list, as the
+  // stream's is; a search or a place is never in the title (T-67).
   head: ({ match }) => {
+    const { search } = match;
     const { pageTitle, text } = titles(match.context.locale);
-    return { meta: [pageTitle(text("navPolls"))] };
+    return {
+      meta: [
+        search.topic === undefined
+          ? pageTitle(text("navPolls"))
+          : pageTitle(text(POLL_TOPIC_MESSAGES[search.topic]), text("navPolls")),
+      ],
+    };
   },
   component: function Polls() {
     const { id, after, q, topic, place, status, counting } = Route.useSearch();

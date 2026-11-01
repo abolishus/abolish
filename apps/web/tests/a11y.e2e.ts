@@ -874,6 +874,7 @@ describe("each page's title", () => {
     for (const path of ["/discover?q=park", "/discover?place=Old%20Town"])
       expect(titles.get(path), path).toBe(titles.get("/discover"));
     expect(titles.get("/polls?q=park")).toBe(titles.get("/polls"));
+    expect(titles.get("/polls?topic=housing&place=Old+Town")).toBe("Housing · Polls · Abolish");
     // Every other page's title is its own.
     const alike = new Map<string, string[]>();
     for (const [path, title] of titles)

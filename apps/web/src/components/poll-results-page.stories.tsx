@@ -303,9 +303,10 @@ export const TurnoutUnstated: Story = {
 };
 
 /**
- * A rolling poll's results: no turnout, since its definition names each
- * tier's members at the opening only and whoever joined by the close could
- * answer too ([[0028-rolling-electorates]]).
+ * A rolling poll's results before our server has read the close: no
+ * turnout, since its definition names each tier's members at the opening
+ * only and whoever joined by the close could answer too
+ * ([[0028-rolling-electorates]]).
  */
 export const Rolling: Story = {
   args: { poll: { ...meta.args.poll, version: 7, rolling: true } },
@@ -315,6 +316,46 @@ export const Rolling: Story = {
     const panel = within(canvas.getByRole("tabpanel"));
     await expect(panel.queryByText("Turnout")).toBeNull();
     await expect(canvas.queryByText(/^Turnout: /)).toBeNull();
+  },
+};
+
+/**
+ * A rolling poll's results with each tier's count at the close: its turnout
+ * is a share of who could answer by then, never of its members at the
+ * opening ([[0028-rolling-electorates]]).
+ */
+export const RollingAtClose: Story = {
+  args: {
+    poll: { ...meta.args.poll, version: 7, rolling: true },
+    results: {
+      kind: "read",
+      tiers: [
+        {
+          tier: 0,
+          counted: 1234,
+          questions: [
+            ["700", "434", "100"],
+            ["600", "600"],
+          ],
+          couldAnswer: 8000,
+        },
+        { tier: 2, counted: 40, questions: undefined, couldAnswer: 150 },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const panel = within(canvas.getByRole("tabpanel"));
+    await expect(panel.getByText("Turnout")).toBeVisible();
+    await expect(
+      panel.getByText("15.4% of 8,000 people who could answer by the close"),
+    ).toBeVisible();
+    // Never a share of the 7,220 members at the opening.
+    await expect(canvas.queryByText(/of 7,220/)).toBeNull();
+    const side = within(canvas.getByRole("region", { name: "The groups side by side" }));
+    await expect(
+      side.getAllByText("Turnout: 26.7% of 150 people who could answer by the close"),
+    ).toHaveLength(2);
   },
 };
 

@@ -303,7 +303,13 @@ describe("elections.getResults' answers", () => {
         ),
         tiers: fc.array(
           fc.record(
-            { tier: small, counted: small, counts, byQuestion },
+            {
+              tier: small,
+              counted: small,
+              counts,
+              byQuestion,
+              electorate: fc.record({ opening: small, eligible: small }),
+            },
             { requiredKeys: ["tier", "counted"] },
           ),
           { maxLength: 4 },

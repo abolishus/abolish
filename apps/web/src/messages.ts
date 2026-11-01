@@ -578,6 +578,14 @@ const enUS = {
   resultsNoneAnswered: "No one answered.",
   resultsTurnout: "Turnout",
   resultsTurnoutOf: { one: "{share} of {count} member", other: "{share} of {count} members" },
+  resultsTurnoutOfClose: {
+    one: "{share} of {count} person who could answer by the close",
+    other: "{share} of {count} people who could answer by the close",
+  },
+  resultsCouldAnswer: {
+    one: "{count} person could answer by the close",
+    other: "{count} people could answer by the close",
+  },
   resultsTurnoutIs: "Turnout: {turnout}",
   resultsTierPending:
     "Part of this group's count isn't published yet. Its results appear here once it all is.",

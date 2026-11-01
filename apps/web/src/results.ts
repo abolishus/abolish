@@ -18,6 +18,12 @@ export interface TierResults {
   readonly tier: Tier;
   readonly counted: number;
   readonly questions: readonly (readonly string[])[] | undefined;
+  /**
+   * A rolling tier's eligible count, as our server read it: who could answer
+   * by the close, of whom `counted` answered ([[0028-rolling-electorates]];
+   * docs/spec/membership.md, Reported counts). Absent for a fixed tier.
+   */
+  readonly couldAnswer?: number;
 }
 
 /**
@@ -43,7 +49,7 @@ const TIERS: readonly number[] = [0, 1, 2];
  * question (T-34); whether the counts are right is the verifier's to say.
  */
 export function resultsView(
-  poll: Pick<PollView, "version" | "questions" | "electorate">,
+  poll: Pick<PollView, "version" | "rolling" | "questions" | "electorate">,
   served: ServedResults,
 ): PollResults {
   if (served.state === "unopened") return { kind: "unopened" };
@@ -57,7 +63,14 @@ export function resultsView(
       t.counts === undefined ? undefined : poll.version === 1 ? [t.counts] : t.byQuestion;
     if (t.counts !== undefined && !fits(poll.questions, t.counted, questions))
       return { kind: "unavailable" };
-    tiers.push({ tier: t.tier as Tier, counted: t.counted, questions });
+    if (t.electorate !== undefined && !electorateFits(poll, t.tier, t.counted, t.electorate))
+      return { kind: "unavailable" };
+    tiers.push({
+      tier: t.tier as Tier,
+      counted: t.counted,
+      questions,
+      ...(t.electorate !== undefined && { couldAnswer: t.electorate.eligible }),
+    });
   }
   return { kind: "read", tiers };
 }
@@ -137,6 +150,26 @@ function sumOf(cells: readonly CellResults[], i: number, j: number): bigint {
 // Seats of a panel of `size`, numbered from 1 (docs/spec/ceremony.md), each once and ascending.
 function seatsOf(size: number, seats: readonly number[]): boolean {
   return seats.every((s, i) => s >= 1 && s <= size && (i === 0 || s > (seats[i - 1] ?? 0)));
+}
+
+// A rolling tier's electorate only, opening with the members the definition
+// names for the tier at the opening root, and with no more ballots counted
+// than could answer: one secret has one nullifier in the poll (T-34;
+// docs/spec/membership.md, Reported counts).
+function electorateFits(
+  poll: Pick<PollView, "rolling" | "electorate">,
+  tier: number,
+  counted: number,
+  electorate: { readonly opening: number; readonly eligible: number },
+): boolean {
+  const groups = poll.electorate.filter((g) => g.tier === tier);
+  return (
+    poll.rolling &&
+    groups.length === 1 &&
+    // `groupSize` is the definition's u64 in canonical decimal (`toString`).
+    groups[0]?.groupSize === String(electorate.opening) &&
+    counted <= electorate.eligible
+  );
 }
 
 // No option is picked on more ballots than were counted.

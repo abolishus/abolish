@@ -335,17 +335,24 @@ function Cells({
  * How many of the tier's members answered: a share of the members the
  * definition names for it. Only for a tier the definition names once, so the
  * members are that tier's alone, and only where the figure can be a share
- * (`turnoutOf`). The tiers' turnouts are never added up (T-16). None for a
- * rolling poll: its definition names a tier's members at the opening only,
- * and whoever joined by the close could answer too, so a share of the first
- * would overstate turnout ([[0028-rolling-electorates]]).
+ * (`turnoutOf`). The tiers' turnouts are never added up (T-16). For a
+ * rolling poll, a share of who could answer by the close, as our server read
+ * it, never of the definition's members at the opening: whoever joined by
+ * the close could answer too, so a share of those would overstate turnout,
+ * and there is none while the server hasn't read the close
+ * ([[0028-rolling-electorates]]).
  */
 function turnout(poll: PollResultsPageProps["poll"], tier: TierResults) {
-  if (poll.rolling) return undefined;
   const groups = poll.electorate.filter((g) => g.tier === tier.tier);
-  const members = groups.length === 1 ? groups[0]?.groupSize : undefined;
+  const members = poll.rolling
+    ? tier.couldAnswer?.toString()
+    : groups.length === 1
+      ? groups[0]?.groupSize
+      : undefined;
   const share = members === undefined ? undefined : turnoutOf(tier.counted, members);
-  return members === undefined || share === undefined ? undefined : { members, share };
+  return members === undefined || share === undefined
+    ? undefined
+    : { members, share, rolling: poll.rolling };
 }
 
 /** The tier's turnout in words, "17.1% of 7,220 members", or nothing where there is none. */
@@ -358,7 +365,7 @@ function useTurnoutText() {
       ? undefined
       : {
           share: of.share,
-          text: t("resultsTurnoutOf", {
+          text: t(of.rolling ? "resultsTurnoutOfClose" : "resultsTurnoutOf", {
             share: percent.format(of.share),
             count: BigInt(of.members),
           }),

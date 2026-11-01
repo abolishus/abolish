@@ -303,6 +303,11 @@ export const Closed: Story = {
     await expect(canvas.queryByText(/only in the ballot app/)).toBeNull();
     await expectSaidOnce(canvasElement, true);
     await expectWhen(canvasElement, "On", "2026-01-08T00:00:00.000Z");
+    // Closed a second ago, so on the visitor's calendar today: after "On" the
+    // close keeps its date, where it read "On today, 7:00 PM EST" (P2-29, the
+    // poll page's iteration 16).
+    const line = canvasElement.querySelector("article > header time")?.parentElement;
+    await expect(line?.textContent?.replace(/\s+/g, " ")).toBe("On January 7 at 7:00 PM EST");
   },
 };
 

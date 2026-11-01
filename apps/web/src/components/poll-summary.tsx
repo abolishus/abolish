@@ -458,7 +458,9 @@ export function PollSummary({
               the facts; a scheduled poll says when it opens instead, and a
               closed one says "On", as the register does, rather than read
               "Closed" twice after its status. The times are the definition's,
-              the same the facts show (T-34). */}
+              the same the facts show (T-34). After "On" the close keeps its
+              date: "today" made "On today, 7:00 PM EST" on the day it closed
+              (P2-29, the poll page's iteration 16). */}
           <span className="text-base text-muted-foreground">
             {t(
               status === "scheduled"
@@ -467,7 +469,11 @@ export function PollSummary({
                   ? "factCloses"
                   : "listClosed",
             )}{" "}
-            <When instant={status === "scheduled" ? poll.opensAt : poll.closesAt} local />
+            <When
+              instant={status === "scheduled" ? poll.opensAt : poll.closesAt}
+              local
+              dated={status === "closed"}
+            />
           </span>
         </div>
 

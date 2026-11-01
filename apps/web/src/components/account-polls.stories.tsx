@@ -1089,18 +1089,20 @@ export const NoProfile: Story = {
  * nothing for a draft, a poll in setup or one the read left out, all read
  * at once (part 58).
  */
+// A fresh client for each story that uses it, so each counts only its own reads.
+const answeredSoFar = () =>
+  fakeDrafts([DRAFT, SETTING_UP, OPEN, CLOSED, TIMED_OUT, UNCOUNTED], {
+    answered: {
+      [OPEN.id]: [
+        { tier: 0, answered: "38" },
+        { tier: 2, answered: "1" },
+      ],
+      [CLOSED.id]: [{ tier: 0, answered: "0" }],
+    },
+  });
+
 export const AnsweredSoFar: Story = {
-  args: {
-    client: fakeDrafts([DRAFT, SETTING_UP, OPEN, CLOSED, TIMED_OUT, UNCOUNTED], {
-      answered: {
-        [OPEN.id]: [
-          { tier: 0, answered: "38" },
-          { tier: 2, answered: "1" },
-        ],
-        [CLOSED.id]: [{ tier: 0, answered: "0" }],
-      },
-    }),
-  },
+  args: { client: answeredSoFar() },
   play: async ({ canvasElement, args }) => {
     const canvas = within(canvasElement);
     const items = await canvas.findAllByRole("listitem");
@@ -1120,6 +1122,7 @@ export const AnsweredSoFar: Story = {
 
 export const AnsweredSoFarPhone: Story = {
   ...AnsweredSoFar,
+  args: { client: answeredSoFar() },
   globals: { viewport: { value: "phone", isRotated: false } },
 };
 

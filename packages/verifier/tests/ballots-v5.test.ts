@@ -4,6 +4,7 @@ import {
   checkContractEvent,
   decodeBallot,
   decodeContractEvent,
+  DecodeError,
   PARAMETERS,
   type RollingBallotChain,
   type RollingTierEvent,
@@ -301,5 +302,83 @@ describe("the operator's admission of a rolling poll's ballots", { timeout: 60_0
     const steps = results.slice(0, 5).map((r) => (r.ok ? r.step : undefined));
     for (const s of steps.slice(0, 3)) expect(s).toBeLessThanOrEqual(2_966_400);
     for (const s of steps.slice(3)) expect(s).toBeGreaterThan(2_966_400);
+  });
+});
+
+// A rolling path's copy, admitted by the operator or a trustee node outside
+// the board's order (the view at `c_I`, P2-17 part 7c-3c-2c), is judged with
+// the root its event carries, as 5.1 judges it on the board: a copy under
+// another root than its step's is never one the verifier counts (T-25, T-54).
+describe("the operator's admission of a rolling path's copies", { timeout: 60_000 }, () => {
+  const c = byId("rolling-path");
+  const { definition, entries } = election(c);
+  const p = file.panels[c.panel];
+  if (p === undefined) throw new Error(`no panel ${c.panel}`);
+  const panel = { threshold: Number(p.threshold), keys: p.keys.map(hex) };
+  const d = definition.value;
+  const contracts = {
+    electionRegistry: d.election_registry,
+    trusteeRegistry: d.trustee_registry,
+    groupRegistry: d.group_registry,
+    board: d.board,
+  };
+  // Every `RollingBallotSubmitted` of the board, by entry, with its record and supplied root.
+  const copies = entries.flatMap((entry, at) => {
+    if (at === 0) return [];
+    try {
+      const checked = checkContractEvent(
+        decodeContractEvent(entry.subarray(51), 13),
+        contracts,
+        13,
+      );
+      return checked.ok && checked.event.event === "RollingBallotSubmitted"
+        ? [{ at, record: checked.event.record, root: checked.event.root }]
+        : [];
+    } catch (e) {
+      // An entry of another kind, or a record that doesn't decode.
+      if (e instanceof DecodeError) return [];
+      throw e;
+    }
+  });
+  const admission = electionAdmission(hex(c.definition), panel, entries, undefined, chain);
+  if (!admission.ok) throw new Error(admission.code);
+
+  test("rejects a copy under another root than its step's (root-step-mismatch), as the vectors' 5.1 does", () => {
+    const results = admission.admitAll(
+      copies.map((x) => x.record),
+      copies.map((x) => x.root),
+    );
+    const mismatched = copies.findIndex((x) => x.at === 2);
+    expect(mismatched).not.toBe(-1);
+    expect(results[mismatched]).toEqual({ ok: false, code: "root-step-mismatch" });
+    // The other roots are their steps' (the re-vote's names a later step of
+    // the same tree): each copy fares as the vectors judge it but for 5.5
+    // and 5.7, the caller's.
+    const rejected = new Map(
+      c.ballots.rejected
+        .filter((x) => x.code !== "repeat" && !x.code.startsWith("window-"))
+        .map((x) => [x.entry, x.code]),
+    );
+    for (const [i, x] of copies.entries()) {
+      const want = rejected.get(x.at);
+      const got = results[i];
+      if (want === undefined) expect(got?.ok, String(x.at)).toBe(true);
+      else expect(got, String(x.at)).toMatchObject({ ok: false, code: want });
+    }
+    // `admit` judges one copy alike.
+    for (const [i, x] of copies.entries())
+      expect(admission.admit(x.record, x.root), String(x.at)).toEqual(results[i]);
+  });
+
+  test("without the supplied root the same copy passes 5.1 to 5.4: the root only ever rejects", () => {
+    const mismatched = copies.find((x) => x.at === 2);
+    if (mismatched === undefined) throw new Error("no copy at entry 2");
+    expect(admission.admit(mismatched.record).ok).toBe(true);
+    expect(admission.admitAll([mismatched.record]).map((r) => r.ok)).toEqual([true]);
+  });
+
+  test("refuses roots not one per payload, so no copy is judged under another's", () => {
+    const records = copies.map((x) => x.record);
+    expect(() => admission.admitAll(records, [copies[0]!.root])).toThrow(RangeError);
   });
 });

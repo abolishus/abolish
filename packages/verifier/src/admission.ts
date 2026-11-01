@@ -221,16 +221,29 @@ export interface ElectionAdmission {
   readonly l1ChainId: bigint;
   /** The definition's `l1_inclusion_bound`: with `closesAt`, where the delivery windows end. */
   readonly l1InclusionBound: bigint;
-  /** Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never throws on its bytes. */
-  readonly admit: (payload: Uint8Array) => BallotAdmission;
+  /**
+   * Strictly decodes one ballot payload and runs 5.1 to 5.4 on it; never
+   * throws on its bytes. `suppliedRoot` is the root a rolling path's event
+   * carries (`RollingBallotSubmitted`, `RelayedRollingBallotSubmitted`),
+   * judged as 5.1 judges it under a rolling definition (`root-step-mismatch`)
+   * and ignored under any other; leave it out for a board-path copy. Never
+   * pass `admit` point-free to `map`, which would hand it an index as a root.
+   */
+  readonly admit: (payload: Uint8Array, suppliedRoot?: bigint) => BallotAdmission;
   /**
    * Each payload's verdict, exactly as `admit` gives it, with the membership
    * proofs of the ballots that reach that check verified together
    * (docs/spec/ballot-validity.md, Batched admission): a ballot whose proof
    * fails runs no validity proof, and an invalid proof costs at most its own
    * batch of 64 the gain from batching (T-52). Never throws on the bytes.
+   * `suppliedRoots[i]`, where given, is payload `i`'s as `admit` takes it;
+   * given, it must be as long as `payloads` (`RangeError` otherwise), so no
+   * copy is judged under another's root.
    */
-  readonly admitAll: (payloads: readonly Uint8Array[]) => BallotAdmission[];
+  readonly admitAll: (
+    payloads: readonly Uint8Array[],
+    suppliedRoots?: readonly (bigint | undefined)[],
+  ) => BallotAdmission[];
   /** Rule 1 for a share receipt's bytes, with rule 4 to run against its ballot; never throws on them. */
   readonly receipt: (payload: Uint8Array) => ReceiptAdmission;
   /** A share posting's bytes with the ballot record's it delivers, as the posting relay judges them; never throws on them. */
@@ -360,7 +373,10 @@ export function electionAdmission(
   if (typeof judge !== "function")
     return refuse(judge.code === "unsupported-version" ? "unsupported-version" : "not-reached");
   // Up to the membership proof: a payload decided before it, or its step.
-  const step = (payload: Uint8Array): BallotAdmission | BallotStep<AnyBallotCheck> => {
+  const step = (
+    payload: Uint8Array,
+    suppliedRoot: bigint | undefined,
+  ): BallotAdmission | BallotStep<AnyBallotCheck> => {
     // The envelope's record type first: a payload of another type is no
     // ballot, whatever its bytes after the type would decode to.
     if (
@@ -369,7 +385,7 @@ export function electionAdmission(
     )
       return { ok: false, code: "decode", decodeError: "unexpected-record-type" };
     try {
-      return judge(payload).step;
+      return judge(payload, suppliedRoot).step;
     } catch (e) {
       if (!(e instanceof DecodeError)) throw e;
       return { ok: false, code: "decode", decodeError: e.code };
@@ -388,14 +404,19 @@ export function electionAdmission(
           ...("step" in checked && { step: checked.step }),
         }
       : { ok: false, code: checked.code };
-  const admitAll = (payloads: readonly Uint8Array[]): BallotAdmission[] => {
+  const admitAll = (
+    payloads: readonly Uint8Array[],
+    suppliedRoots: readonly (bigint | undefined)[] = [],
+  ): BallotAdmission[] => {
+    if (suppliedRoots.length !== 0 && suppliedRoots.length !== payloads.length)
+      throw new RangeError("admitAll: one supplied root, or none, per payload");
     const results: (BallotAdmission | undefined)[] = [];
     const waiting: {
       readonly at: number;
       readonly step: BallotStep<AnyBallotCheck>;
     }[] = [];
     for (const [at, payload] of payloads.entries()) {
-      const s = step(payload);
+      const s = step(payload, suppliedRoots[at]);
       if ("ok" in s) results.push(s);
       else {
         results.push(undefined);
@@ -423,7 +444,7 @@ export function electionAdmission(
     closesAt: d.closes_at,
     l1ChainId: d.l1_chain_id,
     l1InclusionBound: BigInt(d.l1_inclusion_bound),
-    admit: (payload) => admitAll([payload])[0] as BallotAdmission,
+    admit: (payload, suppliedRoot) => admitAll([payload], [suppliedRoot])[0] as BallotAdmission,
     admitAll,
     receipt: (payload) =>
       questions === undefined

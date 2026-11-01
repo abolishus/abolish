@@ -503,6 +503,9 @@ export const LOG_COUNTS = {
   since: "2026-09-01T08:30:00.000Z",
 };
 
+/** The listing's counts the stub serves, as the API does. */
+export const LISTING_COUNTS = { listed: "1234", open: "212", scheduled: "41" };
+
 /** The moderation log the stub serves by default, oldest first. */
 export const LOG_ENTRIES: readonly Record<string, string>[] = [
   { ...LATEST, seq: "5", handle: PROFILE_HANDLE, reason: "impersonation" },
@@ -520,7 +523,8 @@ export const LOG_ENTRIES: readonly Record<string, string>[] = [
 
 /**
  * The stub's state: while `down`, it drops every connection unanswered, as a
- * dead API would; with `logCounts` unset, its read of the log's counts fails;
+ * dead API would; with `logCounts` unset, its read of the log's counts fails,
+ * and with `listingCounts` unset, its read of the listing's;
  * `log` is the moderation log it serves, oldest first; `mostAnswered` is the
  * `answered` order it lists, which with it unset it can't sort by, as an API
  * without the anchoring clock can't; `answered` is how many have answered
@@ -529,12 +533,14 @@ export const LOG_ENTRIES: readonly Record<string, string>[] = [
 export const stub: {
   down: boolean;
   logCounts: Record<string, string> | undefined;
+  listingCounts: Record<string, string> | undefined;
   log: readonly Record<string, string>[];
   mostAnswered: readonly string[] | undefined;
   answered: Map<string, readonly { tier: number; answered: string }[]>;
 } = {
   down: false,
   logCounts: LOG_COUNTS,
+  listingCounts: LISTING_COUNTS,
   log: LOG_ENTRIES,
   mostAnswered: undefined,
   // A count claimed for tier 1, which STREAM_V5's definition doesn't name, is
@@ -618,6 +624,10 @@ export function stubApi(): Server {
           message: "No poll owns this code.",
         });
       return json(200, { electionId, code });
+    }
+    if (url.pathname === "/elections/counts") {
+      if (stub.listingCounts === undefined) return json(503, { code: "INTERNAL_SERVER_ERROR" });
+      return json(200, stub.listingCounts);
     }
     if (url.pathname === "/elections") {
       const after = url.searchParams.get("after") ?? "";

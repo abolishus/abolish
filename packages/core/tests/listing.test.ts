@@ -9,6 +9,7 @@ import {
   answeredByTier,
   answeredWindow,
   appendEntry,
+  countListedPolls,
   ListingError,
   type ListingOrder,
   listPolls,
@@ -354,6 +355,82 @@ describe("listPolls, new and closing", () => {
 // re-vote never counts twice (T-01).
 
 const MAX_U32 = 2n ** 32n - 1n;
+
+// The register's counts (P2-19 part 46): the listing's polls, those open now
+// and those not open yet, by the same rules as the orders, so a count never
+// holds a poll the listing leaves out (T-68).
+describe("countListedPolls", () => {
+  // Times far from every other test's, so `now` picks out this block's polls.
+  const T = 7_000_000_000n;
+
+  /** What adding polls did to the counts at `now`: each count's rise. */
+  async function rise(now: bigint, add: () => Promise<unknown>) {
+    const before = await countListedPolls(app, now);
+    await add();
+    const after = await countListedPolls(app, now);
+    return {
+      listed: after.listed - before.listed,
+      open: after.open - before.open,
+      scheduled: after.scheduled - before.scheduled,
+    };
+  }
+
+  test("counts every listed poll, those open from opens_at up to but not at closes_at, and those not open yet", async () => {
+    expect(
+      await rise(T, async () => {
+        await timed(T + 1n, T + 20n, true);
+        await timed(T + 10n, T + 20n, false);
+        await timed(T, T + 20n, true);
+        await timed(T - 5n, T + 1n, false);
+        await timed(T - 10n, T, true);
+      }),
+    ).toEqual({ listed: 5n, open: 2n, scheduled: 2n });
+  });
+
+  test("counts open exactly the polls the closing order lists", async () => {
+    const now = T + 1_000n;
+    await timed(now - 1n, now + 1n, false);
+    const counts = await countListedPolls(app, now);
+    expect(counts.open).toBe(
+      BigInt((await listAll(MAX_LISTING_PAGE, { sort: "closing", now })).length),
+    );
+    expect(counts.listed).toBe(BigInt((await listAll()).length));
+    expect(counts.open + counts.scheduled).toBeLessThanOrEqual(counts.listed);
+  });
+
+  test("leaves out delisted and hidden polls, and counts them again once restored", async () => {
+    const now = T + 2_000n;
+    const open = await timed(now, now + 10n, true);
+    const scheduled = await timed(now + 5n, now + 10n, true);
+    expect(
+      await rise(now, async () => {
+        await moderate(app, open, { action: "delist", reason: "spam", moderator: "mod-1" });
+        await moderate(app, scheduled, { action: "hide", reason: "threat", moderator: "mod-1" });
+      }),
+    ).toEqual({ listed: -2n, open: -1n, scheduled: -1n });
+    expect(
+      await rise(now, () =>
+        moderate(app, scheduled, { action: "restore", reason: "error", moderator: "mod-2" }),
+      ),
+    ).toEqual({ listed: 1n, open: 0n, scheduled: 1n });
+  });
+
+  test("reads in a read-only session, and refuses a now that isn't a u64", async () => {
+    const readOnly = await db.as("abolish_app");
+    await readOnly`SET default_transaction_read_only = on`;
+    const counts = await countListedPolls(readOnly, T);
+    expect(counts.listed).toBeGreaterThan(0n);
+    // Every u64 is a clock it counts at, past an int8's range too.
+    const U64_MAX = (1n << 64n) - 1n;
+    for (const now of [1n << 63n, U64_MAX]) {
+      const late = await countListedPolls(app, now);
+      expect(late.listed).toBe((await countListedPolls(app, T)).listed);
+      expect(late.scheduled).toBe(0n);
+    }
+    for (const now of [-1n, 1n << 64n, 5, undefined])
+      await expect(countListedPolls(app, now as bigint)).rejects.toThrow(TypeError);
+  });
+});
 
 describe("answeredWindow", () => {
   const HOUR = { epoch: 0n, period: 3600n };

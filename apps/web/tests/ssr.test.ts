@@ -46,6 +46,7 @@ import {
   HIDDEN_CODE,
   HIDDEN_ID,
   LATEST,
+  LISTING_COUNTS,
   LOG_COUNTS,
   LOG_ENTRIES,
   ID,
@@ -1656,6 +1657,60 @@ describe("poll list", () => {
     expect(first).toContain("One choice");
   });
 
+  test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
+    const html = await (await get("/polls")).text();
+    const tally =
+      /<section aria-labelledby="register-counts"[^>]*><h2 id="register-counts"[^>]*>The list in numbers<\/h2><dl[^>]*>([\s\S]*?)<\/dl>/.exec(
+        html,
+      )?.[1];
+    expect(tally).toBeDefined();
+    const pairs = [...tally!.matchAll(/<dt[^>]*>([^<]*)<\/dt><dd[^>]*>([^<]*)<\/dd>/g)].map((m) => [
+      m[1],
+      m[2],
+    ]);
+    expect(pairs.slice(0, 3)).toEqual([
+      ["Listed polls", "1,234"],
+      ["Open now", "212"],
+      ["Scheduled", "41"],
+    ]);
+    expect(pairs[3]![0]).toBe("As of");
+    expect(pairs[3]![1]).toMatch(/\u00a0UTC$/);
+    // Under the heading, before the lookup form.
+    expect(html.indexOf("The list in numbers")).toBeGreaterThan(html.indexOf("<h1"));
+    expect(html.indexOf("The list in numbers")).toBeLessThan(html.indexOf('name="id"'));
+    // Asked for with nothing, as the contract's empty input takes it.
+    const asked = seen.filter((r) => r.path === "/elections/counts");
+    expect(asked.length).toBeGreaterThan(0);
+    for (const r of asked) expect([...r.query]).toEqual([]);
+    // The whole listing's, so read only where the register starts: a later
+    // page or a search doesn't count every listed poll again (T-52).
+    seen.length = 0;
+    for (const path of [`/polls?after=${listed[19]}`, "/polls?q=bridge"]) {
+      const later = await (await get(path)).text();
+      expect(later).toContain("<h1");
+      expect(later).not.toContain("The list in numbers");
+    }
+    expect(seen.filter((r) => r.path === "/elections/counts")).toEqual([]);
+  });
+
+  test.each([
+    ["a failed read", undefined],
+    ["more open than listed", { ...LISTING_COUNTS, open: "1235" }],
+    ["open and scheduled past the listed", { ...LISTING_COUNTS, scheduled: "1023" }],
+    ["a count past a safe integer", { ...LISTING_COUNTS, listed: "9007199254740993" }],
+  ])("leaves the counts out after %s, and keeps the list", async (_, counts) => {
+    stub.listingCounts = counts;
+    try {
+      const response = await get("/polls");
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).not.toContain("The list in numbers");
+      expect(linked(html).length).toBeGreaterThan(0);
+    } finally {
+      stub.listingCounts = LISTING_COUNTS;
+    }
+  });
+
   test("never lists a poll the API leaves out, such as a hidden one (T-68)", async () => {
     let html = await (await get("/polls")).text();
     let all = linked(html);
@@ -3027,7 +3082,7 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box.
+ * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box and counts.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 181, css: 40, fonts: 58 },

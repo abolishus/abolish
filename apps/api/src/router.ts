@@ -2,6 +2,7 @@ import { contract, MAX_PAGE_BYTES } from "@abolishus/api-contract";
 import {
   BoardReadError,
   checkPostingRequest,
+  countListedPolls,
   deleteIdentityBackup,
   hasDefinition,
   IdentityBackupStoreError,
@@ -157,6 +158,15 @@ export const router = os.router({
           });
         throw e;
       }
+    }),
+    // The listing's counts by the same rules and clock, in one statement (T-68).
+    getCounts: os.elections.getCounts.handler(async ({ context }) => {
+      const counts = await countListedPolls(context.sql, context.now());
+      return {
+        listed: String(counts.listed),
+        open: String(counts.open),
+        scheduled: String(counts.scheduled),
+      };
     }),
     getDefinition: os.elections.getDefinition.handler(async ({ input, context, errors }) => {
       const definition = await readDefinition(context.sql, fromHex(input.electionId));

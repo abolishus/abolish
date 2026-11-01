@@ -485,6 +485,11 @@ const enUS = {
   status_closed: "Closed",
   registerEyebrow: "Register of polls",
   registerTitle: "Every listed poll",
+  registerCounts: "The list in numbers",
+  registerCountListed: "Listed polls",
+  registerCountOpen: "Open now",
+  registerCountScheduled: "Scheduled",
+  registerCountAsOf: "As of",
   registerLookupTitle: "Open a poll by its ID",
   registerFindTitle: "Find a poll",
   registerFindLede:

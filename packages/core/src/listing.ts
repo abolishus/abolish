@@ -107,6 +107,20 @@ export function answeredWindow(now: bigint, clock: PeriodClock): { from: bigint;
 }
 
 /**
+ * Whether the row's poll is listed: its newest moderation decision, if any,
+ * restores it (through moderation_actions_by_election).
+ */
+function restoredPoll(db: ReturnType<typeof drizzle>) {
+  const newest = db
+    .select({ action: moderationActions.action })
+    .from(moderationActions)
+    .where(eq(moderationActions.electionId, electionDefinitions.electionId))
+    .orderBy(desc(moderationActions.seq))
+    .limit(1);
+  return q`coalesce((${newest}), 'restore') = 'restore'`;
+}
+
+/**
  * Up to `limit` listed polls after the poll `after` in `order` (or from the
  * first, without it). Fewer than `limit` means the listing ends there for
  * now.
@@ -185,14 +199,7 @@ export async function listPolls(
   const window = order.sort === "answered" ? answeredWindow(order.now, order.clock) : undefined;
   const cursor = after === undefined ? undefined : new Uint8Array(after);
   const db = drizzle({ client });
-  // The newest decision about each poll, through moderation_actions_by_election.
-  const newest = db
-    .select({ action: moderationActions.action })
-    .from(moderationActions)
-    .where(eq(moderationActions.electionId, electionDefinitions.electionId))
-    .orderBy(desc(moderationActions.seq))
-    .limit(1);
-  const restored = q`coalesce((${newest}), 'restore') = 'restore'`;
+  const restored = restoredPoll(db);
   // Every term somewhere in the text, through the row's primary key.
   const matched =
     terms.length === 0
@@ -389,4 +396,45 @@ export async function answeredByTier(
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
+}
+
+/**
+ * How many polls the listing holds at `now` (UNIX seconds): every listed
+ * poll, as the `id` order lists them; those open now (`opens_at ≤ now <
+ * closes_at`), as `closing` lists them; and those not open yet (`now <
+ * opens_at`). A poll whose times aren't stored yet is counted only among
+ * the listed. The three come from one statement, so one snapshot, and each
+ * is a count of public chain data under the public moderation log, the same
+ * for everyone and moved by nothing a voter or an account does (T-68).
+ * Anyone can recount them from the registry's events and the log, give or
+ * take what this server stores.
+ */
+export interface ListingCounts {
+  readonly listed: bigint;
+  readonly open: bigint;
+  readonly scheduled: bigint;
+}
+
+/** The listing's `ListingCounts` at `now`, as `GET /elections/counts` serves them. */
+export async function countListedPolls(client: Sql, now: bigint): Promise<ListingCounts> {
+  if (typeof now !== "bigint" || now < 0n || now > U64_MAX)
+    throw new TypeError("now must be a u64 bigint");
+  const db = drizzle({ client });
+  const s = electionSchedules;
+  const [row] = await db
+    .select({
+      listed: q<string>`count(*)::text`,
+      // Through the columns' own comparisons, which bind `now` as a numeric:
+      // bound bare, it goes as an int8, refused from 2^63 up.
+      open: q<string>`(count(*) FILTER (WHERE ${and(lte(s.opensAt, now), gt(s.closesAt, now))}))::text`,
+      scheduled: q<string>`(count(*) FILTER (WHERE ${gt(s.opensAt, now)}))::text`,
+    })
+    .from(electionDefinitions)
+    .leftJoin(s, eq(s.electionId, electionDefinitions.electionId))
+    .where(restoredPoll(db));
+  return {
+    listed: BigInt(row?.listed ?? "0"),
+    open: BigInt(row?.open ?? "0"),
+    scheduled: BigInt(row?.scheduled ?? "0"),
+  };
 }

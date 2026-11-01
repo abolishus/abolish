@@ -164,6 +164,29 @@ describe("the moderation log's page", () => {
   });
 });
 
+describe("the listing's counts", () => {
+  const input = contract.elections.getCounts["~orpc"].inputSchema;
+  const output = contract.elections.getCounts["~orpc"].outputSchema;
+  const issues = async (schema: typeof input | typeof output, value: unknown) =>
+    (await schema?.["~standard"].validate(value))?.issues;
+  const counts = { listed: "12", open: "5", scheduled: "2" };
+
+  test("take nothing, and serve each count as a decimal", async () => {
+    expect(await issues(input, {})).toBeUndefined();
+    expect(await issues(input, { limit: "1" })).toBeDefined();
+    expect(await issues(output, counts)).toBeUndefined();
+    for (const bad of [
+      { ...counts, listed: "012" },
+      { ...counts, open: "-1" },
+      { ...counts, open: 5 },
+      { ...counts, scheduled: "18446744073709551616" },
+      { ...counts, closed: "5" },
+      { listed: "12", open: "5" },
+    ])
+      expect(await issues(output, bad)).toBeDefined();
+  });
+});
+
 describe("the moderation log's counts", () => {
   const input = contract.moderation.getCounts["~orpc"].inputSchema;
   const output = contract.moderation.getCounts["~orpc"].outputSchema;
@@ -328,6 +351,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/answered",
       "GET /elections/by-code",
       "GET /elections/code",
+      "GET /elections/counts",
       "GET /elections/definition",
       "GET /elections/display-text",
       "GET /elections/results",

@@ -781,11 +781,23 @@ export function now(): Instant {
   return instant(BigInt(Math.floor(Date.now() / 1000)));
 }
 
+/**
+ * How many polls the API lists, as `GET /elections/counts` serves them:
+ * every listed poll, those open now and those not open yet.
+ */
+export interface RegisterCounts {
+  readonly listed: number;
+  readonly open: number;
+  readonly scheduled: number;
+}
+
 export interface PollList {
   readonly kind: "list";
   readonly polls: readonly ListedPoll[];
   /** When the page was loaded, for each poll's status. */
   readonly asOf: Instant;
+  /** The whole listing's counts on the register's first page unsearched, `undefined` elsewhere or when they couldn't be read. */
+  readonly counts: RegisterCounts | undefined;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
 }
@@ -819,6 +831,9 @@ export async function loadPollList(
   locale: string,
 ): Promise<RegisterPage> {
   let elections;
+  // The whole listing's, the same on every page and search, so read only
+  // where the register starts: each read counts every listed poll (T-52).
+  const counts = after === "" && q === "" ? registerCountsOf(api) : undefined;
   try {
     ({ elections } = await api.elections.list({
       ...(after === "" ? {} : { after }),
@@ -872,9 +887,34 @@ export async function loadPollList(
     kind: "list",
     polls,
     asOf,
+    counts: await counts,
     // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
     next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
   };
+}
+
+/**
+ * The listing's counts, or `undefined` when the read fails or they can't all
+ * be true at once (more open or scheduled than listed): they are optional on
+ * the page, as the moderation log's are, and figures that contradict each
+ * other are shown nowhere (T-68). A request that names no visitor (T-10).
+ */
+async function registerCountsOf(api: Api): Promise<RegisterCounts | undefined> {
+  let served;
+  try {
+    served = await api.elections.getCounts({});
+  } catch {
+    return undefined;
+  }
+  const counts = {
+    listed: Number(served.listed),
+    open: Number(served.open),
+    scheduled: Number(served.scheduled),
+  };
+  return Object.values(counts).every(Number.isSafeInteger) &&
+    counts.open + counts.scheduled <= counts.listed
+    ? counts
+    : undefined;
 }
 
 /**

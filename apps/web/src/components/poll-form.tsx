@@ -834,6 +834,15 @@ function PollReview({
       label: t("pollFormReviewWho"),
       value: wholeWords(form.tiers.map((tier) => whoName(t, tier, phoneVerification)).join(", ")),
     },
+    // A submitted draft becomes a version-5 definition, which has no live
+    // release (`results_mode` came with version 6), so its results are
+    // sealed until the close for good, as the create mockup's "Results"
+    // row says before publishing (P2-19 part 69; T-16, T-34). The form
+    // offers no choice, so the row has no "Change".
+    {
+      label: t("pollFormReviewResults"),
+      value: t("pollFormReviewResultsValue"),
+    },
     {
       label: t("pollFormReviewCloses"),
       value:

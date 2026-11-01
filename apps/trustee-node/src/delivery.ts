@@ -55,6 +55,11 @@ export type ReceiptDutyStatus =
   | { readonly state: "open"; readonly until: bigint }
   /** Finalized L1 doesn't reach past `closes_at` yet, so the obligation waits. */
   | { readonly state: "waiting-l1" }
+  /**
+   * A rolling election, which commits roots and owes no receipt batch: the
+   * duty sends nothing and is over ([[P1-12f]] part 3c sends its roots).
+   */
+  | { readonly state: "roots" }
   /** `batches` were sent (or resent) this step; `recorded` of `total` are recorded. */
   | {
       readonly state: "sent";

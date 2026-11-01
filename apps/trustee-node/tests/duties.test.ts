@@ -442,14 +442,18 @@ describe("the receipt duties", () => {
           ],
         ],
         [2, [{ state: "recorded", total: 0 }]],
+        // A rolling election, whose roots aren't the batch duty's (P2-17 part 7c-3c).
+        [3, [{ state: "roots" }]],
       ]),
     );
     for (let i = 0; i < 8; i++) await h.duties.step();
     expect(h.stepped.filter((s) => s === name(1))).toHaveLength(6);
     expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(3))).toHaveLength(1);
     expect(h.events).toEqual([
       { event: "receipts", stubHash: name(1), state: "open", until: "500" },
       { event: "receipts", stubHash: name(2), state: "recorded", total: 0 },
+      { event: "receipts", stubHash: name(3), state: "roots" },
       { event: "receipts", stubHash: name(1), state: "waiting-l1" },
       { event: "receipts", stubHash: name(1), state: "sent", batches: 2, recorded: 0, total: 2 },
       { event: "receipts", stubHash: name(1), state: "sent", batches: 1, recorded: 1, total: 2 },
@@ -603,11 +607,14 @@ describe("the complaint duties", () => {
           ],
         ],
         [2, [{ state: "recorded", total: 0, outside: 0, outsideMissing: 0 }]],
+        // A rolling election, whose roots aren't the batch duty's (P2-17 part 7c-3c).
+        [3, [{ state: "roots" }]],
       ]),
     );
     for (let i = 0; i < 9; i++) await h.duties.step();
     expect(h.stepped.filter((s) => s === name(1))).toHaveLength(7);
     expect(h.stepped.filter((s) => s === name(2))).toHaveLength(1);
+    expect(h.stepped.filter((s) => s === name(3))).toHaveLength(1);
     expect(h.events).toEqual([
       { event: "complaints", stubHash: name(1), state: "open", until: "500" },
       {
@@ -618,6 +625,7 @@ describe("the complaint duties", () => {
         outside: 0,
         outsideMissing: 0,
       },
+      { event: "complaints", stubHash: name(3), state: "roots" },
       { event: "complaints", stubHash: name(1), state: "waiting-postings", until: "700" },
       {
         event: "complaints",

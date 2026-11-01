@@ -42,6 +42,8 @@ import { type MembershipProverArtifacts, proveMembership } from "@abolishus/memb
 import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { IntakeSeat, type SeatStore } from "../src/index.ts";
 import { MAX_CLOCK_SKEW, ROLLING_CHAIN_MAX_AGE, ROLLING_CHAIN_RETRY } from "../src/intake.ts";
+import { ComplaintDuty } from "../src/complaint.ts";
+import { ReceiptDuty } from "../src/delivery.ts";
 import { decideObligation } from "../src/obligation.ts";
 import type { RollingIntakeChain } from "../src/rolling-chain.ts";
 import { checkStub, type StubCheck } from "../src/stub.ts";
@@ -288,8 +290,30 @@ describe("a rolling stub's ceremony", () => {
     const view = vi.fn(() => Promise.reject(new Error("no view is read")));
     await expect(
       decideObligation({ store: new MemoryStore(), view, now: () => e.stub.closes_at }, approved),
-    ).rejects.toThrow(/roots/);
+    ).resolves.toEqual({ state: "roots" });
     expect(view).not.toHaveBeenCalled();
+  });
+
+  it("settles its receipt and complaint duties on its roots, sending and storing nothing", async () => {
+    const [seat] = e.seats;
+    const approved = await seat!.approvedElection(e.stubHash);
+    if (approved === undefined) expect.fail("not approved");
+    const store = new MemoryStore();
+    const writes = [vi.spyOn(store, "putOnce"), vi.spyOn(store, "remove")];
+    const view = vi.fn(() => Promise.reject(new Error("no view is read")));
+    const contract = {
+      send: vi.fn(() => Promise.reject(new Error("nothing is sent"))),
+      recorded: vi.fn(() => Promise.reject(new Error("nothing is read"))),
+      postings: vi.fn(() => Promise.reject(new Error("nothing is read"))),
+    };
+    const ballots = vi.fn(() => Promise.reject(new Error("no ballot is read")));
+    const base = { store, view, now: () => e.stub.closes_at + 10n ** 6n, election: approved };
+    expect(await new ReceiptDuty({ ...base, contract }).step()).toEqual({ state: "roots" });
+    expect(await new ComplaintDuty({ ...base, contract, ballots }).step()).toEqual({
+      state: "roots",
+    });
+    for (const f of [view, contract.send, contract.recorded, contract.postings, ballots, ...writes])
+      expect(f).not.toHaveBeenCalled();
   });
 
   it("is counted in later stubs' check 4 as a rolling election, with no M", async () => {

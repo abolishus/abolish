@@ -416,8 +416,10 @@ export class CountedAvailabilityDuties extends ElectionDuties<
  * The receipt duty of every election the seat approved: each one's
  * `ReceiptDuty`, stepped from before `c_I` (it decides nothing until then)
  * until every batch the decision owes is recorded, or `t_D` has passed with
- * some never recorded (`unrecorded`, an alarm). A view no retry can read
- * (`ViewError`, `L1AnchorError`) gives the election up, reported: the seat
+ * some never recorded (`unrecorded`, an alarm); a rolling election, which
+ * commits roots and owes no batch, settles at once (`roots`). A view no
+ * retry can read (`ViewError`, `L1AnchorError`) gives the election up,
+ * reported: the seat
  * then sends nothing through the contract path for it, and its operator
  * must look (T-25, T-53).
  */
@@ -428,7 +430,8 @@ export class ReceiptDuties extends ElectionDuties<"receipts", ReceiptDutyStatus>
         name: "receipts",
         // `t_D`, as `ReceiptDuty.deadline` computes it.
         deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).delivery,
-        settles: (status) => status.state === "recorded" || status.state === "unrecorded",
+        settles: (status) =>
+          status.state === "recorded" || status.state === "unrecorded" || status.state === "roots",
       },
       options,
     );
@@ -467,7 +470,8 @@ export class ReceiptCopySends extends ElectionDuties<
  * The complaint duty of every election the seat approved: each one's
  * `ComplaintDuty`, stepped from before `c_I` (it decides nothing until
  * `t_D + W_C`) until every batch it owes is recorded, or `t_K` has passed
- * with some never recorded (`unrecorded`, an alarm). A ballot source or view
+ * with some never recorded (`unrecorded`, an alarm), or at once for a
+ * rolling election (`roots`). A ballot source or view
  * no retry can read gives the election up, reported, as the receipt duty's
  * does (T-29, T-53).
  */
@@ -478,7 +482,8 @@ export class ComplaintDuties extends ElectionDuties<"complaints", ComplaintDutyS
         name: "complaints",
         // `t_K`, as `ComplaintDuty.deadline` computes it.
         deadline: (e) => deliveryDeadlines(e.closesAt, e.l1InclusionBound).complaint,
-        settles: (status) => status.state === "recorded" || status.state === "unrecorded",
+        settles: (status) =>
+          status.state === "recorded" || status.state === "unrecorded" || status.state === "roots",
       },
       options,
     );

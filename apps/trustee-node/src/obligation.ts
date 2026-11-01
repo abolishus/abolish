@@ -54,6 +54,12 @@ export type ObligationStatus =
   | { readonly state: "open"; readonly until: bigint }
   /** Finalized L1 doesn't reach past `closes_at` yet, so some reference could still be pending. */
   | { readonly state: "waiting-l1" }
+  /**
+   * A rolling election: it has no `M`, so it commits roots whatever its
+   * size and owes no batch (docs/spec/delivery.md, Capacity). Nothing is
+   * decided or written here: its roots are [[P1-12f]] part 3c's.
+   */
+  | { readonly state: "roots" }
   | ({ readonly state: "decided" } & Obligation);
 
 /** What the seat owes for the election, sorted by ballot hash. */
@@ -101,9 +107,10 @@ export async function decideObligation(
   election: ApprovedElection,
 ): Promise<ObligationStatus> {
   // A rolling election has no `M`: it commits roots whatever its size, which
-  // no seat sends yet ([[P1-12f]] part 3c), and stub check 4 refuses it.
-  if (election.rolling === true)
-    throw new Error("trustee node: a rolling election's obligation is its roots, not batches");
+  // no seat sends yet ([[P1-12f]] part 3c), and stub check 4 refuses it. Its
+  // duties settle on this rather than stop the loop every other election's
+  // duties share, and nothing is written, so the roots decide afresh (T-25).
+  if (election.rolling === true) return { state: "roots" };
   const key = `obligations/${hex(election.stubHash)}`;
   const written = await options.store.get(key);
   if (written !== undefined) return decided(written);

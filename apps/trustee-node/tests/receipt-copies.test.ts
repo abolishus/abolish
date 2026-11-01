@@ -11,7 +11,9 @@ import {
   type BoardEntryVersion,
   encodeBoardEntry,
   encodeShareReceipt,
+  encodeShareReceiptV2,
   type ShareReceiptRecord,
+  type ShareReceiptRecordV2,
 } from "@abolishus/crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
@@ -210,6 +212,54 @@ describe("ReceiptCopySender", () => {
     expect(await s.step()).toEqual(sending(1, 1));
     await s.step();
     expect(sent).toHaveLength(1);
+  });
+
+  describe("in a rolling election, whose receipts are version 2 naming the panel", () => {
+    const ROLLING = { ...ELECTION, rolling: true } as ApprovedElectionInfo;
+    const v2Of = (n: number, over: Partial<ShareReceiptRecordV2> = {}) =>
+      encodeShareReceiptV2({ ...fieldsOf(n), panel: 1, ...over });
+    const givenV2 = [{ ballot: hex(new Uint8Array(32).fill(1)), receipt: v2Of(1) }];
+
+    test("takes the same version-2 receipt in other bytes, answered as earlier, as carrying it", async () => {
+      const { op, sent } = operator(() =>
+        boarded(v2Of(1, { signature: new Uint8Array(64).fill(2) }), true),
+      );
+      const s = sender({ receipts: givenV2 }, op, { now: 0n }, { election: ROLLING });
+      expect(await s.step()).toEqual(sending(1, 1));
+      await s.step();
+      expect(sent).toHaveLength(1);
+    });
+
+    test("takes its own bytes as carrying it", async () => {
+      const { op } = operator((r) => boarded(r));
+      const s = sender({ receipts: givenV2 }, op, { now: 0n }, { election: ROLLING });
+      expect(await s.step()).toEqual(sending(1, 1));
+    });
+
+    test.each<[string, () => OperatorAnswer]>([
+      [
+        "the same receipt for the other panel",
+        () => boarded(v2Of(1, { panel: 2, signature: new Uint8Array(64).fill(2) }), true),
+      ],
+      ["the same statement as a version-1 receipt", () => boarded(resigned(1), true)],
+      ["another seat's", () => boarded(v2Of(1, { seat: 3 }), true)],
+      [
+        "another share hash",
+        () => boarded(v2Of(1, { share_hash: new Uint8Array(32).fill(0xee) }), true),
+      ],
+    ])("sends again when answered as earlier with %s", async (_, answer) => {
+      const { op, sent } = operator(answer);
+      const s = sender({ receipts: givenV2 }, op, { now: 0n }, { election: ROLLING });
+      expect(await s.step()).toEqual(sending(1, 0));
+      await s.step();
+      expect(sent).toHaveLength(2);
+    });
+
+    test("a fixed election's seat doesn't take a version-2 receipt as its own version-1 one", async () => {
+      const { op } = operator(() => boarded(v2Of(1), true));
+      const s = sender({ receipts: givenOf([1]) }, op, { now: 0n });
+      expect(await s.step()).toEqual(sending(1, 0));
+    });
   });
 
   test("sends at most perStep receipts a step, the rest at the next", async () => {

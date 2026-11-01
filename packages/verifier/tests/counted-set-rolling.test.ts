@@ -15,7 +15,14 @@ import { readElection } from "../src/admission.ts";
 import { ALL_ROWS, ballotChecks } from "../src/ballots.ts";
 import { cellTiers } from "../src/counted.ts";
 import { decodeDefinition } from "../src/definition.ts";
-import { countedSet, type CountedExtentInputs, countedTally, splitEntries } from "../src/index.ts";
+import {
+  countedResults,
+  countedSet,
+  type CountedExtentInputs,
+  countedTally,
+  rollingElectorates,
+  splitEntries,
+} from "../src/index.ts";
 import { decodeHeader } from "../src/l1.ts";
 import { run, type TestHeader } from "./headers.ts";
 
@@ -263,5 +270,62 @@ describe("the counted tally under a rolling definition", { timeout: WHOLE_BOARDS
   test("is undecided where the counted set is", () => {
     const inputs = inputsOf(byId("relayed-rolling-path"), afterClose);
     expect(countedTally(inputs)).toEqual(countedSet(inputs));
+  });
+});
+
+describe("a rolling tier's electorate beside the counted tally", { timeout: WHOLE_BOARDS }, () => {
+  // Step 8's electorate over the counted extent, as `verifyBundle` reads it
+  // over the sealed board's: from the same chain and every copy whose
+  // membership proof verifies, admitted or not (P2-17 part 9b-1; T-16, T-13).
+  test("gives each rolling tier's, in cell order, from the chain and the verifying copies", () => {
+    let named = 0;
+    for (const id of ["board", "rolling-path", "no-ballots"]) {
+      const inputs = inputsOf(byId(id), afterClose);
+      const result = countedTally(inputs);
+      if (!result.ok) return expect.fail(`${id} undecided: ${JSON.stringify(result)}`);
+      const record = decodeDefinition(inputs.definition);
+      if (record.version !== 7) return expect.fail("not version 7");
+      const steps = admissionRows(inputs).steps ?? [];
+      named += steps.length;
+      expect(result.electorates, id).toEqual(
+        rollingElectorates(record, chain, clock, steps, inputs.entries.length),
+      );
+      // The opening count is each tier's `group_size`, which 2.4 checked:
+      // never a figure the electorate's events and the definition disagree on.
+      expect(
+        result.electorates?.map((e) => e.opening.members),
+        id,
+      ).toEqual(record.value.rolling_electorate.map((t) => Number(t.group_size)));
+    }
+    // Some copy's proof verifies, so the smallest step is read from the copies.
+    expect(named).toBeGreaterThan(0);
+  });
+
+  test("puts each rolling tier's electorate on its results, paired by tier", () => {
+    const inputs = inputsOf(byId("rolling-path"), afterClose);
+    const tally = countedTally(inputs);
+    if (!tally.ok) return expect.fail("undecided");
+    const electorates = tally.electorates ?? [];
+    const results = countedResults(tally, []);
+    expect(results.tiers.map((t) => t.tier)).toEqual(tally.tiers);
+    for (const t of results.tiers)
+      expect(t.electorate).toEqual(electorates[tally.tiers.indexOf(t.tier)]);
+    // No opening is boarded: every cell is `tally-missing`, and the
+    // electorate is reported all the same, since it rests on no opening.
+    expect(results.ok).toBe(false);
+    expect(results.cells.map((c) => c.code)).toEqual(["tally-missing", "tally-missing"]);
+  });
+
+  test("refuses a tally whose electorates aren't one per rolling tier's cell", () => {
+    const inputs = inputsOf(byId("board"), afterClose);
+    const tally = countedTally(inputs);
+    if (!tally.ok) return expect.fail("undecided");
+    const [first] = tally.electorates ?? [];
+    if (first === undefined) return expect.fail("no electorate");
+    expect(() => countedResults({ ...tally, electorates: [first] }, [])).toThrow(RangeError);
+    // Nor electorates beside two cells of one tier, as a fixed poll's regions are.
+    expect(() =>
+      countedResults({ ...tally, tiers: [0, 0], electorates: [first, first] }, []),
+    ).toThrow(RangeError);
   });
 });

@@ -449,6 +449,9 @@ export const TopicAndPlace: Story = {
     await expect(
       review.getByText(/Moderation never touches the answers or the count/),
     ).toBeVisible();
+    // A hide of an open poll for illegal content or personal data stops
+    // answers through our app (docs/moderation-policy.md, Open polls).
+    await expect(review.getByText(/stops people answering it through our app/)).toBeVisible();
     await expect(review.getByRole("link", { name: "See the moderation log" })).toHaveAttribute(
       "href",
       "/moderation",

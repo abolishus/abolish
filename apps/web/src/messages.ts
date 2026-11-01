@@ -1647,7 +1647,7 @@ const enUS = {
     "These aren't part of the poll. They decide where people find it, and moderation can change them.",
   pollFormReviewModeration: "What moderation can do",
   pollFormReviewModerationLede:
-    "If your poll breaks one of the seven grounds in our moderation policy, a moderator can take it out of our lists or hide its words on our pages, and file it under another topic or place where one doesn't fit. Every decision goes in the public log, and you can appeal taking it out of the lists or hiding it once, from your account. Moderation never touches the answers or the count, and can't close your poll early.",
+    "If your poll breaks one of the seven grounds in our moderation policy, a moderator can take it out of our lists or hide its words on our pages, and file it under another topic or place where one doesn't fit. Every decision goes in the public log, and you can appeal taking it out of the lists or hiding it once, from your account. Hiding an open poll for illegal content or someone's personal details also stops people answering it through our app until it's restored. Moderation never touches the answers or the count, and can't close your poll early.",
   pollFormReviewTitleRow: "Title",
   pollFormReviewDescription: "Description",
   pollFormReviewQuestions: "Questions",

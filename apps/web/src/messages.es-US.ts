@@ -1678,7 +1678,7 @@ export const esUS: Messages = {
     "Esto no forma parte de la encuesta. Decide dónde la encuentran, y la moderación puede cambiarlo.",
   pollFormReviewModeration: "Lo que puede hacer la moderación",
   pollFormReviewModerationLede:
-    "Si tu encuesta incumple uno de los siete motivos de nuestra política de moderación, un moderador puede quitarla de nuestras listas u ocultar su texto en nuestras páginas, y archivarla en otro tema o lugar si el suyo no corresponde. Cada decisión queda en el registro público, y puedes apelar una vez, desde tu cuenta, que la quiten de las listas o la oculten. La moderación nunca toca las respuestas ni el recuento, y no puede cerrar tu encuesta antes de tiempo.",
+    "Si tu encuesta incumple uno de los siete motivos de nuestra política de moderación, un moderador puede quitarla de nuestras listas u ocultar su texto en nuestras páginas, y archivarla en otro tema o lugar si el suyo no corresponde. Cada decisión queda en el registro público, y puedes apelar una vez, desde tu cuenta, que la quiten de las listas o la oculten. Ocultar una encuesta abierta por contenido ilegal o por los datos personales de alguien también impide responderla desde nuestra aplicación hasta que se restaure. La moderación nunca toca las respuestas ni el recuento, y no puede cerrar tu encuesta antes de tiempo.",
   pollFormReviewTitleRow: "Título",
   pollFormReviewDescription: "Descripción",
   pollFormReviewQuestions: "Preguntas",

@@ -1079,6 +1079,10 @@ export const Topic: Story = {
     );
     await userEvent.click(canvas.getByText("Topic and place"));
     const topics = within(canvas.getByRole("navigation", { name: "Topics" }));
+    // Opened, the topics' own "All topics" is the way back, so the line
+    // that offered it folded steps aside: below the place's box it repeated
+    // that link and read as the place's (P2-29, the stream's iteration 39).
+    await expect(canvas.queryByRole("link", { name: "Show every topic" })).toBeNull();
     // The opened topics wrap within the search box's width, one right edge
     // down the column: across the page's they ran 512px past it at 1280px
     // (P2-29, the stream's iteration 34).
@@ -1107,6 +1111,9 @@ export const Topic: Story = {
       "href",
       `/discover?sort=closing&topic=transport&after=${NEXT}`,
     );
+    // Folded again, the line is back.
+    await userEvent.click(canvas.getByText("Topic and place"));
+    await expect(canvas.getByRole("link", { name: "Show every topic" })).toBeVisible();
   },
 };
 

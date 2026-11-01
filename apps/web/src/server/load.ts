@@ -364,6 +364,35 @@ async function answeredOf(api: Api, electionId: string): Promise<ServedAnswered 
   }
 }
 
+/** Each listed poll's served counts by election ID, from one read. */
+type AnsweredByElection = ReadonlyMap<string, ServedAnswered>;
+
+/**
+ * How many the API says have answered each of `electionIds` so far, from one
+ * `POST /elections/answered` rather than one read a poll, so a page of the
+ * register or the stream costs the API one request for its counts (T-52).
+ * It names no visitor, only polls the listing already named (T-10). An empty
+ * map when the read fails, and an election the API leaves out (one it
+ * doesn't know) is missing from it, so either shows as a failed single read
+ * does: no count, never a zero. A listing page never names more polls than
+ * the route takes at once; a poll it names twice is asked about once, since
+ * the route refuses a repeat, which would cost every row its count.
+ */
+async function answeredOfMany(
+  api: Api,
+  electionIds: readonly string[],
+): Promise<AnsweredByElection> {
+  if (electionIds.length === 0) return new Map();
+  try {
+    const { elections } = await api.elections.getAnsweredMany({
+      electionIds: [...new Set(electionIds)],
+    });
+    return new Map(elections.map(({ electionId, tiers }) => [electionId, tiers]));
+  } catch {
+    return new Map();
+  }
+}
+
 /**
  * The served counts on `poll`'s own tiers, in the definition's order, a
  * tier with none served at 0. A tier the definition doesn't name has no
@@ -837,7 +866,7 @@ export type RegisterPage =
  * definition is decoded and checked here as on its own page, and its display
  * text as a stream card's (src/server/stream-card.ts), so the list shows
  * nothing the poll page wouldn't (T-31, T-34, T-41), how many have
- * answered it so far as a card's (`answeredOf`), where it is listed as
+ * answered it so far, every row's from one read (`answeredOfMany`), where it is listed as
  * its page reads it (`tagsOf`), and whether a closed one is counted
  * (`countedOf`). A poll stops being
  * served between the listing and its definition only if the database lost
@@ -887,17 +916,18 @@ export async function loadPollList(
   // The clock each row's status is read at, here to choose whose results to
   // ask for and on the page to show it, so the two agree.
   const asOf = now();
+  const answeredBy = answeredOfMany(api, elections);
   const answers = await Promise.all(
     elections.map(async (electionId) => {
       try {
-        const [{ definition }, displayText, answered, tags] = await Promise.all([
+        const [{ definition }, displayText, tags] = await Promise.all([
           api.elections.getDefinition({ electionId }),
           displayTextOf(api, electionId),
-          answeredOf(api, electionId),
           tagsOf(api, electionId),
         ]);
         const view = definitionView(electionId, definition);
         const counted = view.ok && (await countedOf(api, view.poll, asOf));
+        const answered = (await answeredBy).get(electionId);
         return { electionId, definition, view, displayText, answered, tags, counted };
       } catch (error) {
         if (notFound(error)) return undefined;
@@ -1081,7 +1111,9 @@ async function displayTextOf(api: Api, electionId: string): Promise<string | und
  * (packages/api-contract, `elections.list`); each card's definition and text
  * are checked here (src/server/stream-card.ts), and its tags read as the poll
  * page reads them (`tagsOf`), who asked it as `readAskedBy` reads it
- * (`askedByOf`), and how many have answered it so far (`answeredOf`, `"unread"` when that read fails). A poll the database lost between the listing and its
+ * (`askedByOf`), and how many have answered it so far, every card's from one
+ * read (`answeredOfMany`, `"unread"` when that read fails or leaves the poll
+ * out). A poll the database lost between the listing and its
  * definition drops out of the page. A page holds `limit` polls at most.
  */
 export async function loadStream(
@@ -1109,8 +1141,17 @@ export async function loadStream(
     if (q !== undefined && searchRefused(error)) return { kind: "search-refused" };
     throw error;
   }
+  const answeredBy = answeredOfMany(api, elections);
   const cards = await Promise.all(
-    elections.map((electionId) => loadCard(api, electionId, locale, readAskedBy)),
+    elections.map((electionId) =>
+      loadCard(
+        api,
+        electionId,
+        locale,
+        readAskedBy,
+        answeredBy.then((served) => served.get(electionId)),
+      ),
+    ),
   );
   return {
     kind: "stream",
@@ -1123,14 +1164,15 @@ export async function loadStream(
 /**
  * One poll's card as the stream shows it: its definition and text checked
  * (src/server/stream-card.ts), its tags, who asked it and how many have
- * answered it so far, or `undefined` if the database lost it since the
- * listing named it.
+ * answered it so far (`answered`, read by the caller), or `undefined` if the
+ * database lost it since the listing named it.
  */
 async function loadCard(
   api: Api,
   electionId: string,
   locale: string,
   readAskedBy: ReadAskedBy | undefined,
+  answeredRead: Promise<ServedAnswered | undefined>,
 ): Promise<StreamCard | undefined> {
   try {
     const [{ definition }, displayText, tags, askedBy, answered] = await Promise.all([
@@ -1138,7 +1180,7 @@ async function loadCard(
       displayTextOf(api, electionId),
       tagsOf(api, electionId),
       askedByOf(readAskedBy, electionId),
-      answeredOf(api, electionId),
+      answeredRead,
     ]);
     const card = streamCard(electionId, definition, displayText, locale, tags);
     return card.kind === "poll"
@@ -1187,7 +1229,7 @@ export async function loadFeatured(
   }
   const electionId = elections.find((id) => !shown.includes(id));
   if (electionId === undefined) return undefined;
-  const card = await loadCard(api, electionId, locale, readAskedBy);
+  const card = await loadCard(api, electionId, locale, readAskedBy, answeredOf(api, electionId));
   return card?.kind === "poll" &&
     Array.isArray(card.answered) &&
     card.answered.some(({ answered }) => answered !== "0")

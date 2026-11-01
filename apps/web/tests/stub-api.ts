@@ -553,7 +553,8 @@ export const LOG_ENTRIES: readonly Record<string, string>[] = [
  * `log` is the moderation log it serves, oldest first; `mostAnswered` is the
  * `answered` order it lists, which with it unset it can't sort by, as an API
  * without the anchoring clock can't; `answered` is how many have answered
- * each poll so far, tier by tier, as the API serves it.
+ * each poll so far, tier by tier, as the API serves it, and with
+ * `answeredManyFails` set its read of several polls' counts at once fails.
  */
 export const stub: {
   down: boolean;
@@ -563,6 +564,7 @@ export const stub: {
   log: readonly Record<string, string>[];
   mostAnswered: readonly string[] | undefined;
   answered: Map<string, readonly { tier: number; answered: string }[]>;
+  answeredManyFails: boolean;
 } = {
   down: false,
   logCounts: LOG_COUNTS,
@@ -581,10 +583,17 @@ export const stub: {
       ],
     ],
   ]),
+  answeredManyFails: false,
 };
 
 /** Every request the stub API received, with its headers. */
-export const seen: { path: string; query: URLSearchParams; headers: IncomingHttpHeaders }[] = [];
+export const seen: {
+  method: string;
+  path: string;
+  query: URLSearchParams;
+  headers: IncomingHttpHeaders;
+  body?: unknown;
+}[] = [];
 
 /**
  * The polls the stub finds for a search, as the API would from their
@@ -615,12 +624,38 @@ const TAGS = new Map<string, { topic?: string; place?: string }>([
 export function stubApi(): Server {
   return createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://stub");
-    seen.push({ path: url.pathname, query: url.searchParams, headers: req.headers });
+    const request = {
+      method: req.method ?? "GET",
+      path: url.pathname,
+      query: url.searchParams,
+      headers: req.headers,
+    };
+    seen.push(request);
     if (stub.down) return void req.socket.destroy();
     const json = (status: number, body: unknown) => {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    if (req.method === "POST" && url.pathname === "/elections/answered") {
+      // The only POST the website's server sends the API. As `GET` answers
+      // each poll, leaving out STREAM_V1, whose single read fails, as the API
+      // leaves out an election it doesn't know.
+      const chunks: Buffer[] = [];
+      req.on("data", (chunk: Buffer) => chunks.push(chunk));
+      req.on("end", () => {
+        const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+          electionIds: readonly string[];
+        };
+        Object.assign(request, { body });
+        if (stub.answeredManyFails) return json(500, {});
+        json(200, {
+          elections: body.electionIds
+            .filter((id) => id !== STREAM_V1)
+            .map((id) => ({ electionId: id, tiers: stub.answered.get(id) ?? [] })),
+        });
+      });
+      return;
+    }
     const electionId = url.searchParams.get("electionId") ?? "";
     const definition = definitions.get(electionId);
     if (url.pathname === "/moderation/log/counts") {

@@ -2004,8 +2004,14 @@ describe("poll list", () => {
     expect(seen.filter((r) => r.path === "/elections")).toHaveLength(1);
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(20);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(20);
-    expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(20);
     expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(20);
+    // Every row's count from one read naming the page's polls (P2-19 part 59, T-52).
+    const answered = seen.filter((r) => r.path === "/elections/answered");
+    expect(answered.map((r) => r.method)).toEqual(["POST"]);
+    const { electionIds } = answered[0]!.body as { electionIds: string[] };
+    const read = seen.filter((r) => r.path === "/elections/definition");
+    expect(electionIds).toHaveLength(read.length);
+    expect(new Set(electionIds)).toEqual(new Set(read.map((r) => r.query.get("electionId"))));
   });
 
   // P2-19 part 17: how many have answered each poll on the register.
@@ -2028,6 +2034,21 @@ describe("poll list", () => {
     expect(row(STREAM_V1)).not.toContain("Answered so far");
     // A definition that names another election shows nothing from it, no count included (T-34).
     expect(row(SWAPPED_ID)).not.toContain("Answered so far");
+  });
+
+  // P2-19 part 59: every row's count from one read.
+  test("shows no row's count when the one read of them fails, and keeps every row", async () => {
+    stub.answeredManyFails = true;
+    try {
+      const html = await (await get(`/polls?after=${LOST_ID}`)).text();
+      const rows = html.split(/<article\b/).slice(1);
+      expect(rows.some((row) => row.includes(`href="/polls/${STREAM_V5}"`))).toBe(true);
+      expect(html).toContain("Should the park stay open late?");
+      // The column's heading stays; no row says a count.
+      expect(rows.filter((row) => /\d people/.test(row.replace(/<[^>]+>/g, "|")))).toEqual([]);
+    } finally {
+      stub.answeredManyFails = false;
+    }
   });
 
   // P2-19 part 19: where each poll on the register is listed.
@@ -2497,6 +2518,19 @@ describe("stream", () => {
     expect(text(v1)).toContain("We couldn&#x27;t get how many have answered just now.");
   });
 
+  // P2-19 part 59: every card's count from one read.
+  test("says it couldn't get any card's count when the one read of them fails, and keeps every card", async () => {
+    stub.answeredManyFails = true;
+    try {
+      const html = await (await get("/discover?topic=community")).text();
+      expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
+      expect(html).not.toContain("Answered so far");
+      expect(html.match(/We couldn&#x27;t get how many have answered just now\./g)).toHaveLength(2);
+    } finally {
+      stub.answeredManyFails = false;
+    }
+  });
+
   test("asks the API for one page, and nothing of the visitor's (T-10)", async () => {
     seen.length = 0;
     await get("/discover", { cookie: "session=secret", "x-forwarded-for": "203.0.113.9" });
@@ -2504,7 +2538,13 @@ describe("stream", () => {
     expect(seen.filter((r) => r.path === "/elections/definition")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(10);
-    expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(10);
+    // Every card's count from one read naming the page's polls (P2-19 part 59, T-52).
+    const answered = seen.filter((r) => r.path === "/elections/answered");
+    expect(answered.map((r) => r.method)).toEqual(["POST"]);
+    const { electionIds } = answered[0]!.body as { electionIds: string[] };
+    const read = seen.filter((r) => r.path === "/elections/definition");
+    expect(electionIds).toHaveLength(read.length);
+    expect(new Set(electionIds)).toEqual(new Set(read.map((r) => r.query.get("electionId"))));
     expect(seen.filter((r) => r.path === "/elections/places")).toHaveLength(1);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
@@ -3073,16 +3113,17 @@ describe("home", () => {
   test("asks the API for one short page of the stream (T-52)", async () => {
     seen.length = 0;
     await get("/");
-    // The listing, newest first, then each card's definition, text, tags and
-    // count: three, not ten. Then the most answered, one past those three,
-    // which this API can't sort by, so no card is read for it.
+    // The listing, newest first, then each card's definition, text and tags,
+    // three, not ten, and their counts in one read (P2-19 part 59). Then the
+    // most answered, one past those three, which this API can't sort by, so
+    // no card is read for it.
     const listings = seen.filter((r) => r.path === "/elections");
     expect(listings).toHaveLength(2);
     expect(listings[0]?.query.get("sort")).toBe("new");
     expect(listings[0]?.query.get("limit")).toBe("3");
     expect(listings[1]?.query.get("sort")).toBe("answered");
     expect(listings[1]?.query.get("limit")).toBe("4");
-    expect(seen).toHaveLength(2 + 3 * 4);
+    expect(seen).toHaveLength(2 + 3 * 3 + 1);
   });
 
   // P2-19 part 44: the featured question, from the home mockup's hero.
@@ -3123,7 +3164,7 @@ describe("home", () => {
         expect(html.indexOf("Browse questions")).toBeLessThan(html.indexOf("featured-title"));
         // One card more than the newest three: four requests for it, no more (T-52).
         expect(seen.filter((r) => r.query.get("electionId") === OPEN_MANY)).toHaveLength(4);
-        expect(seen).toHaveLength(2 + 4 * 4);
+        expect(seen).toHaveLength(2 + 3 * 3 + 1 + 4);
       }));
 
     test("is left out when the next is a poll nobody has answered, rather than reading another", async () =>

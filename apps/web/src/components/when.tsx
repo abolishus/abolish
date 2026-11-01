@@ -7,7 +7,12 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 
 import { catalogs } from "../messages.ts";
 import type { Instant } from "../poll.ts";
-import { formatUtcWhole, formatZonedDaySince, formatZonedNear } from "./format.ts";
+import {
+  formatUtcWhole,
+  formatZonedDaySince,
+  formatZonedNear,
+  formatZonedWhole,
+} from "./format.ts";
 
 /**
  * The visitor's time zone, where a story fixes one so its words don't depend
@@ -80,6 +85,24 @@ export function When({
         : t("utcTime", { time: formatUtcWhole(locale, date, style) })}
     </time>
   );
+}
+
+/**
+ * `When`'s words with `local`, for a sentence that says them after "on"
+ * ("closes on {when}"), so always with the date: "closes on tomorrow" isn't
+ * a sentence. The poll page's sealed results said the close in UTC under
+ * facts that said it on the visitor's clock (P2-29, the poll page's
+ * iteration 3). Undefined when the instant is past what `Date` holds.
+ */
+export function useWhenWords(instant: Instant): string | undefined {
+  const t = useTranslate(catalogs);
+  const { locale } = useI18n();
+  const zone = useViewerZone();
+  if (instant.iso === undefined) return undefined;
+  const date = new Date(instant.iso);
+  return zone === undefined
+    ? t("utcTime", { time: formatUtcWhole(locale, date) })
+    : t("zonedTime", formatZonedWhole(locale, zone, date));
 }
 
 /**

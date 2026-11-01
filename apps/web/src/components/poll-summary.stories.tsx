@@ -6,6 +6,7 @@ import type { ReactionsClient } from "../account/reactions.ts";
 import type { PollView } from "../poll.ts";
 import type { ReportOutcome } from "../profile-report.ts";
 import { PollSummary } from "./poll-summary.tsx";
+import { ViewerNow, ViewerTimeZone } from "./when.tsx";
 
 const poll: PollView = {
   electionId: "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
@@ -66,6 +67,17 @@ const meta = {
     follows,
     phoneVerification: false,
   },
+  // A visitor on New York's clock at `asOf`, so the facts' times, drawn on the
+  // visitor's clock, don't depend on the machine drawing the story or when.
+  decorators: [
+    (Story, { args }) => (
+      <ViewerTimeZone.Provider value="America/New_York">
+        <ViewerNow.Provider value={() => new Date(args.asOf.iso ?? OPEN_AT.iso)}>
+          <Story />
+        </ViewerNow.Provider>
+      </ViewerTimeZone.Provider>
+    ),
+  ],
 } satisfies Meta<typeof PollSummary>;
 
 export default meta;
@@ -683,6 +695,37 @@ export const WordedDark: Story = {
   args: { ...WORDED, ballot: BALLOT },
   parameters: { theme: "dark" },
   play: wordedPlay,
+};
+
+/**
+ * Open, closing in three days, its answers sealed until then: the facts and
+ * the results' sentence say the close on the visitor's clock, the evidence
+ * in UTC (P2-29, the poll page's iteration 3).
+ */
+export const WordedClosing: Story = {
+  args: {
+    ...WORDED,
+    ballot: BALLOT,
+    poll: { ...poll, closesAt: { seconds: "1767830400", iso: "2026-01-08T00:00:00.000Z" } },
+    results: { kind: "unopened" },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const facts = canvas.getByRole("region", { name: "About this poll" });
+    // Midnight UTC on January 8 is the evening of January 7 in New York.
+    await expect(within(facts).getByText(/^January 7 at 7:00\sPM\sEST$/)).toBeVisible();
+    await expect(within(facts).getByText(/^December 31, 2025 at 7:00\sPM\sEST$/)).toBeVisible();
+    await expect(within(facts).queryByText(/UTC/)).toBeNull();
+    await expect(
+      canvas.getByText(/^The answers stay sealed until the poll closes on/),
+    ).toHaveTextContent(/closes on January 7, 2026 at 7:00\sPM\sEST\./);
+    // The evidence keeps UTC, the board's own time.
+    await openEvidence(canvasElement);
+    const evidence = canvas.getByRole("region", { name: "How do we know this is real?" });
+    await expect(
+      within(evidence).getByText(/^January 8, 2026 at 12:00\sAM\sUTC$/),
+    ).toBeInTheDocument();
+  },
 };
 
 /** A titled poll of several questions: each question in its words, with its answers. */

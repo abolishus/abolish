@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
 
 import { PollResults } from "./poll-results.tsx";
+import { ViewerTimeZone } from "./when.tsx";
 
 const electionId = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f";
 const closesAt = { seconds: "1794830400", iso: "2026-11-15T12:00:00.000Z" };
@@ -42,6 +43,15 @@ const meta = {
     },
     phoneVerification: false,
   },
+  // A visitor on New York's clock, so the close, drawn on the visitor's
+  // clock, doesn't depend on the machine drawing the story.
+  decorators: [
+    (Story) => (
+      <ViewerTimeZone.Provider value="America/New_York">
+        <Story />
+      </ViewerTimeZone.Provider>
+    ),
+  ],
 } satisfies Meta<typeof PollResults>;
 
 export default meta;
@@ -203,7 +213,7 @@ export const Sealed: Story = {
       canvas.getByRole("heading", { level: 2, name: "Results appear when it closes" }),
     ).toBeVisible();
     await expect(canvas.getByRole("status")).toHaveTextContent(
-      /^The answers stay sealed until the poll closes on November 15, 2026 at 12:00\sPM\sUTC\./,
+      /^The answers stay sealed until the poll closes on November 15, 2026 at 7:00\sAM\sEST\./,
     );
     // T-14: the asker can't open them, and the launch panel's seats are ours.
     await expect(

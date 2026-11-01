@@ -3,10 +3,10 @@ import { ArrowRight } from "lucide-react";
 
 import { catalogs, tierMessage } from "../messages.ts";
 import type { PollStatus, PollView } from "../poll.ts";
-import { formatUtcWhole } from "./format.ts";
 import { leadersOf, type PollResults as Results, shareOf, type TierResults } from "../results.ts";
 import type { PollWords } from "../stream.ts";
 import { isolated } from "../titles.ts";
+import { useWhenWords } from "./when.tsx";
 
 export interface PollResultsProps {
   poll: Pick<PollView, "electionId" | "questions" | "closesAt">;
@@ -212,12 +212,11 @@ const STATE_TEXT = {
  */
 export function PollResults({ poll, results, status, words, phoneVerification }: PollResultsProps) {
   const t = useTranslate(catalogs);
-  const { locale } = useI18n();
   // Definitions of versions 1 and 5 fix no live results, so an open poll's
   // answers are sealed until it closes and is counted: the section says when,
   // in the open poll's mockup's words, rather than a bare "Results".
   const sealed = status === "open" && results.kind === "unopened";
-  const closes = poll.closesAt.iso;
+  const closes = useWhenWords(poll.closesAt);
   return (
     <section aria-labelledby="results-title" className="grid max-w-3xl gap-8">
       <h2 id="results-title" className="m-0 font-heading text-3xl font-semibold">
@@ -253,14 +252,13 @@ export function PollResults({ poll, results, status, words, phoneVerification }:
         </>
       ) : sealed ? (
         <div className="grid gap-4">
-          {/* The date is formatted in UTC, the same on the server and in the
-              browser, though their ICU versions may word it apart. */}
+          {/* Served in UTC and redrawn on the visitor's clock, as the facts'
+              close is; the server's and the browser's ICU versions may word
+              it apart. */}
           <p role="status" className="m-0 max-w-prose text-lg text-pretty" suppressHydrationWarning>
             {closes === undefined
               ? t("resultsSealedUntilClose")
-              : t("resultsSealedUntil", {
-                  when: t("utcTime", { time: formatUtcWhole(locale, new Date(closes)) }),
-                })}
+              : t("resultsSealedUntil", { when: closes })}
           </p>
           {/* T-14: the asker holds no seat, but the launch panel's seats are
               all ours, so the page doesn't claim that no one could open them. */}

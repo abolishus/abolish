@@ -216,21 +216,25 @@ describe("the offline shell", () => {
 
     // The footer's switch: the next page registers the English worker, which
     // replaces the Spanish one and drops its cache. The page's controller
-    // changes when that worker activates, before its `activate` handler has
-    // deleted the old cache, so the cache check waits as long as the switch.
+    // changes when that worker starts activating, before its `activate`
+    // handler has deleted the old cache, so this waits for `activated`, the
+    // state that follows the handler. Reading the caches any earlier races
+    // the deletion: `kept` opens each cache it lists, and opening one the
+    // worker has just deleted makes it again, empty, for good.
     await up();
     await page.goto(`${origin}/how-it-works`);
     await page.getByRole("button", { name: "English" }).click();
     await page.waitForFunction(
-      () => navigator.serviceWorker.controller?.scriptURL.endsWith("/sw.js") === true,
+      () => {
+        const worker = navigator.serviceWorker.controller;
+        return worker?.scriptURL.endsWith("/sw.js") === true && worker.state === "activated";
+      },
       undefined,
       { timeout: 30_000 },
     );
-    await expect
-      .poll(async () => Object.values(await kept()).map((paths) => paths.includes(OFFLINE_PATH)), {
-        timeout: 30_000,
-      })
-      .toEqual([true]);
+    expect(Object.values(await kept()).map((paths) => paths.includes(OFFLINE_PATH))).toEqual([
+      true,
+    ]);
     await down();
     await page.goto(`${origin}/polls`);
     await expect(page.getByRole("heading", { level: 1 }).textContent()).resolves.toBe(

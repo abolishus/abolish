@@ -226,7 +226,8 @@ export interface ElectionAdmission {
    * throws on its bytes. `suppliedRoot` is the root a rolling path's event
    * carries (`RollingBallotSubmitted`, `RelayedRollingBallotSubmitted`),
    * judged as 5.1 judges it under a rolling definition (`root-step-mismatch`)
-   * and ignored under any other; leave it out for a board-path copy.
+   * and ignored under any other; leave it out for a board-path copy. Never
+   * pass `admit` point-free to `map`, which would hand it an index as a root.
    */
   readonly admit: (payload: Uint8Array, suppliedRoot?: bigint) => BallotAdmission;
   /**
@@ -235,7 +236,9 @@ export interface ElectionAdmission {
    * (docs/spec/ballot-validity.md, Batched admission): a ballot whose proof
    * fails runs no validity proof, and an invalid proof costs at most its own
    * batch of 64 the gain from batching (T-52). Never throws on the bytes.
-   * `suppliedRoots[i]`, where given, is payload `i`'s as `admit` takes it.
+   * `suppliedRoots[i]`, where given, is payload `i`'s as `admit` takes it;
+   * given, it must be as long as `payloads` (`RangeError` otherwise), so no
+   * copy is judged under another's root.
    */
   readonly admitAll: (
     payloads: readonly Uint8Array[],
@@ -405,6 +408,8 @@ export function electionAdmission(
     payloads: readonly Uint8Array[],
     suppliedRoots: readonly (bigint | undefined)[] = [],
   ): BallotAdmission[] => {
+    if (suppliedRoots.length !== 0 && suppliedRoots.length !== payloads.length)
+      throw new RangeError("admitAll: one supplied root, or none, per payload");
     const results: (BallotAdmission | undefined)[] = [];
     const waiting: {
       readonly at: number;

@@ -749,6 +749,27 @@ describe("a rolling poll's view at c_I", () => {
     }
   });
 
+  test("keeps exactly the copies under their steps' roots in one batch of both events", async () => {
+    // Voter 0's copy under the wrong root first, so a root shifted onto
+    // another copy would reject a right one or keep a wrong one.
+    const view = await viewOf(
+      viewOptions({
+        entries: board([]),
+        logs: [
+          ...registrationLogs(),
+          rollingSubmitted(ballots[0]!, LATE_ROOT() + 1n, 40n),
+          relayedRollingSubmitted(ballots[1]!, EARLY_ROOT(), 41n),
+          rollingSubmitted(ballots[2]!, LATE_ROOT(), 42n),
+          relayedRollingSubmitted(ballots[0]!, EARLY_ROOT() + 1n, 43n),
+        ],
+      }),
+    );
+    expect(view.board.map((b) => [plainHex(b.ballotHash), b.entry?.path])).toEqual([
+      [plainHex(hashOf(ballots[1]!)), "relayed"],
+      [plainHex(hashOf(ballots[2]!)), "ordinary"],
+    ]);
+  });
+
   test("is retried while no chain can be had, or the chain isn't proven past the close and the tier's root block", async () => {
     for (const chain of [
       undefined,

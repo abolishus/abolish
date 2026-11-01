@@ -376,4 +376,9 @@ describe("the operator's admission of a rolling path's copies", { timeout: 60_00
     expect(admission.admit(mismatched.record).ok).toBe(true);
     expect(admission.admitAll([mismatched.record]).map((r) => r.ok)).toEqual([true]);
   });
+
+  test("refuses roots not one per payload, so no copy is judged under another's", () => {
+    const records = copies.map((x) => x.record);
+    expect(() => admission.admitAll(records, [copies[0]!.root])).toThrow(RangeError);
+  });
 });

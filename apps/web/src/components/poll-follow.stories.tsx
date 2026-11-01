@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { expectTextFocus } from "./focus-text.ts";
 
 import { type FollowsClient, FollowsError, type FollowsFailure } from "../account/follows.ts";
 import { PollFollow } from "./poll-follow.tsx";
@@ -113,6 +114,7 @@ export const Unverified: Story = {
       "href",
       "/account/verify",
     );
+    await expectTextFocus(canvas.getByRole("link", { name: "Verify your e-mail" }));
     await expect(canvas.queryByRole("status")).toBeNull();
   },
 };

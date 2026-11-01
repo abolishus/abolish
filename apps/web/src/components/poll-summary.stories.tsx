@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expectTextFocus } from "./focus-text.ts";
 
 import type { FollowsClient } from "../account/follows.ts";
 import type { ReactionsClient } from "../account/reactions.ts";
@@ -144,6 +145,10 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     "/p/mhanrsz",
   );
+  // The page's text links focus as the answers' boxes do (P2-29, the poll
+  // page's iteration 4).
+  await expectTextFocus(canvas.getByRole("link", { name: "/p/mhanrsz" }));
+  await expectTextFocus(canvas.getByRole("link", { name: "Read the board, entry by entry" }));
 };
 
 export const Default: Story = { play };
@@ -357,6 +362,9 @@ export const Delisted: Story = {
       "left out of discovery and search (Spam)",
     );
     await expect(within(canvasElement).getByText("Delisted")).toBeVisible();
+    await expectTextFocus(
+      within(canvasElement).getByRole("link", { name: "See the moderation log" }),
+    );
   },
 };
 

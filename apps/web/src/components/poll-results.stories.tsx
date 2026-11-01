@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
+import { expectTextFocus } from "./focus-text.ts";
 
 import { PollResults } from "./poll-results.tsx";
 import { ViewerTimeZone } from "./when.tsx";
@@ -90,6 +91,8 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     `/polls/${electionId}/results`,
   );
+  await expectTextFocus(canvas.getByRole("link", { name: "Check the count on the board" }));
+  await expectTextFocus(canvas.getByRole("link", { name: "See the full results" }));
 };
 
 export const Default: Story = { play };

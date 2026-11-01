@@ -18,7 +18,7 @@ const FAILURE = {
   failed: "followFailed",
 } as const satisfies Record<FollowsFailure, keyof Messages>;
 
-const LINK = "font-medium underline underline-offset-4";
+const LINK = "font-medium underline underline-offset-4 focus-text";
 
 /**
  * Following a poll, on the website's poll page ([[P2-25]] part 4b): a

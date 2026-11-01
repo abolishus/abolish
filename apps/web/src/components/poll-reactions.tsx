@@ -62,7 +62,7 @@ type View =
 const failureOf = (e: unknown): ReactionsFailure =>
   e instanceof ReactionsError ? e.failure : "failed";
 
-const LINK = "font-medium underline underline-offset-4";
+const LINK = "font-medium underline underline-offset-4 focus-text";
 
 /**
  * Reactions on a poll, on the website's poll page ([[P2-25]] part 5b). The

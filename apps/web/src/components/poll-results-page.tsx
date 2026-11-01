@@ -570,7 +570,7 @@ export function PollResultsPage({
         lede={t("resultsPageLede")}
       >
         <a
-          className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+          className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4 focus-text"
           href={`/polls/${poll.electionId}`}
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
@@ -588,7 +588,10 @@ export function PollResultsPage({
             of our boards is anchored yet (T-53). */}
         <p className="m-0 max-w-prose border-l-2 border-foreground ps-4 text-pretty text-muted-foreground">
           {t("resultsUpFront")}{" "}
-          <a className="text-foreground underline underline-offset-4" href="#results-check-title">
+          <a
+            className="text-foreground underline underline-offset-4 focus-text"
+            href="#results-check-title"
+          >
             {t("resultsUpFrontLink")}
           </a>
         </p>
@@ -713,7 +716,7 @@ export function PollResultsPage({
           <ul className="m-0 grid list-none gap-2 p-0">
             <li>
               <a
-                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
+                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4 focus-text"
                 href={`/polls/${poll.electionId}/board`}
               >
                 {t("resultsCheck")}
@@ -722,7 +725,7 @@ export function PollResultsPage({
             </li>
             <li>
               <a
-                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4"
+                className="inline-flex min-h-12 items-center gap-2 underline underline-offset-4 focus-text"
                 href="/verify"
               >
                 {t("resultsVerify")}

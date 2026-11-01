@@ -386,6 +386,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
 
   // The lede leaves what choosing an answer does to the one line above the cards.
   await expect(canvas.getAllByText(/in the ballot app/)).toHaveLength(1);
+
+  // The cards end where the search box ends, one right edge down the
+  // column: at 1280px they ran 96px past it (P2-29, the stream's iteration 29).
+  const searchRight = searchForm(canvasElement).getBoundingClientRect().right;
+  for (const card of list.getAllByRole("article"))
+    await expect(card.getBoundingClientRect().right).toBeLessThanOrEqual(searchRight);
 };
 
 export const Default: Story = { play };

@@ -319,7 +319,12 @@ export const TierMeaning: Story = {
     );
     const tier2 = within(canvas.getByRole("tabpanel"));
     await expect(tier2.getByText("Tier 2 (document-verified).")).toBeVisible();
-    await expect(tier2.getByText(/the same document can't join twice\.$/)).toBeVisible();
+    // A document joins once, but one person can hold two (T-03).
+    await expect(
+      tier2.getByText(
+        /can't join twice\. Someone with two documents can still join twice, so this group counts documents, not people/,
+      ),
+    ).toBeVisible();
     await expect(tier2.queryByText(/counts accounts, not people/)).toBeNull();
   },
 };

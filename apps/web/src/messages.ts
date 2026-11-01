@@ -175,9 +175,14 @@ const enUS = {
     "An opened ballot shows what one anonymous voting identity answered, not who it is, unless it is joined to the network address the ballot came from (see the limit on addresses below). Independent trustees take over before the first civic vote, but polls opened before then stay readable with our shares until we destroy them, which no one can verify.",
   howWeakSybilTitle: "Tier 0 can be faked at scale",
   howWeakSybilMeans:
-    "Anyone can create many passkey accounts. A Tier 0 result describes what accounts said, not what people think.",
+    "Anyone who can get several e-mail addresses, and phone numbers where we ask for one, can open several accounts. A Tier 0 result describes what accounts said, not what people think.",
   howWeakSybilLimit:
     "It is always reported on its own and labelled as such, never blended into a total.",
+  howWeakDocumentsTitle: "One person can hold two documents",
+  howWeakDocumentsMeans:
+    "Tier 2 lets each document join once, not each person. Someone with two valid documents, such as passports from two countries, joins twice, and so does anyone holding another person's document, or a copy of its chip's data. A government that issues documents could issue extra ones.",
+  howWeakDocumentsLimit:
+    "Not mitigated: a Tier 2 result counts documents, and is reported on its own beside its tier. Tier 2 isn't open yet.",
   howWeakWatchTitle: "Someone can watch you vote",
   howWeakWatchMeans:
     "A receipt proves your ballot was recorded, not your choice. But nothing stops someone standing over your screen, or demanding your receipt.",
@@ -661,7 +666,7 @@ const enUS = {
   resultsTierMeaning_vouched:
     "Each member was vouched for by people already verified, so faking one takes others willing to vouch falsely.",
   resultsTierMeaning_document:
-    "Each member proved on their own phone, without showing it, that they hold a government-signed passport or ID, and the same document can't join twice.",
+    "Each member proved on their own phone, without showing it, that they hold a government-signed passport or ID, and the same document can't join twice. Someone with two documents can still join twice, so this group counts documents, not people, and is never added to another.",
   resultsTurnoutOf: { one: "{share} of {count} member", other: "{share} of {count} members" },
   resultsTurnoutOfClose: {
     one: "{share} of {count} person who could answer by the close",

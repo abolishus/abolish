@@ -174,9 +174,14 @@ export const esUS: Messages = {
     "Una boleta abierta muestra qué respondió una identidad de votación anónima, no quién es, a menos que se vincule con la dirección de red de la que llegó la boleta (consulta el límite sobre direcciones más abajo). Custodios independientes tomarán el relevo antes de la primera votación cívica, pero las encuestas abiertas antes de eso se podrán seguir leyendo con nuestras partes hasta que las destruyamos, algo que nadie puede verificar.",
   howWeakSybilTitle: "El Nivel 0 se puede falsificar a gran escala",
   howWeakSybilMeans:
-    "Cualquiera puede crear muchas cuentas con llave de acceso. Un resultado de Nivel 0 describe lo que dijeron las cuentas, no lo que piensa la gente.",
+    "Quien pueda conseguir varias direcciones de correo, y números de teléfono donde pedimos uno, puede abrir varias cuentas. Un resultado de Nivel 0 describe lo que dijeron las cuentas, no lo que piensa la gente.",
   howWeakSybilLimit:
     "Siempre se informa por separado y se etiqueta como tal, nunca mezclado en un total.",
+  howWeakDocumentsTitle: "Una persona puede tener dos documentos",
+  howWeakDocumentsMeans:
+    "El Nivel 2 deja que cada documento se una una vez, no cada persona. Alguien con dos documentos válidos, como pasaportes de dos países, se une dos veces, y también quien tenga el documento de otra persona o una copia de los datos de su chip. Un gobierno que emite documentos podría emitir otros de más.",
+  howWeakDocumentsLimit:
+    "Sin mitigar: un resultado de Nivel 2 cuenta documentos y se informa por separado junto a su nivel. El Nivel 2 aún no está abierto.",
   howWeakWatchTitle: "Alguien puede verte votar",
   howWeakWatchMeans:
     "Un comprobante prueba que tu boleta quedó registrada, no tu elección. Pero nada impide que alguien vigile tu pantalla o te exija tu comprobante.",
@@ -668,7 +673,7 @@ export const esUS: Messages = {
   resultsTierMeaning_vouched:
     "Por cada miembro respondieron personas ya verificadas, así que falsificar uno exige que otros respondan en falso.",
   resultsTierMeaning_document:
-    "Cada miembro demostró en su propio teléfono, sin mostrarlo, que tiene un pasaporte o una identificación firmados por un gobierno, y el mismo documento no puede unirse dos veces.",
+    "Cada miembro demostró en su propio teléfono, sin mostrarlo, que tiene un pasaporte o una identificación firmados por un gobierno, y el mismo documento no puede unirse dos veces. Quien tenga dos documentos aún puede unirse dos veces, así que este grupo cuenta documentos, no personas, y nunca se suma a otro.",
   resultsTurnoutOf: { one: "{share} de {count} miembro", other: "{share} de {count} miembros" },
   resultsTurnoutOfClose: {
     one: "{share} de {count} persona que podía responder antes del cierre",

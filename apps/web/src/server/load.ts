@@ -800,7 +800,10 @@ export interface PollList {
   readonly counts: RegisterCounts | undefined;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
-  /** Where the previous page ends, if this one isn't the first and holds a poll. */
+  /**
+   * Where the previous page ends, if this one isn't the first: its first
+   * poll, or, past the list's end, just after the cursor (`pastEnd`).
+   */
   readonly previous: string | undefined;
 }
 
@@ -919,8 +922,24 @@ export async function loadPollList(
     counts: await counts,
     // The listing's own cursors, not the polls shown, so a dropped one doesn't end the list.
     next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
-    previous: at === undefined ? undefined : elections[0],
+    previous: at === undefined ? undefined : (elections[0] ?? pastEnd(at)),
   };
+}
+
+/** The largest election ID, which no ID follows. */
+const LAST_ELECTION_ID = (1n << 256n) - 1n;
+
+/**
+ * Where a page back from a page past the list's end starts: just after its
+ * cursor, so the page back ends on the cursor's own poll, which a page just
+ * before the cursor would leave out. `before` need not name a poll. None for
+ * the largest ID, nor for a page read back, which is never past the end
+ * (with no more than a page before it, it is the start).
+ */
+function pastEnd(at: { readonly after: string } | { readonly before: string }): string | undefined {
+  if (!("after" in at)) return undefined;
+  const cursor = BigInt(`0x${at.after}`);
+  return cursor === LAST_ELECTION_ID ? undefined : (cursor + 1n).toString(16).padStart(64, "0");
 }
 
 /**

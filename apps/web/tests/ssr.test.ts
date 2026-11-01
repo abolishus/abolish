@@ -1716,6 +1716,26 @@ describe("poll list", () => {
     expect(pages(both)).not.toContain(`before=${listed[3]}`);
   });
 
+  // P2-19 part 50: a page past the end leads back to the last page.
+  test("leads from past the last poll back to the page ending on it", async () => {
+    const last = listed.at(-1)!;
+    const after = (BigInt(`0x${last}`) + 1n).toString(16).padStart(64, "0");
+    const past = await (await get(`/polls?after=${last}&status=closed`)).text();
+    expect(past).toContain("No more polls");
+    expect(past).toMatch(
+      new RegExp(`href="/polls\\?before=${after}&amp;status=closed"[^>]*>Previous page</a>`),
+    );
+    expect(past).toMatch(/href="\/polls\?status=closed"[^>]*>First page<\/a>/);
+    // The page back holds the cursor's own poll, last, as the forward page before it did.
+    const back = await follow(`/polls?before=${after}`);
+    expect(back.status).toBe(200);
+    expect(linked(await back.text())).toEqual(listed.slice(-20).filter((id) => id !== LOST_ID));
+    // Past the largest ID nothing follows, so only the first page is offered.
+    const top = await (await get(`/polls?after=${"f".repeat(64)}`)).text();
+    expect(top).toContain("No more polls");
+    expect(top).not.toContain("Previous page");
+  });
+
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
     const html = await (await get("/polls")).text();
     const tally =

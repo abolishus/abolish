@@ -149,12 +149,16 @@ export function PollReactions({ electionId, client }: PollReactionsProps) {
   else if (view.own === undefined)
     body = (
       <>
-        <ul aria-label={t("reactionsLabel")} className="m-0 flex list-none flex-wrap gap-2 p-0">
+        {/* Counts to read, not to tap: drawn as the toggles are, in a 44px
+            box, they looked like the toggles they become, and a visitor's tap
+            on one did nothing. Only "React to this poll" is drawn as a
+            control (P2-29, the poll page's iteration 15). */}
+        <ul
+          aria-label={t("reactionsLabel")}
+          className="m-0 flex list-none flex-wrap gap-x-5 gap-y-2 p-0"
+        >
           {REACTIONS.map((r) => (
-            <li
-              key={r}
-              className="inline-flex min-h-11 items-center gap-2 border border-border px-3 text-base"
-            >
+            <li key={r} className="inline-flex items-center gap-2 text-base">
               {face(r, view.counts[r])}
             </li>
           ))}

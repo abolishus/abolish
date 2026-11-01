@@ -461,7 +461,7 @@ export function PollSummary({
             {t(moderation.state === "hidden" ? "moderationHidden" : "moderationDelisted", {
               reason: t(`reason_${latest.reason}`),
             })}{" "}
-            <a className="underline underline-offset-4" href="/moderation">
+            <a className="underline underline-offset-4 focus-text" href="/moderation">
               {t("moderationLogLink")}
             </a>
           </p>
@@ -703,7 +703,10 @@ export function PollSummary({
                 </Fact>
                 {code === undefined ? null : (
                   <Fact term={t("factShortLink")}>
-                    <a className="font-mono underline underline-offset-4" href={`/p/${code}`}>
+                    <a
+                      className="font-mono underline underline-offset-4 focus-text"
+                      href={`/p/${code}`}
+                    >
                       /p/{code}
                     </a>
                   </Fact>
@@ -717,7 +720,7 @@ export function PollSummary({
               </h3>
               <BoardHeadFacts head={board} />
               <a
-                className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+                className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4 focus-text"
                 href={`/polls/${poll.electionId}/board`}
               >
                 {t("boardLink")}

@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
+import { expectTextFocus } from "./focus-text.ts";
 
 import {
   type Reaction,
@@ -176,6 +177,7 @@ export const Unverified: Story = {
       "href",
       "/account/verify",
     );
+    await expectTextFocus(canvas.getByRole("link", { name: "Verify your e-mail" }));
     await expect(canvas.getByRole("button", { name: "Sad: 0 people" })).toHaveAttribute(
       "aria-pressed",
       "false",

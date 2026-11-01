@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
+import { expectTextFocus } from "./focus-text.ts";
 
 import type { CellResults } from "../results.ts";
 import { PollResultsPage } from "./poll-results-page.tsx";
@@ -236,6 +237,14 @@ const play: Story["play"] = async ({ canvasElement }) => {
     "href",
     `/polls/${electionId}`,
   );
+  for (const name of [
+    "How to check it yourself",
+    "Check the count on the board",
+    "How to count it yourself",
+    "Back to the poll",
+  ]) {
+    await expectTextFocus(canvas.getByRole("link", { name }));
+  }
 };
 
 export const Default: Story = { play };

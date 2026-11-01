@@ -243,7 +243,7 @@ export function PollResults({ poll, results, status, words, phoneVerification }:
             {t("resultsClaim")}
           </p>
           <a
-            className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+            className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4 focus-text"
             href={`/polls/${poll.electionId}/results`}
           >
             {t("resultsSeeAll")}
@@ -273,7 +273,7 @@ export function PollResults({ poll, results, status, words, phoneVerification }:
         </p>
       )}
       <a
-        className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4"
+        className="inline-flex min-h-12 items-center gap-2 justify-self-start underline underline-offset-4 focus-text"
         href={`/polls/${poll.electionId}/board`}
       >
         {t("resultsCheck")}

@@ -79,3 +79,28 @@ export const Phone: Story = {
     }
   },
 };
+
+/**
+ * The Spanish links are the longest words the scene ends on: on a phone
+ * each wraps inside the screen rather than pushing the page sideways.
+ */
+export const SpanishPhone: Story = {
+  parameters: { locale: "es-US" },
+  // The site's frame keeps a 16px gutter each side, as the page does.
+  decorators: [
+    (Story) => (
+      <div className="px-4">
+        <Story />
+      </div>
+    ),
+  ],
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const width = canvasElement.ownerDocument.documentElement.clientWidth;
+    await expect(width).toBe(360);
+    for (const name of ["Cómo funciona, en detalle", "Cómo verificar un resultado por tu cuenta"]) {
+      const link = within(canvasElement).getByRole("link", { name });
+      await expect(link.getBoundingClientRect().right).toBeLessThanOrEqual(width - 16);
+    }
+  },
+};

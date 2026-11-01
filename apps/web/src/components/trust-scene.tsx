@@ -172,7 +172,10 @@ export function TrustScene() {
       <div className="flex flex-wrap gap-3">
         <a
           href="/how-it-works"
-          className={cn(buttonVariants({ size: "lg" }), "h-auto min-h-12 py-3 whitespace-normal")}
+          className={cn(
+            buttonVariants({ size: "lg" }),
+            "h-auto min-h-12 max-w-full py-3 whitespace-normal",
+          )}
         >
           {t("trustHowItWorks")}
         </a>
@@ -180,7 +183,7 @@ export function TrustScene() {
           href="/verify"
           className={cn(
             buttonVariants({ size: "lg", variant: "outline" }),
-            "h-auto min-h-12 py-3 whitespace-normal",
+            "h-auto min-h-12 max-w-full py-3 whitespace-normal",
           )}
         >
           {t("howVerify")}

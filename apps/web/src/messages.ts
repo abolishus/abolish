@@ -622,6 +622,7 @@ const enUS = {
     other:
       "{count} questions, answered together. You can change your answers until the poll closes, and only your last ones count.",
   },
+  pollFactsTitle: "About this poll",
   pollQuestionsTitle: "What it asks",
   pollQuestionsFixed:
     "The poll's definition fixes these words, so they can't be edited before it opens or while it runs.",

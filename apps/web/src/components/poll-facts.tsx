@@ -49,6 +49,10 @@ export function StatusMark({
  * tier, when it opens and closes, and how it is counted, with how many
  * questions and options it has. The poll page and its results page head
  * themselves with the same strip, so the two can't state a poll differently.
+ * Its opening and close are on the visitor's own clock once the page runs,
+ * as a stream card's close is: the card a visitor tapped said "Closes
+ * tomorrow, 7:00 PM EST" and the page it opened "January 8, 2026 at 12:00 AM
+ * UTC" (P2-29, the poll page's iteration 3). The evidence keeps UTC.
  */
 export function PollFacts({
   poll,
@@ -79,8 +83,8 @@ export function PollFacts({
             </ul>
           ),
         },
-        { term: t("factOpens"), value: <When instant={poll.opensAt} /> },
-        { term: t("factCloses"), value: <When instant={poll.closesAt} /> },
+        { term: t("factOpens"), value: <When instant={poll.opensAt} local /> },
+        { term: t("factCloses"), value: <When instant={poll.closesAt} local /> },
         {
           term: t("factType"),
           value: (

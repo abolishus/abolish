@@ -3,6 +3,7 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 
 import type { CellResults } from "../results.ts";
 import { PollResultsPage } from "./poll-results-page.tsx";
+import { ViewerNow, ViewerTimeZone } from "./when.tsx";
 
 const electionId = "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f";
 const head = { treeSize: "1234", chainHead: "1f".repeat(32), root: "2e".repeat(32) };
@@ -103,6 +104,18 @@ const meta = {
     phoneVerification: false,
     head,
   },
+  // A visitor on New York's clock the day after the close, so the facts'
+  // times, drawn on the visitor's clock, don't depend on the machine
+  // drawing the story or when.
+  decorators: [
+    (Story) => (
+      <ViewerTimeZone.Provider value="America/New_York">
+        <ViewerNow.Provider value={() => new Date("2026-01-09T12:00:00.000Z")}>
+          <Story />
+        </ViewerNow.Provider>
+      </ViewerTimeZone.Provider>
+    ),
+  ],
 } satisfies Meta<typeof PollResultsPage>;
 
 export default meta;

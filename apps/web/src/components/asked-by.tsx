@@ -1,7 +1,8 @@
-import { useTranslate } from "@abolishus/ui";
+import { cn, useTranslate } from "@abolishus/ui";
 
 import { catalogs } from "../messages.ts";
 import type { AskedBy as Asker } from "../poll.ts";
+import { TEXT_FOCUS } from "./page-parts.tsx";
 
 /**
  * "Asked by" and the profile's name, a link to its page
@@ -19,7 +20,10 @@ export function AskedBy({ askedBy }: { askedBy: Asker }) {
     <span className="min-w-0 wrap-anywhere">
       {t("askedBy")}{" "}
       <a
-        className="relative font-medium text-foreground underline underline-offset-4 before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:content-['']"
+        className={cn(
+          "relative font-medium text-foreground underline underline-offset-4 before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:content-['']",
+          TEXT_FOCUS,
+        )}
         href={`/by/${askedBy.handle}`}
       >
         <bdi>{askedBy.name}</bdi>

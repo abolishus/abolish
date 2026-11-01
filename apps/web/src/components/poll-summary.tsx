@@ -99,10 +99,13 @@ function PollQuestions({
   poll,
   words,
   scheduled,
+  answering,
 }: {
   poll: PollView;
   words: PollWords;
   scheduled: boolean;
+  /** The ballot client's address where this page links answering, else null. */
+  answering: string | null;
 }) {
   const t = useTranslate(catalogs);
   const headed = words.title === "" && words.questions.length === 1;
@@ -126,6 +129,13 @@ function PollQuestions({
           const limits = poll.questions[i];
           const instruction =
             limits === undefined ? undefined : instructionMessage(instructionOf(limits));
+          // The first question's answers open the ballot client with that
+          // answer chosen, as a stream card's do ([[first-answer]]): a link
+          // carries one pick, for question 1, in its fragment alone, which
+          // no server sees (T-10, T-11). The rest are words, drawn without
+          // the box the card's links taught a visitor to tap (P2-29, the
+          // poll page's iteration 1).
+          const picks = i === 0 ? answering : null;
           return (
             <li
               key={i}
@@ -139,9 +149,14 @@ function PollQuestions({
               </span>
               <div className="grid min-w-0 gap-3">
                 {headed ? (
-                  <h3 className="sr-only">{t("questionNumber", { number: i + 1 })}</h3>
+                  <h3 id={`question-${i}`} className="sr-only">
+                    {t("questionNumber", { number: i + 1 })}
+                  </h3>
                 ) : (
-                  <h3 className="m-0 font-heading text-xl leading-snug font-semibold text-pretty break-words sm:text-2xl">
+                  <h3
+                    id={`question-${i}`}
+                    className="m-0 font-heading text-xl leading-snug font-semibold text-pretty break-words sm:text-2xl"
+                  >
                     <span className="sr-only">{t("questionNumber", { number: i + 1 })}: </span>
                     <span lang={words.language} dir="auto">
                       {q.question}
@@ -156,18 +171,46 @@ function PollQuestions({
                     })}
                   </p>
                 )}
-                <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
-                  {q.options.map((label, j) => (
-                    <li
-                      key={j}
-                      lang={words.language}
-                      dir="auto"
-                      className="min-w-0 border border-border px-3 py-1 text-sm break-words"
+                {picks !== null ? (
+                  <>
+                    <p className="m-0 text-sm text-pretty text-muted-foreground">
+                      {t("streamPick", { count: words.questions.length })}
+                    </p>
+                    <ul
+                      // Named by the question it answers, as a card's list is: on a
+                      // poll headed by its one question, the page's heading.
+                      aria-labelledby={headed ? "poll-heading" : `question-${i}`}
+                      className="m-0 grid list-none gap-2 p-0"
                     >
-                      {label}
-                    </li>
-                  ))}
-                </ul>
+                      {q.options.map((label, j) => (
+                        <li key={j}>
+                          <a
+                            href={ballotLink(picks, poll.electionId, j)}
+                            className="flex min-h-12 items-center justify-between gap-3 border border-input px-4 py-2 text-base font-medium hover:border-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:outline-none"
+                          >
+                            <span lang={words.language} dir="auto" className="min-w-0 break-words">
+                              {label}
+                            </span>
+                            <ArrowRight aria-hidden="true" className="size-4 shrink-0" />
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <ul className="m-0 flex list-none flex-wrap gap-2 p-0">
+                    {q.options.map((label, j) => (
+                      <li
+                        key={j}
+                        lang={words.language}
+                        dir="auto"
+                        className="min-w-0 bg-muted px-3 py-1 text-sm break-words"
+                      >
+                        {label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             </li>
           );
@@ -324,6 +367,7 @@ export function PollSummary({
           </h1>
         ) : (
           <h1
+            id="poll-heading"
             lang={text.language}
             dir="auto"
             className="m-0 max-w-4xl font-heading text-4xl leading-[1.05] font-semibold tracking-tight text-balance break-words sm:text-6xl"
@@ -441,7 +485,12 @@ export function PollSummary({
       </header>
 
       {words === undefined ? null : (
-        <PollQuestions poll={poll} words={words} scheduled={status === "scheduled"} />
+        <PollQuestions
+          poll={poll}
+          words={words}
+          scheduled={status === "scheduled"}
+          answering={answering}
+        />
       )}
 
       {/* Shown on a hidden poll too, by number: moderation never withholds a

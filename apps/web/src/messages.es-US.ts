@@ -1825,6 +1825,10 @@ export const esUS: Messages = {
   pollFormReviewQuestionCount: { one: "{count} pregunta", other: "{count} preguntas" },
   pollFormReviewWho: "Quién puede responder",
   pollFormReviewCloses: "Cierra",
+  pollFormReviewKey: "Quién tiene la clave",
+  pollFormReviewKeyValue:
+    "Durante el lanzamiento, solo Abolish tiene la clave de esta encuesta, así que sus respuestas no son secretas para nosotros. Los fideicomisarios independientes que se nombren después no lo cambiarán para esta encuesta, y aún no se ofrece añadir fideicomisarios propios.",
+  pollFormReviewKeyLink: "Cómo funciona la clave",
   pollFormReviewPlace: "Lugar",
   pollFormReviewTopic: "Tema",
   pollFormReviewNone: "Ninguno",

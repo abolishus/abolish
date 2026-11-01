@@ -1795,6 +1795,10 @@ const enUS = {
   pollFormReviewQuestionCount: { one: "{count} question", other: "{count} questions" },
   pollFormReviewWho: "Who can answer",
   pollFormReviewCloses: "Closes",
+  pollFormReviewKey: "Who holds the key",
+  pollFormReviewKeyValue:
+    "During launch, Abolish alone holds the key for this poll, so its answers aren't secret from us. Independent trustees named later won't change that for this poll, and adding trustees of your own isn't offered yet.",
+  pollFormReviewKeyLink: "How the key works",
   pollFormReviewPlace: "Place",
   pollFormReviewTopic: "Topic",
   pollFormReviewNone: "None",

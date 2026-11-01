@@ -2,7 +2,8 @@ import { cn, useTranslate } from "@abolishus/ui";
 
 import { catalogs, POLL_TOPIC_MESSAGES } from "../messages.ts";
 import type { PollTags } from "../poll.ts";
-import { streamHref, streamPlace } from "../stream.ts";
+import type { StreamFilter } from "../server/load.ts";
+import { streamHref, streamPlace, type StreamSort } from "../stream.ts";
 
 const CHIP =
   "inline-flex min-h-8 min-w-0 items-center border border-border px-2 py-1 wrap-anywhere";
@@ -20,14 +21,27 @@ const LINK = `${CHIP} underline-offset-4 hover:border-foreground hover:underline
 export function ListedUnder({
   tags,
   linked,
+  within,
   className,
 }: {
   tags: PollTags;
   linked: boolean;
+  /**
+   * The stream page the poll is listed on, whose order and narrowing each
+   * link keeps, as that page's own topic links and place box do. Elsewhere a
+   * link leads to the newest.
+   */
+  within?: { sort: StreamSort; filter: StreamFilter } | undefined;
   className?: string;
 }) {
   const t = useTranslate(catalogs);
   const { topic, place } = tags;
+  // On "Most answered this week" a card's "Culture" led to Culture's newest,
+  // while the topics above it, the same word, kept the order: two links of
+  // one name on one page went to two pages (P2-29, the stream's iteration
+  // 40). Kept, a chip leads to a page that still holds its card.
+  const sort = within?.sort ?? "new";
+  const rest = within?.filter ?? {};
   if (topic === undefined && place === undefined) return null;
   const filter = place === undefined ? undefined : streamPlace(place);
   return (
@@ -38,7 +52,7 @@ export function ListedUnder({
       {topic === undefined ? null : (
         <li className="flex min-w-0">
           {linked ? (
-            <a className={LINK} href={streamHref("new", { topic })}>
+            <a className={LINK} href={streamHref(sort, { ...rest, topic })}>
               {t(POLL_TOPIC_MESSAGES[topic])}
             </a>
           ) : (
@@ -51,7 +65,7 @@ export function ListedUnder({
           {/* A checked place is always one the stream can filter by
               (`streamPlace`); the guard keeps a link from carrying any other. */}
           {linked && filter?.kind === "place" ? (
-            <a className={LINK} href={streamHref("new", { place: filter.place })}>
+            <a className={LINK} href={streamHref(sort, { ...rest, place: filter.place })}>
               <bdi>{place}</bdi>
             </a>
           ) : (

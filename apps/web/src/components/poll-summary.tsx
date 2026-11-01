@@ -195,13 +195,17 @@ function PollQuestions({
                         answer…" as a second muted line: the boxes count
                         themselves and "Choose an answer" says "Pick one", so
                         only a rule a pick doesn't say leads the sentence
-                        (P2-29, the poll page's iteration 8). */}
+                        (P2-29, the poll page's iteration 8). The card's
+                        sentence, without the stream card's "to question 1
+                        of 2": here the card is numbered and the lede counts
+                        the questions, and said again it ran to five lines
+                        at 360 (P2-29, the poll page's iteration 10). */}
                     <p className="m-0 text-sm text-pretty text-muted-foreground">
                       {instruction === undefined || instruction.key === "instruction_one"
-                        ? t("streamPick", { count: words.questions.length })
+                        ? t("streamPick", { count: 1 })
                         : t("pollPickRule", {
                             instruction: t(instruction.key, instruction.values),
-                            pick: t("streamPick", { count: words.questions.length }),
+                            pick: t("streamPick", { count: 1 }),
                           })}
                     </p>
                     <ul

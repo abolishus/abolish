@@ -13,6 +13,7 @@ import {
   oneHistory,
   type TreeClaim,
 } from "../board.ts";
+import { type CeremonyView, ceremonyView } from "../ceremony.ts";
 import {
   ACTIVITY_PAGE,
   ANCHOR_PAGE,
@@ -488,6 +489,11 @@ export type BoardPage =
       /** The entries from `from`, checked; empty at the end of the board. */
       readonly rows: readonly BoardRow[];
       readonly inclusion: Inclusion;
+      /**
+       * The key ceremony from the board's first entry, on the page that
+       * holds it: `undefined` on any later page, or while the board is empty.
+       */
+      readonly ceremony: CeremonyView | undefined;
       readonly anchors: Anchors;
       /** `undefined` with `anchors`. */
       readonly histories: Histories | undefined;
@@ -661,6 +667,12 @@ export async function loadBoardPage(
       ? undefined
       : boardRows(electionId, view.boardEntryVersion, BigInt(from), entries);
   if (rows === undefined) return { kind: "unavailable", problem: "undecodable-entries" };
+  // `boardRows` checked the first entry; the ceremony is read only from the
+  // page that holds it, so no other page asks the API for anything more (T-52).
+  const ceremony =
+    from === "0" && entries[0] !== undefined && view.boardEntryVersion !== undefined
+      ? ceremonyView(entries[0], view.boardEntryVersion, view.transcript, view.poll.panelSize)
+      : undefined;
   const [inclusion, checked] = await Promise.all([
     loadInclusion(api, electionId, head, rows),
     histories(),
@@ -672,6 +684,7 @@ export async function loadBoardPage(
     from,
     rows,
     inclusion,
+    ceremony,
     anchors,
     histories: checked,
   };

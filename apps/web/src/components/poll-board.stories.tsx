@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 
 import type { AnchorRow, BoardRow, EntryKind } from "../board.ts";
+import type { CeremonyView } from "../ceremony.ts";
 import type { PollView } from "../poll.ts";
 import { PollBoard } from "./poll-board.tsx";
 
@@ -59,6 +60,7 @@ const meta = {
     rows,
     kind: undefined,
     inclusion: { checked: 25, outside: undefined },
+    ceremony: undefined,
     pageSize: 25,
     anchors,
     histories: { head: true, anchors: [true, true, true, true, true] },
@@ -171,6 +173,106 @@ export const Default: Story = {
     await expect(lines[9]).toHaveTextContent(/^8\s*10$/);
     // Heights are attributes, never inline styles (style-src 'self').
     await expect(canvasElement.querySelector("svg [style]")).toBeNull();
+    // The ceremony is read only on the page holding the board's first entry, so this one links there.
+    await expect(
+      canvas.getByText(/^The ceremony's record is the board's first entry\./),
+    ).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "See it on the first page" })).toHaveAttribute(
+      "href",
+      `${base}?from=0#ceremony-title`,
+    );
+    await expect(canvas.queryByRole("list", { name: "Trustee seats, in order" })).toBeNull();
+  },
+};
+
+/** Entries 0 to 24, the first page, the ceremony's record first. */
+const firstRows: BoardRow[] = rows.map((row, i) => ({
+  ...row,
+  index: String(i),
+  segment: Math.floor(i / 10),
+  kind: i === 0 ? "ceremony" : row.kind,
+}));
+
+const transcript: CeremonyView = {
+  kind: "transcript",
+  hash: "c3".repeat(32),
+  committed: true,
+  // Seat 7 sent its keys, challenges and answers, but no reveals.
+  seats: Array.from({ length: 7 }, (_, i) => ({ index: i + 1, rounds: i === 6 ? 3 : 4 })),
+};
+
+/**
+ * The first page: the ceremony's record, read from its first entry, is the
+ * one the definition commits to, with each seat's rounds. Which seats
+ * qualified is left to the verifier, and the launch panel is said beside them.
+ */
+export const Ceremony: Story = {
+  args: { from: "0", rows: firstRows, ceremony: transcript },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { name: "How the poll's key was made" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByText(/^This is the record the poll's definition commits to/),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("figure", { name: "Ceremony record hash, computed here" }),
+    ).toHaveTextContent("c3".repeat(32));
+    await expect(
+      canvas.getByRole("img", { name: "Fingerprint of the key ceremony's record" }),
+    ).toBeVisible();
+    await expect(
+      canvas.getByRole("heading", { name: "Seats that sent all four rounds: 6 of 7" }),
+    ).toBeVisible();
+    const seats = within(
+      canvas.getByRole("list", { name: "Trustee seats, in order" }),
+    ).getAllByRole("listitem");
+    await expect(seats).toHaveLength(7);
+    await expect(seats[0]).toHaveTextContent(/^Seat 1\s*All four rounds$/);
+    await expect(seats[6]).toHaveTextContent(/^Seat 7\s*3 of the four rounds$/);
+    await expect(canvas.getByText(/It doesn't check the proofs in it/)).toBeVisible();
+    await expect(canvas.getByRole("link", { name: "Who holds the keys" })).toHaveAttribute(
+      "href",
+      "/trustees",
+    );
+    await expect(canvas.queryByRole("link", { name: "See it on the first page" })).toBeNull();
+    await expect(canvasElement.querySelectorAll('[data-history="broken"]')).toHaveLength(0);
+  },
+};
+
+/** A record on the board that isn't the one the definition commits to: evidence, and said so (T-34). */
+export const CeremonyNotCommitted: Story = {
+  args: { from: "0", rows: firstRows, ceremony: { ...transcript, committed: false } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const verdict = canvas.getByText(/^This isn't the record the poll's definition commits to/);
+    await expect(verdict.closest("[data-history]")).toHaveAttribute("data-history", "broken");
+    await expect(canvas.getByRole("list", { name: "Trustee seats, in order" })).toBeVisible();
+  },
+};
+
+/** A board whose first entry is another kind of record. */
+export const CeremonyMissing: Story = {
+  args: { from: "0", rows: firstRows, ceremony: { kind: "missing" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(/^The board's first entry isn't a ceremony record/),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("list", { name: "Trustee seats, in order" })).toBeNull();
+  },
+};
+
+/** A first entry that is a ceremony record this page can't decode. */
+export const CeremonyUndecodable: Story = {
+  args: { from: "0", rows: firstRows, ceremony: { kind: "undecodable" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByText(/^The board's first entry doesn't decode as a ceremony record/),
+    ).toBeVisible();
+    await expect(canvas.queryByRole("figure", { name: /Ceremony record hash/ })).toBeNull();
   },
 };
 
@@ -368,6 +470,9 @@ export const Empty: Story = {
     await expect(canvas.getAllByText("No entries yet.")).toHaveLength(2);
     await expect(canvas.getByText(/^No period's entries can be counted yet/)).toBeVisible();
     await expect(canvas.queryByRole("figure", { name: "Chain head" })).toBeNull();
+    await expect(
+      canvas.getByText(/^The board holds no entries yet, so the ceremony's/),
+    ).toBeVisible();
     // Nowhere to go: no empty list of pages either.
     await expect(canvas.queryByRole("navigation", { name: "Pages of the board" })).toBeNull();
   },

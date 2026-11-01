@@ -1102,6 +1102,31 @@ const enUS = {
     "Only the latest {count} checkpoints are shown here. The verifier reads every anchored one, from the first.",
   boardAnchorsUndecodable:
     "Our server sent checkpoints for this board that don't check: one doesn't decode, names another poll, or holds more entries than a later one. This page shows none of them rather than show checkpoints it can't read.",
+  boardCeremonyMark: "Key ceremony",
+  boardCeremonyTitle: "How the poll's key was made",
+  boardCeremonyLede:
+    "Before a poll opens, its trustee seats make the key its answers are sealed to, in four rounds of signed messages: their keys, challenges, answers and reveals. The record of all four is the board's first entry, and the poll's definition commits to its hash.",
+  boardCeremonyClaim:
+    "This page decodes that record, computes its hash itself and compares it with the definition's, and reads which seats sent a message in each round. It doesn't check the proofs in it, or so which seats qualified: that is for the verifier, which checks the record against the trustee panel our release names.",
+  boardCeremonyCommitted:
+    "This is the record the poll's definition commits to: this page computed its hash and found the definition's.",
+  boardCeremonyNotCommitted:
+    "This isn't the record the poll's definition commits to: its hash, computed here, isn't the definition's. Keep this page. A board whose ceremony doesn't match its poll fails the verifier.",
+  boardCeremonyHash: "Ceremony record hash, computed here",
+  fingerprintCeremony: "Fingerprint of the key ceremony's record",
+  boardCeremonySeatsTitle: "Seats that sent all four rounds: {count} of {seats}",
+  boardCeremonySeats: "Trustee seats, in order",
+  boardCeremonySeat: "Seat {index}",
+  boardCeremonyAllRounds: "All four rounds",
+  boardCeremonySomeRounds: "{count} of the four rounds",
+  boardCeremonyLaunch: "During launch, Abolish runs every seat.",
+  boardCeremonyMissing:
+    "The board's first entry isn't a ceremony record. A poll's board must start with one, so the verifier fails this poll.",
+  boardCeremonyUndecodable:
+    "The board's first entry doesn't decode as a ceremony record this page reads, under the version the poll's definition pins.",
+  boardCeremonyEmpty: "The board holds no entries yet, so the ceremony's record isn't on it.",
+  boardCeremonyElsewhere: "The ceremony's record is the board's first entry.",
+  boardCeremonyFirstPage: "See it on the first page",
   fingerprintCheckpoint: "Fingerprint of the checkpoint after period {segment}",
   entryKind_ballot: "Sealed ballot",
   entryKind_spoiledOpening: "Spoiled ballot, opened",

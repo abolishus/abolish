@@ -188,17 +188,20 @@ function registrationOf(config: NodeConfig): RegistrationCheck {
 /**
  * A rolling poll's chain over the seat's L2 node, where the configuration
  * names the group registry; without it, intake refuses every rolling
- * poll's ballot (`intake-chain`), as the electorate check refuses its stub.
+ * poll's ballot (`intake-chain`), as the electorate check refuses its stub,
+ * and the counted source refuses its counted set.
  */
-function rollingOf(config: NodeConfig): { rolling?: RollingChainCheck } {
-  const a = config.availability;
+function rollingOf(
+  l2ChainId: bigint,
+  a: AvailabilityConfig | undefined,
+): { rolling?: RollingChainCheck } {
   const g = a?.groupRegistry;
   if (a === undefined || g === undefined) return {};
   const l2 = rpcClient(a.l2);
   return {
     rolling: l2RollingChain({
       l2,
-      chainId: config.l2ChainId,
+      chainId: l2ChainId,
       registry: g.address,
       registrars: g.registrars,
       threshold: g.threshold,
@@ -388,7 +391,7 @@ async function intakeEndpoint(
     ceremony: seat,
     electorate,
     registration: registrationOf(config),
-    ...rollingOf(config),
+    ...rollingOf(config.l2ChainId, config.availability),
     store,
     now: () => BigInt(Math.floor(Date.now() / 1000)),
   });
@@ -921,6 +924,9 @@ export function dutyWiring(
     board: view.board,
     boardFromBlock: view.boardFromBlock,
     counted: a.anchorClock,
+    // A rolling poll's counted set is judged against the chain intake reads,
+    // read afresh through a block past the close.
+    ...rollingOf(config.l2ChainId, a),
     extent: async (election) => {
       const point = AVAILABILITY_POINTS.countedExtent;
       if (!(await attested(s.store, election.definitionHash, point))) return undefined;

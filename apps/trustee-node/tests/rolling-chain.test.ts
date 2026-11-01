@@ -124,7 +124,7 @@ describe("l2RollingChain", () => {
     const { rpc, asked } = l2Node(HISTORY);
     const atLeast: bigint[] = [];
     const got = await chainOver(rpc, { accumulators: provenOver(HISTORY, atLeast) })(definition);
-    expect(got).toEqual({ chain: expected(), safeAt: PROVEN_AT });
+    expect(got).toEqual({ chain: expected(), safeAt: PROVEN_AT, block: PROVEN_BLOCK });
     expect(got?.chain.registeredAt).toBe(tree.registeredAt);
     // Proven at or after the opening state's block and both deployments,
     // and each registry's whole log read from its own deployment.
@@ -163,7 +163,7 @@ describe("l2RollingChain", () => {
     const got = await chainOver(l2Node(history).rpc, { accumulators: provenOver(history) })(
       definition,
     );
-    expect(got).toEqual({ chain: expected(), safeAt: PROVEN_AT });
+    expect(got).toEqual({ chain: expected(), safeAt: PROVEN_AT, block: PROVEN_BLOCK });
   });
 
   test("refuses a proven block the node hasn't finalized, or one short of the opening state's", async () => {

@@ -166,6 +166,7 @@ function electorateFits(
   return (
     poll.rolling &&
     groups.length === 1 &&
+    // `groupSize` is the definition's u64 in canonical decimal (`toString`).
     groups[0]?.groupSize === String(electorate.opening) &&
     counted <= electorate.eligible
   );

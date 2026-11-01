@@ -30,6 +30,7 @@ import {
   deliverySegments,
   type ElectionDefinitionV7,
   electionDefinitionV7Hash,
+  decode,
   encodeBallotV5,
   encodeBoardEntry,
   encodeElectionDefinitionV7,
@@ -48,7 +49,11 @@ import {
   rollingMembershipNullifier,
   rollingMembershipProverInput,
   RollingTierTree,
+  SEAT_PANELS,
+  SHARE_CIPHERTEXT,
   type RollingTierEvent,
+  encodeSharePosting,
+  encodeSharePostingV2,
   shareVoteV4,
   tallyOpeningStatement,
   tallyRules,
@@ -180,6 +185,8 @@ interface Cast {
   readonly bytes: Uint8Array;
   /** Each seat's `ct_i`, by seat. */
   readonly ciphertexts: readonly Uint8Array[];
+  /** Each seat's ML-KEM message `m_i`, by seat, which a posting carries. */
+  readonly ms: readonly Uint8Array[];
 }
 
 let e: ElectionV7;
@@ -257,7 +264,12 @@ async function cast(
     step,
     committed_vote: vote,
   };
-  return { record, bytes: encodeBallotV5(record), ciphertexts: encrypted.ciphertexts };
+  return {
+    record,
+    bytes: encodeBallotV5(record),
+    ciphertexts: encrypted.ciphertexts,
+    ms: encrypted.randomness.map((r) => r.m),
+  };
 }
 
 beforeAll(async () => {
@@ -608,6 +620,7 @@ function duties(
   wire: Wire,
   counted: (election: ApprovedElection) => Promise<CountedSet>,
   definitionOf: TallyDefinition = tagged(),
+  hidden?: { readonly seat: number; readonly ballot: Cast },
 ): TallyDuty[] {
   wire.duties = approved.map(
     (a, i) =>
@@ -620,7 +633,7 @@ function duties(
         definition: definitionOf,
         transcript,
         // Each duty's tally records are its own, over the seat's intake.
-        store: overlay(stores[i] as SeatStore),
+        store: overlay(stores[i] as SeatStore, hidden?.seat === i + 1 ? hidden.ballot : undefined),
         summing: AVAILABLE,
         counted,
         board: async () => ({ state: "unread" }),
@@ -630,11 +643,19 @@ function duties(
   return wire.duties;
 }
 
-function overlay(store: SeatStore): SeatStore {
+/** `store` with the tally's records kept apart, and without its intake record of `hidden`, if given. */
+function overlay(store: SeatStore, hidden?: Cast): SeatStore {
   const own = new Map<string, Uint8Array>();
+  const gone =
+    hidden === undefined
+      ? undefined
+      : `intake/${hex(e.stubHash).slice(2)}/${hex(hashOf(hidden)).slice(2)}`;
   return {
     remove: () => Promise.reject(new Error("the tally duty removes nothing")),
-    get: async (key) => own.get(key) ?? (key.startsWith("tally/") ? undefined : store.get(key)),
+    get: async (key) =>
+      key === gone
+        ? undefined
+        : (own.get(key) ?? (key.startsWith("tally/") ? undefined : store.get(key))),
     putOnce: async (key, v) => {
       const held = own.get(key);
       if (held !== undefined) return { created: false, value: held };
@@ -661,6 +682,38 @@ async function prime(wire: Wire): Promise<void> {
 }
 
 const vssOf = (bytes: Uint8Array) => decodeBallot(bytes, 5).committed_vote.vss;
+const hashOf = (c: Cast) =>
+  ballotHashV5(
+    {
+      definitionHash: election.definitionHash,
+      cell: 0,
+      nullifier: c.record.nullifier,
+      step: c.record.step,
+    },
+    c.record.committed_vote,
+  );
+
+/** `c`'s posting for `seat`: version 2 naming `panel` (the default panel's by default), or version 1. */
+function posting(c: Cast, seat: number, as: { version?: 1 | 2; panel?: 1 | 2 } = {}) {
+  const fields = {
+    definition_hash: election.definitionHash,
+    ballot_hash: hashOf(c),
+    seat,
+    m: c.ms[seat - 1] as Uint8Array,
+    ciphertext: decode(SHARE_CIPHERTEXT, c.ciphertexts[seat - 1] as Uint8Array),
+  };
+  return as.version === 1
+    ? encodeSharePosting(fields)
+    : encodeSharePostingV2({ ...fields, panel: as.panel ?? SEAT_PANELS.default });
+}
+
+/** Every duty's first step with seat 1 holding no intake record of voter 2's ballot. */
+async function stepWithout(postings: readonly Uint8Array[]) {
+  const wire = new Wire();
+  const counted = { ...fixed([ballots.map((b) => b.bytes)]), postings };
+  const d = duties(wire, async () => counted, tagged(), { seat: 1, ballot: ballots[2]! });
+  return d[0]!.step();
+}
 
 describe("the tally duty over a rolling poll", () => {
   test("opens the rolling tier's cell over the counted source's set to the votes cast", async () => {
@@ -685,6 +738,28 @@ describe("the tally duty over a rolling poll", () => {
       if (!checked.ok) return expect.fail(`the opening fails ${checked.code}`);
       expect(checked.counts).toEqual(COUNTS);
     }
+  });
+
+  test("opens a counted ballot's shares from its version-2 posting where intake holds none", async () => {
+    // Seat 1 never took voter 2's ballot in: without a posting it has no sums.
+    expect(await stepWithout([])).toMatchObject({
+      cells: [{ state: "missing-shares", missing: 1 }],
+    });
+    // Its default-panel posting for seat 1 gives them, and its sums pass.
+    expect(await stepWithout([posting(ballots[2]!, 1)])).toMatchObject({
+      cells: [{ state: "combining", sent: 2 }],
+    });
+  });
+
+  test("reads no posting of version 1, of the author panel or of another seat (T-34, T-38)", async () => {
+    for (const p of [
+      posting(ballots[2]!, 1, { version: 1 }),
+      posting(ballots[2]!, 1, { panel: SEAT_PANELS.author }),
+      posting(ballots[2]!, 2),
+    ])
+      expect(await stepWithout([p])).toMatchObject({
+        cells: [{ state: "missing-shares", missing: 1 }],
+      });
   });
 
   const refused = async (counted: CountedSet, definitionOf?: TallyDefinition) => {

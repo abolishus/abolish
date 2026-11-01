@@ -1,7 +1,6 @@
 import { Button, buttonVariants, cn, useI18n, useTranslate } from "@abolishus/ui";
 import { Input } from "@abolishus/ui/ui/input";
 import { Label } from "@abolishus/ui/ui/label";
-import { Pagination, PaginationContent, PaginationItem } from "@abolishus/ui/ui/pagination";
 import { ArrowLeftToLine, ArrowRight, Search } from "lucide-react";
 import { type ReactNode, useId } from "react";
 
@@ -396,25 +395,25 @@ function Pages({
   const t = useTranslate(catalogs);
   if (after === undefined && next === undefined) return null;
   return (
-    <Pagination aria-label={t("registerPages")} className="justify-start">
-      <PaginationContent className="flex-wrap gap-x-6 gap-y-2">
+    <nav aria-label={t("registerPages")}>
+      <ul className="m-0 flex list-none flex-wrap gap-x-6 gap-y-2 p-0">
         {after === undefined ? null : (
-          <PaginationItem>
+          <li>
             <a className={PAGE_LINK} href={registerHref(undefined, filters)}>
               <ArrowLeftToLine aria-hidden="true" className="size-4" />
               {t("registerFirst")}
             </a>
-          </PaginationItem>
+          </li>
         )}
         {next === undefined ? null : (
-          <PaginationItem>
+          <li>
             <a className={PAGE_LINK} href={registerHref(next, filters)}>
               {t("listMore")}
               <ArrowRight aria-hidden="true" className="size-4" />
             </a>
-          </PaginationItem>
+          </li>
         )}
-      </PaginationContent>
-    </Pagination>
+      </ul>
+    </nav>
   );
 }

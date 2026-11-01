@@ -3100,14 +3100,14 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box and counts.
+ * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 181, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 178, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 179, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 180, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
   "/account": { html: 6, js: 200, css: 40, fonts: 58 },

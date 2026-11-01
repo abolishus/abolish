@@ -18,7 +18,8 @@ import {
   type PollSummary,
 } from "../account/drafts.ts";
 import type { OwnProfileView, ProfilesClient } from "../account/profiles.ts";
-import { catalogs, type Messages, POLL_FAILURE_MESSAGES } from "../messages.ts";
+import { catalogs, type Messages, POLL_FAILURE_MESSAGES, tierMessage } from "../messages.ts";
+import type { CardAnswered } from "../stream.ts";
 import { formatUtcWhole } from "./format.ts";
 import { Section } from "./page-parts.tsx";
 import { PollModeration } from "./poll-moderation.tsx";
@@ -84,6 +85,77 @@ export interface AccountPollsProps {
   readonly now?: () => Date;
   /** Called with a failed poll's ID once it is a draft again; by default, opens that draft. */
   readonly onRetried?: (id: string) => void;
+  /** Whether this deployment verifies a phone before an account votes, which names Tier 0. */
+  readonly phoneVerification?: boolean;
+}
+
+/**
+ * How many have answered one of the author's open or closed polls, one line
+ * per tier it is open to, as its page and the stream's card say it: the
+ * board's count of distinct voters, never a result and never one figure
+ * across tiers (T-01). Read for the row alone, after the list; a read that
+ * fails shows nothing, as a card's count does, since the poll's page has it.
+ */
+function AuthorAnswered({
+  client,
+  pollId,
+  closed,
+  phoneVerification,
+  onSignedOut,
+}: {
+  client: DraftsClient;
+  pollId: string;
+  closed: boolean;
+  phoneVerification: boolean;
+  onSignedOut: (() => void) | undefined;
+}) {
+  const t = useTranslate(catalogs);
+  const [answered, setAnswered] = useState<CardAnswered | undefined>();
+  // Read once per poll: a new callback from the page is no reason to ask again.
+  const signedOut = useRef(onSignedOut);
+  signedOut.current = onSignedOut;
+  useEffect(() => {
+    let live = true;
+    client.answered(pollId).then(
+      (counts) => {
+        if (live) setAnswered(counts);
+      },
+      (e: unknown) => {
+        if (live && e instanceof DraftsError && e.failure === "signedOut") signedOut.current?.();
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, pollId]);
+  if (answered === undefined || answered.length === 0) return null;
+  const titleId = `poll-${pollId}-answered`;
+  return (
+    <div className="grid gap-1 text-sm md:col-span-full">
+      <p id={titleId} className="m-0 font-medium">
+        {t(closed ? "pollAnsweredClosed" : "streamAnsweredSoFar")}
+      </p>
+      {/* Every tier at zero is one fact, said once, as the stream's card says it; that sums nothing (T-01). */}
+      {answered.every(({ answered: count }) => count === "0") ? (
+        <p className="m-0">{t("streamAnsweredNone")}</p>
+      ) : (
+        // A line per tier, not a list: the account's list of polls is the one list here.
+        <div role="group" aria-labelledby={titleId} className="grid gap-1">
+          {answered.map(({ tier, answered: count }) => (
+            <p key={tier} className="m-0 flex flex-wrap gap-x-2">
+              <span className="font-semibold tabular-nums">
+                {t("resultsPeople", { count: BigInt(count) })}
+              </span>{" "}
+              <span aria-hidden="true">·</span>{" "}
+              <span className="text-muted-foreground">
+                {t(tierMessage(tier, phoneVerification))}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -105,6 +177,7 @@ export function AccountPolls({
   onProfileChanged,
   now = () => new Date(),
   onRetried = (id) => window.location.assign(`/account/polls/${id}`),
+  phoneVerification = false,
 }: AccountPollsProps) {
   const t = useTranslate(catalogs);
   const { locale } = useI18n();
@@ -428,6 +501,15 @@ export function AccountPolls({
                   <div className="text-sm md:col-start-3 md:row-start-2 md:min-h-12 md:text-end">
                     {actions(p, shown)}
                   </div>
+                  {(shown === "open" || shown === "closed") && p.electionId !== undefined ? (
+                    <AuthorAnswered
+                      client={client}
+                      pollId={p.id}
+                      closed={shown === "closed"}
+                      phoneVerification={phoneVerification}
+                      onSignedOut={onSignedOut}
+                    />
+                  ) : null}
                   {confirming?.id === p.id ? confirm(p, title, confirming.action) : null}
                   {profiles === undefined || profile === undefined ? null : (
                     <div className="md:col-span-full">

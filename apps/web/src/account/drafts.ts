@@ -12,6 +12,7 @@ import { type PollFailure, POLL_FAILURES } from "@abolishus/core/poll-failures";
 import { TURNSTILE_HEADER } from "@abolishus/core/turnstile";
 
 import { REMOVAL_GROUNDS, RESTORE_GROUNDS } from "../moderation-grounds.ts";
+import type { CardAnswered } from "../stream.ts";
 import { isElectionId } from "../values.ts";
 
 // Every state core's table admits (`satisfies` keeps this list core's).
@@ -144,6 +145,8 @@ export interface DraftsClient {
   moderation(id: string): Promise<PollModerationView>;
   /** Appeals the poll's newest decision, which must be an unappealed removal. */
   appeal(id: string): Promise<void>;
+  /** How many have answered an open poll so far, one count per tier it is open to. */
+  answered(id: string): Promise<CardAnswered>;
   /** Submits a draft for setup, with a Turnstile token solved for `poll-create`. */
   submit(id: string, token: string): Promise<void>;
 }
@@ -164,6 +167,9 @@ const REFUSALS: Readonly<Record<string, DraftsFailure>> = {
   TOO_MANY_TODAY: "tooManyToday",
   TURNSTILE_REFUSED: "challengeRefused",
   TURNSTILE_UNAVAILABLE: "challengeUnavailable",
+  // The poll is no longer open (it can only stay open, so another account's
+  // answer, or a stale page): the list is read again.
+  NOT_OPEN: "changed",
 };
 
 async function call(
@@ -366,6 +372,26 @@ function moderationOf(value: unknown): PollModerationView {
   return { state: m.state as ModerationState, latest, appealable: m.appealable, appeals };
 }
 
+/**
+ * The handler's counts, refused unless each is a tier the website words, in
+ * ascending order and once, with a decimal `u64` count. Which tiers the poll
+ * is open to is the handler's, from the poll's own draft.
+ */
+function answeredOf(value: unknown): CardAnswered {
+  const tiers = array(record(value).tiers).map((v) => {
+    const c = record(v);
+    if (
+      (c.tier !== 0 && c.tier !== 1 && c.tier !== 2) ||
+      typeof c.answered !== "string" ||
+      !U64.test(c.answered)
+    )
+      throw new DraftsError("failed");
+    return { tier: c.tier, answered: c.answered } as const;
+  });
+  if (tiers.some((c, i) => i > 0 && c.tier <= tiers[i - 1]!.tier)) throw new DraftsError("failed");
+  return tiers;
+}
+
 // The handler's own wire form: `closesAt` a decimal string.
 const wire = (d: PollDraft) => ({ ...d, closesAt: d.closesAt.toString() });
 
@@ -410,6 +436,9 @@ export const draftsClient: DraftsClient = {
   },
   async appeal(id) {
     await call("/appeal", { id });
+  },
+  async answered(id) {
+    return answeredOf(await call("/answered", { id }));
   },
   async submit(id, token) {
     await call("/submit", { id }, { [TURNSTILE_HEADER]: token });

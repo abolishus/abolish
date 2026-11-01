@@ -504,6 +504,88 @@ describe("moderation", () => {
   });
 });
 
+// How many have answered an open poll as the handler answers it
+// (`POST /drafts/answered`, P2-19 part 57): the row shows only counts it can
+// word, one per tier.
+describe("answered", () => {
+  test("reads each tier's count as the handler answers it, and words each refusal", async () => {
+    const calls = serve(
+      Response.json({ tiers: [{ tier: 0, answered: "38" }] }),
+      Response.json({
+        tiers: [
+          { tier: 0, answered: "0" },
+          { tier: 2, answered: "18446744073709551615" },
+        ],
+      }),
+      Response.json({ tiers: [] }),
+      refusal(409, "NOT_OPEN"),
+      refusal(404, "NOT_FOUND"),
+      refusal(401, "SIGNED_OUT"),
+      refusal(503, "UNAVAILABLE"),
+    );
+    expect(await draftsClient.answered(ID)).toEqual([{ tier: 0, answered: "38" }]);
+    expect(await draftsClient.answered(ID)).toEqual([
+      { tier: 0, answered: "0" },
+      { tier: 2, answered: "18446744073709551615" },
+    ]);
+    expect(await draftsClient.answered(ID)).toEqual([]);
+    expect(calls[0]).toMatchObject({
+      url: "/drafts/answered",
+      init: { method: "POST", body: JSON.stringify({ id: ID }) },
+    });
+    for (const expected of ["changed", "gone", "signedOut", "failed"])
+      expect(await failure(draftsClient.answered(ID))).toBe(expected);
+  });
+
+  test("refuses a tier it can't word, a count that isn't a decimal u64, and tiers out of order", async () => {
+    const bad = [
+      {},
+      { tiers: {} },
+      { tiers: [{ tier: 3, answered: "1" }] },
+      { tiers: [{ tier: -1, answered: "1" }] },
+      { tiers: [{ tier: "0", answered: "1" }] },
+      { tiers: [{ tier: 0, answered: 1 }] },
+      { tiers: [{ tier: 0, answered: "01" }] },
+      { tiers: [{ tier: 0, answered: "-1" }] },
+      { tiers: [{ tier: 0, answered: "1".repeat(21) }] },
+      { tiers: [{ tier: 0 }] },
+      { tiers: [null] },
+      {
+        tiers: [
+          { tier: 1, answered: "1" },
+          { tier: 0, answered: "1" },
+        ],
+      },
+      {
+        tiers: [
+          { tier: 0, answered: "1" },
+          { tier: 0, answered: "2" },
+        ],
+      },
+      [],
+      null,
+    ];
+    for (const answer of bad) {
+      serve(Response.json(answer));
+      expect(await failure(draftsClient.answered(ID))).toBe("failed");
+    }
+  });
+
+  test("never throws anything but its own error, whatever the handler answers", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.jsonValue(), fc.constantFrom(200, 404, 409, 503), async (j, s) => {
+        serve(Response.json(j, { status: s }));
+        const e = await draftsClient.answered(ID).then(
+          () => undefined,
+          (x: unknown) => x,
+        );
+        if (e !== undefined) expect(e).toBeInstanceOf(DraftsError);
+      }),
+      runs,
+    );
+  });
+});
+
 describe("submission", () => {
   test("sends the poll's ID with the token in Turnstile's header, and nothing else of the page's", async () => {
     const calls = serve(Response.json({}, { status: 202 }));

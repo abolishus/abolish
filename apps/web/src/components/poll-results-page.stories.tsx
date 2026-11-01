@@ -298,6 +298,40 @@ export const ByNumber: Story = {
   },
 };
 
+/**
+ * Each tier's panel says what its members proved under its turnout: Tier 0
+ * as accounts, never people, in the words of what this deployment checks
+ * (T-01); Tier 2 what its proof rules out (T-03).
+ */
+export const TierMeaning: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const tier0 = within(canvas.getByRole("tabpanel"));
+    await expect(
+      tier0.getByText(/^Each account here showed it holds an e-mail address\. Anyone with/),
+    ).toBeVisible();
+    await expect(tier0.getByText("Tier 0 (verified e-mail).")).toBeVisible();
+    await userEvent.click(canvas.getByRole("tab", { name: /Tier 2/ }));
+    const tier2 = within(canvas.getByRole("tabpanel"));
+    await waitFor(() => expect(tier2.getByText("Tier 2 (document-verified).")).toBeVisible());
+    await expect(tier2.getByText(/the same document can't join twice\.$/)).toBeVisible();
+    await expect(tier2.queryByText(/counts accounts, not people/)).toBeNull();
+  },
+};
+
+/** Under a phone check, Tier 0's words say what that check proves and what it doesn't (T-01). */
+export const TierMeaningWithPhones: Story = {
+  args: { phoneVerification: true },
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const panel = within(within(canvasElement).getByRole("tabpanel"));
+    await expect(panel.getByText("Tier 0 (verified e-mail and phone).")).toBeVisible();
+    await expect(
+      panel.getByText(/a number verifies one account only\. Someone with several numbers/),
+    ).toBeVisible();
+  },
+};
+
 /** More ballots claimed than the tier has members: no share past 100% is printed (T-34). */
 export const TurnoutUnstated: Story = {
   args: {

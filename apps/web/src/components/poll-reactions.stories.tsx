@@ -89,6 +89,12 @@ export const Counts: Story = {
     await expect(within(list).getAllByRole("listitem")).toHaveLength(6);
     await expect(within(list).getByText("Heart: 12 people")).toBeInTheDocument();
     await expect(within(list).getByText("Clap: 1 person")).toBeInTheDocument();
+    // Counts are read, not tapped: no box like the toggles they become, so
+    // the one control is "React to this poll" (P2-29, the poll page's
+    // iteration 15).
+    for (const item of within(list).getAllByRole("listitem")) {
+      await expect(item).toHaveStyle({ borderTopWidth: "0px", borderLeftWidth: "0px" });
+    }
     await expect(canvas.getByText(/Only you can see which reactions are yours/)).toBeVisible();
     await expect(canvas.getByRole("button", { name: "React to this poll" })).toBeVisible();
     await expect(calls(args.client)).toEqual(["counts"]);

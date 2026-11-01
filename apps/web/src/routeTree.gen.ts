@@ -116,11 +116,12 @@ const PCodeFlyerRoute = PCodeFlyerRouteImport.update({
   path: "/p/$code/flyer",
   getParentRoute: () => rootRouteImport,
 } as any);
-const PollsElectionIdPreviewDotpngRoute = PollsElectionIdPreviewDotpngRouteImport.update({
-  id: "/preview.png",
-  path: "/preview.png",
-  getParentRoute: () => PollsElectionIdRoute,
-} as any);
+const PollsElectionIdPreviewDotpngRoute =
+  PollsElectionIdPreviewDotpngRouteImport.update({
+    id: "/preview.png",
+    path: "/preview.png",
+    getParentRoute: () => PollsElectionIdRoute,
+  } as any);
 const PollsElectionIdBoardRoute = PollsElectionIdBoardRouteImport.update({
   id: "/polls/$electionId_/board",
   path: "/polls/$electionId/board",

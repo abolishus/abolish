@@ -390,7 +390,7 @@ export const esUS: Messages = {
   sortNote_new: "Abiertas ahora, las más recientes primero.",
   sortNote_closing: "Abiertas ahora, las que cierran antes primero.",
   sortNote_answered:
-    "Abiertas ahora, según cuántas personas respondieron en los últimos siete días, cada persona una vez sin importar cuántas veces cambió su respuesta. Cualquiera puede volver a contarlo desde el tablero público.",
+    "Abiertas ahora, las más respondidas en los últimos siete días primero, cada persona contada una vez. Cada tarjeta cuenta todas las respuestas desde que abrió, así que puede mostrar más que la de arriba.",
   streamQuestions: "Preguntas",
   streamAnsweredSoFar: "Han respondido hasta ahora",
   streamAnsweredSinceDay: "Han respondido desde que abrió {day}",

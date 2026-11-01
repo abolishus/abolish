@@ -159,6 +159,21 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // their profile (T-75).
   const asker = list.getByRole("link", { name: "Riverside Neighbours" });
   await expect(asker).toHaveAttribute("href", "/by/k7qa2mzr5xw3bn4d");
+  // A card's text links take the boxes' square 3px focus in the ring's
+  // colour, not the browser's thin rounded outline across their underline
+  // (P2-29, the stream's iteration 33).
+  for (const link of [
+    libraryLink,
+    asker,
+    list.getByRole("link", { name: "This poll can't be shown here" }),
+  ]) {
+    link.focus();
+    await expect(link.matches(":focus-visible")).toBe(true);
+    const style = getComputedStyle(link);
+    await expect(`${style.outlineStyle} ${style.outlineWidth}`).toBe("solid 3px");
+    await expect(style.outlineOffset).toBe("2px");
+    link.blur();
+  }
   await expect(list.getAllByText(/Asked by/)).toHaveLength(1);
   // Its name takes a tap 24px tall, though its line of small text is 14px:
   // points 11px above and below its middle still land on it.

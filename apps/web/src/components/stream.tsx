@@ -201,7 +201,7 @@ function BoxNote({
       <span id={id}>{narrowed.note}</span>
       {/* A 24px tap (WCAG 2.5.8; P2-29, the stream's iteration 12). */}
       <a
-        className="inline-flex min-h-6 items-center underline underline-offset-4"
+        className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
         href={narrowed.href}
       >
         {narrowed.clear}
@@ -507,7 +507,7 @@ export function StreamCard({
         {/* Balanced: at 360px "here" wrapped alone under the rest. */}
         <h3 id={titleId} className="m-0 text-lg font-medium text-balance">
           <a
-            className="underline underline-offset-4"
+            className="underline underline-offset-4 focus-text"
             href={`/polls/${card.electionId}`}
             aria-describedby={questionId}
           >
@@ -570,7 +570,7 @@ export function StreamCard({
               colour, so the heading still reads first. */}
           <a
             href={`/polls/${poll.electionId}`}
-            className="underline decoration-primary decoration-1 underline-offset-4 hover:decoration-2"
+            className="underline decoration-primary decoration-1 underline-offset-4 hover:decoration-2 focus-text"
           >
             {text.heading}
           </a>
@@ -683,7 +683,7 @@ function TopicClear({ sort, filter }: { sort: StreamSort; filter: StreamFilter }
   return (
     <p className="m-0 text-sm">
       <a
-        className="inline-flex min-h-6 items-center underline underline-offset-4"
+        className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
         href={streamHref(sort, { q, place })}
       >
         {t("streamTopicClear")}
@@ -883,7 +883,7 @@ export function StreamPage({
               <p className="m-0 flex flex-wrap items-center gap-x-3 text-sm">
                 <span>{t("streamLater")}</span>
                 <a
-                  className="inline-flex min-h-6 items-center underline underline-offset-4"
+                  className="inline-flex min-h-6 items-center underline underline-offset-4 focus-text"
                   href={streamHref(sort, filter)}
                 >
                   {t("streamStart")}

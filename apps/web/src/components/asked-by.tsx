@@ -19,7 +19,7 @@ export function AskedBy({ askedBy }: { askedBy: Asker }) {
     <span className="min-w-0 wrap-anywhere">
       {t("askedBy")}{" "}
       <a
-        className="relative font-medium text-foreground underline underline-offset-4 before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:content-['']"
+        className="relative font-medium text-foreground underline underline-offset-4 before:absolute before:inset-x-0 before:top-1/2 before:h-6 before:-translate-y-1/2 before:content-[''] focus-text"
         href={`/by/${askedBy.handle}`}
       >
         <bdi>{askedBy.name}</bdi>

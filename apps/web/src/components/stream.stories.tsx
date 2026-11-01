@@ -608,11 +608,21 @@ export const MostAnswered: Story = {
       "aria-current",
       "page",
     );
-    await expect(canvas.getByText(/each person once/)).toBeVisible();
+    const note = canvas.getByText(/each person once/);
+    await expect(note).toBeVisible();
     await expect(canvas.getByRole("link", { name: "More questions" })).toHaveAttribute(
       "href",
       streamHref("answered", {}, NEXT),
     );
+    // The notes under the orders and the topics keep the search box's
+    // width: across the page's, this one ran 150 characters on one line at
+    // 1280px (P2-29, the stream's iteration 26).
+    await userEvent.click(canvas.getByText("Topic and place"));
+    const tagsNote = canvas.getByText(/^Askers choose their poll/);
+    await expect(tagsNote).toBeVisible();
+    const search = searchForm(canvasElement).getBoundingClientRect().width;
+    for (const line of [note, tagsNote])
+      await expect(line.getBoundingClientRect().width).toBeLessThanOrEqual(search);
   },
 };
 

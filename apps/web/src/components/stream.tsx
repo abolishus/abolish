@@ -84,8 +84,14 @@ function Sorts({
           the server can't count this week's answers, it told how they are
           counted, five lines a phone read before the box (P2-29, the
           stream's iteration 18). */}
+      {/* The search box's width: across the page's, "Most answered this
+          week"'s note ran 150 characters on one line at 1280px, twice a
+          reading line, under boxes half as wide (P2-29, the stream's
+          iteration 26). */}
       {unavailable ? null : (
-        <p className="m-0 text-sm text-muted-foreground">{t(SORT_NOTE[sort])}</p>
+        <p className="m-0 max-w-2xl text-sm text-pretty text-muted-foreground">
+          {t(SORT_NOTE[sort])}
+        </p>
       )}
     </nav>
   );
@@ -132,7 +138,9 @@ function Topics({
       </ul>
       {/* The tags are the author's, kept by our server and refiled by
           moderation, not part of the poll (T-68). */}
-      <p className="m-0 text-sm text-muted-foreground">{t("streamTagsNote")}</p>
+      <p className="m-0 max-w-2xl text-sm text-pretty text-muted-foreground">
+        {t("streamTagsNote")}
+      </p>
     </nav>
   );
 }

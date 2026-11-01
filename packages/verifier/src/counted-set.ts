@@ -25,6 +25,7 @@ import {
   type Panel,
   pinnedVersion,
   RECORD_TYPES,
+  type RollingBallotChain,
   type TallyElection,
   tallyRules,
   type WholeOpeningVersion,
@@ -43,7 +44,7 @@ import {
   type TierReport,
   tierResults,
 } from "./counted.ts";
-import type { VerifiedDefinition } from "./definition.ts";
+import { isRolling, type VerifiedDefinition } from "./definition.ts";
 import type { L1Header } from "./l1.ts";
 import { PINNED_PANELS, type PinnedPanel } from "./panels.ts";
 import { selectAdmitted, type SelectionOutcome } from "./selection.ts";
@@ -82,6 +83,16 @@ export interface CountedExtentInputs {
   readonly eventsAuthenticated: boolean;
   /** The panels the release pins, as `verifyBundle` reads them. */
   readonly pins?: readonly PinnedPanel[];
+  /**
+   * Under a rolling definition, its chain, as `rollingChain` gives it from
+   * the caller's own finalized, proven read of both registries through
+   * close, never a chain the operator, a submitter or a relay gives: as
+   * `electionAdmission` takes it, so 5.1 to 5.3 judge each ballot against
+   * step roots the caller computed and 5.8 its step's window (T-08, T-25,
+   * T-71). Without it a rolling poll is `unsupported-version`, decided
+   * before any ballot is read. Another definition never reads it.
+   */
+  readonly rolling?: RollingBallotChain;
 }
 
 /** Each cell's counted set, or why it isn't decided. */
@@ -110,7 +121,9 @@ export type CountedSetResult =
  * entry that doesn't decode under the pinned board-entry version, names
  * another election or lies in a segment past `s_S`: then `entries` isn't the
  * counted extent the board checks passed, and no set over it is the
- * anchored one.
+ * anchored one. Under a rolling definition it also throws one for a chain
+ * whose events don't give the definition's opening state, which no chain
+ * `rollingChain` gives does (2.4's recount passed for it).
  */
 export function countedSet(inputs: CountedExtentInputs): CountedSetResult {
   const counted = countedCells(inputs);
@@ -294,6 +307,7 @@ function countedCells(
     inputs.panel,
     entries,
     inputs.pins ?? PINNED_PANELS,
+    inputs.rolling,
   );
   if (!election.ok) return election;
   const { record, hash, boardEntryVersion, registered, authorRegistered } = election;
@@ -338,6 +352,7 @@ function countedCells(
     boardEntryVersion,
     clock,
     blocks,
+    isRolling(record) ? inputs.rolling : undefined,
   );
   for (const id of ALL_ROWS) {
     const outcome = admission.rows.get(id);

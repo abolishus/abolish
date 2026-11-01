@@ -618,23 +618,25 @@ export function PollSummary({
             already says what choosing does and that nothing is sent until the
             ballot is cast, as the stream says it once above its cards, and the
             lede says where answers are cast (P2-29, the poll page's iteration 7). */}
-        {answering === null ? null : (
-          <div className="grid justify-items-start pt-2">
-            <a
-              href={ballotLink(answering, poll.electionId)}
-              className={cn(
-                buttonVariants({ size: "lg" }),
-                "h-auto min-h-12 justify-between gap-3 py-3 text-start whitespace-normal",
-              )}
-            >
-              {t("pollAnswerOpen", { count: poll.questions.length })}
-              <ArrowRight aria-hidden="true" />
-            </a>
-          </div>
-        )}
-        {share === undefined ? null : (
-          <div className="pt-2">
-            <PollShare {...share} />
+        {/* The way in and the share in one row from where both fit: stacked,
+            the share's wider outline button stood alone under the green one,
+            its own line of a 1280px screen (P2-29, the poll page's iteration
+            12). They wrap to two lines on a phone, the way in first. */}
+        {answering === null && share === undefined ? null : (
+          <div className="flex flex-wrap gap-3 pt-2">
+            {answering === null ? null : (
+              <a
+                href={ballotLink(answering, poll.electionId)}
+                className={cn(
+                  buttonVariants({ size: "lg" }),
+                  "h-auto min-h-12 justify-between gap-3 py-3 text-start whitespace-normal",
+                )}
+              >
+                {t("pollAnswerOpen", { count: poll.questions.length })}
+                <ArrowRight aria-hidden="true" />
+              </a>
+            )}
+            {share === undefined ? null : <PollShare {...share} />}
           </div>
         )}
       </section>

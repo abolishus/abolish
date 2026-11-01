@@ -158,12 +158,13 @@ export class ReceiptCopySender {
 
   /**
    * Whether `entry`, decoded under the pinned board-entry version, carries
-   * `receipt`: its bytes, or with `earlier` a version-1 receipt in other
-   * bytes stating the same (definition, ballot hash, seat, share hash), as
-   * the operator answers a receipt when it already holds a passing one for
-   * that seat of that ballot (Boarding, rule 5). The signature isn't
-   * checked: the answer only stops the sending, which the operator can
-   * already do by never anchoring the entry.
+   * `receipt`: its bytes, or with `earlier` a receipt of the seat's own
+   * version in other bytes stating the same (definition, ballot hash, seat,
+   * share hash, and under version 2 panel), as the operator answers a
+   * receipt when it already holds a passing one for that seat of that
+   * ballot (Boarding, rule 5, per panel under version 2). The signature
+   * isn't checked: the answer only stops the sending, which the operator
+   * can already do by never anchoring the entry.
    */
   #carries(receipt: Uint8Array, entry: Uint8Array, earlier: boolean): boolean {
     let payload: Uint8Array;
@@ -175,16 +176,30 @@ export class ReceiptCopySender {
     }
     if (!earlier) return sameBytes(payload, receipt);
     if (sameBytes(payload, receipt)) return false;
-    // The seat gives version-1 receipts only (definition versions 1 and 5), so its own decodes under it.
+    // The seat's receipts are version 1 under definition versions 1 and 5
+    // and version 2, naming its panel, under a rolling version 7, whose
+    // ballot version 5 fixes it (docs/spec/delivery.md, Versions): its own
+    // decodes under that, and an answer under the other never matches.
     try {
-      const theirs = decodeShareReceipt(payload, 1);
-      const ours = decodeShareReceipt(receipt, 1);
-      return (
+      const same = (
+        theirs: {
+          definition_hash: Uint8Array;
+          ballot_hash: Uint8Array;
+          seat: number;
+          share_hash: Uint8Array;
+        },
+        ours: typeof theirs,
+      ) =>
         sameBytes(theirs.definition_hash, ours.definition_hash) &&
         sameBytes(theirs.ballot_hash, ours.ballot_hash) &&
         theirs.seat === ours.seat &&
-        sameBytes(theirs.share_hash, ours.share_hash)
-      );
+        sameBytes(theirs.share_hash, ours.share_hash);
+      if (this.#o.election.rolling === true) {
+        const theirs = decodeShareReceipt(payload, 2);
+        const ours = decodeShareReceipt(receipt, 2);
+        return theirs.panel === ours.panel && same(theirs, ours);
+      }
+      return same(decodeShareReceipt(payload, 1), decodeShareReceipt(receipt, 1));
     } catch (e) {
       if (e instanceof DecodeError) return false;
       throw e;

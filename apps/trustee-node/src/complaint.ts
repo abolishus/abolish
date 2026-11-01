@@ -114,6 +114,11 @@ export type ComplaintDutyStatus =
   /** Finalized L1 doesn't reach past `closes_at` yet, so the obligation waits. */
   | { readonly state: "waiting-l1" }
   /**
+   * A rolling election, which commits roots and owes no complaint batch: the
+   * duty sends nothing and is over ([[P1-12f]] part 3c sends its roots).
+   */
+  | { readonly state: "roots" }
+  /**
    * The node's clock, or the finalized L2 history it reads postings from,
    * hasn't passed `until` (`t_D + W_C`): a posting in time may not be
    * recorded yet, so the complaints wait.

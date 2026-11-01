@@ -110,20 +110,37 @@ function PollQuestions({
   const t = useTranslate(catalogs);
   const headed = words.title === "" && words.questions.length === 1;
   return (
-    <section aria-labelledby="questions-title" className="grid max-w-3xl gap-6">
-      <div className="grid gap-2">
-        <h2 id="questions-title" className="m-0 font-heading text-2xl font-semibold">
+    // Where the answers open the ballot app, the open poll's mockup goes from
+    // the lede straight to the questions, 40px on (its hero's `gap-10`, where
+    // the page's sections stand 64px apart): its hero is the title, how
+    // answering works and what is asked. A visible "What it asks" and the
+    // sections' gap held the first answer of a poll of several questions
+    // under a phone's first screen. The heading stays for screen readers and
+    // names the section; out of the flow, it adds no gap (P2-29, the poll
+    // page's iteration 9).
+    <section
+      aria-labelledby="questions-title"
+      className={cn("grid max-w-3xl gap-6", answering !== null && "-mt-6")}
+    >
+      {answering !== null ? (
+        <h2 id="questions-title" className="sr-only">
           {t("pollQuestionsTitle")}
         </h2>
-        {/* Before it opens, as the scheduled poll's mockup says it: the words
-            are the definition's, which the definition hash in the evidence
-            pins, and the ballot app checks against the registry (T-34). */}
-        {scheduled ? (
-          <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
-            {t("pollQuestionsFixed")}
-          </p>
-        ) : null}
-      </div>
+      ) : (
+        <div className="grid gap-2">
+          <h2 id="questions-title" className="m-0 font-heading text-2xl font-semibold">
+            {t("pollQuestionsTitle")}
+          </h2>
+          {/* Before it opens, as the scheduled poll's mockup says it: the words
+              are the definition's, which the definition hash in the evidence
+              pins, and the ballot app checks against the registry (T-34). */}
+          {scheduled ? (
+            <p className="m-0 max-w-prose text-base text-pretty text-muted-foreground">
+              {t("pollQuestionsFixed")}
+            </p>
+          ) : null}
+        </div>
+      )}
       <ol className="m-0 grid list-none gap-4 p-0">
         {words.questions.map((q, i) => {
           const limits = poll.questions[i];

@@ -665,7 +665,31 @@ const WORDED = {
   },
 };
 
+/**
+ * Where its answers open the ballot app, the page goes from the lede straight
+ * to the questions, as the open poll's mockup does: "What it asks" names the
+ * section for screen readers only, and the first card stands 40px under the
+ * lede (P2-29, the poll page's iteration 9).
+ */
+const fromTheLede = async (canvasElement: HTMLElement) => {
+  const canvas = within(canvasElement);
+  const asks = canvas.getByRole("region", { name: "What it asks" });
+  const title = within(asks).getByRole("heading", { level: 2, name: "What it asks" });
+  await expect(title.getBoundingClientRect().width).toBeLessThanOrEqual(1);
+  // The header ends on the lede on an open poll.
+  const header = canvasElement.querySelector("article > header");
+  const card = within(asks).getAllByRole("listitem")[0];
+  if (header === null || card === undefined) throw new Error("no header or question card");
+  await expect(within(header as HTMLElement).getByText(/^(One question\.|\d+ questions,) /)).toBe(
+    header.lastElementChild,
+  );
+  await expect(
+    Math.round(card.getBoundingClientRect().top - header.getBoundingClientRect().bottom),
+  ).toBe(40);
+};
+
 const wordedPlay: Story["play"] = async ({ canvasElement }) => {
+  await fromTheLede(canvasElement);
   const canvas = within(canvasElement);
   const heading = canvas.getByRole("heading", { level: 1 });
   await expect(heading).toHaveTextContent("Should the park stay open late?");
@@ -778,29 +802,32 @@ export const WordedClosing: Story = {
 };
 
 /** A titled poll of several questions: each question in its words, with its answers. */
-export const WordedQuestions: Story = {
-  args: {
-    poll: { ...questions, questions: questions.questions.slice(0, 2) },
-    text: {
-      language: "en",
-      heading: "Park and library",
-      question: "Should the park stay open late?",
-      options: ["Yes", "No", "Abstain"],
-    },
-    words: {
-      language: "en",
-      title: "Park and library",
-      questions: [
-        { question: "Should the park stay open late?", options: ["Yes", "No", "Abstain"] },
-        {
-          question: "Which days should the library open on Sundays and holidays?",
-          options: ["Sundays", "Public holidays", "School holidays", "Every evening", "None"],
-        },
-      ],
-    },
-    ballot: BALLOT,
+const WORDED_QUESTIONS = {
+  poll: { ...questions, questions: questions.questions.slice(0, 2) },
+  text: {
+    language: "en",
+    heading: "Park and library",
+    question: "Should the park stay open late?",
+    options: ["Yes", "No", "Abstain"],
   },
+  words: {
+    language: "en",
+    title: "Park and library",
+    questions: [
+      { question: "Should the park stay open late?", options: ["Yes", "No", "Abstain"] },
+      {
+        question: "Which days should the library open on Sundays and holidays?",
+        options: ["Sundays", "Public holidays", "School holidays", "Every evening", "None"],
+      },
+    ],
+  },
+  ballot: BALLOT,
+} satisfies Story["args"];
+
+export const WordedQuestions: Story = {
+  args: WORDED_QUESTIONS,
   play: async ({ canvasElement }) => {
+    await fromTheLede(canvasElement);
     const canvas = within(canvasElement);
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("Park and library");
     // Questions of their own are numbered beside their words.
@@ -835,6 +862,26 @@ export const WordedQuestions: Story = {
     await expect(
       canvas.getByText(/^2 questions, answered together\. You can change your answers until/),
     ).toBeVisible();
+  },
+};
+
+/**
+ * On a small phone's first screen, a poll of several questions shows its
+ * first answer whole, as the frame's own phone stories hold the system pages'
+ * first actions (P2-29, the poll page's iteration 9).
+ */
+export const WordedQuestionsPhone: Story = {
+  args: WORDED_QUESTIONS,
+  globals: { viewport: { value: "phone", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.ownerDocument.documentElement.clientWidth).toBe(360);
+    await fromTheLede(canvasElement);
+    const first = within(
+      within(canvasElement).getByRole("list", {
+        name: "Question 1: Should the park stay open late?",
+      }),
+    ).getByRole("link", { name: "Yes" });
+    await expect(first.getBoundingClientRect().bottom).toBeLessThanOrEqual(640);
   },
 };
 
@@ -902,6 +949,11 @@ export const WordedScheduled: Story = {
     const canvas = within(canvasElement);
     const asks = canvas.getByRole("region", { name: "What it asks" });
     await expect(asks).toBeVisible();
+    // Before it opens nothing links answering, so the section keeps its
+    // visible heading over the note (P2-29, the poll page's iteration 9).
+    await expect(
+      within(asks).getByRole("heading", { level: 2 }).getBoundingClientRect().width,
+    ).toBeGreaterThan(1);
     await expect(within(asks).getByText(/^The poll's definition fixes these words/)).toBeVisible();
     await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
     await expect(canvas.getByText("You can answer here once the poll opens.")).toBeVisible();

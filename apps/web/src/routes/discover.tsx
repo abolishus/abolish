@@ -47,9 +47,19 @@ export const Route = createFileRoute("/discover")({
   // A query or place the API wouldn't take is refused here, without a request.
   loader: ({ context: { locale }, deps: { sort, after, query, topic, place } }) =>
     query.kind === "refused"
-      ? { stream: { kind: "search-refused" as const }, ballot: null, phoneVerification: false }
+      ? {
+          stream: { kind: "search-refused" as const },
+          ballot: null,
+          phoneVerification: false,
+          places: null,
+        }
       : place.kind === "refused"
-        ? { stream: { kind: "place-refused" as const }, ballot: null, phoneVerification: false }
+        ? {
+            stream: { kind: "place-refused" as const },
+            ballot: null,
+            phoneVerification: false,
+            places: null,
+          }
         : fetchStream({
             data: {
               sort,
@@ -75,7 +85,7 @@ export const Route = createFileRoute("/discover")({
   },
   component: function Discover() {
     const { sort, after, q, topic, place } = Route.useSearch();
-    const { stream, ballot, phoneVerification } = Route.useLoaderData();
+    const { stream, ballot, phoneVerification, places } = Route.useLoaderData();
     const query = streamQuery(q);
     const filter = streamPlace(place);
     return (
@@ -91,6 +101,7 @@ export const Route = createFileRoute("/discover")({
         }}
         ballot={ballot}
         phoneVerification={phoneVerification}
+        places={places}
         later={after !== undefined}
       />
     );

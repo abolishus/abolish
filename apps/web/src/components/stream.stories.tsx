@@ -1241,3 +1241,65 @@ export const PlaceRefused: Story = {
     );
   },
 };
+
+/**
+ * The stream's first page with the places listed polls are filed at: the
+ * folded place box suggests them through the browser's own list, each as
+ * its asker wrote it, while the page's text names none of them (T-67), and
+ * the hint says the box suggests them (P2-23 part 3b).
+ */
+export const PlacesSuggested: Story = {
+  args: { places: ["Old Town", "Riverside", "東京 Ward 2"] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByText("Topic and place"));
+    const place = within(placeForm(canvasElement)).getByRole("combobox", { name: "Place" });
+    await expect(place).toBeVisible();
+    await expect(place).toHaveValue("");
+    await expect(place).toHaveAccessibleDescription(
+      /the whole name must match\. It suggests the places listed polls are filed at\.$/,
+    );
+    const list = place.getAttribute("list");
+    await expect(list).not.toBeNull();
+    const options = canvasElement.querySelectorAll(`datalist[id="${list}"] > option`);
+    await expect([...options].map((o) => o.getAttribute("value"))).toEqual([
+      "Old Town",
+      "Riverside",
+      "東京 Ward 2",
+    ]);
+    await expect(canvas.queryByText("東京 Ward 2")).toBeNull();
+  },
+};
+
+/**
+ * A place's page with places to suggest: its box beside the search keeps the
+ * list, and the note saying the page is narrowed stands where the hint was.
+ */
+export const PlacesSuggestedOnAPlace: Story = {
+  args: {
+    typedPlace: "Old Town",
+    filter: { place: "Old Town" },
+    stream: { kind: "stream", cards: filed({ place: "Old town" }), next: NEXT },
+    places: ["Old Town", "Riverside"],
+  },
+  play: async ({ canvasElement }) => {
+    const place = within(placeForm(canvasElement)).getByRole("combobox", { name: "Place" });
+    await expect(place).toBeVisible();
+    await expect(place).toHaveValue("Old Town");
+    await expect(place).toHaveAccessibleDescription("Only questions filed at this place.");
+    await expect(canvasElement.querySelectorAll("datalist > option")).toHaveLength(2);
+  },
+};
+
+/** No places to suggest: a plain box, and a hint that promises none. */
+export const NoPlacesSuggested: Story = {
+  args: { places: [] },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByText("Topic and place"));
+    const place = within(placeForm(canvasElement)).getByRole("textbox", { name: "Place" });
+    await expect(place).not.toHaveAttribute("list");
+    await expect(canvasElement.querySelector("datalist")).toBeNull();
+    await expect(canvas.queryByText(/suggests the places/)).toBeNull();
+  },
+};

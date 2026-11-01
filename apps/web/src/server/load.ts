@@ -865,7 +865,7 @@ export async function loadPollList(
       : undefined;
   // The whole listing's too, but a visitor narrowing the list wants them
   // most, so read wherever the register starts, searched or not (T-52).
-  const places = at === undefined ? placesOf(api) : undefined;
+  const places = at === undefined ? loadPlaces(api) : undefined;
   const back = at !== undefined && "before" in at;
   try {
     ({ elections } = await api.elections.list({
@@ -976,12 +976,13 @@ async function registerCountsOf(api: Api): Promise<RegisterCounts | undefined> {
 }
 
 /**
- * The places the API suggests, or `undefined` when the read fails: they are
+ * The places the API suggests for the register's and the stream's place
+ * boxes, or `undefined` when the read fails: they are
  * a convenience beside the place box, which takes any place without them. A
  * request that names no visitor (T-10); each is an author's tag, shown only
  * as a suggestion the browser offers, never in our words (T-67, T-68).
  */
-async function placesOf(api: Api): Promise<readonly string[] | undefined> {
+export async function loadPlaces(api: Api): Promise<readonly string[] | undefined> {
   try {
     return (await api.elections.getPlaces({})).places;
   } catch {

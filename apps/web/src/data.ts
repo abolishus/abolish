@@ -11,6 +11,7 @@ import {
   loadFeatured,
   loadFollowedPolls,
   loadModerationLog,
+  loadPlaces,
   loadPoll,
   loadPollList,
   loadProfile,
@@ -149,7 +150,9 @@ export const fetchPollList = createServerFn({ method: "GET" })
 /**
  * A page of the stream, with the ballot client's address (`BALLOT_URL`)
  * its cards link to, or `null` if none is set, where the cards link only to
- * each poll's page.
+ * each poll's page, and on the stream's first page the places listed polls
+ * are filed at, for the place box to suggest (`null` on a later page or
+ * when they couldn't be read).
  */
 export const fetchStream = createServerFn({ method: "GET" })
   .inputValidator((input: unknown) => {
@@ -178,23 +181,29 @@ export const fetchStream = createServerFn({ method: "GET" })
     };
   })
   .handler(({ data, context }) =>
-    opaque(async () => ({
-      stream: await loadStream(
-        api(),
-        data.sort,
-        data.after,
-        {
-          q: data.q === "" ? undefined : data.q,
-          topic: data.topic === "" ? undefined : data.topic,
-          place: data.place === "" ? undefined : data.place,
-        },
-        data.locale,
-        context.readAskedBy,
-      ),
-      ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
-      // Names Tier 0 on each card's count, as the poll page names it (P2-31 part 6a).
-      phoneVerification: process.env["PHONE_VERIFICATION"] === "on",
-    })),
+    opaque(async () => {
+      // Read beside the page, and only where the stream starts, as the
+      // register reads them (T-52).
+      const places = data.after === "" ? loadPlaces(api()) : undefined;
+      return {
+        stream: await loadStream(
+          api(),
+          data.sort,
+          data.after,
+          {
+            q: data.q === "" ? undefined : data.q,
+            topic: data.topic === "" ? undefined : data.topic,
+            place: data.place === "" ? undefined : data.place,
+          },
+          data.locale,
+          context.readAskedBy,
+        ),
+        ballot: ballotBase(process.env["BALLOT_URL"]) ?? null,
+        // Names Tier 0 on each card's count, as the poll page names it (P2-31 part 6a).
+        phoneVerification: process.env["PHONE_VERIFICATION"] === "on",
+        places: (await places) ?? null,
+      };
+    }),
   );
 
 /** Questions the home page shows from the top of the stream: one row of cards at desktop width. */

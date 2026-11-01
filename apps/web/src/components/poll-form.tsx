@@ -835,6 +835,26 @@ function PollReview({
         ),
       field: fieldId.closes,
     },
+    // The definition pins its trustee panel (`panel_id`), and the form
+    // offers only the launch panel, so who holds the key is recorded for
+    // good with the rest. Said before submitting, as every page of the poll
+    // says it after ([[0027-trustee-panels-and-live-results]], Part 3, rule
+    // 1; T-14), from the create mockup's "Who holds the key now" (P2-19).
+    // Nothing on the page changes it, so the row has no "Change".
+    {
+      label: t("pollFormReviewKey"),
+      value: (
+        <span className="grid justify-items-start gap-1">
+          <span>{t("pollFormReviewKeyValue")}</span>
+          <a
+            href="/trustees"
+            className="inline-flex min-h-12 items-center underline underline-offset-4"
+          >
+            {t("pollFormReviewKeyLink")}
+          </a>
+        </span>
+      ),
+    },
   ];
   const listing: ReviewRow[] = [
     {

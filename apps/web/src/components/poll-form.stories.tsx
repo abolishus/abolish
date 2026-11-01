@@ -434,6 +434,7 @@ export const TopicAndPlace: Story = {
       "Questions",
       "Who can answer",
       "Closes",
+      "Who holds the key",
       "Place",
       "Topic",
     ]);
@@ -446,6 +447,16 @@ export const TopicAndPlace: Story = {
     await expect(
       review.getByText(wholeText("People with a verified e-mail address")),
     ).toBeVisible();
+    // Who holds the key is recorded for good with the rest, said as every
+    // page of the poll says it, with the trustees page one step away (T-14).
+    await expect(
+      review.getByText(/During launch, Abolish alone holds the key for this poll/),
+    ).toBeVisible();
+    await expect(review.getByRole("link", { name: "How the key works" })).toHaveAttribute(
+      "href",
+      "/trustees",
+    );
+    await expect(review.queryByRole("link", { name: "Change Who holds the key" })).toBeNull();
     // What moderation can do is said before submitting, with the log it
     // writes to, and that it never reaches the answers or the count.
     await expect(review.getByRole("heading", { name: "What moderation can do" })).toBeVisible();
@@ -809,9 +820,9 @@ function wordLines(element: Element, word: string): number {
 
 /**
  * Each review row's value lies as far below its row's top as every other
- * row's, the one row with no "Change" included, which drew its value 20px
- * higher at 360 and its row 24px shorter from 640px (P2-29, creating a poll's
- * iteration 8).
+ * row's, the rows with no "Change" included (who can answer, and who holds
+ * the key), which drew its value 20px higher at 360 and its row 24px shorter
+ * from 640px (P2-29, creating a poll's iteration 8).
  */
 async function valuesLineUp(review: HTMLElement) {
   const offsets = within(review)
@@ -821,7 +832,7 @@ async function valuesLineUp(review: HTMLElement) {
       if (term.parentElement === null || value === null) throw new Error("a term with no value");
       return value.getBoundingClientRect().top - term.parentElement.getBoundingClientRect().top;
     });
-  await expect(offsets).toHaveLength(7);
+  await expect(offsets).toHaveLength(8);
   const [first = 0] = offsets;
   for (const offset of offsets) await expect(Math.abs(offset - first)).toBeLessThanOrEqual(1);
 }

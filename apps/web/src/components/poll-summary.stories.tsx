@@ -809,6 +809,22 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
     await expect(share.height).toBe(way.height);
     await expect(share.left).toBeGreaterThan(way.right);
   }
+  // The share is as wide as its words, its icon right after them as the way
+  // in's arrow is: a fixed minimum width set its icon at the far edge of a
+  // box wider than the green button beside it (P2-29, the poll page's
+  // iteration 14).
+  for (const control of [
+    canvas.getByRole("link", { name: "Answer the question" }),
+    canvas.getByRole("button", { name: "Share this poll" }),
+  ]) {
+    const words = control.ownerDocument.createRange();
+    words.selectNodeContents(control);
+    words.setEndBefore(control.querySelector("svg") ?? control);
+    const icon = control.querySelector("svg")?.getBoundingClientRect();
+    await expect(
+      (icon?.left ?? Infinity) - words.getBoundingClientRect().right,
+    ).toBeLessThanOrEqual(16);
+  }
 };
 
 /** In its own words, answerable in the ballot client. */

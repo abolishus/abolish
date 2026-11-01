@@ -99,9 +99,10 @@ export function PollShare({ url, title, canShare, flyer, embed }: PollShareProps
         setView("share");
       }}
     >
-      <DialogTrigger
-        render={<Button variant="outline" size="lg" className="justify-between sm:min-w-64" />}
-      >
+      {/* As wide as its words, its icon after them, as the green way in
+          beside it is: a minimum width put the icon at the far edge of a box
+          wider than that button (P2-29, the poll page's iteration 14). */}
+      <DialogTrigger render={<Button variant="outline" size="lg" />}>
         {t("shareOpen")}
         <Share2 aria-hidden="true" />
       </DialogTrigger>

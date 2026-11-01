@@ -798,6 +798,11 @@ export interface PollList {
   readonly asOf: Instant;
   /** The whole listing's counts on the register's first page unsearched, `undefined` elsewhere or when they couldn't be read. */
   readonly counts: RegisterCounts | undefined;
+  /**
+   * The places listed polls are filed at, for the place box to suggest, on
+   * the register's first page; `undefined` elsewhere or when they couldn't be read.
+   */
+  readonly places: readonly string[] | undefined;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
   /**
@@ -858,6 +863,9 @@ export async function loadPollList(
     at === undefined && q === undefined && topic === undefined && place === undefined
       ? registerCountsOf(api)
       : undefined;
+  // The whole listing's too, but a visitor narrowing the list wants them
+  // most, so read wherever the register starts, searched or not (T-52).
+  const places = at === undefined ? placesOf(api) : undefined;
   const back = at !== undefined && "before" in at;
   try {
     ({ elections } = await api.elections.list({
@@ -920,6 +928,7 @@ export async function loadPollList(
     polls,
     asOf,
     counts: await counts,
+    places: await places,
     // The listing's own cursors, not the polls shown, so a dropped one doesn't end the list.
     next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
     previous: at === undefined ? undefined : (elections[0] ?? pastEnd(at)),
@@ -964,6 +973,20 @@ async function registerCountsOf(api: Api): Promise<RegisterCounts | undefined> {
     counts.open + counts.scheduled <= counts.listed
     ? counts
     : undefined;
+}
+
+/**
+ * The places the API suggests, or `undefined` when the read fails: they are
+ * a convenience beside the place box, which takes any place without them. A
+ * request that names no visitor (T-10); each is an author's tag, shown only
+ * as a suggestion the browser offers, never in our words (T-67, T-68).
+ */
+async function placesOf(api: Api): Promise<readonly string[] | undefined> {
+  try {
+    return (await api.elections.getPlaces({})).places;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

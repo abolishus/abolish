@@ -8,6 +8,8 @@ import {
   contract,
   MAX_BOARD_PAYLOAD,
   MAX_DISPLAY_TEXT,
+  MAX_LISTED_PLACES,
+  MAX_PLACE_LENGTH,
   MAX_RESULT_CELLS,
   MAX_RESULT_OPTIONS,
   MAX_RESULT_QUESTIONS,
@@ -212,6 +214,33 @@ describe("the listing's counts", () => {
   });
 });
 
+describe("the listed places", () => {
+  const input = contract.elections.getPlaces["~orpc"].inputSchema;
+  const output = contract.elections.getPlaces["~orpc"].outputSchema;
+  const issues = async (schema: typeof input | typeof output, value: unknown) =>
+    (await schema?.["~standard"].validate(value))?.issues;
+
+  test("take nothing, and serve at most MAX_LISTED_PLACES places a filter could name", async () => {
+    expect(await issues(input, {})).toBeUndefined();
+    expect(await issues(input, { limit: "1" })).toBeDefined();
+    for (const good of [
+      { places: [] },
+      { places: ["Riverside", "東京 Ward 2", "\u{10000}".repeat(MAX_PLACE_LENGTH)] },
+      { places: Array.from({ length: MAX_LISTED_PLACES }, (_, i) => `Place ${i}`) },
+    ])
+      expect(await issues(output, good)).toBeUndefined();
+    for (const bad of [
+      { places: [""] },
+      { places: ["x".repeat(2 * MAX_PLACE_LENGTH + 1)] },
+      { places: [7] },
+      { places: Array.from({ length: MAX_LISTED_PLACES + 1 }, (_, i) => `Place ${i}`) },
+      { places: ["Riverside"], polls: "1" },
+      {},
+    ])
+      expect(await issues(output, bad)).toBeDefined();
+  });
+});
+
 describe("the moderation log's counts", () => {
   const input = contract.moderation.getCounts["~orpc"].inputSchema;
   const output = contract.moderation.getCounts["~orpc"].outputSchema;
@@ -379,6 +408,7 @@ describe("the generated OpenAPI document", () => {
       "GET /elections/counts",
       "GET /elections/definition",
       "GET /elections/display-text",
+      "GET /elections/places",
       "GET /elections/results",
       "GET /elections/tags",
       "GET /moderation/log",

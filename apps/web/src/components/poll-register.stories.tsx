@@ -67,6 +67,7 @@ const LIST: PollList = {
   previous: undefined,
   asOf: { seconds: "1767571200", iso: "2026-01-05T00:00:00.000Z" },
   counts: { listed: 1234, open: 212, scheduled: 41 },
+  places: undefined,
 };
 
 const meta = {
@@ -547,6 +548,46 @@ export const FiledEmpty: Story = {
     await expect(canvas.getByRole("heading", { name: "No listed poll matches" })).toBeVisible();
     await expect(canvas.getByText(/only where its asker, or moderation, filed it/)).toBeVisible();
     await expect(canvas.queryByText("No polls listed.")).toBeNull();
+  },
+};
+
+/**
+ * The register's first page with the places listed polls are filed at: the
+ * place box suggests them through the browser's own list, each as its asker
+ * wrote it, while the page's text names none of them (T-67), and the hint
+ * says the box suggests them.
+ */
+export const PlacesSuggested: Story = {
+  args: { page: { ...LIST, places: ["Old Town", "Riverside", "東京 Ward 2"] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const search = canvas.getByRole("search");
+    const place = within(search).getByRole("combobox", { name: "Place" });
+    await expect(place).toHaveValue("");
+    await expect(place).toHaveAccessibleDescription(
+      /the whole name must match\. It suggests the places listed polls are filed at\.$/,
+    );
+    const list = place.getAttribute("list");
+    await expect(list).not.toBeNull();
+    const options = canvasElement.querySelectorAll(`datalist[id="${list}"] > option`);
+    await expect([...options].map((o) => o.getAttribute("value"))).toEqual([
+      "Old Town",
+      "Riverside",
+      "東京 Ward 2",
+    ]);
+    await expect(canvas.queryByText("Riverside")).toBeNull();
+  },
+};
+
+/** No places to suggest: a plain box, and a hint that promises none. */
+export const NoPlacesSuggested: Story = {
+  args: { page: { ...LIST, places: [] } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const place = canvas.getByRole("textbox", { name: "Place" });
+    await expect(place).not.toHaveAttribute("list");
+    await expect(canvasElement.querySelector("datalist")).toBeNull();
+    await expect(canvas.queryByText(/suggests the places/)).toBeNull();
   },
 };
 

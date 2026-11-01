@@ -10,15 +10,20 @@ import {
   answeredWindow,
   appendEntry,
   countListedPolls,
+  insertPollTags,
+  listedPlaces,
   ListingError,
   type ListingOrder,
   listPolls,
   listPollsBefore,
+  MAX_LISTED_PLACES,
   MAX_LISTING_PAGE,
   moderate,
   moderationStatus,
+  placeKey,
   REMOVAL_REASONS,
   recordRegistration,
+  refilePoll,
   RESTORE_REASONS,
   storeDefinition,
 } from "../src/index.ts";
@@ -527,6 +532,97 @@ describe("countListedPolls", () => {
     }
     for (const now of [-1n, 1n << 64n, 5, undefined])
       await expect(countListedPolls(app, now as bigint)).rejects.toThrow(TypeError);
+  });
+});
+
+describe("listedPlaces", () => {
+  // A place no other test files a poll at, so its spellings are this test's.
+  const fresh = () => `Place ${randomBytes(6).toString("hex")}`;
+
+  /** A stored, listed poll filed at `place`. */
+  async function filed(place: string): Promise<Uint8Array> {
+    const id = await election();
+    expect(await insertPollTags(app, id, { place })).toBe(true);
+    return id;
+  }
+
+  test("suggests each place once, in the spelling most of its polls carry, the first by code point on a tie", async () => {
+    // The commonest spelling sorts last by code point, so the first by code
+    // point (a `min`) would pick another.
+    const common = fresh();
+    await filed(common.toUpperCase());
+    await filed(common);
+    await filed(common.toLowerCase());
+    await filed(common.toLowerCase());
+    const tied = fresh();
+    await filed(tied.toLowerCase());
+    await filed(tied);
+    const places = await listedPlaces(app);
+    expect(places.filter((p) => p.toLowerCase() === common.toLowerCase())).toEqual([
+      common.toLowerCase(),
+    ]);
+    // "P" (U+0050) sorts before "p" (U+0070) whatever the database's collation.
+    expect(places.filter((p) => p.toLowerCase() === tied.toLowerCase())).toEqual([tied]);
+  });
+
+  test("leaves out a place filed only on delisted or hidden polls, and suggests it again once restored", async () => {
+    const delisted = fresh();
+    const hidden = fresh();
+    const d = await filed(delisted);
+    const h = await filed(hidden);
+    expect(await listedPlaces(app)).toEqual(expect.arrayContaining([delisted, hidden]));
+    await moderate(app, d, { action: "delist", reason: "spam", moderator: "mod-1" });
+    await moderate(app, h, { action: "hide", reason: "threat", moderator: "mod-1" });
+    const out = await listedPlaces(app);
+    expect(out).not.toContain(delisted);
+    expect(out).not.toContain(hidden);
+    await moderate(app, h, { action: "restore", reason: "error", moderator: "mod-2" });
+    expect(await listedPlaces(app)).toContain(hidden);
+  });
+
+  test("follows a refiling, and suggests no poll filed under a topic alone", async () => {
+    const was = fresh();
+    const now = fresh();
+    const id = await filed(was);
+    await refilePoll(app, id, { tags: { place: now }, reason: "misfiled", moderator: "mod-1" });
+    const topicOnly = await election();
+    await insertPollTags(app, topicOnly, { topic: "food" });
+    const places = await listedPlaces(app);
+    expect(places).toContain(now);
+    expect(places).not.toContain(was);
+    expect(places.every((p) => typeof p === "string" && p !== "")).toBe(true);
+  });
+
+  test("returns at most MAX_LISTED_PLACES, the places with the most polls, in order of key", async () => {
+    // More places than fit, each filed once, and one filed twice whose key
+    // sorts after every other: it fits only by its count.
+    const once = Array.from({ length: MAX_LISTED_PLACES + 1 }, fresh);
+    for (const place of once) await filed(place);
+    const twice = `zzz ${fresh()}`;
+    await filed(twice);
+    await filed(twice);
+    const places = await listedPlaces(app);
+    expect(places).toHaveLength(MAX_LISTED_PLACES);
+    expect(places.at(-1)).toBe(twice);
+    expect(once.filter((p) => !places.includes(p)).length).toBeGreaterThan(0);
+    const keys = places.map((p) => placeKey(p)!);
+    const byCodePoint = (a: string, b: string) => {
+      const [x, y] = [Array.from(a), Array.from(b)];
+      for (let i = 0; i < Math.min(x.length, y.length); i++)
+        if (x[i] !== y[i]) return x[i]!.codePointAt(0)! - y[i]!.codePointAt(0)!;
+      return x.length - y.length;
+    };
+    expect([...keys].sort(byCodePoint)).toEqual(keys);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  test("reads in a read-only session", async () => {
+    // Filed often enough to fit among the places the cap keeps.
+    const place = fresh();
+    for (let i = 0; i < 5; i++) await filed(place);
+    const readOnly = await db.as("abolish_app");
+    await readOnly`SET default_transaction_read_only = on`;
+    expect(await listedPlaces(readOnly)).toContain(place);
   });
 });
 

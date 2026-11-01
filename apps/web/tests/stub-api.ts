@@ -505,6 +505,7 @@ export const LOG_COUNTS = {
 
 /** The listing's counts the stub serves, as the API does. */
 export const LISTING_COUNTS = { listed: "1234", open: "212", scheduled: "41" };
+export const LISTED_PLACES = ["Old Town", "Riverside", "東京 Ward 2"];
 
 /** The moderation log the stub serves by default, oldest first. */
 export const LOG_ENTRIES: readonly Record<string, string>[] = [
@@ -524,7 +525,8 @@ export const LOG_ENTRIES: readonly Record<string, string>[] = [
 /**
  * The stub's state: while `down`, it drops every connection unanswered, as a
  * dead API would; with `logCounts` unset, its read of the log's counts fails,
- * and with `listingCounts` unset, its read of the listing's;
+ * and with `listingCounts` unset, its read of the listing's, as with
+ * `listedPlaces` unset its read of the places it suggests;
  * `log` is the moderation log it serves, oldest first; `mostAnswered` is the
  * `answered` order it lists, which with it unset it can't sort by, as an API
  * without the anchoring clock can't; `answered` is how many have answered
@@ -534,6 +536,7 @@ export const stub: {
   down: boolean;
   logCounts: Record<string, string> | undefined;
   listingCounts: Record<string, string> | undefined;
+  listedPlaces: readonly string[] | undefined;
   log: readonly Record<string, string>[];
   mostAnswered: readonly string[] | undefined;
   answered: Map<string, readonly { tier: number; answered: string }[]>;
@@ -541,6 +544,7 @@ export const stub: {
   down: false,
   logCounts: LOG_COUNTS,
   listingCounts: LISTING_COUNTS,
+  listedPlaces: LISTED_PLACES,
   log: LOG_ENTRIES,
   mostAnswered: undefined,
   // A count claimed for tier 1, which STREAM_V5's definition doesn't name, is
@@ -624,6 +628,10 @@ export function stubApi(): Server {
           message: "No poll owns this code.",
         });
       return json(200, { electionId, code });
+    }
+    if (url.pathname === "/elections/places") {
+      if (stub.listedPlaces === undefined) return json(503, { code: "INTERNAL_SERVER_ERROR" });
+      return json(200, { places: stub.listedPlaces });
     }
     if (url.pathname === "/elections/counts") {
       if (stub.listingCounts === undefined) return json(503, { code: "INTERNAL_SERVER_ERROR" });

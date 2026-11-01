@@ -46,6 +46,7 @@ import {
   HIDDEN_CODE,
   HIDDEN_ID,
   LATEST,
+  LISTED_PLACES,
   LISTING_COUNTS,
   LOG_COUNTS,
   LOG_ENTRIES,
@@ -1792,6 +1793,46 @@ describe("poll list", () => {
       expect(linked(html).length).toBeGreaterThan(0);
     } finally {
       stub.listingCounts = LISTING_COUNTS;
+    }
+  });
+
+  test("suggests the listed polls' places in the place box wherever the register starts (P2-19 part 52)", async () => {
+    const suggested = (html: string) => {
+      const list = /<input[^>]*name="place"[^>]*>/.exec(html)?.[0].match(/list="([^"]+)"/)?.[1];
+      if (list === undefined) return undefined;
+      const datalist = new RegExp(`<datalist id="${list}">([\\s\\S]*?)</datalist>`).exec(html)?.[1];
+      return [...(datalist ?? "").matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]);
+    };
+    seen.length = 0;
+    for (const path of ["/polls", "/polls?q=bridge", "/polls?topic=housing&place=Old+Town"]) {
+      const html = await (await get(path)).text();
+      expect(suggested(html), path).toEqual(LISTED_PLACES);
+      expect(html).toContain("It suggests the places listed polls are filed at.");
+    }
+    // Asked for with nothing, as the contract's empty input takes it.
+    const asked = seen.filter((r) => r.path === "/elections/places");
+    expect(asked).toHaveLength(3);
+    for (const r of asked) expect([...r.query]).toEqual([]);
+    // A later page reads them again nowhere (T-52), and keeps a plain box.
+    seen.length = 0;
+    const later = await (await get(`/polls?after=${"0".repeat(64)}`)).text();
+    expect(later).toContain('name="place"');
+    expect(suggested(later)).toBeUndefined();
+    expect(later).not.toContain("<datalist");
+    expect(seen.filter((r) => r.path === "/elections/places")).toEqual([]);
+  });
+
+  test("keeps a plain place box, and the list, after the places fail to read", async () => {
+    stub.listedPlaces = undefined;
+    try {
+      const response = await get("/polls");
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).not.toContain("<datalist");
+      expect(html).not.toContain("suggests the places");
+      expect(linked(html).length).toBeGreaterThan(0);
+    } finally {
+      stub.listedPlaces = LISTED_PLACES;
     }
   });
 

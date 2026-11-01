@@ -24,6 +24,7 @@ import {
   IDENTITY_BACKUP_RETENTION_MONTHS,
   MAX_REPORT_QUEUE,
   insertPollTags,
+  MAX_LISTED_PLACES as CORE_MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH as CORE_MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY as CORE_MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS as CORE_MAX_SEARCH_TERMS,
@@ -51,6 +52,7 @@ import {
   contract,
   IDENTITY_BACKUP_ENVELOPE,
   IDENTITY_BACKUP_RETENTION_MONTHS as CONTRACT_RETENTION_MONTHS,
+  MAX_LISTED_PLACES,
   MAX_PLACE_LENGTH,
   MAX_SEARCH_QUERY,
   MAX_SEARCH_TERMS,
@@ -786,9 +788,10 @@ describe("elections.list (T-68)", () => {
     }
 
     test("the contract's topics and place bound are core's", () => {
-      expect([[...POLL_TOPICS], MAX_PLACE_LENGTH]).toEqual([
+      expect([[...POLL_TOPICS], MAX_PLACE_LENGTH, MAX_LISTED_PLACES]).toEqual([
         [...CORE_POLL_TOPICS],
         CORE_MAX_PLACE_LENGTH,
+        CORE_MAX_LISTED_PLACES,
       ]);
     });
 
@@ -858,6 +861,29 @@ describe("elections.list (T-68)", () => {
       expect(r.status).toBe(404);
       expect((await json(r))["code"]).toBe("ELECTION_NOT_FOUND");
       expect((await get("/elections/tags", { electionId: "00" })).status).toBe(400);
+    });
+
+    test("suggests the places of listed polls only, each once in its commonest spelling", async () => {
+      const places = async () => {
+        const r = await get("/elections/places", {});
+        expect(r.status).toBe(200);
+        return (await json(r))["places"] as string[];
+      };
+      const town = `Mill ${hex(b32()).slice(0, 8)}`;
+      const hidden = `Mill ${hex(b32()).slice(0, 8)}`;
+      // The commonest spelling is the last by code point, not the first.
+      for (const place of [town.toUpperCase(), town, town.toLowerCase(), town.toLowerCase()])
+        await insertPollTags(app, (await election()).id, { place });
+      const h = await election();
+      await insertPollTags(app, h.id, { place: hidden });
+      expect(await places()).toEqual(expect.arrayContaining([town.toLowerCase(), hidden]));
+      await moderate(app, h.id, { action: "hide", reason: "threat", moderator: "mod-1" });
+      const now = await places();
+      expect(now.filter((p) => p.toLowerCase() === town.toLowerCase())).toEqual([
+        town.toLowerCase(),
+      ]);
+      expect(now).not.toContain(hidden);
+      expect((await get("/elections/places", { limit: "1" })).status).toBe(400);
     });
 
     test("a place as long as a draft may hold is served", async () => {

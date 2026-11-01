@@ -211,6 +211,8 @@ export const POLL_TOPICS = [
   "transport",
 ] as const;
 export const MAX_PLACE_LENGTH = 80;
+/** The most places `GET /elections/places` serves; a test ties it to `@abolishus/core`. */
+export const MAX_LISTED_PLACES = 100;
 
 /** One to `MAX_PLACE_LENGTH` code points, which take at most twice as many UTF-16 units. */
 const Place = z.string().check(z.minLength(1), z.maxLength(2 * MAX_PLACE_LENGTH));
@@ -264,6 +266,18 @@ const getListingCounts = oc
   })
   .input(z.strictObject({}))
   .output(z.strictObject({ listed: U64, open: U64, scheduled: U64 }));
+
+const getListedPlaces = oc
+  .route({
+    method: "GET",
+    path: "/elections/places",
+    summary: "The places listed polls are filed at",
+    description:
+      "The places `GET /elections` can be narrowed to with `place`, for a front end to suggest: each place once, matched as `place` matches (NFKC, lower case, single-spaced), in the spelling most of its listed polls carry (the first by code point where they tie), in order of that matching key by code point. At most `MAX_LISTED_PLACES` places, those with the most listed polls (by key where they tie); a key's count only chooses which places fit, never their order. Only listed polls count: a place filed only on delisted or hidden polls is left out, so a hidden poll's place stays withheld (docs/moderation-policy.md). A place is a listing tag its author chose, or moderation's once it refiled the poll, which no definition commits to, so these are a claim no verifier checks and no result depends on (docs/adr/0041-poll-topics-and-places.md; T-68).",
+    tags: ["elections"],
+  })
+  .input(z.strictObject({}))
+  .output(z.strictObject({ places: z.array(Place).check(z.maxLength(MAX_LISTED_PLACES)) }));
 
 const getTags = oc
   .route({
@@ -923,6 +937,7 @@ export const contract = {
   elections: {
     list: listElections,
     getCounts: getListingCounts,
+    getPlaces: getListedPlaces,
     getDefinition,
     getDisplayText,
     getTags,

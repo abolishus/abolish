@@ -84,6 +84,22 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+/**
+ * The line beside the poll's status at the top of its page (P2-19 part 64,
+ * from the open poll mockup's byline): which time it is, and that it is the
+ * definition's own, the same instant the facts show.
+ */
+async function expectWhen(canvasElement: HTMLElement, word: string, iso: string | undefined) {
+  const header = canvasElement.querySelector("article > header");
+  const line = [...(header?.querySelectorAll("span") ?? [])].find((s) =>
+    s.textContent?.startsWith(`${word} `),
+  );
+  await expect(line).toBeVisible();
+  const time = line?.querySelector("time") ?? null;
+  if (iso === undefined) await expect(time).toBeNull();
+  else await expect(time).toHaveAttribute("datetime", iso);
+}
+
 /** Opens "How do we know this is real?", where the definition and board facts are. */
 async function openEvidence(canvasElement: HTMLElement) {
   const canvas = within(canvasElement);
@@ -158,8 +174,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(canvas.getByText("5,000 members")).toBeVisible();
   // A singular plural, and an instant past what Date holds shown as seconds.
   await expect(canvas.getByText("1 member")).toBeVisible();
-  // On the surface and in the evidence.
-  await expect(canvas.getAllByText("18446744073709551615")).toHaveLength(2);
+  // Beside its status, on the surface and in the evidence.
+  await expect(canvas.getAllByText("18446744073709551615")).toHaveLength(3);
+  await expectWhen(canvasElement, "Closes", undefined);
   await expect(canvas.getByRole("figure", { name: "Chain head" })).toBeVisible();
   await expect(canvas.queryByRole("note")).toBeNull();
   await expect(canvas.getByRole("link", { name: "/p/mhanrsz" })).toHaveAttribute(
@@ -245,6 +262,8 @@ export const Scheduled: Story = {
     await expect(canvas.getByText("Not open yet")).toBeVisible();
     await expect(canvas.queryByText("Open for answers")).toBeNull();
     await expect(canvas.getByText(/^Nothing can be answered until it opens\./)).toBeVisible();
+    // When it opens, beside its status, rather than when it closes.
+    await expectWhen(canvasElement, "Opens", poll.opensAt.iso);
     // Before it opens, where its key came from is one link away, on the
     // surface beside who holds it, as the scheduled poll's mockup shows its
     // ceremony: the board's record, on the board's first page.
@@ -263,9 +282,11 @@ export const Closed: Story = {
   },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByText("Closed")).toBeVisible();
+    // Its status mark, and the word before when it closed beside it.
+    await expect(canvas.getAllByText("Closed")).toHaveLength(2);
     await expect(canvas.getByText(/This poll has closed/)).toBeVisible();
     await expect(canvas.queryByText(/only in the ballot app/)).toBeNull();
+    await expectWhen(canvasElement, "Closed", "2026-01-08T00:00:00.000Z");
   },
 };
 

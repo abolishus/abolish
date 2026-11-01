@@ -1001,6 +1001,7 @@ const enUS = {
   trusteesOf: "{threshold} of {size}",
   factOpens: "Opens",
   factCloses: "Closes",
+  pollClosedAt: "Closed",
   factShortLink: "Short link",
   factElectorate: "Who can vote",
   tier0: "Tier 0 (passkey)",

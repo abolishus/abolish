@@ -1009,6 +1009,7 @@ export const esUS: Messages = {
   trusteesOf: "{threshold} de {size}",
   factOpens: "Abre",
   factCloses: "Cierra",
+  pollClosedAt: "Cerró",
   factShortLink: "Enlace corto",
   factElectorate: "Quién puede votar",
   tier0: "Nivel 0 (llave de acceso)",

@@ -441,6 +441,20 @@ export function PollSummary({
               {t(moderation.state === "hidden" ? "action_hide" : "action_delist")}
             </StatusMark>
           )}
+          {/* The open poll's mockup says when it closes above everything
+              else, so a visitor knows how long they have without reaching
+              the facts; a scheduled poll says when it opens instead. The
+              times are the definition's, the same the facts show (T-34). */}
+          <span className="text-base text-muted-foreground">
+            {t(
+              status === "scheduled"
+                ? "factOpens"
+                : status === "open"
+                  ? "factCloses"
+                  : "pollClosedAt",
+            )}{" "}
+            <When instant={status === "scheduled" ? poll.opensAt : poll.closesAt} local />
+          </span>
         </div>
 
         {/* A class on the civic record needs independent trustees, which no

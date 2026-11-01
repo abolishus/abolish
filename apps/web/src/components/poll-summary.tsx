@@ -681,7 +681,14 @@ export function PollSummary({
             {t("evidenceSummary")}
           </h2>
         </div>
-        <p className="m-0 max-w-prose text-lg text-pretty">{t("evidenceLede")}</p>
+        {/* Where the Answering panel says each answer is sealed on the
+            voter's own device, the evidence says only what makes it
+            checkable; once the poll has closed the panel says only that, so
+            the sealing is said here instead (P2-29, the poll page's
+            iteration 13; T-10). */}
+        <p className="m-0 max-w-prose text-lg text-pretty">
+          {t(status === "closed" ? "evidenceLedeClosed" : "evidenceLede")}
+        </p>
         {/* The brief's launch line, said in every state of the poll, as the
             open poll's mockup says who can open the answers: the asker can't,
             and during launch the key is ours alone (T-14). */}

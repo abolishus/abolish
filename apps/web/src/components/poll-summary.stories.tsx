@@ -100,13 +100,28 @@ async function expectWhen(canvasElement: HTMLElement, word: string, iso: string 
   else await expect(time).toHaveAttribute("datetime", iso);
 }
 
+/**
+ * The page says once that each answer is sealed on the voter's device, and
+ * once that anyone can count the board again: in the Answering panel and the
+ * evidence while the poll takes answers, in the evidence alone once it has
+ * closed (P2-29, the poll page's iteration 13).
+ */
+async function expectSaidOnce(canvasElement: HTMLElement, closed: boolean) {
+  const article = canvasElement.querySelector("article");
+  const text = article?.textContent ?? "";
+  await expect(text.match(/sealed on/g)).toHaveLength(1);
+  await expect(text.match(/count (it )?again/g)).toHaveLength(1);
+  const panel = within(canvasElement).getByRole("region", { name: "Answering" });
+  await expect(within(panel).queryByText(/sealed on/) === null).toBe(closed);
+}
+
 /** Opens "How do we know this is real?", where the definition and board facts are. */
 async function openEvidence(canvasElement: HTMLElement) {
   const canvas = within(canvasElement);
   // The question and its answer in plain words are on the surface; the evidence is one step down.
   const section = canvas.getByRole("region", { name: "How do we know this is real?" });
   await expect(
-    within(section).getByText(/^Every answer is sealed on the device that sends it/),
+    within(section).getByText(/^Every answer (is|was) .*listed on the public board/),
   ).toBeVisible();
   // Who can open the answers, in the brief's words for the launch panel.
   await expect(
@@ -274,7 +289,7 @@ export const Scheduled: Story = {
   },
 };
 
-/** Past `closes_at`: closed, and answering says the board stays public. */
+/** Past `closes_at`: closed, and answering says it takes no more answers. */
 export const Closed: Story = {
   args: {
     poll: { ...poll, closesAt: { seconds: "1767830400", iso: "2026-01-08T00:00:00.000Z" } },
@@ -283,8 +298,9 @@ export const Closed: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(canvas.getByText("Closed")).toBeVisible();
-    await expect(canvas.getByText(/This poll has closed/)).toBeVisible();
+    await expect(canvas.getByText("This poll has closed and takes no more answers.")).toBeVisible();
     await expect(canvas.queryByText(/only in the ballot app/)).toBeNull();
+    await expectSaidOnce(canvasElement, true);
     await expectWhen(canvasElement, "On", "2026-01-08T00:00:00.000Z");
   },
 };
@@ -719,6 +735,7 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   // page's iteration 11).
   await expect(heading).toBe(canvasElement.querySelector("article > header")?.firstElementChild);
   await expect(canvas.queryByText(/^Poll 1011121314151617…/)).toBeNull();
+  await expectSaidOnce(canvasElement, false);
   const asks = canvas.getByRole("region", { name: "What it asks" });
   // The question heading the page isn't said again: its answers, numbered by question.
   await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();

@@ -304,7 +304,11 @@ describe("poll page", () => {
     // And when, beside its status at the top, in the definition's time
     // (P2-19 part 64).
     expect(html).toMatch(/>On<!-- --> <time datetime="2026-01-08T00:00:00.000Z"/i);
-    expect(html).toContain("This poll has closed.");
+    // Closed, the panel says only that, and the evidence that each answer
+    // was sealed on the voter's device, each said once (P2-29, the poll
+    // page's iteration 13).
+    expect(html).toContain("This poll has closed and takes no more answers.");
+    expect(html.match(/sealed on/g)).toHaveLength(1);
     // The evidence is one step down, but in the server's HTML, so it opens without script.
     expect(html).toMatch(/<details\b[^>]*>\s*<summary\b/);
     // Above it, the heading and what the evidence shows in plain words,
@@ -314,7 +318,7 @@ describe("poll page", () => {
     )?.[1];
     expect(section?.replace(/<[^>]+>/g, "")).toBe(
       "How do we know this is real?" +
-        "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again." +
+        "Every answer was sealed on the device that sent it and listed on the public board, which anyone can download and count again." +
         "Whoever asked it can&#x27;t see anyone&#x27;s answers. During launch, Abolish alone holds the key for this poll." +
         "How the poll&#x27;s key was made",
     );
@@ -575,7 +579,7 @@ describe("poll page", () => {
     expect(await text(OPEN_ONE)).toMatch(/Answered so far\|+0 people\|/);
     // A failed read shows no count, and the page stays.
     const failed = await text(STREAM_V1);
-    expect(failed).toContain("This poll has closed.");
+    expect(failed).toContain("This poll has closed and takes no more answers.");
     expect(failed).not.toMatch(/Answered (?:so far|before it closed)/);
   });
 

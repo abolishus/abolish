@@ -305,7 +305,11 @@ test("an outcome is parsed strictly: an unknown field, a negative count or a bal
     RESULTS_OUTCOME.safeParse({ ...read, tiers: [{ tier: 0, counted: 2, panel: 2 }] }).success,
   ).toBe(false);
   // A rolling tier's two figures only, never its growth by period.
-  const rolling = { tier: 0, counted: 2, electorate: { opening: 3, eligible: 5 } };
+  const rolling = {
+    tier: 0,
+    counted: 2,
+    electorate: { opening: 3, eligible: 5, flagged: { eligible: true } },
+  };
   expect(RESULTS_OUTCOME.safeParse({ ...read, tiers: [rolling] }).success).toBe(true);
   expect(
     RESULTS_OUTCOME.safeParse({
@@ -316,7 +320,25 @@ test("an outcome is parsed strictly: an unknown field, a negative count or a bal
   expect(
     RESULTS_OUTCOME.safeParse({
       ...read,
-      tiers: [{ ...rolling, electorate: { opening: 3, eligible: -1 } }],
+      tiers: [{ ...rolling, electorate: { ...rolling.electorate, eligible: -1 } }],
+    }).success,
+  ).toBe(false);
+  // 8.2's flag on who could answer, and never the smallest step's.
+  expect(
+    RESULTS_OUTCOME.safeParse({
+      ...read,
+      tiers: [{ ...rolling, electorate: { opening: 3, eligible: 5 } }],
+    }).success,
+  ).toBe(false);
+  expect(
+    RESULTS_OUTCOME.safeParse({
+      ...read,
+      tiers: [
+        {
+          ...rolling,
+          electorate: { ...rolling.electorate, flagged: { eligible: true, smallestStep: true } },
+        },
+      ],
     }).success,
   ).toBe(false);
   expect(RESULTS_OUTCOME.safeParse({ ok: false, code: "rejected" }).success).toBe(false);
@@ -330,7 +352,7 @@ test("a rolling tier's electorate is carried as its members at the opening and w
     close: { step: 4, members: 4, accepted: true },
     smallestStep: { step: 1, members: 3 },
     growth: [{ period: "12", added: 2, removed: 1, members: 4 }],
-    flagged: { eligible: true, smallestStep: true },
+    flagged: { eligible: true, smallestStep: false },
   };
   const outcome = resultsOutcomeOf({
     state: "read",
@@ -351,7 +373,12 @@ test("a rolling tier's electorate is carried as its members at the opening and w
     passed: true,
     cells: [{ cell: 0, tier: 0, counted: 2, counts: ["1", "1"], signers: [1] }],
     tiers: [
-      { tier: 0, counted: 2, counts: ["1", "1"], electorate: { opening: 3, eligible: 5 } },
+      {
+        tier: 0,
+        counted: 2,
+        counts: ["1", "1"],
+        electorate: { opening: 3, eligible: 5, flagged: { eligible: true } },
+      },
       { tier: 2, counted: 0 },
     ],
   });

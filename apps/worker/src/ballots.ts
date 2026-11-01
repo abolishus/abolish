@@ -338,10 +338,15 @@ export function resultsOutcomeOf(results: PollResults): ResultsOutcome {
       tier: t.tier,
       counted: t.counted,
       ...slices(t),
-      // The two figures a rolling tier's results state; its growth by period
-      // and its steps' sizes are the verifier's report to give.
+      // The two figures a rolling tier's results state, with the verifier's
+      // small-count flag on who could answer (8.2, T-16); its growth by
+      // period and its steps' sizes are the verifier's report to give.
       ...(t.electorate !== undefined && {
-        electorate: { opening: t.electorate.opening.members, eligible: t.electorate.eligible },
+        electorate: {
+          opening: t.electorate.opening.members,
+          eligible: t.electorate.eligible,
+          flagged: { eligible: t.electorate.flagged.eligible },
+        },
       }),
     })),
     ...(questions !== undefined && {

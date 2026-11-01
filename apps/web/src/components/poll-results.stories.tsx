@@ -118,6 +118,33 @@ export const Rolling: Story = {
   },
 };
 
+/**
+ * A rolling tier so few could answer that the verifier flags the count: its
+ * results stand, saying what so few can reveal (verifier 8.2; T-16).
+ */
+export const RollingFewCouldAnswer: Story = {
+  args: {
+    results: {
+      kind: "read",
+      tiers: [
+        { tier: 0, counted: 1234, questions: undefined, couldAnswer: 8000 },
+        { tier: 2, counted: 12, questions: undefined, couldAnswer: 15, fewCouldAnswer: true },
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const few = within(canvas.getByRole("region", { name: "Tier 2 (document-verified)" }));
+    await expect(few.getByText("15 people could answer by the close")).toBeVisible();
+    await expect(
+      few.getByText("So few could answer that these results can show how some of them answered."),
+    ).toBeVisible();
+    // Only the flagged tier says so.
+    const many = within(canvas.getByRole("region", { name: "Tier 0 (verified e-mail)" }));
+    await expect(many.queryByText(/So few could answer/)).toBeNull();
+  },
+};
+
 /** A hidden poll's results, by number: its words are withheld, its count never is. */
 export const ByNumber: Story = {
   args: {

@@ -170,6 +170,11 @@ function Tier({
             {t("resultsCouldAnswer", { count: result.couldAnswer })}
           </p>
         )}
+        {/* The verifier's small-count flag on that count: the results stand,
+            and say what so few can reveal (8.2, T-16). */}
+        {result.fewCouldAnswer === true ? (
+          <p className="m-0 max-w-prose text-base">{t("resultsFewCouldAnswer")}</p>
+        ) : null}
       </div>
       {result.questions === undefined ? (
         <p role="status" className="m-0 max-w-prose text-base">

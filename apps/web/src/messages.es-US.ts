@@ -594,6 +594,9 @@ export const esUS: Messages = {
     one: "{count} persona podía responder antes del cierre",
     other: "{count} personas podían responder antes del cierre",
   },
+  resultsFewCouldAnswer:
+    "Podían responder tan pocas personas que estos resultados pueden mostrar cómo respondieron algunas.",
+  resultsFewCouldAnswerShort: "Pocas personas podían responder",
   resultsTurnoutIs: "Participación: {turnout}",
   resultsTierPending:
     "Parte del conteo de este grupo todavía no se publica. Sus resultados aparecen aquí cuando se publique completo.",

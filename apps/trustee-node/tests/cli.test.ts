@@ -853,6 +853,26 @@ describe("run with the availability duty", () => {
       now: sources.clock,
     });
     expect(complaints.view).toBe(w.receipts(election).view);
+    // With no group registry configured, the counted source has no rolling
+    // chain check, and refuses a rolling poll's counted set.
+    expect(w.counted).not.toHaveProperty("rolling");
+    const withGroups = parseConfig(
+      JSON.stringify({
+        ...seatConfig,
+        store: join(dir, "wiring-store"),
+        availability: availability({
+          groupRegistry: {
+            address: `0x${"9a".repeat(20)}`,
+            fromBlock: "0",
+            registrars: [`0x${"11".repeat(20)}`, `0x${"22".repeat(20)}`],
+            threshold: 2,
+          },
+        }),
+      }),
+    );
+    if (withGroups.availability === undefined) return expect.fail("no availability");
+    const rolling = dutyWiring(withGroups, withGroups.availability, sources).counted.rolling;
+    expect(rolling).toBeTypeOf("function");
   });
 
   test("gives the view no extent for an election the seat didn't attest, without asking its nodes", async () => {

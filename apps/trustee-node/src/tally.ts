@@ -27,6 +27,7 @@ import {
   aggregateHash,
   ballotHash,
   ballotHashV3,
+  ballotHashV5,
   type BoardErrorCode,
   bytesFixed,
   type CellAggregate,
@@ -43,6 +44,8 @@ import {
   electionDefinitionHash,
   type ElectionDefinitionV5,
   electionDefinitionV5Hash,
+  type ElectionDefinitionV7,
+  electionDefinitionV7Hash,
   encodeTallyOpening,
   identityKey,
   KEM_PUBLIC_KEY,
@@ -74,14 +77,16 @@ import type { Pins } from "./stub.ts";
 
 /**
  * A registered definition of a version the tally reads: version 1 (one cell
- * per tier, one question) or version 5 (every tier's regional cells, several
- * questions), the stubs the ceremony and intake take. A bare definition is
- * version 1's, as crypto's summed-share calls read it.
+ * per tier, one question), version 5 (every tier's regional cells, several
+ * questions) or a rolling version 7 without an author panel (one cell per
+ * rolling tier, several questions), the stubs the ceremony and intake take.
+ * A bare definition is version 1's, as crypto's summed-share calls read it.
  */
 export type TallyDefinition =
   | ElectionDefinition
   | { readonly version: 1; readonly value: ElectionDefinition }
-  | { readonly version: 5; readonly value: ElectionDefinitionV5 };
+  | { readonly version: 5; readonly value: ElectionDefinitionV5 }
+  | { readonly version: 7; readonly value: ElectionDefinitionV7 };
 
 /** What the deployment reads of the counted set, from the anchored counted extent. */
 export type CountedSet =
@@ -104,7 +109,8 @@ export type CountedSet =
   /**
    * The counted set, fixed: for each cell of the registered partition, in
    * order, the ballot records of its counted ballots (version 1 under
-   * definition version 1, version 3 under version 5), as the
+   * definition version 1, version 3 under version 5, version 5 under a
+   * rolling version 7), as the
    * anchored counted extent holds them. It must come from the seat's own
    * finalized L1 and L2 nodes through packages/verifier, never a served
    * value: sums over a set other than the anchored one, beside the
@@ -146,7 +152,7 @@ export interface TallyDutyOptions extends Pins {
   /** The transcript and key set the seat's approval signed for. */
   readonly secrets: Pick<IntakeSecrets, "transcriptHash" | "keySetHash">;
   /**
-   * The registered definition (version 1 or 5) and its ceremony transcript, as
+   * The registered definition (version 1, 5 or a rolling 7) and its ceremony transcript, as
    * the deployment reads them. Checked against what the seat approved, never
    * trusted: the definition must hash to the approved definition hash, and
    * the transcript's check must return the approved key set (T-37).
@@ -525,12 +531,15 @@ export class TallyDuty {
     const posted = postedCiphertexts(postings, election.definitionHash, election.index);
     // The partition's cells, each with its tier: under version 1 one per
     // `electorate` entry, under version 5 every tier's cells numbered across
-    // the definition (verifier 2.8). No more and no fewer: a sum over any
-    // other set could disclose a difference of sums (T-14, T-16).
+    // the definition (verifier 2.8), under a rolling version 7 one per
+    // rolling tier (tally.md, Rolling tiers). No more and no fewer: a sum
+    // over any other set could disclose a difference of sums (T-14, T-16).
     const tiers =
       definition.version === 1
         ? definition.value.electorate.map((t) => t.tier)
-        : definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier));
+        : definition.version === 5
+          ? definition.value.electorate.flatMap((t) => t.cells.map(() => t.tier))
+          : definition.value.rolling_electorate.map((t) => t.tier);
     if (counted.length !== tiers.length)
       throw new Refused("another number of cells than the partition's");
     const voters = new Set<string>();
@@ -545,7 +554,9 @@ export class TallyDuty {
         // Re-voting selects one ballot per voter (T-45): two would count
         // twice. A nullifier is the tier's, so under version 5 a voter is
         // one across the tier's cells, and a second in another cell is
-        // refused as one in the same cell is.
+        // refused as one in the same cell is. Under a rolling version 7 the
+        // nullifier doesn't depend on the step, so a voter's ballots at two
+        // steps are one voter too.
         const voter = `${tier}/${b.nullifier}`;
         if (voters.has(voter)) throw new Refused("a voter counted twice");
         voters.add(voter);
@@ -610,7 +621,9 @@ export class TallyDuty {
       hash =
         definition.version === 1
           ? electionDefinitionHash(definition.value)
-          : electionDefinitionV5Hash(definition.value);
+          : definition.version === 5
+            ? electionDefinitionV5Hash(definition.value)
+            : electionDefinitionV7Hash(definition.value);
     } catch (e) {
       if (!(e instanceof EncodeError)) throw e;
     }
@@ -698,12 +711,14 @@ function postedCiphertexts(
 
 /**
  * A counted ballot of cell `c` read under the ballot version the definition
- * pins (1 under definition version 1, 3 under version 5), with its ballot
- * hash recomputed from the record. T-38: intake's shares are looked up by
- * that hash, so the source can't pair one ballot's vote with another's
- * shares; it binds the ballot version and the tier or cell, so a record
- * relabelled to another layout or cell never finds the shares of the one it
- * copies (T-34).
+ * pins (1 under definition version 1, 3 under version 5, 5 under a rolling
+ * version 7), with its ballot hash recomputed from the record. T-38:
+ * intake's shares are looked up by that hash, so the source can't pair one
+ * ballot's vote with another's shares; it binds the ballot version and the
+ * tier or cell, and under version 5 the step, so a record relabelled to
+ * another layout, cell or step never finds the shares of the one it copies
+ * (T-34). A version-5 ballot's VSS commitments are its default half's: with
+ * no author panel, the whole vote, as intake shared it.
  */
 function countedBallot(
   version: Definition["version"],
@@ -720,11 +735,28 @@ function countedBallot(
       const hash = ballotHash({ definitionHash, tier, nullifier: b.nullifier }, b.committed_vote);
       return { nullifier: b.nullifier, ...voteOf(b.committed_vote), hash };
     }
-    const b = decodeBallot(bytes, 3);
+    if (version === 5) {
+      const b = decodeBallot(bytes, 3);
+      if (!equal(b.definition_hash, definitionHash) || b.cell !== c)
+        throw new Refused("a counted ballot of another election or cell");
+      const hash = ballotHashV3(
+        { definitionHash, cell: c, nullifier: b.nullifier },
+        b.committed_vote,
+      );
+      return { nullifier: b.nullifier, ...voteOf(b.committed_vote), hash };
+    }
+    const b = decodeBallot(bytes, 5);
     if (!equal(b.definition_hash, definitionHash) || b.cell !== c)
       throw new Refused("a counted ballot of another election or cell");
-    const hash = ballotHashV3(
-      { definitionHash, cell: c, nullifier: b.nullifier },
+    // An author half is nobody's to open without an author panel: a ballot
+    // carrying one isn't of this election's shape.
+    if (
+      b.committed_vote.author_vss.length !== 0 ||
+      b.committed_vote.author_share_hashes.length !== 0
+    )
+      throw new Refused("a counted ballot of another shape");
+    const hash = ballotHashV5(
+      { definitionHash, cell: c, nullifier: b.nullifier, step: b.step },
       b.committed_vote,
     );
     return { nullifier: b.nullifier, ...voteOf(b.committed_vote), hash };

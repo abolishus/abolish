@@ -32,12 +32,15 @@ import {
   type ElectionDefinition,
   electionDefinitionHash,
   electionDefinitionV5Hash,
+  electionDefinitionV7Hash,
+  ELECTORATE_MODES,
   type EventContracts,
   type FinalizedL1,
   L1_REF_MARGIN,
   type Panel,
   pinnedVersion,
   RECORD_TYPES,
+  RESULTS_MODES,
   type ViewBallot,
 } from "@abolishus/crypto";
 import {
@@ -52,6 +55,7 @@ import {
 } from "@abolishus/node";
 import {
   type BallotAdmission,
+  type CountedChain,
   countedSet,
   decodeHeader,
   electionAdmission,
@@ -65,6 +69,7 @@ import { heldIntake } from "./intake.ts";
 import { l2BlockTime } from "./recorded.ts";
 import type { ObligationView } from "./obligation.ts";
 import type { SeatStore } from "./store.ts";
+import type { RollingChainCheck } from "./rolling-chain.ts";
 import { RELEASE_WINDOWS } from "./stub.ts";
 import type { CountedSet, TallyDefinition } from "./tally.ts";
 
@@ -242,15 +247,15 @@ export function complaintBallots(
 
 /**
  * The registered definition, as the tally duty takes it, from the seat's own
- * L2 node: the approved one, of version 1 or 5 and naming the deployment's
- * board, or `ViewError`, as `obligationView` reads it. The duty checks it
- * against the approval again (T-37).
+ * L2 node: the approved one, of version 1 or 5, or a rolling version 7, and
+ * naming the deployment's board, or `ViewError`, as `obligationView` reads
+ * it. The duty checks it against the approval again (T-37).
  */
 export async function tallyDefinition(
   options: Omit<ViewOptions, "store" | "extent">,
   election: ApprovedElection,
 ): Promise<TallyDefinition> {
-  return (await registered(options, election)).decoded;
+  return (await registered(options, election, { rolling: true })).decoded;
 }
 
 export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "extent"> {
@@ -262,6 +267,12 @@ export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "exten
   readonly extent: (election: ApprovedElection) => Promise<HeldExtent | undefined>;
   /** The anchoring clock the deployment pins (`L1AnchorOptions.timing`), as the counted duty reads it. */
   readonly counted: DeadlineClock;
+  /**
+   * A rolling poll's chain from the seat's own proven, final read of both
+   * registries (`l2RollingChain`), the one intake judges its ballots
+   * against. Without it a rolling poll's counted set is refused.
+   */
+  readonly rolling?: RollingChainCheck;
 }
 
 /**
@@ -274,7 +285,11 @@ export interface CountedSourceOptions extends Omit<ViewOptions, "store" | "exten
  * T-16, T-29). Undecided only for want of a later input (a run reaching a
  * ballot's L1 reference), it waits; undecided for a reason this release never
  * resolves (relayed ballots, obligation roots, version-2 batches), or over an
- * extent that isn't the board's, it refuses. Throws as `obligationView` does
+ * extent that isn't the board's, it refuses. A rolling poll's set is decided
+ * over the chain `rolling` gives, with the block it is proven through: it
+ * waits while none can be had or that block isn't past the close and every
+ * rolling tier's `root_l2_block`, so no ballot is dropped over a chain read
+ * before a late member joined (T-14, T-16, T-71). Throws as `obligationView` does
  * when the nodes or the registered definition aren't the seat's, and
  * `L1AnchorError` `outside-clock` for a close before the clock's epoch.
  */
@@ -282,7 +297,11 @@ export function countedSource(
   options: CountedSourceOptions,
 ): (election: ApprovedElection) => Promise<CountedSet> {
   return async (election) => {
-    const { definition, boardVersion, eventVersion, l2Head } = await registered(options, election);
+    const { definition, decoded, boardVersion, eventVersion, l2Head } = await registered(
+      options,
+      election,
+      { rolling: true },
+    );
     // Only the seat's own attested extent is the counted extent: a copy it
     // didn't check by `C_S`'s CIDs could hold any entries the operator chose.
     const extent = await options.extent(election);
@@ -309,6 +328,17 @@ export function countedSource(
       return { state: "waiting" };
     const shown = await eventsShown(options, extent.entries, boardVersion, eventVersion, l2Head);
     if (shown !== undefined) return { state: "refused", reason: shown };
+    // Read afresh for each decision, never intake's cached read: the set
+    // must rest on a chain proven past the close, which `countedSet` checks
+    // against the block it is proven through (T-14, T-16).
+    let rolling: CountedChain | undefined;
+    if (decoded.version === 7) {
+      if (options.rolling === undefined)
+        return { state: "refused", reason: "no rolling chain check" };
+      const read = await options.rolling(decoded);
+      if (read === undefined) return { state: "waiting" };
+      rolling = { chain: read.chain, through: { block: read.block, timestamp: read.safeAt } };
+    }
     const blocks = await l1Run(options, election);
     let result;
     try {
@@ -319,6 +349,7 @@ export function countedSource(
         clock,
         blocks,
         eventsAuthenticated: true,
+        ...(rolling === undefined ? {} : { rolling }),
       });
     } catch (e) {
       // The entries aren't the counted extent the board checks passed.
@@ -462,11 +493,17 @@ async function eventsShown(
  * the board-entry and contract-event versions it pins and the node's
  * finalized block, after checking both nodes' chains. Refused (`ViewError`)
  * when a node is on another chain, or the definition isn't the approved
- * one, isn't one this node reads or names another board.
+ * one, isn't one this node reads or names another board. A version-7
+ * definition is read only by the tally's reads (`rolling`), and only as the
+ * stub checks approve one: rolling, sealed and without an author panel. The
+ * view and the complaint duty's ballot source take it once [[P1-12f]] part
+ * 3c's decision at `c_I` replaces the duties' `roots` answer (P2-17 part
+ * 7c-3c-2c); until then they refuse it.
  */
 async function registered(
   options: Omit<ViewOptions, "store" | "extent">,
   election: ApprovedElection,
+  { rolling = false }: { readonly rolling?: boolean } = {},
 ): Promise<{
   readonly definition: Awaited<ReturnType<typeof registration>>["definition"];
   readonly decoded: Exclude<TallyDefinition, ElectionDefinition>;
@@ -487,14 +524,22 @@ async function registered(
   );
   // The hash binds every field, the transcript's hash among them, so the
   // definition admission reads is the one the seat approved: of version 1
-  // or 5, the versions the seat approves (`checkStub`), each hashed under
-  // its own layout.
+  // or 5, or a rolling 7, the versions the seat approves (`checkStub`),
+  // each hashed under its own layout.
   const decoded = reg.decoded;
-  if (decoded.version !== 1 && decoded.version !== 5) throw new ViewError("definition");
-  const hash =
-    decoded.version === 1
-      ? electionDefinitionHash(decoded.value)
-      : electionDefinitionV5Hash(decoded.value);
+  let hash: Uint8Array;
+  if (decoded.version === 1) hash = electionDefinitionHash(decoded.value);
+  else if (decoded.version === 5) hash = electionDefinitionV5Hash(decoded.value);
+  else if (
+    rolling &&
+    decoded.version === 7 &&
+    decoded.value.electorate_mode === ELECTORATE_MODES.rolling &&
+    decoded.value.results_mode === RESULTS_MODES.sealed &&
+    decoded.value.author_threshold === 0 &&
+    decoded.value.author_keys.length === 0
+  )
+    hash = electionDefinitionV7Hash(decoded.value);
+  else throw new ViewError("definition");
   if (!equal(hash, election.definitionHash)) throw new ViewError("definition");
   const d = decoded.value;
   // The versions the verifier reads this election's board and events under (4.2, 4.4).

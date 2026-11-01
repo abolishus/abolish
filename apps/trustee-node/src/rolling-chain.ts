@@ -32,6 +32,11 @@ export interface RollingIntakeChain {
   readonly chain: RollingBallotChain;
   /** The proven, final L2 block's timestamp: every step whose boundary is before it is settled. */
   readonly safeAt: bigint;
+  /**
+   * That block's number, which the counted set checks against every rolling
+   * tier's `root_l2_block` (`CountedChain.through`).
+   */
+  readonly block: bigint;
 }
 
 /**
@@ -121,7 +126,9 @@ export function l2RollingChain(options: L2RollingChainOptions): RollingChainChec
         }),
       ];
       const outcome = rollingChain(definition, records, release);
-      return "status" in outcome ? { chain: outcome.chain, safeAt: group.timestamp } : undefined;
+      return "status" in outcome
+        ? { chain: outcome.chain, safeAt: group.timestamp, block: group.block }
+        : undefined;
     } catch (e) {
       if (
         e instanceof RpcError ||

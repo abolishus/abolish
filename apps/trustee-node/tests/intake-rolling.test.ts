@@ -110,6 +110,8 @@ const LATE = 1702; // τ = 1,021,500: the joiner's tree too
 // The proven block's timestamp: past EARLY's boundary only, then past LATE's.
 const SAFE_EARLY = 1_021_000n;
 const SAFE_LATE = 1_022_000n;
+// The proven block's number: past the joiner's and the tier's `root_l2_block`.
+const PROVEN = 30n;
 const CHAIN: RollingBallotChain = { events: [OPENING, JOINER], registeredAt: REGISTERED_AT };
 const VOTES = [1, 0, 1, 0, 1] as const;
 
@@ -241,7 +243,7 @@ function seatsOf(
     reads: [],
     // Within the skew guard of both proven blocks, long before `c_I`.
     clock: SAFE_LATE,
-    chain: { chain: CHAIN, safeAt: SAFE_LATE },
+    chain: { chain: CHAIN, safeAt: SAFE_LATE, block: PROVEN },
   };
   seats.intake = e.seats.map(
     (ceremony, i) =>
@@ -375,11 +377,11 @@ describe("intake of a version-5 ballot", () => {
     const store = new MemoryStore();
     const seats = seatsOf({ store });
     const [, , seat] = seats.intake;
-    seats.chain = { chain: CHAIN, safeAt: SAFE_EARLY };
+    seats.chain = { chain: CHAIN, safeAt: SAFE_EARLY, block: PROVEN };
     expect(await deliver(seat!, late, 3)).toEqual({ ok: false, code: "step-unsettled" });
     expect(await store.list(`intake/${hex(e.stubHash)}`)).toEqual([]);
     // Read again only once the last read is ROLLING_CHAIN_MAX_AGE old.
-    seats.chain = { chain: CHAIN, safeAt: SAFE_LATE };
+    seats.chain = { chain: CHAIN, safeAt: SAFE_LATE, block: PROVEN };
     seats.clock += ROLLING_CHAIN_MAX_AGE - 1n;
     expect(await deliver(seat!, late, 3)).toEqual({ ok: false, code: "step-unsettled" });
     expect(seats.reads).toHaveLength(1);
@@ -410,7 +412,7 @@ describe("intake of a version-5 ballot", () => {
     seats.chain = undefined;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
     // A failed read is kept for ROLLING_CHAIN_RETRY only (T-52).
-    seats.chain = { chain: CHAIN, safeAt: SAFE_LATE };
+    seats.chain = { chain: CHAIN, safeAt: SAFE_LATE, block: PROVEN };
     seats.clock += ROLLING_CHAIN_RETRY - 1n;
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
     expect(seats.reads).toHaveLength(1);
@@ -437,7 +439,7 @@ describe("intake of a version-5 ballot", () => {
   it("refuses a chain whose opening state isn't the definition's", async () => {
     const seats = seatsOf({ store: new MemoryStore() });
     const [seat] = seats.intake;
-    seats.chain = { chain: { ...CHAIN, events: [JOINER] }, safeAt: SAFE_LATE };
+    seats.chain = { chain: { ...CHAIN, events: [JOINER] }, safeAt: SAFE_LATE, block: PROVEN };
     expect(await deliver(seat!)).toEqual({ ok: false, code: "intake-chain" });
   });
 

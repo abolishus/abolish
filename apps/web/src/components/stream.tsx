@@ -287,23 +287,30 @@ function SearchForm({
 
 /**
  * The place: a GET form of its own like the search, keeping the order, the
- * topic and the search. What was typed is shown back only in its box (T-67).
+ * topic and the search. What was typed is shown back only in its box (T-67);
+ * the places listed polls are filed at, when given, are offered as the
+ * browser's own suggestions, each as its asker wrote it and never in our
+ * words (T-67, T-68), as the register's box offers them.
  */
 function PlaceForm({
   sort,
   filter,
   typedPlace,
+  places,
   narrowed = false,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typedPlace: string;
+  places: readonly string[] | null | undefined;
   /** Whether the page is narrowed by the place, as `SearchForm`'s. */
   narrowed?: boolean;
 }) {
   const t = useTranslate(catalogs);
   const placeId = useId();
   const placeHintId = useId();
+  const placesId = useId();
+  const suggested = places !== null && places !== undefined && places.length > 0;
   return (
     <form
       role="search"
@@ -325,15 +332,23 @@ function PlaceForm({
           maxLength={MAX_STREAM_PLACE * 2}
           autoComplete="off"
           aria-describedby={placeHintId}
+          {...(suggested ? { list: placesId } : {})}
           className="h-12 min-w-0 flex-1 text-base md:text-base"
         />
+        {suggested ? (
+          <datalist id={placesId}>
+            {places.map((p) => (
+              <option key={p} value={p} />
+            ))}
+          </datalist>
+        ) : null}
         <Button type="submit" variant="outline" className="h-12 shrink-0 px-5">
           {t("streamPlaceSubmit")}
         </Button>
       </div>
       <BoxNote
         id={placeHintId}
-        hint={t("streamPlaceHint")}
+        hint={suggested ? `${t("streamPlaceHint")} ${t("placeSuggested")}` : t("streamPlaceHint")}
         narrowed={
           narrowed
             ? {
@@ -359,12 +374,14 @@ function Narrowing({
   sort,
   filter,
   typedPlace,
+  places,
   withPlace,
   current,
 }: {
   sort: StreamSort;
   filter: StreamFilter;
   typedPlace: string;
+  places: readonly string[] | null | undefined;
   withPlace: boolean;
   current: Current;
 }) {
@@ -382,7 +399,9 @@ function Narrowing({
       </summary>
       <div className="mt-4 grid gap-6">
         <Topics sort={sort} filter={filter} current={current} />
-        {withPlace ? <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} /> : null}
+        {withPlace ? (
+          <PlaceForm sort={sort} filter={filter} typedPlace={typedPlace} places={places} />
+        ) : null}
       </div>
     </details>
   );
@@ -727,6 +746,12 @@ export interface StreamPageProps {
   ballot: string | null;
   /** Whether Tier 0 asks for a phone here, which names it on each card's count. */
   phoneVerification: boolean;
+  /**
+   * The places listed polls are filed at, for the place box to suggest, on
+   * the stream's first page; `null` or left out elsewhere, or when they
+   * couldn't be read, for a plain box.
+   */
+  places?: readonly string[] | null | undefined;
   /** Whether the page starts after another one's last question (`after`). */
   later?: boolean;
 }
@@ -749,6 +774,7 @@ export function StreamPage({
   filter,
   ballot,
   phoneVerification,
+  places,
   later = false,
 }: StreamPageProps) {
   const t = useTranslate(catalogs);
@@ -786,6 +812,7 @@ export function StreamPage({
             sort={sort}
             filter={filter}
             typedPlace={typedPlace}
+            places={places}
             narrowed={place !== undefined && !refused}
           />
         ) : null}
@@ -799,6 +826,7 @@ export function StreamPage({
           sort={sort}
           filter={filter}
           typedPlace={typedPlace}
+          places={places}
           withPlace={!placeShown}
           current={current}
         />

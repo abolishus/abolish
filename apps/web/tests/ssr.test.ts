@@ -2354,6 +2354,75 @@ describe("stream", () => {
     }
   });
 
+  test("suggests the listed polls' places in the place box wherever the stream starts (P2-23 part 3b)", async () => {
+    const suggested = (html: string) => {
+      // The place box, not the search form's hidden field keeping the place.
+      const box = [...html.matchAll(/<input[^>]*name="place"[^>]*>/g)].find(
+        ([input]) => !input.includes('type="hidden"'),
+      );
+      const list = box?.[0].match(/list="([^"]+)"/)?.[1];
+      if (list === undefined) return undefined;
+      const datalist = new RegExp(`<datalist id="${list}">([\\s\\S]*?)</datalist>`).exec(html)?.[1];
+      return [...(datalist ?? "").matchAll(/<option value="([^"]*)"/g)].map((m) => m[1]);
+    };
+    seen.length = 0;
+    // The folded box, the box beside the search on a place's page, and a
+    // search under another order.
+    for (const path of [
+      "/discover",
+      "/discover?place=Riverside%20Park",
+      "/discover?sort=closing&q=park",
+    ]) {
+      const html = await (await get(path)).text();
+      expect(suggested(html), path).toEqual(LISTED_PLACES);
+      expect(html.match(/<datalist\b/g), path).toHaveLength(1);
+      // Offered only as the browser's suggestions, never in the page's words (T-67).
+      expect(html.replace(/<script\b[\s\S]*?<\/script>/g, ""), path).not.toMatch(
+        />[^<]*Riverside</,
+      );
+    }
+    // The hint says so where it shows: under the folded box, not where the
+    // place narrows the page and its note takes the hint's place.
+    expect(await (await get("/discover")).text()).toContain(
+      "but the whole name must match. It suggests the places listed polls are filed at.",
+    );
+    // Asked for with nothing, as the contract's empty input takes it.
+    const asked = seen.filter((r) => r.path === "/elections/places");
+    expect(asked).toHaveLength(4);
+    for (const r of asked) expect([...r.query]).toEqual([]);
+    // A later page reads them nowhere (T-52), and keeps a plain box; nor
+    // does the home page, which has no place box.
+    seen.length = 0;
+    const later = await (await get(`/discover?after=${streamed[9]}`)).text();
+    expect(later).toContain('name="place"');
+    expect(suggested(later)).toBeUndefined();
+    expect(later).not.toContain("<datalist");
+    await get("/");
+    expect(seen.filter((r) => r.path === "/elections/places")).toEqual([]);
+  });
+
+  test("keeps a plain place box, and the stream, after the places fail to read", async () => {
+    stub.listedPlaces = undefined;
+    try {
+      const response = await get("/discover");
+      expect(response.status).toBe(200);
+      const html = await response.text();
+      expect(html).toContain('name="place"');
+      expect(html).not.toContain("<datalist");
+      expect(html).not.toContain("suggests the places");
+      expect(cards(html)).toEqual(streamed.slice(0, 10));
+    } finally {
+      stub.listedPlaces = LISTED_PLACES;
+    }
+  });
+
+  test("offers no suggestions on a refused place's page, which asks the API nothing", async () => {
+    seen.length = 0;
+    const html = await (await get(`/discover?place=${"a".repeat(81)}`)).text();
+    expect(html).not.toContain("<datalist");
+    expect(seen).toEqual([]);
+  });
+
   test("says how many have answered each card's poll so far, tier by tier, or that it couldn't when the read fails", async () => {
     const html = await (await get("/discover?topic=community")).text();
     expect(cards(html)).toEqual([STREAM_V5, STREAM_V1]);
@@ -2382,6 +2451,7 @@ describe("stream", () => {
     expect(seen.filter((r) => r.path === "/elections/display-text")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/tags")).toHaveLength(10);
     expect(seen.filter((r) => r.path === "/elections/answered")).toHaveLength(10);
+    expect(seen.filter((r) => r.path === "/elections/places")).toHaveLength(1);
     for (const { headers } of seen) {
       expect(headers.cookie).toBeUndefined();
       expect(JSON.stringify(headers)).not.toContain("203.0.113.9");

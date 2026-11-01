@@ -180,7 +180,7 @@ function SearchForm({
           ) : null}
           <p id={placeHintId} className="m-0 text-sm text-muted-foreground">
             {t("streamPlaceHint")}
-            {suggested ? ` ${t("registerPlaceSuggested")}` : null}
+            {suggested ? ` ${t("placeSuggested")}` : null}
           </p>
         </div>
       </div>

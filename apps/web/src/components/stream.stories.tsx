@@ -268,16 +268,18 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(sortsOnOneRow(canvasElement)).toBe(true);
 
   // At desktop width the answers and the count stay a readable width, not
-  // the card's whole width with the arrow 1,000px from its answer.
+  // the page's whole width with the arrow 1,000px from its answer: the
+  // cards keep the search box's width, and the answers and the count fill
+  // the card inside its padding (iteration 30).
   for (const box of [
     list.getByRole("list", { name: "When should the main library open on Sundays?" }),
     countBoxes(canvasElement)[0]!,
   ])
-    await expect(box.getBoundingClientRect().width).toBeLessThanOrEqual(576);
+    await expect(box.getBoundingClientRect().width).toBeLessThanOrEqual(640);
   // The cards themselves keep a reading width rather than the page's, which
   // left each card's right half empty at 1280px.
   await expect(list.getAllByRole("article")[0]!.getBoundingClientRect().width).toBeLessThanOrEqual(
-    768,
+    672,
   );
 
   // The order is a link like the others; more comes only when asked for.
@@ -392,6 +394,20 @@ const play: Story["play"] = async ({ canvasElement }) => {
   const searchRight = searchForm(canvasElement).getBoundingClientRect().right;
   for (const card of list.getAllByRole("article"))
     await expect(card.getBoundingClientRect().right).toBeLessThanOrEqual(searchRight);
+
+  // Inside each card the answers end as far from its right border as they
+  // start from its left: at 1280px they stopped 46px short of it against
+  // 25px at the left, a second right edge inside the card (P2-29, the
+  // stream's iteration 30).
+  for (const card of list.getAllByRole("article")) {
+    const answers = within(card).queryByRole("list", { name: /\?$/ });
+    if (answers === null) continue;
+    const box = card.getBoundingClientRect();
+    const inner = answers.getBoundingClientRect();
+    await expect(Math.abs(box.right - inner.right - (inner.left - box.left))).toBeLessThanOrEqual(
+      1,
+    );
+  }
 };
 
 export const Default: Story = { play };

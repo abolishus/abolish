@@ -85,6 +85,41 @@ export function formatZonedNear(
   return { time: clock, zone, day };
 }
 
+/**
+ * The calendar day `date` falls on at `timeZone`, said as "today" or
+ * "yesterday" ("hoy", "ayer") where it is one of them at `now`, and otherwise
+ * as a short date, its year only when it isn't `now`'s year: when a poll
+ * opened, for a card's count of answers so far (P2-29, the stream's
+ * iteration 24). A date's spaces are no-break ones, so a phone wraps it
+ * whole: at 360px "1 ene" left "ene" alone on a line. `relative` tells a
+ * caller which, since some languages put an article before a date but not
+ * before "today".
+ */
+export function formatZonedDaySince(
+  locale: string,
+  timeZone: string,
+  date: Date,
+  now: Date,
+): { day: string; relative: boolean } {
+  const days = zonedDay(timeZone, date) - zonedDay(timeZone, now);
+  if (days === 0 || days === -1)
+    return {
+      day: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(days, "day"),
+      relative: true,
+    };
+  const year = (d: Date) =>
+    new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric" }).format(d);
+  const day = new Intl.DateTimeFormat(locale, {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    ...(year(date) === year(now) ? {} : { year: "numeric" }),
+  })
+    .format(date)
+    .replace(/\s/g, "\u00a0");
+  return { day, relative: false };
+}
+
 /** A UTC day, `YYYY-MM-DD`, for `locale`. */
 export function formatUtcDay(locale: string, day: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: "long", timeZone: "UTC" }).format(

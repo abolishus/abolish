@@ -128,7 +128,7 @@ const sortsOnOneRow = (root: HTMLElement, name = "Order") => {
 
 const countBoxes = (root: HTMLElement) =>
   questions(root)
-    .getAllByRole("list", { name: "Answered so far" })
+    .getAllByRole("list", { name: /^Answered since it opened / })
     .map((l) => l.parentElement!);
 
 const play: Story["play"] = async ({ canvasElement }) => {
@@ -338,7 +338,12 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // How many have answered so far, each of a poll's tiers on its own line,
   // never one figure across them (T-01), and each tier said in words, never
   // as a code ([[language]]); a card without a count shows none.
-  const counts = list.getAllByRole("list", { name: "Answered so far" });
+  // Each count says since when, on the visitor's calendar: the library
+  // opened at midnight UTC, the evening before New Year's Day in New York
+  // (P2-29, the stream's iteration 24).
+  const counts = list.getAllByRole("list", {
+    name: "Answered since it opened yesterday",
+  });
   await expect(counts).toHaveLength(2);
   await expect(
     within(counts[0]!)
@@ -452,6 +457,65 @@ export const SpanishTomorrow: Story = {
     await expect(closes[0]!.textContent).toMatch(
       /^Cierra mañana, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
     );
+  },
+};
+
+/**
+ * A count says since when it has gathered: on the evening the library
+ * opened, "today"; a week on, its date; in another year, its date with the
+ * year (P2-29, the stream's iteration 24).
+ */
+export const OpenedToday: Story = {
+  parameters: { now: "2026-01-01T03:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const counts = questions(canvasElement).getAllByRole("list", {
+      name: "Answered since it opened today",
+    });
+    await expect(counts).toHaveLength(2);
+    // The heading keeps one line on a phone, above the counts.
+    const heading = document.getElementById(counts[0]!.getAttribute("aria-labelledby")!)!;
+    await expect(heading.getClientRects()).toHaveLength(1);
+  },
+};
+
+/** On UTC's calendar the library opened on New Year's Day, this year. */
+export const OpenedLastWeek: Story = {
+  parameters: { timeZone: "UTC", now: "2026-01-07T15:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    await expect(
+      questions(canvasElement).getAllByRole("list", {
+        name: "Answered since it opened Jan\u00a01",
+      }),
+    ).toHaveLength(2);
+  },
+};
+
+export const OpenedLastYear: Story = {
+  parameters: { now: "2027-01-02T15:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    await expect(
+      questions(canvasElement).getAllByRole("list", {
+        name: "Answered since it opened Dec\u00a031,\u00a02025",
+      }),
+    ).toHaveLength(2);
+  },
+};
+
+/** In Spanish east of UTC, the library opened at 1 a.m. on New Year's Day there. */
+export const SpanishOpened: Story = {
+  parameters: { locale: "es-US", timeZone: "Europe/Berlin", now: "2026-01-03T09:00:00.000Z" },
+  play: async ({ canvasElement }) => {
+    const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
+    const counts = list.getAllByRole("list", {
+      name: /^Han respondido desde que abrió el\u00a01\u00a0ene\.?$/,
+    });
+    await expect(counts).toHaveLength(2);
+    // "el 1 ene" wraps whole: at 360px "ene" fell alone onto a second line.
+    const words = document.getElementById(counts[0]!.getAttribute("aria-labelledby")!)!.firstChild!;
+    const date = document.createRange();
+    date.setStart(words, words.textContent!.indexOf("el\u00a01"));
+    date.setEnd(words, words.textContent!.length);
+    await expect(new Set([...date.getClientRects()].map((r) => Math.round(r.top))).size).toBe(1);
   },
 };
 

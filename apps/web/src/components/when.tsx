@@ -7,7 +7,7 @@ import { createContext, useContext, useSyncExternalStore } from "react";
 
 import { catalogs } from "../messages.ts";
 import type { Instant } from "../poll.ts";
-import { formatUtcWhole, formatZonedNear } from "./format.ts";
+import { formatUtcWhole, formatZonedDaySince, formatZonedNear } from "./format.ts";
 
 /**
  * The visitor's time zone, where a story fixes one so its words don't depend
@@ -80,4 +80,21 @@ export function When({
         : t("utcTime", { time: formatUtcWhole(locale, date, style) })}
     </time>
   );
+}
+
+/**
+ * The day `instant` fell on, on the visitor's own calendar, once the page
+ * runs in their browser ("today", "yesterday", "Dec 28"), and nothing on
+ * the server or while the page hydrates: the server knows neither the
+ * visitor's zone nor when a cached page is read, and a day in UTC can be
+ * the wrong one (P2-29, the stream's iteration 24).
+ */
+export function useViewerDaySince(
+  instant: Instant,
+): { day: string; relative: boolean } | undefined {
+  const { locale } = useI18n();
+  const zone = useViewerZone();
+  const now = useContext(ViewerNow) ?? browserNow;
+  if (zone === undefined || instant.iso === undefined) return undefined;
+  return formatZonedDaySince(locale, zone, new Date(instant.iso), now());
 }

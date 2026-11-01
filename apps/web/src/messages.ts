@@ -389,6 +389,8 @@ const enUS = {
     "Open now, by how many people answered in the last seven days, each person once however often they changed their answer. Anyone can count it again from the public board.",
   streamQuestions: "Questions",
   streamAnsweredSoFar: "Answered so far",
+  streamAnsweredSinceDay: "Answered since it opened {day}",
+  streamAnsweredSinceDate: "Answered since it opened {date}",
   streamAnswered_email: {
     one: "{count} person with a verified e-mail",
     other: "{count} people with a verified e-mail",

@@ -1,4 +1,5 @@
-// A version-1 stub, a version-5 one as the website creates it, a panel and a
+// A version-1 stub, a version-5 one as the website creates it, a rolling
+// version-7 one, a panel and a
 // coordinator that relays every round between seats, dropping what a test
 // tells it to.
 import {
@@ -6,6 +7,8 @@ import {
   type ChallengesMessage,
   type ElectionDefinition,
   type ElectionDefinitionV5,
+  type ElectionDefinitionV7,
+  ELECTORATE_MODES,
   electionStubHash,
   electionStubV5Hash,
   encodeCeremonyTranscript,
@@ -14,8 +17,10 @@ import {
   identityKey,
   type KeysMessage,
   type Panel,
+  POLL_CLASSES,
   QUESTION_METHODS,
   RECORD_TYPES,
+  RESULTS_MODES,
   type RevealsMessage,
 } from "@abolishus/crypto";
 import type { SummingRule } from "../src/summing.ts";
@@ -107,6 +112,44 @@ export function stubV5For(
     max_sequencer_drift: v1.max_sequencer_drift,
     display_text_commitment: v1.display_text_commitment,
     receipt_keys: [identityKey(crypto.getRandomValues(new Uint8Array(32)))],
+    ...change,
+  };
+}
+
+// A rolling poll's profile ([[0028-rolling-electorates]]): definition 7,
+// ballot 5 and the spoiled-ballot opening that opens its cores.
+const ROLLING_PINS: ReadonlyMap<number, number> = new Map([
+  [RECORD_TYPES.electionDefinition, 7],
+  [RECORD_TYPES.ballot, 5],
+  [RECORD_TYPES.spoiledBallotOpening, 3],
+  [RECORD_TYPES.boardEntry, 5],
+  [RECORD_TYPES.contractEvent, 13],
+  [RECORD_TYPES.displayText, 2],
+]);
+
+/** A sealed everyday rolling stub without an author panel: one Tier 0 tier over two groups. */
+export function rollingStubFor(
+  panel: Panel,
+  change: Partial<ElectionDefinitionV7> = {},
+): ElectionDefinitionV7 {
+  const pins = [];
+  for (let t: number = RECORD_TYPES.electionDefinition; t <= RECORD_TYPES.displayText; t++)
+    pins.push({ record_type: t, version: ROLLING_PINS.get(t) ?? 1 });
+  return {
+    ...stubV5For(panel),
+    profile: { protocol_major: 1, pins },
+    electorate: [],
+    poll_class: POLL_CLASSES.everyday,
+    results_mode: RESULTS_MODES.sealed,
+    live_every: 0,
+    live_batch: 0,
+    author_threshold: 0,
+    author_keys: [],
+    author_transcript_hash: new Uint8Array(32),
+    electorate_mode: ELECTORATE_MODES.rolling,
+    rolling_electorate: [
+      { tier: 0, root_l2_block: 7n, groups: [1n, 2n], root: 1n << 200n, group_size: 3n },
+    ],
     ...change,
   };
 }

@@ -21,13 +21,15 @@
 // resolves; L2 governance that rewrites state rewrites the accumulator too
 // (T-71). Whatever can't be decided (a block not final yet or not under a
 // posted root, a node that can't be read or doesn't prove, a Tier 1 or
-// Tier 2 tier) is a refusal, never a pass.
+// Tier 2 tier) is a refusal, never a pass. A rolling stub's recount is
+// its tiers' opening state, with every listed group's history replayed
+// strictly through the proven block (T-13, T-16, T-08).
 
 import { chainId, GameBlockError, l2Finalized, type Rpc, RpcError } from "@abolishus/node";
 import { electorateCheck, type GroupRegistryRelease, OutputRootError } from "@abolishus/verifier";
 import { bytesToHex, keccak256, toBytes } from "viem";
 import { provenLog, type RegistryAccumulators } from "./output-root.ts";
-import type { ElectorateCheck } from "./stub.ts";
+import { type ElectorateCheck, stubRootBlock } from "./stub.ts";
 
 // Topic 0 of each event the recount reads ([[contracts]], Group registry):
 // the replay takes every log, but the recount these alone, so an event no
@@ -66,10 +68,8 @@ export interface L2ElectorateOptions extends GroupRegistryRelease {
 export function l2ElectorateCheck(options: L2ElectorateOptions): ElectorateCheck {
   const { l2, fromBlock, accumulators, ...release } = options;
   return async (stub) => {
-    const top = stub.value.electorate.reduce(
-      (m, t) => (t.root_l2_block > m ? t.root_l2_block : m),
-      0n,
-    );
+    // A rolling stub's tiers are its rolling ones: its fixed list is empty.
+    const top = stubRootBlock(stub);
     try {
       // T-71: a node on another chain could show any contract's logs at the
       // pinned address, and a self-paid group's need no signature.

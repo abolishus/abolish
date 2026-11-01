@@ -214,7 +214,7 @@ const play: Story["play"] = async ({ canvasElement }) => {
   // On the visitor's own clock: midnight UTC is the evening before in New
   // York, where "Jan 8, 12:00 AM UTC" named a day the poll was already closed.
   const closes = list.getAllByText(/^Closes/);
-  await expect(closes[0]!.textContent).toBe("Closes Jan 7, 2026, 7:00\u00a0PM\u00a0EST");
+  await expect(closes[0]!.textContent).toBe("Closes Jan 7, 7:00\u00a0PM\u00a0EST");
   await expect(within(closes[0]!).getByRole("time")).toHaveAttribute(
     "datetime",
     "2026-01-08T00:00:00.000Z",
@@ -398,8 +398,8 @@ export const UtcVisitor: Story = {
   play: async ({ canvasElement }) => {
     const list = questions(canvasElement);
     const closes = list.getAllByText(/^Closes/);
-    await expect(closes[0]!.textContent).toBe("Closes Jan 8, 2026, 12:00\u00a0AM\u00a0UTC");
-    await expect(closes[1]!.textContent).toBe("Closes Jan 15, 2026, 12:00\u00a0AM\u00a0UTC");
+    await expect(closes[0]!.textContent).toBe("Closes Jan 8, 12:00\u00a0AM\u00a0UTC");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 15, 12:00\u00a0AM\u00a0UTC");
   },
 };
 
@@ -409,9 +409,7 @@ export const SpanishClock: Story = {
   play: async ({ canvasElement }) => {
     const list = within(within(canvasElement).getByRole("list", { name: "Preguntas" }));
     const closes = list.getAllByText(/^Cierra/);
-    await expect(closes[0]!.textContent).toMatch(
-      /^Cierra 8 ene 2026, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
-    );
+    await expect(closes[0]!.textContent).toMatch(/^Cierra 8 ene, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/);
   },
 };
 
@@ -426,7 +424,7 @@ export const ClosesToday: Story = {
     const list = questions(canvasElement);
     const closes = list.getAllByText(/^Closes/);
     await expect(closes[0]!.textContent).toBe("Closes today, 7:00\u00a0PM\u00a0EST");
-    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 2026, 7:00\u00a0PM\u00a0EST");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 7:00\u00a0PM\u00a0EST");
     await expect(within(closes[0]!).getByRole("time")).toHaveAttribute(
       "datetime",
       "2026-01-08T00:00:00.000Z",
@@ -448,7 +446,7 @@ export const ClosesTomorrow: Story = {
   play: async ({ canvasElement }) => {
     const closes = questions(canvasElement).getAllByText(/^Closes/);
     await expect(closes[0]!.textContent).toBe("Closes tomorrow, 7:00\u00a0PM\u00a0EST");
-    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 2026, 7:00\u00a0PM\u00a0EST");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 7:00\u00a0PM\u00a0EST");
   },
 };
 
@@ -461,6 +459,35 @@ export const SpanishTomorrow: Story = {
     await expect(closes[0]!.textContent).toMatch(
       /^Cierra mañana, 1:00\u00a0a\.\s?m\.\u00a0GMT\+1$/,
     );
+  },
+};
+
+/**
+ * A close in this year leaves the year out, as the count's "since" does; one
+ * in another year keeps it (P2-29, the stream's iteration 28).
+ */
+export const ClosesNextYear: Story = {
+  args: {
+    stream: {
+      kind: "stream",
+      cards: cards.map((card, i) =>
+        card.kind === "poll" && i === 1
+          ? {
+              ...card,
+              poll: {
+                ...card.poll,
+                closesAt: { seconds: "1799971200", iso: "2027-01-15T00:00:00.000Z" },
+              },
+            }
+          : card,
+      ),
+      next: NEXT,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const closes = questions(canvasElement).getAllByText(/^Closes/);
+    await expect(closes[0]!.textContent).toBe("Closes Jan 7, 7:00\u00a0PM\u00a0EST");
+    await expect(closes[1]!.textContent).toBe("Closes Jan 14, 2027, 7:00\u00a0PM\u00a0EST");
   },
 };
 

@@ -136,7 +136,10 @@ describe("the counted set from the counted extent", { timeout: WHOLE_BOARDS }, (
     // One cell per tier of the two-tier electorate.
     expect(result.cells).toEqual([[], []]);
     // A fixed definition never reads a rolling chain, whatever it holds.
-    const rolling = { events: [], registeredAt: 0n };
+    const rolling = {
+      chain: { events: [], registeredAt: 0n },
+      through: { block: 0n, timestamp: 0n },
+    };
     expect(countedSet({ ...inputsOf(admitted, afterClose), rolling })).toEqual(result);
   });
 

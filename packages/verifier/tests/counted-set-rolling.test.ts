@@ -66,6 +66,14 @@ const events: RollingTierEvent[] = file.events.map((e) => {
     : { ...at, kind: "remove", indices: e.remove.map(BigInt) };
 });
 const chain: RollingBallotChain = { events, registeredAt: BigInt(file.registeredAt) };
+const rootBlock = (c: Case) => {
+  const d = decodeDefinition(hex(c.definition));
+  if (d.version !== 7) throw new Error("not version 7");
+  return d.value.rolling_electorate.reduce(
+    (b, t) => (t.root_l2_block > b ? t.root_l2_block : b),
+    0n,
+  );
+};
 const clock: AnchorClock = {
   epoch: BigInt(file.clock["epoch"] ?? ""),
   period: BigInt(file.clock["period"] ?? ""),
@@ -89,6 +97,7 @@ function inputsOf(
   c: Case,
   headers: readonly TestHeader[],
   rolling: RollingBallotChain | null = chain,
+  through?: { readonly block: bigint; readonly timestamp: bigint },
 ): CountedExtentInputs {
   const p = file.panels[c.panel];
   if (p === undefined) throw new Error(`no panel ${c.panel}`);
@@ -99,7 +108,12 @@ function inputsOf(
     clock,
     blocks: headers.map((h) => decodeHeader(h.encoded)),
     eventsAuthenticated: true,
-    ...(rolling !== null && { rolling }),
+    ...(rolling !== null && {
+      rolling: {
+        chain: rolling,
+        through: through ?? { block: rootBlock(c), timestamp: CLOSES + 1n },
+      },
+    }),
   };
 }
 /** Admission's rows over the same inputs, with the same chain, as `ballotChecks` gives them. */
@@ -109,7 +123,7 @@ function admissionRows(inputs: CountedExtentInputs) {
     inputs.panel,
     inputs.entries,
     undefined,
-    inputs.rolling,
+    inputs.rolling?.chain,
   );
   if (!election.ok) throw new Error(`readElection refused: ${election.code}`);
   return ballotChecks(
@@ -120,7 +134,7 @@ function admissionRows(inputs: CountedExtentInputs) {
     election.boardEntryVersion,
     inputs.clock,
     inputs.blocks,
-    inputs.rolling,
+    inputs.rolling?.chain,
   );
 }
 
@@ -186,6 +200,32 @@ describe("the counted set under a rolling definition", { timeout: WHOLE_BOARDS }
       }),
       { numRuns },
     );
+  });
+
+  test("is undecided at 5.1 over a chain not proven past the close and every root_l2_block", () => {
+    // A chain read mid-poll gives every later step the last tree it holds,
+    // so a member added after it would fail membership-proof: never a set
+    // over it (T-14, T-16).
+    const undecided = {
+      ok: false,
+      row: "5.1",
+      outcome: { status: "unverifiable", code: "not-reached", at: {} },
+    };
+    for (const c of file.cases) {
+      const block = rootBlock(c);
+      for (const through of [
+        { block, timestamp: CLOSES },
+        { block, timestamp: times.opens_at },
+        { block: block - 1n, timestamp: CLOSES + 1n },
+      ]) {
+        const inputs = inputsOf(c, afterClose, chain, through);
+        expect(countedSet(inputs), c.id).toEqual(undecided);
+        expect(countedTally(inputs), c.id).toEqual(undecided);
+      }
+      // At the bounds it is decided wherever admission is.
+      const at = inputsOf(c, afterClose, chain, { block, timestamp: CLOSES + 1n });
+      expect(countedSet(at)).toEqual(countedSet(inputsOf(c, afterClose)));
+    }
   });
 
   test("throws on a chain whose events don't give the definition's opening state", () => {

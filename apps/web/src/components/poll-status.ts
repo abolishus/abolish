@@ -1,7 +1,7 @@
 import { CircleCheckBig, CircleDot, Clock, type LucideIcon } from "lucide-react";
 
 import type { Messages } from "../messages.ts";
-import type { Counting, Instruction, PollStatus } from "../poll.ts";
+import type { Counting, Instruction, PollClass, PollStatus } from "../poll.ts";
 
 /** Each status in words with its own icon; colour is only ever on the icon. */
 export const STATUS_MARK = {
@@ -23,6 +23,13 @@ export const COUNTING_LABEL = {
   approval: "typeApproval",
   questions: "typeQuestions",
 } as const satisfies Record<Counting, keyof Messages>;
+
+/** Each poll class in words, as its definition states it. */
+export const CLASS_LABEL = {
+  everyday: "class_everyday",
+  organisational: "class_organisational",
+  civic: "class_civic",
+} as const satisfies Record<PollClass, keyof Messages>;
 
 /** A question's instruction, in words, with the values its message names. */
 export function instructionMessage(i: Instruction): {

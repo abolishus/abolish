@@ -7,7 +7,15 @@ import { ArrowLeft, ArrowLeftToLine, ArrowRight, Search } from "lucide-react";
 import { type ReactNode, useId } from "react";
 
 import { catalogs, POLL_TOPIC_MESSAGES } from "../messages.ts";
-import { type Counting, COUNTINGS, POLL_STATUSES, pollStatus, type PollStatus } from "../poll.ts";
+import {
+  type Counting,
+  COUNTINGS,
+  POLL_CLASSES,
+  POLL_STATUSES,
+  type PollClass,
+  pollStatus,
+  type PollStatus,
+} from "../poll.ts";
 import type {
   ListedPoll,
   PollList as List,
@@ -21,7 +29,7 @@ import { formatUtc, formatUtcWhole } from "./format.ts";
 import { LookupForm } from "./lookup-form.tsx";
 import { PageHeader, Section } from "./page-parts.tsx";
 import { PollRows } from "./poll-list.tsx";
-import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
+import { CLASS_LABEL, COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 
 /**
  * What the register shows of the list: the polls whose words hold every
@@ -38,6 +46,8 @@ export interface RegisterFilters {
   readonly topic?: PollTopic | undefined;
   readonly place?: string | undefined;
   readonly status: PollStatus | "all" | undefined;
+  /** The poll's class, as its definition states it. */
+  readonly kind?: PollClass | "all" | undefined;
   readonly counting: Counting | "all" | undefined;
 }
 
@@ -53,6 +63,7 @@ const chosen = <T extends string>(value: T | "all" | undefined): T | undefined =
  */
 export function registerHref(at: RegisterAt, filters: RegisterFilters): string {
   const status = chosen(filters.status);
+  const kind = chosen(filters.kind);
   const counting = chosen(filters.counting);
   const search = [
     ...(at === undefined ? [] : "after" in at ? [`after=${at.after}`] : [`before=${at.before}`]),
@@ -60,6 +71,7 @@ export function registerHref(at: RegisterAt, filters: RegisterFilters): string {
     ...(filters.topic === undefined ? [] : [`topic=${filters.topic}`]),
     ...(filters.place === undefined ? [] : [`place=${encodeURIComponent(filters.place)}`]),
     ...(status === undefined ? [] : [`status=${status}`]),
+    ...(kind === undefined ? [] : [`kind=${kind}`]),
     ...(counting === undefined ? [] : [`counting=${counting}`]),
   ];
   return search.length === 0 ? "/polls" : `/polls?${search.join("&")}`;
@@ -68,11 +80,13 @@ export function registerHref(at: RegisterAt, filters: RegisterFilters): string {
 /** Whether `entry` passes `filters`; a poll the page can't read passes only no filter. */
 function matches(entry: ListedPoll, filters: RegisterFilters, asOf: List["asOf"]): boolean {
   const status = chosen(filters.status);
+  const kind = chosen(filters.kind);
   const counting = chosen(filters.counting);
-  if (status === undefined && counting === undefined) return true;
+  if (status === undefined && kind === undefined && counting === undefined) return true;
   if (entry.kind !== "poll") return false;
   return (
     (status === undefined || pollStatus(entry.poll, asOf) === status) &&
+    (kind === undefined || entry.poll.pollClass === kind) &&
     (counting === undefined || entry.poll.counting === counting)
   );
 }
@@ -107,6 +121,7 @@ function SearchForm({
   const placesId = useId();
   const suggested = places !== undefined && places.length > 0;
   const status = chosen(filters.status);
+  const kind = chosen(filters.kind);
   const counting = chosen(filters.counting);
   return (
     <form role="search" method="get" action="/polls" className="grid max-w-2xl gap-5">
@@ -188,6 +203,7 @@ function SearchForm({
         {t("streamSearchSubmit")}
       </Button>
       {status === undefined ? null : <input type="hidden" name="status" value={status} />}
+      {kind === undefined ? null : <input type="hidden" name="kind" value={kind} />}
       {counting === undefined ? null : <input type="hidden" name="counting" value={counting} />}
     </form>
   );
@@ -290,7 +306,7 @@ function Tally({ counts, asOf }: { counts: RegisterCounts; asOf: List["asOf"] })
 /**
  * The register of polls (`/polls`): the lookup form, then a page of the
  * polls our API lists, narrowed by a search the API runs over the polls'
- * words and filtered by status and counting rule. The listing leaves out
+ * words and filtered by status, class and counting rule. The listing leaves out
  * delisted and hidden polls (T-68) and is only ours: the page says the
  * registry on chain names every poll (T-34). Filters apply to the page in
  * hand, never to a search our server runs, and a poll's status is read from
@@ -308,8 +324,9 @@ export function PollRegister({
   const t = useTranslate(catalogs);
   const { q, topic, place } = filters;
   const status = chosen(filters.status);
+  const kind = chosen(filters.kind);
   const counting = chosen(filters.counting);
-  const unsearched = registerHref(undefined, { status, counting });
+  const unsearched = registerHref(undefined, { status, kind, counting });
   // Whether the API narrowed the whole list, by its words or its filing.
   const narrowed = q !== undefined || topic !== undefined || place !== undefined;
   const refused = page.kind === "search-refused" || page.kind === "place-refused";
@@ -431,8 +448,9 @@ function ListPage({
   const rows = list.polls.filter((entry) => matches(entry, filters, asOf));
   const { q, topic, place } = filters;
   const status = chosen(filters.status);
+  const kind = chosen(filters.kind);
   const counting = chosen(filters.counting);
-  const filtered = status !== undefined || counting !== undefined;
+  const filtered = status !== undefined || kind !== undefined || counting !== undefined;
   const clear = registerHref(at, { q, topic, place, status: undefined, counting: undefined });
   return (
     <>
@@ -456,6 +474,16 @@ function ListPage({
               : readable.filter((p) => pollStatus(p, asOf) === s).length
           }
           label={(s) => t(STATUS_MARK[s].label)}
+        />
+        <FilterGroup
+          name="kind"
+          legend={t("listKind")}
+          options={POLL_CLASSES}
+          checked={kind}
+          count={(k) =>
+            k === "all" ? list.polls.length : readable.filter((p) => p.pollClass === k).length
+          }
+          label={(k) => t(CLASS_LABEL[k])}
         />
         <FilterGroup
           name="counting"

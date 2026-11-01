@@ -13,6 +13,7 @@ const poll: PollView = {
   version: 1,
   illFormed: undefined,
   rolling: false,
+  pollClass: "everyday",
   counting: "plurality",
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [
@@ -176,6 +177,25 @@ export const Rolling: Story = {
     await expect(canvas.getByText("5,000 members when it opened")).toBeVisible();
     await expect(canvas.getByText("1 member when it opened")).toBeVisible();
     await expect(canvas.queryByText("5,000 members")).toBeNull();
+  },
+};
+
+/**
+ * A version-7 poll whose definition files it on the civic record: the class
+ * is named as its definition states it, with why no poll under the launch
+ * panel can be registered there (P2-19 part 56; T-14).
+ */
+export const CivicRecord: Story = {
+  args: { poll: { ...poll, version: 7, pollClass: "civic", counting: "questions" } },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText(/· Civic referendum · Question by question$/)).toBeVisible();
+    await expect(
+      canvas.getByText(/^Its definition puts it on the civic record, .* independent trustees\./),
+    ).toBeVisible();
+    await openEvidence(canvasElement);
+    const kind = canvas.getByText("Kind", { selector: "dt" });
+    await expect(kind.nextElementSibling).toHaveTextContent("Civic referendum");
   },
 };
 
@@ -599,7 +619,7 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   const heading = canvas.getByRole("heading", { level: 1 });
   await expect(heading).toHaveTextContent("Should the park stay open late?");
   await expect(heading).toHaveAttribute("lang", "en");
-  await expect(canvas.getByText("Poll 1011121314151617… · One choice")).toBeVisible();
+  await expect(canvas.getByText("Poll 1011121314151617… · Everyday poll · One choice")).toBeVisible();
   const asks = canvas.getByRole("region", { name: "What it asks" });
   // The question heading the page isn't said again: its answers, numbered by question.
   await expect(within(asks).getByRole("heading", { name: "Question 1" })).toBeInTheDocument();

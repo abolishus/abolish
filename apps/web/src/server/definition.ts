@@ -31,10 +31,17 @@ import {
   ELECTORATE_MODES,
   foldRegions,
   pinnedVersion,
+  POLL_CLASSES,
   RECORD_TYPES,
 } from "@abolishus/crypto";
 
-import { type DefinitionProblem, instant, type PartitionCell, type PollView } from "../poll.ts";
+import {
+  type DefinitionProblem,
+  instant,
+  type PartitionCell,
+  type PollClass,
+  type PollView,
+} from "../poll.ts";
 import { fromHex, toHex } from "../values.ts";
 
 export type DefinitionResult =
@@ -78,6 +85,13 @@ function viewV5(d: ElectionDefinitionV5): PollView {
   return questionsView(d, 5, electionDefinitionV5Hash(d), electionDefinitionV5Rule(d));
 }
 
+// The decoder admits only these three values (an `enum8`).
+const CLASS_OF = {
+  [POLL_CLASSES.everyday]: "everyday",
+  [POLL_CLASSES.organisational]: "organisational",
+  [POLL_CLASSES.civicReferendum]: "civic",
+} as const satisfies Record<ElectionDefinitionV7["poll_class"], PollClass>;
+
 /**
  * Version 7's view: version 5's under a fixed electorate; under a rolling
  * one, each rolling tier with its members at the opening root, which is what
@@ -85,7 +99,10 @@ function viewV5(d: ElectionDefinitionV5): PollView {
  * close, which no definition holds.
  */
 function viewV7(d: ElectionDefinitionV7): PollView {
-  const view = questionsView(d, 7, electionDefinitionV7Hash(d), electionDefinitionV7Rule(d));
+  const view = {
+    ...questionsView(d, 7, electionDefinitionV7Hash(d), electionDefinitionV7Rule(d)),
+    pollClass: CLASS_OF[d.poll_class],
+  };
   if (d.electorate_mode !== ELECTORATE_MODES.rolling) return view;
   return {
     ...view,
@@ -107,6 +124,8 @@ function questionsView(
     electionId: toHex(d.election_id),
     version,
     rolling: false,
+    // Version 5 carries no class: an everyday poll. Version 7 sets its own.
+    pollClass: "everyday",
     definitionHash: toHex(hash),
     illFormed:
       failure === undefined
@@ -157,6 +176,7 @@ function viewV1(d: ElectionDefinition): PollView {
     electionId: toHex(d.election_id),
     version: 1,
     rolling: false,
+    pollClass: "everyday",
     definitionHash: toHex(electionDefinitionHash(d)),
     illFormed: rule === undefined ? undefined : { rule, question: undefined },
     counting: d.election_type === ELECTION_TYPES.approval ? "approval" : "plurality",

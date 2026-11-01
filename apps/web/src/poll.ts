@@ -38,6 +38,22 @@ export const COUNTINGS = [
   "questions",
 ] as const satisfies readonly Counting[];
 
+/**
+ * The poll's class, as its definition states it: an everyday poll, or one
+ * of the two classes on the civic record, an organisational vote or a civic
+ * referendum (version 7's `poll_class`; versions 1 and 5 carry none and are
+ * everyday polls). A class on the civic record needs a panel of independent
+ * trustees, so no poll under the launch panel is on it (verifier 2.5,
+ * `panel-kind`; [[0027-trustee-panels-and-live-results]], Part 3; T-14).
+ */
+export type PollClass = "everyday" | "organisational" | "civic";
+
+export const POLL_CLASSES = [
+  "everyday",
+  "organisational",
+  "civic",
+] as const satisfies readonly PollClass[];
+
 /** The first well-formedness rule the definition breaks, and the question it names if any. */
 export interface IllFormed {
   readonly rule: ElectionDefinitionV7Rule;
@@ -54,6 +70,7 @@ export interface PollView {
   readonly definitionHash: string;
   /** The first well-formedness rule the definition breaks, if any: the verifier fails such an election. */
   readonly illFormed: IllFormed | undefined;
+  readonly pollClass: PollClass;
   readonly counting: Counting;
   /** In ballot order; version 1 has exactly one. */
   readonly questions: readonly PollQuestion[];

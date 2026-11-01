@@ -6,7 +6,7 @@ import { type Instant, pollStatus, type PollView } from "../poll.ts";
 import type { ListedPoll } from "../server/load.ts";
 import type { CardAnswered } from "../stream.ts";
 import { ListedUnder } from "./listed-under.tsx";
-import { COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
+import { CLASS_LABEL, COUNTING_LABEL, STATUS_MARK } from "./poll-status.ts";
 import { When } from "./when.tsx";
 
 /** A listed poll's ID, which names its row where the poll's own words can't. */
@@ -141,9 +141,14 @@ function Row({
         {entry.kind === "poll" ? (
           <dl className="col-span-2 m-0 grid gap-4 sm:grid-cols-2 md:col-span-7 md:grid-cols-7 md:gap-x-6">
             <div className="grid content-start gap-1 md:col-span-2">
-              <dt className={CELL_TERM}>{t("listCounting")}</dt>
+              <dt className={CELL_TERM}>{t("listKindCounting")}</dt>
               <dd className="m-0 grid gap-1 text-sm">
-                <span>{t(COUNTING_LABEL[entry.poll.counting])}</span>
+                {/* The class its definition states, which a poll on the civic
+                    record can't hold under the launch panel (T-14). */}
+                <span>{t(CLASS_LABEL[entry.poll.pollClass])}</span>
+                <span className="text-muted-foreground">
+                  {t(COUNTING_LABEL[entry.poll.counting])}
+                </span>
                 {entry.poll.illFormed !== undefined ? (
                   <span className="text-destructive">{t("listIllFormed")}</span>
                 ) : null}
@@ -178,7 +183,7 @@ function Row({
 /**
  * Listed polls as rows of the register, under one set of column heads: the
  * poll, in its own words where they can be shown and by its ID, with where
- * it is listed, its counting rule, its status, read from the definition's
+ * it is listed, its class and counting rule, its status, read from the definition's
  * times at `asOf` (the server's clock when it loaded them, so the page and
  * its hydration agree) with whether a closed one is counted, and how many
  * have answered it so far, with Tier 0 named by the deployment's phone
@@ -203,7 +208,7 @@ export function PollRows({
         className="hidden grid-cols-12 gap-x-6 border-y border-foreground py-3 md:grid"
       >
         <span className={cn(COLUMN_HEAD, "col-span-4")}>{t("listPoll")}</span>
-        <span className={cn(COLUMN_HEAD, "col-span-2")}>{t("listCounting")}</span>
+        <span className={cn(COLUMN_HEAD, "col-span-2")}>{t("listKindCounting")}</span>
         <span className={cn(COLUMN_HEAD, "col-span-3")}>{t("listStatus")}</span>
         <span className={cn(COLUMN_HEAD, "col-span-2")}>{t("streamAnsweredSoFar")}</span>
       </div>

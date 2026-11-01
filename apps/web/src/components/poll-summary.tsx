@@ -26,7 +26,13 @@ import { PollFollow } from "./poll-follow.tsx";
 import { PollReactions } from "./poll-reactions.tsx";
 import { PollResults, useResultsWords } from "./poll-results.tsx";
 import { PollShare, type PollShareProps } from "./poll-share.tsx";
-import { COUNTING_LABEL, instructionMessage, STATUS_MARK, STATUS_TEXT } from "./poll-status.ts";
+import {
+  CLASS_LABEL,
+  COUNTING_LABEL,
+  instructionMessage,
+  STATUS_MARK,
+  STATUS_TEXT,
+} from "./poll-status.ts";
 import { ReportSection, type ReportWords } from "./report-section.tsx";
 import { When } from "./when.tsx";
 
@@ -288,6 +294,7 @@ export function PollSummary({
   const latest = moderation.latest;
   const status = pollStatus(poll, asOf);
   const counting = t(COUNTING_LABEL[poll.counting]);
+  const pollClass = t(CLASS_LABEL[poll.pollClass]);
   const options = poll.questions.reduce((sum, q) => sum + q.optionCount, 0);
   const illFormed = poll.illFormed;
   const prefix = poll.electionId.slice(0, 16);
@@ -305,7 +312,8 @@ export function PollSummary({
     <article className="grid gap-16">
       <header className="grid gap-6 pt-2 md:pt-10">
         <p className="m-0 font-mono text-xs tracking-widest text-muted-foreground uppercase">
-          {text === undefined ? t("pollTitle") : t("pollHeading", { prefix })} · {counting}
+          {text === undefined ? t("pollTitle") : t("pollHeading", { prefix })} · {pollClass} ·{" "}
+          {counting}
         </p>
         {/* In the poll's own words where the definition commits to them,
             in their own language and direction (T-34, T-41); by its ID
@@ -333,6 +341,13 @@ export function PollSummary({
             </StatusMark>
           )}
         </div>
+
+        {/* A class on the civic record needs independent trustees, which no
+            poll has during launch, so the registry on chain refuses it: the
+            class is the definition's claim, never our endorsement (T-14). */}
+        {poll.pollClass === "everyday" ? null : (
+          <p className="m-0 max-w-prose text-base text-pretty">{t("pollCivicRecord")}</p>
+        )}
 
         {/* The scheduled poll's mockup opens on this: there is nothing to do
             yet, and the facts below say when there will be. */}
@@ -558,6 +573,7 @@ export function PollSummary({
                 {t("evidenceDefinitionTitle")}
               </h3>
               <dl className="m-0">
+                <Fact term={t("factKind")}>{pollClass}</Fact>
                 <Fact term={t("factType")}>{counting}</Fact>
                 <Fact term={t("factOptions")}>
                   <Count value={options} />

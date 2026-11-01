@@ -4,7 +4,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { PollRegister, type RegisterFilters } from "../components/poll-register.tsx";
 import { fetchPollList } from "../data.ts";
 import { POLL_TOPIC_MESSAGES } from "../messages.ts";
-import { COUNTINGS, POLL_STATUSES } from "../poll.ts";
+import { COUNTINGS, POLL_CLASSES, POLL_STATUSES } from "../poll.ts";
 import { streamPlace, streamQuery } from "../stream.ts";
 import { titles } from "../titles.ts";
 import { isElectionId, normalizeElectionId, oneOf, searchText } from "../values.ts";
@@ -42,6 +42,7 @@ export const Route = createFileRoute("/polls/")({
       topic: POLL_TOPICS.find((t) => t === topic),
       place: searchText(search["place"]),
       status: oneOf(search["status"], POLL_STATUSES),
+      kind: oneOf(search["kind"], POLL_CLASSES),
       counting: oneOf(search["counting"], COUNTINGS),
     };
   },
@@ -103,7 +104,7 @@ export const Route = createFileRoute("/polls/")({
     };
   },
   component: function Polls() {
-    const { id, after, before, q, topic, place, status, counting } = Route.useSearch();
+    const { id, after, before, q, topic, place, status, kind, counting } = Route.useSearch();
     const { page, phoneVerification } = Route.useLoaderData();
     const query = streamQuery(q);
     const filed = streamPlace(place);
@@ -118,6 +119,7 @@ export const Route = createFileRoute("/polls/")({
           topic,
           place: filed.kind === "place" ? filed.place : undefined,
           status,
+          kind,
           counting,
         }}
         invalid={id}

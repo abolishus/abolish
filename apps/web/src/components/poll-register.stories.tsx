@@ -11,6 +11,7 @@ const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView =
   version: 1,
   illFormed: undefined,
   rolling: false,
+  pollClass: "everyday",
   counting: "plurality",
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [{ tier: 0, groupSize: "5000" }],
@@ -27,6 +28,7 @@ const CLOSED = "30".repeat(32);
 const UNREADABLE = "40".repeat(32);
 const NEXT = "50".repeat(32);
 const QUESTIONS = "60".repeat(32);
+const CIVIC = "70".repeat(32);
 
 const LIST: PollList = {
   kind: "list",
@@ -130,7 +132,11 @@ const play: Story["play"] = async ({ canvasElement }) => {
   await expect(within(rows[3]!).getByText(/another poll's definition/)).toBeVisible();
   await expect(canvas.getByText(/clock \(January 5, 2026/)).toBeVisible();
   // Each group at All, and each option counting the page's polls it matches.
-  await expect(canvas.getAllByRole("radio", { name: "All 4", checked: true })).toHaveLength(2);
+  await expect(canvas.getAllByRole("radio", { name: "All 4", checked: true })).toHaveLength(3);
+  await expect(canvas.getByRole("radio", { name: "Everyday poll 3" })).not.toBeChecked();
+  await expect(canvas.getByRole("radio", { name: "Civic referendum 0" })).toBeVisible();
+  // Each row's class above its counting rule, under one column head.
+  await expect(rows[0]).toHaveTextContent(/Kind and countingEveryday pollOne choice/);
   await expect(canvas.getByRole("radio", { name: "Open 1" })).not.toBeChecked();
   await expect(canvas.getByRole("radio", { name: "One choice 2" })).not.toBeChecked();
   await expect(canvas.getByRole("radio", { name: "Approve any number 1" })).toBeVisible();
@@ -292,7 +298,8 @@ export const AllSent: Story = {
   args: { filters: { status: "all", counting: "approval" } },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    await expect(canvas.getByRole("radio", { name: "All 4", checked: true })).toBeVisible();
+    // Status as sent, and the class, which the address leaves out.
+    await expect(canvas.getAllByRole("radio", { name: "All 4", checked: true })).toHaveLength(2);
     await expect(shown(canvasElement)).toEqual([`/polls/${SCHEDULED}`]);
     await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
       "href",
@@ -341,6 +348,56 @@ export const QuestionByQuestion: Story = {
     const row = canvas.getByRole("article", { name: "Riverside Park improvements" });
     await expect(within(row).getByText("Question by question")).toBeVisible();
     await expect(within(row).getByText("Open")).toBeVisible();
+  },
+};
+
+/**
+ * A version-7 poll whose definition files it on the civic record, among
+ * everyday ones, filtered by its class (P2-19 part 56; T-14).
+ */
+export const ByKind: Story = {
+  args: {
+    page: {
+      ...LIST,
+      polls: [
+        ...LIST.polls,
+        {
+          kind: "poll",
+          text: undefined,
+          answered: undefined,
+          tags: NO_TAGS,
+          counted: false,
+          poll: poll(CIVIC, {
+            version: 7,
+            pollClass: "civic",
+            counting: "questions",
+          }),
+        },
+      ],
+    },
+    filters: { status: undefined, kind: "civic", counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("radio", { name: "Civic referendum 1" })).toBeChecked();
+    await expect(canvas.getByRole("radio", { name: "Everyday poll 3" })).not.toBeChecked();
+    await expect(canvas.getByRole("radio", { name: "Organisational vote 0" })).toBeVisible();
+    await expect(canvas.getByText("1 of 5 polls on this page match.")).toBeVisible();
+    await expect(shown(canvasElement)).toEqual([`/polls/${CIVIC}`]);
+    const [row] = canvas.getAllByRole("article");
+    await expect(row).toHaveTextContent(/Civic referendumQuestion by question/);
+    // The search form and the next page keep the class.
+    await expect(canvasElement.querySelector('input[type=hidden][name="kind"]')).toHaveValue(
+      "civic",
+    );
+    await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
+      "href",
+      `/polls?after=${NEXT}&kind=civic`,
+    );
+    await expect(canvas.getByRole("link", { name: "Clear filters" })).toHaveAttribute(
+      "href",
+      "/polls",
+    );
   },
 };
 
@@ -473,6 +530,12 @@ export const Addresses: Story = {
     await expect(registerHref(undefined, { status: undefined, counting: "all" })).toBe("/polls");
     await expect(registerHref(undefined, { status: "closed", counting: "approval" })).toBe(
       "/polls?status=closed&counting=approval",
+    );
+    await expect(
+      registerHref(undefined, { status: "open", kind: "organisational", counting: "plurality" }),
+    ).toBe("/polls?status=open&kind=organisational&counting=plurality");
+    await expect(registerHref(undefined, { status: undefined, kind: "all", counting: "all" })).toBe(
+      "/polls",
     );
     await expect(
       registerHref(

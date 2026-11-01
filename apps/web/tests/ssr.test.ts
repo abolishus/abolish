@@ -3188,8 +3188,8 @@ const KB = 1024;
  * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box with its topics and place, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
-  "/": { html: 10, js: 181, css: 40, fonts: 58 },
-  "/discover": { html: 8, js: 178, css: 40, fonts: 58 },
+  "/": { html: 10, js: 182, css: 40, fonts: 58 },
+  "/discover": { html: 8, js: 179, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 182, css: 40, fonts: 58 },

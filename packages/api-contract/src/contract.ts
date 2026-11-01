@@ -309,6 +309,23 @@ const getTags = oc
 /** The tiers a definition can name (docs/spec/election-definition.md). */
 const MAX_TIERS = 3;
 
+/** Each tier's count of voters so far, one entry a tier with a voter, ascending. */
+const TierCounts = z
+  .array(
+    z.strictObject({
+      tier: z.number().check(z.int(), z.minimum(0), z.maximum(MAX_TIERS - 1)),
+      answered: U64,
+    }),
+  )
+  .check(
+    z.maxLength(MAX_TIERS),
+    // One entry a tier, ascending, so a caller never has two counts for one tier to choose from.
+    z.refine(
+      (tiers) => tiers.every((t, i) => i === 0 || t.tier > tiers[i - 1]!.tier),
+      "tiers must be strictly ascending",
+    ),
+  );
+
 const getAnswered = oc
   .route({
     method: "GET",
@@ -320,23 +337,34 @@ const getAnswered = oc
   })
   .errors(electionNotFound)
   .input(ElectionQuery)
+  .output(z.strictObject({ tiers: TierCounts }));
+
+/** The most elections `POST /elections/answered` reads at once; a test ties this copy to `@abolishus/core`. */
+export const MAX_ANSWERED_ELECTIONS = 100;
+
+const getAnsweredMany = oc
+  .route({
+    method: "POST",
+    path: "/elections/answered",
+    summary: "How many have answered several polls so far",
+    description:
+      "`GET /elections/answered` for each of `electionIds` (1 to `MAX_ANSWERED_ELECTIONS` distinct IDs) at once, from one snapshot, so a page listing several polls asks once rather than once a poll (T-52). It reads and changes nothing else: POST only carries the list. `elections` holds, in the order asked, each election this server has a definition for, with its tiers as that route serves them, each tier on its own and never added together (T-01); an unknown election is left out rather than refused, so one unknown ID never hides the others' counts. The counts are the public board's, which anyone can recount, and say nothing the board doesn't (T-10, T-11); moderation never withholds them (docs/moderation-policy.md; T-68).",
+    tags: ["elections"],
+  })
+  .input(
+    z.strictObject({
+      electionIds: z.array(Hash32).check(
+        z.minLength(1),
+        z.maxLength(MAX_ANSWERED_ELECTIONS),
+        z.refine((ids) => new Set(ids).size === ids.length, "election IDs must be distinct"),
+      ),
+    }),
+  )
   .output(
     z.strictObject({
-      tiers: z
-        .array(
-          z.strictObject({
-            tier: z.number().check(z.int(), z.minimum(0), z.maximum(MAX_TIERS - 1)),
-            answered: U64,
-          }),
-        )
-        .check(
-          z.maxLength(MAX_TIERS),
-          // One entry a tier, ascending, so a caller never has two counts for one tier to choose from.
-          z.refine(
-            (tiers) => tiers.every((t, i) => i === 0 || t.tier > tiers[i - 1]!.tier),
-            "tiers must be strictly ascending",
-          ),
-        ),
+      elections: z
+        .array(z.strictObject({ electionId: Hash32, tiers: TierCounts }))
+        .check(z.maxLength(MAX_ANSWERED_ELECTIONS)),
     }),
   );
 
@@ -949,6 +977,7 @@ export const contract = {
     getDisplayText,
     getTags,
     getAnswered,
+    getAnsweredMany,
     getResults,
     resolveCode,
     getCode,

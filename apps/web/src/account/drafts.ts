@@ -145,8 +145,12 @@ export interface DraftsClient {
   moderation(id: string): Promise<PollModerationView>;
   /** Appeals the poll's newest decision, which must be an unappealed removal. */
   appeal(id: string): Promise<void>;
-  /** How many have answered an open poll so far, one count per tier it is open to. */
-  answered(id: string): Promise<CardAnswered>;
+  /**
+   * How many have answered each of the account's open polls so far, by poll
+   * ID, one count per tier each is open to, in one read; a poll missing from
+   * the map has no count to show.
+   */
+  answered(): Promise<ReadonlyMap<string, CardAnswered>>;
   /** Submits a draft for setup, with a Turnstile token solved for `poll-create`. */
   submit(id: string, token: string): Promise<void>;
 }
@@ -167,9 +171,6 @@ const REFUSALS: Readonly<Record<string, DraftsFailure>> = {
   TOO_MANY_TODAY: "tooManyToday",
   TURNSTILE_REFUSED: "challengeRefused",
   TURNSTILE_UNAVAILABLE: "challengeUnavailable",
-  // The poll is no longer open (it can only stay open, so another account's
-  // answer, or a stale page): the list is read again.
-  NOT_OPEN: "changed",
 };
 
 async function call(
@@ -373,23 +374,32 @@ function moderationOf(value: unknown): PollModerationView {
 }
 
 /**
- * The handler's counts, refused unless each is a tier the website words, in
- * ascending order and once, with a decimal `u64` count. Which tiers the poll
- * is open to is the handler's, from the poll's own draft.
+ * The handler's counts, refused unless each poll is named once, with tiers
+ * the website words, in ascending order and once, each a decimal `u64`
+ * count. Which polls are open and which tiers each is open to is the
+ * handler's, from the account's own drafts.
  */
-function answeredOf(value: unknown): CardAnswered {
-  const tiers = array(record(value).tiers).map((v) => {
-    const c = record(v);
-    if (
-      (c.tier !== 0 && c.tier !== 1 && c.tier !== 2) ||
-      typeof c.answered !== "string" ||
-      !U64.test(c.answered)
-    )
+function answeredOf(value: unknown): ReadonlyMap<string, CardAnswered> {
+  const polls = new Map<string, CardAnswered>();
+  for (const p of array(record(value).polls)) {
+    const entry = record(p);
+    const id = text(entry.id);
+    if (polls.has(id)) throw new DraftsError("failed");
+    const tiers = array(entry.tiers).map((v) => {
+      const c = record(v);
+      if (
+        (c.tier !== 0 && c.tier !== 1 && c.tier !== 2) ||
+        typeof c.answered !== "string" ||
+        !U64.test(c.answered)
+      )
+        throw new DraftsError("failed");
+      return { tier: c.tier, answered: c.answered } as const;
+    });
+    if (tiers.some((c, i) => i > 0 && c.tier <= tiers[i - 1]!.tier))
       throw new DraftsError("failed");
-    return { tier: c.tier, answered: c.answered } as const;
-  });
-  if (tiers.some((c, i) => i > 0 && c.tier <= tiers[i - 1]!.tier)) throw new DraftsError("failed");
-  return tiers;
+    polls.set(id, tiers);
+  }
+  return polls;
 }
 
 // The handler's own wire form: `closesAt` a decimal string.
@@ -437,8 +447,8 @@ export const draftsClient: DraftsClient = {
   async appeal(id) {
     await call("/appeal", { id });
   },
-  async answered(id) {
-    return answeredOf(await call("/answered", { id }));
+  async answered() {
+    return answeredOf(await call("/answered", {}));
   },
   async submit(id, token) {
     await call("/submit", { id }, { [TURNSTILE_HEADER]: token });

@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vite-plus/test";
 import {
   ANSWERED_WINDOW_SECONDS,
   answeredByTier,
+  answeredByTiers,
   answeredWindow,
   appendEntry,
   countListedPolls,
@@ -16,6 +17,7 @@ import {
   type ListingOrder,
   listPolls,
   listPollsBefore,
+  MAX_ANSWERED_ELECTIONS,
   MAX_LISTED_PLACES,
   MAX_LISTING_PAGE,
   moderate,
@@ -920,5 +922,50 @@ describe("answeredByTier", () => {
     const id = await election();
     await cast(id, 1n);
     expect(await answeredByTier(readOnly, id)).toEqual([{ tier: 0, voters: 1n }]);
+  });
+  // An account's list of polls (P2-19 part 58): every poll's count in one read (T-52).
+  test("reads several elections at once, each as it would be read alone, in the asked order", async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.array(
+          fc.array(fc.tuple(fc.integer({ min: 0, max: 2 }), fc.integer({ min: 1, max: 3 })), {
+            maxLength: 5,
+          }),
+          { minLength: 1, maxLength: 4 },
+        ),
+        fc.boolean(),
+        async (polls, unknownFirst) => {
+          const ids: Uint8Array[] = [];
+          for (const ballots of polls) {
+            const id = await election();
+            for (const [tier, nullifier] of ballots) await cast(id, BigInt(nullifier), tier);
+            ids.push(id);
+          }
+          const unknown = new Uint8Array(randomBytes(32));
+          const asked = unknownFirst ? [unknown, ...ids.reverse()] : [...ids, unknown];
+          const alone = await Promise.all(asked.map((id) => answeredByTier(app, id)));
+          expect(await answeredByTiers(app, asked)).toEqual(alone);
+          expect(alone[unknownFirst ? 0 : asked.length - 1]).toBeUndefined();
+        },
+      ),
+      { numRuns: Math.min(numRuns, 10) },
+    );
+  }, 120_000);
+
+  test("refuses no IDs, too many, a repeated one and a malformed one", async () => {
+    const id = await election();
+    await expect(answeredByTiers(app, [])).rejects.toThrow(TypeError);
+    await expect(answeredByTiers(app, [id, new Uint8Array(id)])).rejects.toThrow(TypeError);
+    await expect(answeredByTiers(app, [id, new Uint8Array(31)])).rejects.toThrow(TypeError);
+    await expect(answeredByTiers(app, "00" as unknown as readonly Uint8Array[])).rejects.toThrow(
+      TypeError,
+    );
+    const many = Array.from(
+      { length: MAX_ANSWERED_ELECTIONS + 1 },
+      () => new Uint8Array(randomBytes(32)),
+    );
+    await expect(answeredByTiers(app, many)).rejects.toThrow(TypeError);
+    // The bound itself is read, every unknown ID undefined.
+    expect(await answeredByTiers(app, many.slice(1))).toEqual(many.slice(1).map(() => undefined));
   });
 });

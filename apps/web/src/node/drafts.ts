@@ -17,11 +17,13 @@
 // (ADR 0032, rule 14; P2-22 part 5d-2). An open poll carries its election's
 // identifier, so the author's pages link to the poll's public page (part 6d);
 // a poll in setup carries none, as the website names no step's hash (T-34).
-// For an open poll, `answered` says how many have answered it so far, one
-// count per tier its draft opened it to, as the API serves the count to
-// anyone and the poll's page shows it (P2-19 part 57). The API is asked by
-// election ID alone, from this server, so it learns nothing of the account
-// (T-10); the count is the API's claim, as on every page that shows it.
+// `answered` says how many have answered each of the account's open polls so
+// far, one count per tier its draft opened it to, as the API serves the count
+// to anyone and the poll's page shows it (P2-19 part 57), all in one read of
+// the API (part 58; T-52). The API is asked by election IDs alone, from this
+// server, so it learns nothing of the account beyond that the polls in one
+// request share an author (T-10); the count is the API's claim, as on every
+// page that shows it.
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -85,17 +87,24 @@ export interface DraftsOptions {
   /** The clock; the system's by default. Injected so tests can set it. */
   readonly now?: () => Date;
   /**
-   * How many the API says have answered the election `electionId` (lowercase
-   * hex) so far, tier by tier, as `GET /elections/answered` serves it;
+   * How many the API says have answered each of `electionIds` (1 to 100
+   * distinct, lowercase hex) so far, tier by tier, as `POST
+   * /elections/answered` serves them, an election it doesn't know left out;
    * rejects when the API can't say. None to answer every count unavailable.
    */
-  readonly answered?: (electionId: string) => Promise<readonly ServedCount[]>;
+  readonly answered?: (electionIds: readonly string[]) => Promise<readonly ServedElection[]>;
 }
 
 /** One tier's count as `GET /elections/answered` serves it: a decimal `u64`. */
 export interface ServedCount {
   readonly tier: number;
   readonly answered: string;
+}
+
+/** One election's counts as `POST /elections/answered` serves them. */
+export interface ServedElection {
+  readonly electionId: string;
+  readonly tiers: readonly ServedCount[];
 }
 
 // Transport bounds only, at the codec's own field limits
@@ -138,7 +147,7 @@ const Inputs = {
   "POST /drafts/discard": z.strictObject({ id: PollId }),
   "POST /drafts/moderation": z.strictObject({ id: PollId }),
   "POST /drafts/appeal": z.strictObject({ id: PollId }),
-  "POST /drafts/answered": z.strictObject({ id: PollId }),
+  "POST /drafts/answered": z.strictObject({}),
 } as const;
 
 const toDraft = ({ topic, place, ...d }: z.infer<typeof Draft>): PollDraft => ({
@@ -303,26 +312,47 @@ export function createDraftsHandler({
         case "POST /drafts/answered": {
           const input = Inputs[route].safeParse(body);
           if (!input.success) return refuse(400, "BAD_REQUEST");
-          const poll = await readAccountPoll(sql, account, input.data.id);
-          if (poll === undefined) return refuse(404, "NOT_FOUND");
-          // Only an open poll has an election the website names (T-34).
-          if (poll.state !== "open" || poll.electionId === undefined)
-            return refuse(409, "NOT_OPEN");
+          // Only an open poll has an election the website names (T-34). The
+          // list holds at most core's MAX_LISTED_POLLS, which is as many as
+          // the API reads at once.
+          const open = (await listAccountPolls(sql, account)).flatMap((poll) =>
+            poll.state === "open" && poll.electionId !== undefined
+              ? [{ poll, electionId: toHex(poll.electionId) }]
+              : [],
+          );
+          if (open.length === 0) return answer(200, { polls: [] });
           if (answered === undefined) return refuse(503, "UNAVAILABLE");
-          let served: readonly ServedCount[];
+          let served: readonly ServedElection[];
           try {
-            served = await answered(toHex(poll.electionId));
+            served = await answered(open.map((p) => p.electionId));
           } catch {
             return refuse(503, "UNAVAILABLE");
           }
-          // On the tiers the poll was opened to, as the definition built from
-          // this draft names them, a tier with none served at 0; a count for
-          // any other tier is left out, as `cardAnswered` leaves it (T-01).
+          // An answer naming an election twice or one not asked about is no
+          // answer to this question, so nothing is shown rather than a guess.
+          const asked = new Set(open.map((p) => p.electionId));
+          const byElection = new Map(served.map((e) => [e.electionId, e.tiers]));
+          if (byElection.size !== served.length || served.some((e) => !asked.has(e.electionId)))
+            return refuse(503, "UNAVAILABLE");
           return answer(200, {
-            tiers: poll.draft.tiers.map((tier) => ({
-              tier,
-              answered: served.find((count) => count.tier === tier)?.answered ?? "0",
-            })),
+            // A poll the API doesn't know is left out, as a failed read shows
+            // nothing, never a zero. The rest are placed on the tiers the
+            // poll was opened to, as the definition built from its draft
+            // names them, a tier with none served at 0; a count for any other
+            // tier is left out, as `cardAnswered` leaves it (T-01).
+            polls: open.flatMap(({ poll, electionId }) => {
+              const tiers = byElection.get(electionId);
+              if (tiers === undefined) return [];
+              return [
+                {
+                  id: poll.id,
+                  tiers: poll.draft.tiers.map((tier) => ({
+                    tier,
+                    answered: tiers.find((count) => count.tier === tier)?.answered ?? "0",
+                  })),
+                },
+              ];
+            }),
           });
         }
         case "POST /drafts/appeal": {

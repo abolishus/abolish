@@ -504,70 +504,93 @@ describe("moderation", () => {
   });
 });
 
-// How many have answered an open poll as the handler answers it
-// (`POST /drafts/answered`, P2-19 part 57): the row shows only counts it can
-// word, one per tier.
+// How many have answered each of the account's open polls as the handler
+// answers them (`POST /drafts/answered`, P2-19 parts 57 and 58): the rows
+// show only counts they can word, one per tier, read for the whole list at once.
 describe("answered", () => {
-  test("reads each tier's count as the handler answers it, and words each refusal", async () => {
+  const OTHER = "0123456789abcdef0123456789abcdef";
+
+  test("reads each poll's counts as the handler answers them, and words each refusal", async () => {
     const calls = serve(
-      Response.json({ tiers: [{ tier: 0, answered: "38" }] }),
       Response.json({
-        tiers: [
-          { tier: 0, answered: "0" },
-          { tier: 2, answered: "18446744073709551615" },
+        polls: [
+          { id: ID, tiers: [{ tier: 0, answered: "38" }] },
+          {
+            id: OTHER,
+            tiers: [
+              { tier: 0, answered: "0" },
+              { tier: 2, answered: "18446744073709551615" },
+            ],
+          },
         ],
       }),
-      Response.json({ tiers: [] }),
-      refusal(409, "NOT_OPEN"),
-      refusal(404, "NOT_FOUND"),
+      Response.json({ polls: [] }),
+      Response.json({ polls: [{ id: ID, tiers: [] }] }),
       refusal(401, "SIGNED_OUT"),
       refusal(503, "UNAVAILABLE"),
     );
-    expect(await draftsClient.answered(ID)).toEqual([{ tier: 0, answered: "38" }]);
-    expect(await draftsClient.answered(ID)).toEqual([
-      { tier: 0, answered: "0" },
-      { tier: 2, answered: "18446744073709551615" },
-    ]);
-    expect(await draftsClient.answered(ID)).toEqual([]);
+    expect(await draftsClient.answered()).toEqual(
+      new Map([
+        [ID, [{ tier: 0, answered: "38" }]],
+        [
+          OTHER,
+          [
+            { tier: 0, answered: "0" },
+            { tier: 2, answered: "18446744073709551615" },
+          ],
+        ],
+      ]),
+    );
+    expect(await draftsClient.answered()).toEqual(new Map());
+    expect(await draftsClient.answered()).toEqual(new Map([[ID, []]]));
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toMatchObject({
       url: "/drafts/answered",
-      init: { method: "POST", body: JSON.stringify({ id: ID }) },
+      init: { method: "POST", body: JSON.stringify({}) },
     });
-    for (const expected of ["changed", "gone", "signedOut", "failed"])
-      expect(await failure(draftsClient.answered(ID))).toBe(expected);
+    for (const expected of ["signedOut", "failed"])
+      expect(await failure(draftsClient.answered())).toBe(expected);
   });
 
-  test("refuses a tier it can't word, a count that isn't a decimal u64, and tiers out of order", async () => {
+  test("refuses a tier it can't word, a count that isn't a decimal u64, tiers out of order and a poll twice", async () => {
+    const one = (tiers: unknown) => ({ polls: [{ id: ID, tiers }] });
     const bad = [
       {},
-      { tiers: {} },
-      { tiers: [{ tier: 3, answered: "1" }] },
-      { tiers: [{ tier: -1, answered: "1" }] },
-      { tiers: [{ tier: "0", answered: "1" }] },
-      { tiers: [{ tier: 0, answered: 1 }] },
-      { tiers: [{ tier: 0, answered: "01" }] },
-      { tiers: [{ tier: 0, answered: "-1" }] },
-      { tiers: [{ tier: 0, answered: "1".repeat(21) }] },
-      { tiers: [{ tier: 0 }] },
-      { tiers: [null] },
+      { polls: {} },
+      { polls: [null] },
+      { polls: [{ tiers: [] }] },
+      { polls: [{ id: 1, tiers: [] }] },
+      { polls: [{ id: ID }] },
       {
-        tiers: [
-          { tier: 1, answered: "1" },
-          { tier: 0, answered: "1" },
+        polls: [
+          { id: ID, tiers: [] },
+          { id: ID, tiers: [] },
         ],
       },
-      {
-        tiers: [
-          { tier: 0, answered: "1" },
-          { tier: 0, answered: "2" },
-        ],
-      },
+      one({}),
+      one([{ tier: 3, answered: "1" }]),
+      one([{ tier: -1, answered: "1" }]),
+      one([{ tier: "0", answered: "1" }]),
+      one([{ tier: 0, answered: 1 }]),
+      one([{ tier: 0, answered: "01" }]),
+      one([{ tier: 0, answered: "-1" }]),
+      one([{ tier: 0, answered: "1".repeat(21) }]),
+      one([{ tier: 0 }]),
+      one([null]),
+      one([
+        { tier: 1, answered: "1" },
+        { tier: 0, answered: "1" },
+      ]),
+      one([
+        { tier: 0, answered: "1" },
+        { tier: 0, answered: "2" },
+      ]),
       [],
       null,
     ];
     for (const answer of bad) {
       serve(Response.json(answer));
-      expect(await failure(draftsClient.answered(ID))).toBe("failed");
+      expect(await failure(draftsClient.answered()), JSON.stringify(answer)).toBe("failed");
     }
   });
 
@@ -575,7 +598,7 @@ describe("answered", () => {
     await fc.assert(
       fc.asyncProperty(fc.jsonValue(), fc.constantFrom(200, 404, 409, 503), async (j, s) => {
         serve(Response.json(j, { status: s }));
-        const e = await draftsClient.answered(ID).then(
+        const e = await draftsClient.answered().then(
           () => undefined,
           (x: unknown) => x,
         );

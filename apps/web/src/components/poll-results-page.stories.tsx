@@ -204,6 +204,9 @@ const play: Story["play"] = async ({ canvasElement }) => {
     board.getByRole("img", { name: "Fingerprint of the chain head 1f1f1f1f" }),
   ).toBeVisible();
   await expect(board.getByRole("figure", { name: "Chain head" })).toHaveTextContent(head.chainHead);
+  await expect(
+    board.getByText(/each link hashes in the one before it.*hold the same 1,234 entries\.$/),
+  ).toBeVisible();
   await expect(board.getByRole("figure", { name: "Tree root" })).toHaveTextContent(head.root);
   await expect(board.getByText(/only this server's word/)).toBeVisible();
 

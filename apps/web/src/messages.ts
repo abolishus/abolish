@@ -1022,6 +1022,11 @@ const enUS = {
   boardEntries: "Entries",
   boardEmpty: "No entries yet.",
   boardHead: "Chain head",
+  boardHeadMeaning: {
+    one: "The chain head is the latest entry's link, and each link hashes in the one before it, so the head commits to every entry in order. Two copies of this board with the same head hold the same single entry.",
+    other:
+      "The chain head is the latest entry's link, and each link hashes in the one before it, so the head commits to every entry in order. Two copies of this board with the same head hold the same {count} entries.",
+  },
   boardRoot: "Tree root",
   boardUnanchored:
     "Until an L1 checkpoint covers these values, they are only this server's word. Keep them: a later board that doesn't extend them is evidence of tampering.",

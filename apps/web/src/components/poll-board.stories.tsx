@@ -78,6 +78,7 @@ export const Default: Story = {
     await expect(canvas.getByRole("heading", { level: 1 })).toHaveTextContent("The poll's board");
     await expect(canvas.getByText("Poll 1011121314151617… · Public board")).toBeVisible();
     await expect(canvas.getByRole("figure", { name: "Chain head" })).toBeVisible();
+    await expect(canvas.getByText(/with the same head hold the same 100 entries\.$/)).toBeVisible();
     await expect(canvas.getByText(/they are only this server's word/)).toBeVisible();
     const table = canvas.getByRole("table", { name: "Entries 25 to 49 of 100" });
     await expect(within(table).getAllByRole("row")).toHaveLength(26);
@@ -470,6 +471,7 @@ export const Empty: Story = {
     await expect(canvas.getAllByText("No entries yet.")).toHaveLength(2);
     await expect(canvas.getByText(/^No period's entries can be counted yet/)).toBeVisible();
     await expect(canvas.queryByRole("figure", { name: "Chain head" })).toBeNull();
+    await expect(canvas.queryByText(/with the same head hold the same/)).toBeNull();
     await expect(
       canvas.getByText(/^The board holds no entries yet, so the ceremony's/),
     ).toBeVisible();

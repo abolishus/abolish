@@ -152,6 +152,9 @@ export function PollBoard({
                     <Hash value={head.chainHead} label={t("boardHead")} />
                   </div>
                 </div>
+                <p className="m-0 max-w-prose text-sm text-muted-foreground">
+                  {t("boardHeadMeaning", { count: size })}
+                </p>
                 <Hash value={head.root} label={t("boardRoot")} />
               </>
             )}

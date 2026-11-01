@@ -763,8 +763,12 @@ export function StreamPage({
         {refused ? null : <TopicClear sort={sort} filter={filter} />}
       </div>
       {/* A reading width: at desktop width a card the page's whole width
-          held its question and answers in its left half, beside an empty one. */}
-      <section aria-labelledby="stream-title" className="grid max-w-3xl content-start gap-6">
+          held its question and answers in its left half, beside an empty one.
+          The search box's: a card 96px wider than the box and the notes
+          above it gave the column a third right edge at 1280px, its border
+          running past everything the visitor had just read (P2-29, the
+          stream's iteration 29). */}
+      <section aria-labelledby="stream-title" className="grid max-w-2xl content-start gap-6">
         <h2 id="stream-title" className="sr-only">
           {t("streamQuestions")}
         </h2>

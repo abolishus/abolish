@@ -102,6 +102,10 @@ const analytics: Analytics = {
 };
 /** Every token a poll submission's Turnstile check saw. */
 const submitted: [string | null, TurnstileAction][] = [];
+/** What the drafts handler's API answers for each election's answered counts, by hex ID; none rejects. */
+const answeredServed = new Map<string, { tier: number; answered: string }[]>();
+/** Every election the drafts handler asked the API about. */
+const answeredAsked: string[] = [];
 /** The drafts handler's clock. */
 const NOW = new Date("2026-10-17T12:00:00Z");
 /** The push handler's VAPID public key. */
@@ -253,6 +257,12 @@ beforeAll(async () => {
       },
       origin: ORIGIN,
       now: () => NOW,
+      answered: async (electionId) => {
+        answeredAsked.push(electionId);
+        const served = answeredServed.get(electionId);
+        if (served === undefined) throw new Error("the API didn't answer");
+        return served;
+      },
     }),
     email: createEmailHandler({
       sql,
@@ -742,6 +752,58 @@ describe("poll drafts under /drafts", () => {
     expect(await (await author.call("GET", "/drafts")).json()).toEqual({
       polls: [expect.objectContaining({ id, state: "open", electionId: hex })],
     });
+  });
+
+  test("says how many have answered an open poll on the tiers its draft opened it to, and nothing of any other poll", async () => {
+    const author = new Browser();
+    await register(author, new SoftAuthenticator(RP_ID), true);
+    const { id } = (await (await author.call("POST", "/drafts/create", { draft })).json()) as {
+      id: string;
+    };
+    // A draft and a poll in setup have no election to count (T-34), and the API isn't asked.
+    expect(await (await author.call("POST", "/drafts/answered", { id })).json()).toEqual({
+      code: "NOT_OPEN",
+      status: 409,
+    });
+    expect((await author.call("POST", "/drafts/submit", { id })).status).toBe(202);
+    expect((await author.call("POST", "/drafts/answered", { id })).status).toBe(409);
+    expect(answeredAsked).toHaveLength(0);
+
+    const electionId = randomBytes(32);
+    await db.admin`
+      UPDATE account_polls SET state = 'open',
+        creator_address = ${randomBytes(20)}, create_tx_hash = ${randomBytes(32)},
+        election_id = ${electionId}, created_block = 1, l1_origin_timestamp = 1,
+        anchors_checked_block = 1, electorate = '[]', stub_hash = ${randomBytes(32)},
+        ceremony_tx_hash = ${randomBytes(32)}, register_tx_hash = ${randomBytes(32)},
+        registered_block = 2
+      WHERE id = ${id}`;
+    const hex = electionId.toString("hex");
+    // The API is down: unavailable, never a zero.
+    const down = await author.call("POST", "/drafts/answered", { id });
+    expect([down.status, await down.json()]).toEqual([503, { code: "UNAVAILABLE", status: 503 }]);
+    expect(answeredAsked).toEqual([hex]);
+    // A count for a tier the poll isn't open to is left out; Tier 0 is its only tier.
+    answeredServed.set(hex, [
+      { tier: 0, answered: "38" },
+      { tier: 2, answered: "5" },
+    ]);
+    const counted = await author.call("POST", "/drafts/answered", { id });
+    expect(counted.headers.get("cache-control")).toBe("no-store");
+    expect(await counted.json()).toEqual({ tiers: [{ tier: 0, answered: "38" }] });
+    // A tier with none served is at 0.
+    answeredServed.set(hex, [{ tier: 1, answered: "7" }]);
+    expect(await (await author.call("POST", "/drafts/answered", { id })).json()).toEqual({
+      tiers: [{ tier: 0, answered: "0" }],
+    });
+    // Another account's poll is no poll of this one's.
+    const other = new Browser();
+    await register(other, new SoftAuthenticator(RP_ID), true);
+    expect((await other.call("POST", "/drafts/answered", { id })).status).toBe(404);
+    expect((await author.call("POST", "/drafts/answered", { id: "x" })).status).toBe(400);
+    expect((await new Browser().call("POST", "/drafts/answered", { id })).status).toBe(401);
+    expect(answeredAsked).toHaveLength(3);
+    expect(logged.at(-1)).toMatchObject({ route: "drafts" });
   });
 
   test("needs a session, our origin and JSON, and serves only its routes", async () => {

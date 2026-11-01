@@ -403,11 +403,13 @@ const accounts = createAccounts({
   turnstile,
   log: write,
 });
+const api = createApi(env.API_URL);
 const drafts = createDraftsHandler({
   sql,
   accountOf: (headers) => accounts.accountOf(headers),
   turnstile,
   origin,
+  answered: async (electionId) => (await api.elections.getAnswered({ electionId })).tiers,
 });
 const emailVerification = emailService();
 const email = createEmailHandler({
@@ -500,7 +502,7 @@ const prune = startAccountPrune({
 // which the prune timer sends where the e-mail service is configured.
 const landing = startResultsLanding({
   sql,
-  resultsIn: resultsInFrom(createApi(env.API_URL)),
+  resultsIn: resultsInFrom(api),
   log: write,
 });
 const analytics =

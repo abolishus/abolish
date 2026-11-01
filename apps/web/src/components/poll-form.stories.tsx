@@ -113,6 +113,9 @@ function fakeDrafts({
     appeal: async () => {
       throw new DraftsError("failed");
     },
+    answered: async () => {
+      throw new DraftsError("failed");
+    },
   };
 }
 

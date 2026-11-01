@@ -42,6 +42,7 @@ function setupDrafts(
     update: refused,
     moderation: refused,
     appeal: refused,
+    answered: refused,
     submit: refused,
     read: async (id: string) => {
       const answer = answers[Math.min(client.at, answers.length - 1)];

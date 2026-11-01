@@ -97,6 +97,9 @@ const noPolls: DraftsClient = {
   appeal: async () => {
     throw new DraftsError("gone");
   },
+  answered: async () => {
+    throw new DraftsError("gone");
+  },
   submit: async () => {},
 };
 

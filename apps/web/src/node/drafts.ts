@@ -17,6 +17,11 @@
 // (ADR 0032, rule 14; P2-22 part 5d-2). An open poll carries its election's
 // identifier, so the author's pages link to the poll's public page (part 6d);
 // a poll in setup carries none, as the website names no step's hash (T-34).
+// For an open poll, `answered` says how many have answered it so far, one
+// count per tier its draft opened it to, as the API serves the count to
+// anyone and the poll's page shows it (P2-19 part 57). The API is asked by
+// election ID alone, from this server, so it learns nothing of the account
+// (T-10); the count is the API's claim, as on every page that shows it.
 //
 // T-10, T-11, T-67: a request's session names its account and nothing else
 // is read from it; answers are no-store, and the request log keeps only the
@@ -64,6 +69,7 @@ export const DRAFT_ROUTES = [
   "POST /drafts/discard",
   "POST /drafts/moderation",
   "POST /drafts/appeal",
+  "POST /drafts/answered",
 ] as const;
 
 const ROUTES: ReadonlySet<string> = new Set(DRAFT_ROUTES);
@@ -78,6 +84,18 @@ export interface DraftsOptions {
   readonly origin: string;
   /** The clock; the system's by default. Injected so tests can set it. */
   readonly now?: () => Date;
+  /**
+   * How many the API says have answered the election `electionId` (lowercase
+   * hex) so far, tier by tier, as `GET /elections/answered` serves it;
+   * rejects when the API can't say. None to answer every count unavailable.
+   */
+  readonly answered?: (electionId: string) => Promise<readonly ServedCount[]>;
+}
+
+/** One tier's count as `GET /elections/answered` serves it: a decimal `u64`. */
+export interface ServedCount {
+  readonly tier: number;
+  readonly answered: string;
 }
 
 // Transport bounds only, at the codec's own field limits
@@ -120,6 +138,7 @@ const Inputs = {
   "POST /drafts/discard": z.strictObject({ id: PollId }),
   "POST /drafts/moderation": z.strictObject({ id: PollId }),
   "POST /drafts/appeal": z.strictObject({ id: PollId }),
+  "POST /drafts/answered": z.strictObject({ id: PollId }),
 } as const;
 
 const toDraft = ({ topic, place, ...d }: z.infer<typeof Draft>): PollDraft => ({
@@ -202,6 +221,7 @@ export function createDraftsHandler({
   turnstile,
   origin,
   now = () => new Date(),
+  answered,
 }: DraftsOptions): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
@@ -279,6 +299,31 @@ export function createDraftsHandler({
           const m = await readPollModeration(sql, account, input.data.id);
           if (m === undefined) return refuse(404, "NOT_FOUND");
           return answer(200, moderation(m));
+        }
+        case "POST /drafts/answered": {
+          const input = Inputs[route].safeParse(body);
+          if (!input.success) return refuse(400, "BAD_REQUEST");
+          const poll = await readAccountPoll(sql, account, input.data.id);
+          if (poll === undefined) return refuse(404, "NOT_FOUND");
+          // Only an open poll has an election the website names (T-34).
+          if (poll.state !== "open" || poll.electionId === undefined)
+            return refuse(409, "NOT_OPEN");
+          if (answered === undefined) return refuse(503, "UNAVAILABLE");
+          let served: readonly ServedCount[];
+          try {
+            served = await answered(toHex(poll.electionId));
+          } catch {
+            return refuse(503, "UNAVAILABLE");
+          }
+          // On the tiers the poll was opened to, as the definition built from
+          // this draft names them, a tier with none served at 0; a count for
+          // any other tier is left out, as `cardAnswered` leaves it (T-01).
+          return answer(200, {
+            tiers: poll.draft.tiers.map((tier) => ({
+              tier,
+              answered: served.find((count) => count.tier === tier)?.answered ?? "0",
+            })),
+          });
         }
         case "POST /drafts/appeal": {
           const input = Inputs[route].safeParse(body);

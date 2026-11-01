@@ -294,6 +294,7 @@ export function AccountPanel({
             client={drafts}
             index="02"
             onSignedOut={signedOut}
+            phoneVerification={phone}
             profiles={profiles}
             profileRevision={pollsRevision}
             onProfileChanged={() => setProfileRevision((n) => n + 1)}

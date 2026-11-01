@@ -781,6 +781,16 @@ const wordedPlay: Story["play"] = async ({ canvasElement }) => {
   await expect(
     within(canvas.getByRole("region", { name: "Answering" })).queryByText(/Nothing is sent/),
   ).toBeNull();
+  // The way in and the share in one row, of one height, where both fit; the
+  // share stood alone on its own line under the green button (P2-29, the poll
+  // page's iteration 12).
+  if (window.matchMedia("(min-width: 48rem)").matches) {
+    const way = canvas.getByRole("link", { name: "Answer the question" }).getBoundingClientRect();
+    const share = canvas.getByRole("button", { name: "Share this poll" }).getBoundingClientRect();
+    await expect(share.top).toBe(way.top);
+    await expect(share.height).toBe(way.height);
+    await expect(share.left).toBeGreaterThan(way.right);
+  }
 };
 
 /** In its own words, answerable in the ballot client. */
@@ -926,6 +936,15 @@ export const WordedQuestionsPhone: Story = {
     await expect(
       line.getBoundingClientRect().height / parseFloat(getComputedStyle(line).lineHeight),
     ).toBeLessThanOrEqual(4.1);
+    // At 360 the two don't fit side by side: the way in first, the share
+    // under it (P2-29, the poll page's iteration 12).
+    const way = within(canvasElement)
+      .getByRole("link", { name: "Answer 2 questions" })
+      .getBoundingClientRect();
+    await expect(
+      within(canvasElement).getByRole("button", { name: "Share this poll" }).getBoundingClientRect()
+        .top,
+    ).toBeGreaterThan(way.bottom);
   },
 };
 

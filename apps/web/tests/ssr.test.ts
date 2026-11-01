@@ -1675,6 +1675,45 @@ describe("poll list", () => {
     expect(past).toMatch(/href="\/polls\?q=park"[^>]*>First page<\/a>/);
   });
 
+  // P2-19 part 49: the register's previous page.
+  test("turns back a page before the first poll shown, and to the first page at the start", async () => {
+    const pages = (html: string) =>
+      /<nav [^>]*aria-label="Pages of the list"[\s\S]*?<\/nav>/.exec(html)?.[0] ?? "";
+    // The first page offers nothing back.
+    expect(pages(await (await get("/polls")).text())).not.toContain("Previous page");
+    // The second page turns back before its first poll, keeping the filters.
+    const second = await (await get(`/polls?after=${listed[19]}&status=closed`)).text();
+    expect(pages(second)).toMatch(
+      new RegExp(`href="/polls\\?before=${listed[20]}&amp;status=closed"[^>]*>.*Previous page</a>`),
+    );
+    // Back from there is the start of the list: the first page, which shows it whole.
+    for (const [search, target] of [
+      [`before=${listed[20]}`, "/polls"],
+      [`before=${listed[20]}&status=closed&q=+park`, "/polls?status=closed&q=+park"],
+    ] as const) {
+      const response = await get(`/polls?${search}`);
+      expect(response.status, search).toBe(307);
+      const location = new URL(response.headers.get("location") ?? "", "http://localhost");
+      expect(location.origin).toBe("http://localhost");
+      expect(location.pathname + location.search).toBe(target);
+    }
+    // From the last poll back, more than a page lies below: the page just
+    // before it, the stub's lost poll dropping out, leading back again and on.
+    const back = await follow(`/polls?before=${listed.at(-1)}`);
+    expect(back.status).toBe(200);
+    const html = await back.text();
+    expect(linked(html)).toEqual(listed.slice(4, 24).filter((id) => id !== LOST_ID));
+    expect(pages(html)).toContain(`href="/polls?before=${listed[4]}"`);
+    expect(pages(html)).toContain(`href="/polls?after=${listed[23]}"`);
+    expect(pages(html)).toMatch(/href="\/polls"[^>]*>.*First page<\/a>/);
+    // Its form keeps the page it shows, never as `after`.
+    expect(html).toContain(`name="before" value="${listed.at(-1)}"`);
+    expect(html).not.toContain('name="after"');
+    // `after` wins when a link carries both, and the address drops `before`.
+    const both = await (await follow(`/polls?after=${listed[19]}&before=${listed[3]}`)).text();
+    expect(linked(both)).toEqual(listed.slice(20));
+  });
+
   test("states the whole listing in numbers under its heading, as of the page's clock (P2-19 part 46)", async () => {
     const html = await (await get("/polls")).text();
     const tally =

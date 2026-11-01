@@ -800,7 +800,16 @@ export interface PollList {
   readonly counts: RegisterCounts | undefined;
   /** Where the next page starts, if this one was full. */
   readonly next: string | undefined;
+  /** Where the previous page ends, if this one isn't the first and holds a poll. */
+  readonly previous: string | undefined;
 }
+
+/**
+ * Where a page of the register starts: just after a poll, the page a reader
+ * turns on to; just before one, the page they turn back to; or, `undefined`,
+ * at the first poll. Each is a canonical election ID.
+ */
+export type RegisterAt = { readonly after: string } | { readonly before: string } | undefined;
 
 /**
  * A page of the register, or a search the API refused: one of control
@@ -813,8 +822,7 @@ export type RegisterPage =
   | { readonly kind: "place-refused" };
 
 /**
- * A page of the polls the API lists for discovery, from just above `after`
- * (an election ID, or `""` from the start), only those whose question text
+ * A page of the polls the API lists for discovery, from `at`, only those whose question text
  * holds every term of `q` and that are filed under `topic` and at `place`,
  * each when given (`filter`, as the stream's), each poll's words in `locale`.
  * The API leaves out delisted and hidden polls (T-68); each listed poll's
@@ -826,32 +834,44 @@ export type RegisterPage =
  * (`countedOf`). A poll stops being
  * served between the listing and its definition only if the database lost
  * it, so it drops out of the page.
+ *
+ * A page before a poll is read a poll deeper than a page: with no more than
+ * a page before the poll, the page it would show is the start of the list,
+ * which the register's first page shows whole, with any polls listed since
+ * (`start`), so a reader turning back never meets a short first page that
+ * leads back further (T-68).
  */
 export async function loadPollList(
   api: Api,
-  after: string,
+  at: RegisterAt,
   { q, topic, place }: StreamFilter,
   locale: string,
-): Promise<RegisterPage> {
+): Promise<RegisterPage | { readonly kind: "start" }> {
   let elections;
   // The whole listing's, the same on every page, search and filing, so read
   // only where the register starts unnarrowed: each read counts every listed
   // poll (T-52), and counts beside a narrowed list would read as its own.
   const counts =
-    after === "" && q === undefined && topic === undefined && place === undefined
+    at === undefined && q === undefined && topic === undefined && place === undefined
       ? registerCountsOf(api)
       : undefined;
+  const back = at !== undefined && "before" in at;
   try {
     ({ elections } = await api.elections.list({
-      ...(after === "" ? {} : { after }),
+      ...at,
       ...(q === undefined ? {} : { q }),
       ...(topic === undefined ? {} : { topic }),
       ...(place === undefined ? {} : { place }),
-      limit: String(LIST_PAGE),
+      limit: String(back ? LIST_PAGE + 1 : LIST_PAGE),
     }));
   } catch (error) {
     if (q !== undefined && searchRefused(error)) return { kind: "search-refused" };
     throw error;
+  }
+  if (back) {
+    if (elections.length <= LIST_PAGE) return { kind: "start" };
+    // The deeper poll only says there is a page before this one.
+    elections = elections.slice(1);
   }
   // The clock each row's status is read at, here to choose whose results to
   // ask for and on the page to show it, so the two agree.
@@ -897,8 +917,9 @@ export async function loadPollList(
     polls,
     asOf,
     counts: await counts,
-    // The listing's own cursor, not the last poll shown, so a dropped one doesn't end the list.
+    // The listing's own cursors, not the polls shown, so a dropped one doesn't end the list.
     next: elections.length === LIST_PAGE ? elections.at(-1) : undefined,
+    previous: at === undefined ? undefined : elections[0],
   };
 }
 

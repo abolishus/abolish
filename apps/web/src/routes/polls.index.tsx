@@ -17,24 +17,27 @@ import { isElectionId, normalizeElectionId, oneOf, searchText } from "../values.
 export const Route = createFileRoute("/polls/")({
   // Always sets every key: the router lays this object over the raw
   // search, so a key left out would keep whatever the URL held (an array,
-  // for `?id=a&id=b`). Anything but a canonical election ID as `after`
-  // starts the list from the beginning, and a topic not on the list is no
-  // topic. `q` and `place` stay as typed, for the form; `streamQuery` and
+  // for `?id=a&id=b`). Anything but a canonical election ID as `after` or
+  // `before` starts the list from the beginning, `after` wins over `before`,
+  // and a topic not on the list is no topic. `q` and `place` stay as typed, for the form; `streamQuery` and
   // `streamPlace` read them.
   validateSearch: (
     search: Record<string, unknown>,
   ): {
     id: string | undefined;
     after: string | undefined;
+    before: string | undefined;
     q: string | undefined;
     place: string | undefined;
   } & Omit<RegisterFilters, "q" | "place"> => {
     const id = searchText(search["id"]);
     const after = searchText(search["after"]);
+    const before = searchText(search["before"]);
     const topic = searchText(search["topic"]);
     return {
       id: id?.slice(0, 256),
       after: isElectionId(after) ? after : undefined,
+      before: isElectionId(before) && !isElectionId(after) ? before : undefined,
       q: searchText(search["q"]),
       topic: POLL_TOPICS.find((t) => t === topic),
       place: searchText(search["place"]),
@@ -50,25 +53,42 @@ export const Route = createFileRoute("/polls/")({
   },
   loaderDeps: ({ search }) => ({
     after: search.after ?? "",
+    before: search.before ?? "",
     query: streamQuery(search.q),
     topic: search.topic ?? "",
     place: streamPlace(search.place),
   }),
   // A query or place the API wouldn't take is refused here, without a request.
-  loader: ({ context: { locale }, deps: { after, query, topic, place } }) =>
-    query.kind === "refused"
-      ? { page: { kind: "search-refused" as const }, phoneVerification: false }
-      : place.kind === "refused"
-        ? { page: { kind: "place-refused" as const }, phoneVerification: false }
-        : fetchPollList({
-            data: {
-              after,
-              q: query.kind === "search" ? query.q : "",
-              topic,
-              place: place.kind === "place" ? place.place : "",
-              locale,
-            },
-          }),
+  // A page back that reaches the start of the list is the first page, which
+  // shows it whole, so the reader is sent there with the search and filters.
+  loader: async ({
+    context: { locale },
+    deps: { after, before, query, topic, place },
+    location,
+  }) => {
+    if (query.kind === "refused")
+      return { page: { kind: "search-refused" as const }, phoneVerification: false };
+    if (place.kind === "refused")
+      return { page: { kind: "place-refused" as const }, phoneVerification: false };
+    const { page, phoneVerification } = await fetchPollList({
+      data: {
+        after,
+        before,
+        q: query.kind === "search" ? query.q : "",
+        topic,
+        place: place.kind === "place" ? place.place : "",
+        locale,
+      },
+    });
+    if (page.kind === "start") {
+      const search = new URLSearchParams(location.searchStr);
+      search.delete("after");
+      search.delete("before");
+      const rest = search.toString();
+      throw redirect({ href: rest === "" ? "/polls" : `/polls?${rest}` });
+    }
+    return { page, phoneVerification };
+  },
   // A topic's register is named by the topic, from the fixed list, as the
   // stream's is; a search or a place is never in the title (T-67).
   head: ({ match }) => {
@@ -83,14 +103,14 @@ export const Route = createFileRoute("/polls/")({
     };
   },
   component: function Polls() {
-    const { id, after, q, topic, place, status, counting } = Route.useSearch();
+    const { id, after, before, q, topic, place, status, counting } = Route.useSearch();
     const { page, phoneVerification } = Route.useLoaderData();
     const query = streamQuery(q);
     const filed = streamPlace(place);
     return (
       <PollRegister
         page={page}
-        after={after}
+        at={after !== undefined ? { after } : before !== undefined ? { before } : undefined}
         typed={q ?? ""}
         typedPlace={place ?? ""}
         filters={{

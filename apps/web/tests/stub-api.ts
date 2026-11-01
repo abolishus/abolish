@@ -683,11 +683,14 @@ export function stubApi(): Server {
       const filed = (id: string) =>
         (topic === null || TAGS.get(id)?.topic === topic) &&
         (place === null || key(TAGS.get(id)?.place ?? "") === key(place));
-      return json(200, {
-        elections: listed
-          .filter((id) => id > after && (only === undefined || only.includes(id)) && filed(id))
-          .slice(0, limit),
-      });
+      const kept = listed.filter((id) => (only === undefined || only.includes(id)) && filed(id));
+      // As the API reads back from `before`: the page just below it, in the same order.
+      const before = url.searchParams.get("before");
+      if (before !== null) {
+        const below = kept.filter((id) => id < before);
+        return json(200, { elections: below.slice(Math.max(0, below.length - limit)) });
+      }
+      return json(200, { elections: kept.filter((id) => id > after).slice(0, limit) });
     }
     if (definition === undefined)
       return json(404, {

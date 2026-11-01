@@ -13,6 +13,7 @@ import {
   ListingError,
   type ListingOrder,
   listPolls,
+  listPollsBefore,
   MAX_LISTING_PAGE,
   moderate,
   moderationStatus,
@@ -183,6 +184,103 @@ describe("listPolls", () => {
         })
       ).map(hex),
     ).toContain(hex(open));
+  });
+});
+
+// The register's previous page (P2-19 part 49): the `id` order read
+// backward from a cursor gives the page before it, in the same order, so a
+// reader can turn back as well as on (T-68).
+
+/** Above every election ID: a backward read from here starts at the last poll. */
+const PAST_END = new Uint8Array(32).fill(0xff);
+
+/** Every listed poll, a page of `limit` at a time read backward from the end, as hex. */
+async function listAllBackward(limit: number): Promise<string[]> {
+  const pages: string[][] = [];
+  let before: Uint8Array = PAST_END;
+  for (;;) {
+    const page = await listPollsBefore(app, before, limit);
+    expect(page.length).toBeLessThanOrEqual(limit);
+    pages.unshift(page.map(hex));
+    if (page.length < limit) return pages.flat();
+    before = page[0]!; // a full page holds at least one poll
+  }
+}
+
+describe("listPollsBefore", () => {
+  test("pages back through every listed poll once, in the order listPolls pages forward", async () => {
+    const ids: string[] = [];
+    for (let i = 0; i < 7; i++) ids.push(hex(await election()));
+    const forward = (await listAll()).filter((id) => ids.includes(id));
+    expect(forward).toEqual([...ids].sort());
+    for (const limit of [1, 2, 3, 7, MAX_LISTING_PAGE])
+      expect((await listAllBackward(limit)).filter((id) => ids.includes(id))).toEqual(forward);
+  });
+
+  test("is the page listPolls reads forward to the cursor, for any cursor and page size", async () => {
+    for (let i = 0; i < 5; i++) await election();
+    const all = await listAll();
+    await fc.assert(
+      fc.asyncProperty(
+        fc.uint8Array({ minLength: 32, maxLength: 32 }),
+        fc.integer({ min: 1, max: 12 }),
+        async (cursor, limit) => {
+          const below = all.filter((id) => id < hex(cursor));
+          expect((await listPollsBefore(app, cursor, limit)).map(hex)).toEqual(
+            below.slice(Math.max(0, below.length - limit)),
+          );
+        },
+      ),
+      { numRuns: Math.min(numRuns, 50) },
+    );
+  });
+
+  test("ends strictly before the cursor, which need not be a stored poll", async () => {
+    const low = await election(new Uint8Array(32).fill(0x11));
+    const high = await election(new Uint8Array(32).fill(0xef));
+    const between = new Uint8Array(32).fill(0x80);
+    const page = (await listPollsBefore(app, between, MAX_LISTING_PAGE)).map(hex);
+    expect(page).toContain(hex(low));
+    expect(page).not.toContain(hex(high));
+    expect(page.every((id) => id < hex(between))).toBe(true);
+    expect((await listPollsBefore(app, low, MAX_LISTING_PAGE)).map(hex)).not.toContain(hex(low));
+    expect(await listPollsBefore(app, new Uint8Array(32), 1)).toEqual([]);
+  });
+
+  test("leaves out delisted and hidden polls, and lists them again once restored", async () => {
+    const delisted = await election();
+    const hidden = await election();
+    const visible = await election();
+    await moderate(app, delisted, { action: "delist", reason: "spam", moderator: "mod-1" });
+    await moderate(app, hidden, { action: "hide", reason: "threat", moderator: "mod-1" });
+    let listed = await listPollsBefore(app, PAST_END, MAX_LISTING_PAGE).then((p) => p.map(hex));
+    expect(listed).toContain(hex(visible));
+    expect(listed).not.toContain(hex(delisted));
+    expect(listed).not.toContain(hex(hidden));
+    await moderate(app, hidden, { action: "restore", reason: "error", moderator: "mod-2" });
+    listed = await listPollsBefore(app, PAST_END, MAX_LISTING_PAGE).then((p) => p.map(hex));
+    expect(listed).toContain(hex(hidden));
+    expect(listed).not.toContain(hex(delisted));
+  });
+
+  test("refuses a cursor that isn't 32 bytes, a page size outside its bounds and bad filters", async () => {
+    for (const before of [new Uint8Array(31), new Uint8Array(33), "00".repeat(32), [0], undefined])
+      await expect(listPollsBefore(app, before as Uint8Array, 1)).rejects.toThrow(TypeError);
+    for (const limit of [0, -1, 1.5, MAX_LISTING_PAGE + 1, Number.NaN])
+      await expect(listPollsBefore(app, PAST_END, limit)).rejects.toThrow(TypeError);
+    await expect(listPollsBefore(app, PAST_END, 1, [""])).rejects.toThrow(TypeError);
+    await expect(
+      listPollsBefore(app, PAST_END, 1, [], { topic: "nonsense" } as never),
+    ).rejects.toThrow(TypeError);
+  });
+
+  test("reads in a read-only session", async () => {
+    const readOnly = await db.as("abolish_app");
+    await readOnly`SET default_transaction_read_only = on`;
+    const id = await election();
+    expect((await listPollsBefore(readOnly, PAST_END, MAX_LISTING_PAGE)).map(hex)).toContain(
+      hex(id),
+    );
   });
 });
 

@@ -426,6 +426,42 @@ describe("elections.list (T-68)", () => {
     expect(await json(r)).toEqual({ elections: [] });
   });
 
+  test("pages back by before, in the same order, through the stored polls (P2-19 part 49)", async () => {
+    const mine: string[] = [];
+    for (let i = 0; i < 5; i++) mine.push((await election()).idHex);
+    const forward = await listed(mine);
+    for (const limit of ["1", "2", "256"]) {
+      const pages: string[][] = [];
+      let before = "ff".repeat(32);
+      for (;;) {
+        const r = await get("/elections", { before, limit });
+        expect(r.status).toBe(200);
+        const page = (await json(r))["elections"] as string[];
+        pages.unshift(page);
+        if (page.length < Number(limit)) break;
+        before = page[0]!; // a full page holds at least one poll
+      }
+      expect(pages.flat().filter((id) => mine.includes(id))).toEqual(forward);
+    }
+    expect(await json(await get("/elections", { before: "00".repeat(32), limit: "1" }))).toEqual({
+      elections: [],
+    });
+  });
+
+  test("takes before only alone, under the id order", async () => {
+    const before = "ff".repeat(32);
+    expect((await get("/elections", { before, sort: "id", limit: "1" })).status).toBe(200);
+    for (const query of [
+      { before, after: "00".repeat(32), limit: "1" },
+      { before, sort: "new", limit: "1" },
+      { before, sort: "closing", limit: "1" },
+      { before, sort: "answered", limit: "1" },
+      { before: before.toUpperCase(), limit: "1" },
+      { before: "", limit: "1" },
+    ])
+      expect((await get("/elections", query)).status, JSON.stringify(query)).toBe(400);
+  });
+
   describe("new and closing (P2-23)", () => {
     // Registration positions in L2 block 0, before every later test's in
     // this file, which start at block 1: the table takes them in chain order.

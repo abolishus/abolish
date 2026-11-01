@@ -153,6 +153,7 @@ export {
   type ListingOrder,
   type ListingTags,
   listPolls,
+  listPollsBefore,
   MAX_LISTING_PAGE,
   type TierAnswered,
 } from "./listing.ts";

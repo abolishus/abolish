@@ -164,6 +164,31 @@ describe("the moderation log's page", () => {
   });
 });
 
+describe("the listing's page", () => {
+  const input = contract.elections.list["~orpc"].inputSchema;
+  const issues = async (value: unknown) => (await input?.["~standard"].validate(value))?.issues;
+  const id = "ab".repeat(32);
+
+  test("reads before a poll only alone and under the id order", async () => {
+    for (const ok of [
+      { before: id, limit: "20" },
+      { before: id, sort: "id", limit: "20", q: "park", topic: "housing", place: "Old Town" },
+      { after: id, limit: "20" },
+      { after: id, sort: "closing", limit: "20" },
+    ])
+      expect(await issues(ok)).toBeUndefined();
+    for (const bad of [
+      { before: id, after: id, limit: "20" },
+      { before: id, sort: "new", limit: "20" },
+      { before: id, sort: "closing", limit: "20" },
+      { before: id, sort: "answered", limit: "20" },
+      { before: id.toUpperCase(), limit: "20" },
+      { before: id.slice(2), limit: "20" },
+    ])
+      expect(await issues(bad), JSON.stringify(bad)).toBeDefined();
+  });
+});
+
 describe("the listing's counts", () => {
   const input = contract.elections.getCounts["~orpc"].inputSchema;
   const output = contract.elections.getCounts["~orpc"].outputSchema;

@@ -523,6 +523,7 @@ export const esUS: Messages = {
   registerMatches: "{shown} de {total} encuestas de esta página coinciden.",
   registerPages: "Páginas de la lista",
   registerFirst: "Primera página",
+  registerPrevious: "Página anterior",
   registerPastEnd: "No hay más encuestas",
   registerPastEndLede:
     "La lista termina antes de esta página. Va en orden de ID de encuesta, así que una encuesta añadida desde que empezó puede estar en una página anterior.",

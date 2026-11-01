@@ -519,6 +519,7 @@ const enUS = {
   registerMatches: "{shown} of {total} polls on this page match.",
   registerPages: "Pages of the list",
   registerFirst: "First page",
+  registerPrevious: "Previous page",
   registerPastEnd: "No more polls",
   registerPastEndLede:
     "The list ends before this page. It runs in order of poll ID, so a poll listed since you started may be on an earlier page.",

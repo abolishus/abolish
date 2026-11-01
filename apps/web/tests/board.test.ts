@@ -13,6 +13,7 @@ import {
   boardRows,
   inTree,
   oneHistory,
+  sizeShare,
 } from "../src/board.ts";
 import type { Api } from "../src/server/api.ts";
 import { loadHistories, loadInclusion } from "../src/server/load.ts";
@@ -336,6 +337,43 @@ describe("activityBars", () => {
           expect(BigInt(bar.added) >= 0n).toBe(true);
           if (i > 0) expect(bar.segment > (bars[i - 1]?.segment ?? -1)).toBe(true);
         }
+      }),
+      runs,
+    );
+  });
+});
+
+describe("sizeShare", () => {
+  const anchor = (size: bigint): AnchorRow => ({
+    segment: 0,
+    size: size.toString(),
+    head: "00".repeat(32),
+    root: "00".repeat(32),
+    hash: "00".repeat(32),
+  });
+  const MAX = 2n ** 64n - 1n;
+
+  test("is each checkpoint's share of the latest's entries, to a millionth", () => {
+    expect(sizeShare(anchor(100n), anchor(100n))).toBe(1);
+    expect(sizeShare(anchor(25n), anchor(100n))).toBe(0.25);
+    expect(sizeShare(anchor(1n), anchor(3n))).toBe(0.333333);
+    expect(sizeShare(anchor(1n), anchor(MAX))).toBe(0);
+    // Past a double's integers, where Number(size) / Number(latest) would round to 1.
+    expect(sizeShare(anchor(MAX - 1n), anchor(MAX))).toBe(0.999999);
+    expect(sizeShare(anchor(MAX), anchor(MAX))).toBe(1);
+  });
+
+  test("stays within [0, 1] and never passes the exact share, for any checkpoints anchorRows keeps", () => {
+    fc.assert(
+      fc.property(fc.bigInt({ min: 1n, max: MAX }), fc.bigInt({ min: 1n, max: MAX }), (a, b) => {
+        const [size, latest] = a <= b ? [a, b] : [b, a];
+        const share = sizeShare(anchor(size), anchor(latest));
+        expect(share).toBeGreaterThanOrEqual(0);
+        expect(share).toBeLessThanOrEqual(1);
+        // Within a millionth below the exact share, never above it.
+        const scaled = BigInt(Math.round(share * 1_000_000));
+        expect(scaled * latest).toBeLessThanOrEqual(size * 1_000_000n);
+        expect((scaled + 1n) * latest).toBeGreaterThan(size * 1_000_000n);
       }),
       runs,
     );

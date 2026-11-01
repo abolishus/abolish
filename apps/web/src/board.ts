@@ -142,6 +142,16 @@ export function anchorRows(
   return rows;
 }
 
+/**
+ * The share of `latest`'s entries that `anchor` counts, for the anchors'
+ * size bars: `anchorRows` keeps every checkpoint at least 1 entry and at
+ * most as many as the one after it, so this is in (0, 1]. Worked in bigints
+ * to a millionth, since a `u64` size can pass a double's integers.
+ */
+export function sizeShare(anchor: AnchorRow, latest: AnchorRow): number {
+  return Number((BigInt(anchor.size) * 1_000_000n) / BigInt(latest.size)) / 1_000_000;
+}
+
 export interface ActivityBar {
   /** The anchoring period. */
   readonly segment: number;

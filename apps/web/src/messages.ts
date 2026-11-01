@@ -1798,6 +1798,9 @@ const enUS = {
   pollFormReviewResults: "Results",
   pollFormReviewResultsValue:
     "Sealed until it closes. No running count is published while it's open, not even to you; the results appear on its page once they're counted after it closes. Live results aren't offered yet.",
+  pollFormReviewOpens: "Opens",
+  pollFormReviewOpensValue:
+    "About half an hour after you submit it, once it's set up. If setup runs late, it opens later and still closes at the time below.",
   pollFormReviewCloses: "Closes",
   pollFormReviewKey: "Who holds the key",
   pollFormReviewKeyValue:

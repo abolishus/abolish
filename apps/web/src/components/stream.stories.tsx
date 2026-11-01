@@ -760,6 +760,40 @@ export const SpanishOrders: Story = {
   },
 };
 
+/**
+ * On a folded phone's 280px, in Spanish, the orders' longest words needed
+ * 243px on one row, past the column, and the page scrolled sideways: in a
+ * column that narrow they wrap as whole links, each label on one line
+ * (P2-29, the stream's iteration 37).
+ */
+export const SpanishOrdersFolded: Story = {
+  parameters: { locale: "es-US" },
+  globals: { viewport: { value: "folded", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.ownerDocument.documentElement;
+    await expect(root.clientWidth).toBe(280);
+    await expect(root.scrollWidth).toBeLessThanOrEqual(root.clientWidth);
+    const nav = within(canvasElement).getByRole("navigation", { name: "Orden" });
+    const list = within(nav).getByRole("list");
+    const links = within(nav).getAllByRole("link");
+    await expect(links).toHaveLength(3);
+    const [first, second, third] = links.map((a) => a.getBoundingClientRect());
+    // "Nuevas" and "Cierran pronto" share the first row, the third its own.
+    await expect(Math.round(first!.top)).toBe(Math.round(second!.top));
+    await expect(third!.top).toBeGreaterThanOrEqual(first!.bottom);
+    for (const a of links) {
+      await expect(a.getBoundingClientRect().right).toBeLessThanOrEqual(
+        list.getBoundingClientRect().right + 0.5,
+      );
+      // Each label on one line.
+      const words = canvasElement.ownerDocument.createRange();
+      words.selectNodeContents(a);
+      const lines = new Set([...words.getClientRects()].map((r) => Math.round(r.top)));
+      await expect(lines.size).toBe(1);
+    }
+  },
+};
+
 /** A poll whose definition failed its checks: why, in everyday words, and a way to its page. */
 export const Unreadable: Story = {
   args: {

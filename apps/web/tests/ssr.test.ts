@@ -1703,7 +1703,12 @@ describe("poll list", () => {
     // The whole listing's, so read only where the register starts: a later
     // page or a search doesn't count every listed poll again (T-52).
     seen.length = 0;
-    for (const path of [`/polls?after=${listed[19]}`, "/polls?q=bridge"]) {
+    for (const path of [
+      `/polls?after=${listed[19]}`,
+      "/polls?q=bridge",
+      "/polls?topic=housing",
+      "/polls?place=Old+Town",
+    ]) {
       const later = await (await get(path)).text();
       expect(later).toContain("<h1");
       expect(later).not.toContain("The list in numbers");
@@ -1978,6 +1983,43 @@ describe("poll list", () => {
     html = await (await get("/polls?q=%C2%85")).text();
     expect(html).toContain("That search can&#x27;t be run");
     expect(html).not.toContain("BAD_REQUEST");
+  });
+
+  // P2-19 part 48: narrowing the register to a topic and a place.
+  test("narrows every listed poll to a topic and a place, never quoting the place", async () => {
+    seen.length = 0;
+    let html = await (await get("/polls?topic=housing&place=%20old%20%20TOWN%20")).text();
+    const asked = seen.find((r) => r.path === "/elections");
+    expect(asked?.query.get("topic")).toBe("housing");
+    // Single-spaced and trimmed, as the stream sends a place.
+    expect(asked?.query.get("place")).toBe("old TOWN");
+    expect(linked(html)).toEqual([ID]);
+    expect(html).toContain("Only the polls filed under Housing.");
+    expect(html).toContain("Only the polls filed at the place you gave.");
+    expect(html).toMatch(/<option[^>]*value="housing"[^>]*selected=""/);
+    expect(html).toMatch(/<input[^>]*name="place"[^>]*value=" old {2}TOWN "/);
+    expect(html.replace(/<script\b[\s\S]*?<\/script>/g, "")).not.toMatch(/>[^<]*old {1,2}TOWN/);
+    expect(html).toContain('<input type="hidden" name="place" value="old TOWN"/>');
+    expect(html).toContain('href="/polls">Clear the search');
+    // A topic not on the list is no topic; the form's blank fields are no filter.
+    const unlisted = await get("/polls?topic=gossip&q=&place=");
+    expect(unlisted.headers.get("location")).toBe("/polls?q=&place=");
+    html = await (await get("/polls?q=&place=")).text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).not.toContain("Only the polls filed");
+    expect(html).not.toContain("Clear the search");
+    // Nothing filed there says so, in words that are true of a filing.
+    html = await (await get("/polls?topic=sport")).text();
+    expect(linked(html)).toEqual([]);
+    expect(html).toContain("No listed poll matches");
+    expect(html).toContain("only where its asker, or moderation, filed it");
+    // A place the contract refuses is refused here, without a request.
+    seen.length = 0;
+    const response = await get(`/polls?place=${"x".repeat(81)}`);
+    expect(response.status).toBe(200);
+    html = await response.text();
+    expect(html).toContain("That place can&#x27;t be looked up");
+    expect(seen).toEqual([]);
   });
 
   test("asks the API for nothing of the visitor's (T-10)", async () => {
@@ -3100,19 +3142,19 @@ const KB = 1024;
  * 155 KiB of script (React, the router, the message catalog, the frame) and
  * adds only its own (P2-28 part 2b): the poll page its share sheet,
  * reactions, report and follow controls, the results page its tier switcher, the poll form the draft rules and the codecs they check with,
- * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box, counts and pages.
+ * home the stream's cards, the featured question's among them, beside its trust scene, the register its search box with its topics and place, counts and pages.
  */
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 181, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 178, css: 40, fonts: 58 },
   [`/polls/${ID}`]: { html: 9, js: 218, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 188, css: 40, fonts: 58 },
-  "/polls": { html: 12, js: 180, css: 40, fonts: 58 },
+  "/polls": { html: 12, js: 182, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 174, css: 40, fonts: 58 },
   "/verify": { html: 8, js: 171, css: 40, fonts: 58 },
-  "/account": { html: 6, js: 200, css: 40, fonts: 58 },
+  "/account": { html: 6, js: 201, css: 40, fonts: 58 },
   "/account/polls/new": { html: 5, js: 255, css: 40, fonts: 58 },
-  [`/p/${CODE}/flyer`]: { html: 8, js: 175, css: 40, fonts: 58 },
+  [`/p/${CODE}/flyer`]: { html: 8, js: 176, css: 40, fonts: 58 },
   "/offline": { html: 4, js: 0, css: 40, fonts: 58 },
 };
 

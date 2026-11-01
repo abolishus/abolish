@@ -501,7 +501,7 @@ export const esUS: Messages = {
   registerLookupTitle: "Abrir una encuesta por su ID",
   registerFindTitle: "Buscar una encuesta",
   registerFindLede:
-    "Busca entre todas las encuestas de la lista por sus palabras y luego filtra la página por estado y regla de conteo. Deja un grupo en Todas para incluirlo completo.",
+    "Busca entre todas las encuestas de la lista por sus palabras, su tema o su lugar, y luego filtra la página por estado y regla de conteo. Deja un grupo en Todas para incluirlo completo.",
   registerSearchLabel: "Buscar en las encuestas",
   registerSearchHint:
     "Cada palabra que escribas debe aparecer en el título o en las preguntas de una encuesta, hasta {words} palabras. Se buscan las encuestas abiertas, programadas y cerradas, en el orden de la lista.",
@@ -509,6 +509,11 @@ export const esUS: Messages = {
   registerSearchEmpty: "Ninguna encuesta de la lista coincide",
   registerSearchEmptyLede:
     "Prueba con menos palabras o más cortas: una encuesta coincide solo si su título o sus preguntas las contienen todas. Una encuesta que moderación retiró de la lista no se busca, pero se sigue abriendo por su ID.",
+  registerTopicLabel: "Tema",
+  registerFiledTopic: "Solo las encuestas clasificadas en {topic}.",
+  registerFiledPlace: "Solo las encuestas clasificadas en el lugar que indicaste.",
+  registerFiledEmptyLede:
+    "Una encuesta está clasificada en un tema o un lugar solo si quien pregunta, o la moderación, la clasificó ahí, y un lugar coincide solo por su nombre completo. Una encuesta que moderación retiró de la lista no aparece, pero se sigue abriendo por su ID.",
   registerAsOf:
     "Los estados salen de las horas de apertura y cierre que declara cada encuesta, comparadas con el reloj de este servidor ({time} UTC).",
   filterAll: "Todas",

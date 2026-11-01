@@ -15,12 +15,14 @@ import {
   decodeCheckpoint,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   electionDefinitionHash,
   electionDefinitionV5Hash,
   encodeBoardEntry,
   encodeCheckpoint,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   inclusionProof,
   merkleRoot,
 } from "@abolishus/crypto";
@@ -158,9 +160,30 @@ export const questionsDefinition = encodeElectionDefinitionV5({
   election_id: fromHex(QUESTIONS_ID),
 });
 
+/**
+ * A version-7 civic referendum: the fixed civic vector under an ID of its
+ * own, unlisted. Its class puts it on the civic record, which no poll can
+ * be on under the launch panel (T-14).
+ */
+const civicV7 = (
+  JSON.parse(
+    readFileSync(
+      new URL("../../../docs/spec/vectors/election-definition-v7.json", import.meta.url),
+      "utf8",
+    ),
+  ) as { vectors: Vector[] }
+).vectors.find((v) => v.id === "definition-v7-fixed-civic");
+if (civicV7 === undefined) throw new Error("vectors missing");
+export const CIVIC_ID = "a7".repeat(32);
+const civicDefinition = encodeElectionDefinitionV7({
+  ...decodeElectionDefinitionV7(fromHex(civicV7.encoding)),
+  election_id: fromHex(CIVIC_ID),
+});
+
 export const definitions = new Map([
   [ID, typical.encoding],
   [QUESTIONS_ID, toHex(questionsDefinition)],
+  [CIVIC_ID, toHex(civicDefinition)],
   [HIDDEN_ID, hiddenDefinition],
   [SWAPPED_ID, typical.encoding],
 ]);

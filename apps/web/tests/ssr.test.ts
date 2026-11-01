@@ -34,6 +34,7 @@ import {
   brokenProofs,
   CELLS_ID,
   CELLS_MISFIT_ID,
+  CIVIC_ID,
   COUNTED_ID,
   CHECKPOINTS,
   CODE,
@@ -321,6 +322,22 @@ describe("poll page", () => {
     expect(html).toContain(`<meta property="og:title" content="Poll ${CODE}"`);
     // The share sheet's trigger; the sheet itself opens in the browser.
     expect(html).toContain(">Share this poll<");
+  });
+
+  // P2-19 part 56: the class the definition states, and what one on the civic record means (T-14).
+  test("names the poll's class, and says a civic-record class can't be registered yet", async () => {
+    const everyday = (await (await get(`/polls/${ID}`)).text()).replace(/<[^>]+>/g, "");
+    expect(everyday).toContain("Poll · Everyday poll · One choice");
+    expect(everyday).toContain("KindEveryday poll");
+    expect(everyday).not.toContain("civic record");
+    const response = await get(`/polls/${CIVIC_ID}`);
+    expect(response.status).toBe(200);
+    const civic = (await response.text()).replace(/<[^>]+>/g, "");
+    expect(civic).toContain("Civic referendum · Question by question");
+    expect(civic).toContain("KindCivic referendum");
+    expect(civic).toContain(
+      "Its definition puts it on the civic record, which takes only polls whose key is held by independent trustees. None are named yet, so the election registry on chain refuses to register a poll like this one.",
+    );
   });
 
   test("names Tier 0 by the deployment's phone setting, off unless set to on", async () => {
@@ -1933,17 +1950,40 @@ describe("poll list", () => {
     expect(linked(html)).toContain(SWAPPED_ID);
   });
 
-  test.each(["?status=bogus", "?status=open&status=closed", "?counting=ranked"])(
-    "%s is no filter, quoting nothing",
-    async (search) => {
-      const response = await follow(`/polls${search}`);
-      expect(response.status).toBe(200);
-      const html = await response.text();
-      expect(linked(html)).toEqual(listed.slice(0, 19));
-      expect(html).not.toContain("bogus");
-      expect(html).not.toContain("ranked");
-    },
-  );
+  // P2-19 part 56: the class each poll's definition states, as a filter over the page in hand.
+  test("names each row's class and filters the page in hand by it, with no script", async () => {
+    let html = await (await get("/polls")).text();
+    expect(html).toContain(">Kind and counting<");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("Everyday pollOne choice");
+    // Versions 1 and 5 are everyday polls, so every stub poll is one.
+    expect(html).toMatch(/<input type="radio" [^>]*name="kind" checked="" value="all"/);
+    html = await (await get("/polls?kind=everyday&status=closed")).text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).toMatch(/<input type="radio" [^>]*name="kind" checked="" value="everyday"/);
+    expect(html).toContain(`href="/polls?after=${listed[19]}&amp;status=closed&amp;kind=everyday"`);
+    // The search form keeps the filter, as it keeps the others.
+    expect(html).toContain('<input type="hidden" name="kind" value="everyday"/>');
+    for (const kind of ["civic", "organisational"]) {
+      html = await (await get(`/polls?kind=${kind}`)).text();
+      expect(linked(html)).toEqual([]);
+      expect(html).toContain("0 of 19 polls on this page match.");
+    }
+  });
+
+  test.each([
+    "?status=bogus",
+    "?status=open&status=closed",
+    "?counting=ranked",
+    "?kind=referendum",
+  ])("%s is no filter, quoting nothing", async (search) => {
+    const response = await follow(`/polls${search}`);
+    expect(response.status).toBe(200);
+    const html = await response.text();
+    expect(linked(html)).toEqual(listed.slice(0, 19));
+    expect(html).not.toContain("bogus");
+    expect(html).not.toContain("ranked");
+    expect(html).not.toContain("kind=referendum");
+  });
 
   test("a filter asks the API for the same page as no filter", async () => {
     seen.length = 0;
@@ -3346,7 +3386,7 @@ const KB = 1024;
 const BUDGETS: Record<string, { html: number; js: number; css: number; fonts: number }> = {
   "/": { html: 10, js: 184, css: 40, fonts: 58 },
   "/discover": { html: 8, js: 181, css: 40, fonts: 58 },
-  [`/polls/${ID}`]: { html: 9, js: 220, css: 40, fonts: 58 },
+  [`/polls/${ID}`]: { html: 10, js: 221, css: 40, fonts: 58 },
   [`/polls/${CELLS_ID}/results`]: { html: 10, js: 191, css: 40, fonts: 58 },
   "/polls": { html: 12, js: 184, css: 40, fonts: 58 },
   "/how-it-works": { html: 12, js: 177, css: 40, fonts: 58 },

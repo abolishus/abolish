@@ -459,6 +459,7 @@ describe("a poll page's preview today", () => {
     definitionHash: SEAL,
     illFormed: undefined,
     rolling: false,
+    pollClass: "everyday",
     counting: "plurality",
     questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
     electorate: [{ tier: 0, groupSize: "5000" }],

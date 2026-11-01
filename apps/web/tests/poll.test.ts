@@ -62,6 +62,8 @@ describe("definitionView", () => {
       const { poll } = result;
       expect(poll.definitionHash).toBe(v.hash);
       expect(poll.version).toBe(1);
+      // Versions 1 and 5 carry no class: everyday polls.
+      expect(poll.pollClass).toBe("everyday");
       expect(poll.illFormed).toEqual(
         v.illFormed === undefined ? undefined : { rule: v.illFormed, question: undefined },
       );
@@ -243,6 +245,7 @@ describe("definitionView, version 5", () => {
       if (!result.ok) throw new Error(`refused: ${result.problem}`);
       const { poll } = result;
       expect(poll.version).toBe(5);
+      expect(poll.pollClass).toBe("everyday");
       expect(poll.counting).toBe("questions");
       expect(poll.definitionHash).toBe(v.hash);
       expect(poll.illFormed).toEqual(
@@ -341,6 +344,7 @@ interface VectorV7 {
   value?: {
     election_id: string;
     electorate_mode: string;
+    poll_class: string;
     electorate: { tier: string; regions: string[]; cells: { members: string }[] }[];
     rolling_electorate: { tier: string; group_size: string }[];
   };
@@ -364,6 +368,7 @@ describe("definitionView, version 7", () => {
     expect(rolling.filter((v) => v.illFormed !== undefined).length).toBeGreaterThan(5);
     expect(decodableV7.filter((v) => v.value!.electorate_mode === "1").length).toBeGreaterThan(1);
     expect(vectorsV7.filter((v) => v.error !== undefined).length).toBeGreaterThan(5);
+    expect(new Set(decodableV7.map((v) => v.value!.poll_class))).toEqual(new Set(["1", "2", "3"]));
   });
 
   test.each(decodableV7.map((v) => [v.id, v] as const))(
@@ -376,6 +381,12 @@ describe("definitionView, version 7", () => {
       expect(result.poll.definitionHash).toBe(v.hash);
       expect(result.poll.illFormed?.rule).toBe(v.illFormed);
       expect(result.poll.counting).toBe("questions");
+      // The class as the definition states it, on the civic record or not (T-14).
+      expect(result.poll.pollClass).toBe(
+        ({ "1": "everyday", "2": "organisational", "3": "civic" } as const)[
+          value.poll_class as "1" | "2" | "3"
+        ],
+      );
       const rolling = value.electorate_mode === "2";
       expect(result.poll.rolling).toBe(rolling);
       if (rolling) {

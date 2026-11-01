@@ -13,6 +13,7 @@ const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView =
   version: 5,
   illFormed: undefined,
   rolling: false,
+  pollClass: "everyday",
   counting: "questions",
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [{ tier: 0, groupSize: "5000" }],

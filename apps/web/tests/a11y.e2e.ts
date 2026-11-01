@@ -72,6 +72,7 @@ const PAGES = [
   "/verify",
   "/polls",
   "/polls?q=park",
+  "/polls?topic=housing&place=Old+Town",
   `/polls/${ID}`,
   `/polls/${QUESTIONS_ID}`,
   `/polls/${STREAM_V5}`,

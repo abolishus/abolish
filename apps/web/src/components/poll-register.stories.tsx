@@ -73,6 +73,7 @@ const meta = {
     page: LIST,
     after: undefined,
     typed: "",
+    typedPlace: "",
     filters: { status: undefined, counting: undefined },
     invalid: undefined,
     phoneVerification: false,
@@ -401,5 +402,88 @@ export const Addresses: Story = {
     await expect(
       registerHref(NEXT, { q: "café & bar #1", status: undefined, counting: "approval" }),
     ).toBe(`/polls?after=${NEXT}&q=caf%C3%A9%20%26%20bar%20%231&counting=approval`);
+    await expect(
+      registerHref(NEXT, {
+        q: "bridge",
+        topic: "transport",
+        place: "Old Town & Quay",
+        status: "open",
+        counting: undefined,
+      }),
+    ).toBe(
+      `/polls?after=${NEXT}&q=bridge&topic=transport&place=Old%20Town%20%26%20Quay&status=open`,
+    );
+  },
+};
+
+/**
+ * The list narrowed to a topic and a place: the form holds both, the page
+ * names the topic from the fixed list but never the place it was given
+ * (T-67), every form and link keeps both, and the counts of the whole list
+ * aren't shown beside it.
+ */
+export const Filed: Story = {
+  args: {
+    page: { ...LIST, counts: undefined },
+    after: OPEN,
+    typedPlace: " Old  Town ",
+    filters: { topic: "housing", place: "Old Town", status: undefined, counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const search = canvas.getByRole("search");
+    await expect(within(search).getByRole("combobox", { name: "Topic" })).toHaveValue("housing");
+    await expect(within(search).getByRole("textbox", { name: "Place" })).toHaveValue(" Old  Town ");
+    await expect(search.querySelector("input[name=after]")).toBeNull();
+    await expect(canvas.getByText("Only the polls filed under Housing.")).toBeVisible();
+    await expect(canvas.getByText("Only the polls filed at the place you gave.")).toBeVisible();
+    await expect(canvas.queryByText(/Old {1,2}Town/)).toBeNull();
+    await expect(canvas.queryByRole("region", { name: "The list in numbers" })).toBeNull();
+    await expect(canvas.getByRole("link", { name: "Clear the search" })).toHaveAttribute(
+      "href",
+      "/polls",
+    );
+    const form = canvasElement.querySelector("form:has(input[name=counting])");
+    await expect(form?.querySelector("input[type=hidden][name=topic]")).toHaveValue("housing");
+    await expect(form?.querySelector("input[type=hidden][name=place]")).toHaveValue("Old Town");
+    await expect(canvas.getByRole("link", { name: "More polls" })).toHaveAttribute(
+      "href",
+      `/polls?after=${NEXT}&topic=housing&place=Old%20Town`,
+    );
+    await expect(canvas.getByRole("link", { name: "First page" })).toHaveAttribute(
+      "href",
+      "/polls?topic=housing&place=Old%20Town",
+    );
+  },
+};
+
+export const FiledEmpty: Story = {
+  args: {
+    page: { ...LIST, polls: [], next: undefined, counts: undefined },
+    filters: { topic: "sport", status: undefined, counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByRole("heading", { name: "No listed poll matches" })).toBeVisible();
+    await expect(canvas.getByText(/only where its asker, or moderation, filed it/)).toBeVisible();
+    await expect(canvas.queryByText("No polls listed.")).toBeNull();
+  },
+};
+
+/** A place the API wouldn't take: said in our words, with the box still holding it. */
+export const PlaceRefused: Story = {
+  args: {
+    page: { kind: "place-refused" },
+    typedPlace: "x".repeat(81),
+    filters: { status: undefined, counting: undefined },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("heading", { name: "That place can't be looked up" }),
+    ).toBeVisible();
+    await expect(canvas.getByRole("textbox", { name: "Place" })).toHaveValue("x".repeat(81));
+    await expect(canvas.queryByRole("radio")).toBeNull();
+    await expect(canvas.queryByText(/filed at the place you gave/)).toBeNull();
   },
 };

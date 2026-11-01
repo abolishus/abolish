@@ -807,13 +807,16 @@ export interface PollList {
  * characters alone, which no pattern the contract can state catches first
  * (as the stream's, `searchRefused`).
  */
-export type RegisterPage = PollList | { readonly kind: "search-refused" };
+export type RegisterPage =
+  | PollList
+  | { readonly kind: "search-refused" }
+  | { readonly kind: "place-refused" };
 
 /**
  * A page of the polls the API lists for discovery, from just above `after`
  * (an election ID, or `""` from the start), only those whose question text
- * holds every term of `q` when it is given (a query `streamQuery` admits,
- * or `""` for none), each poll's words in `locale`.
+ * holds every term of `q` and that are filed under `topic` and at `place`,
+ * each when given (`filter`, as the stream's), each poll's words in `locale`.
  * The API leaves out delisted and hidden polls (T-68); each listed poll's
  * definition is decoded and checked here as on its own page, and its display
  * text as a stream card's (src/server/stream-card.ts), so the list shows
@@ -827,21 +830,27 @@ export type RegisterPage = PollList | { readonly kind: "search-refused" };
 export async function loadPollList(
   api: Api,
   after: string,
-  q: string,
+  { q, topic, place }: StreamFilter,
   locale: string,
 ): Promise<RegisterPage> {
   let elections;
-  // The whole listing's, the same on every page and search, so read only
-  // where the register starts: each read counts every listed poll (T-52).
-  const counts = after === "" && q === "" ? registerCountsOf(api) : undefined;
+  // The whole listing's, the same on every page, search and filing, so read
+  // only where the register starts unnarrowed: each read counts every listed
+  // poll (T-52), and counts beside a narrowed list would read as its own.
+  const counts =
+    after === "" && q === undefined && topic === undefined && place === undefined
+      ? registerCountsOf(api)
+      : undefined;
   try {
     ({ elections } = await api.elections.list({
       ...(after === "" ? {} : { after }),
-      ...(q === "" ? {} : { q }),
+      ...(q === undefined ? {} : { q }),
+      ...(topic === undefined ? {} : { topic }),
+      ...(place === undefined ? {} : { place }),
       limit: String(LIST_PAGE),
     }));
   } catch (error) {
-    if (q !== "" && searchRefused(error)) return { kind: "search-refused" };
+    if (q !== undefined && searchRefused(error)) return { kind: "search-refused" };
     throw error;
   }
   // The clock each row's status is read at, here to choose whose results to

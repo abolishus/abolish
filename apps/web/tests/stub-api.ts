@@ -675,9 +675,17 @@ export function stubApi(): Server {
         return json(200, { elections: order.slice(from, from + limit) });
       }
       const only = q === null ? undefined : (SEARCHES.get(q.toLowerCase()) ?? []);
+      // The register's tag filters, as `GET /elections/tags` files each poll:
+      // a place matched whole, ignoring capitals and spacing.
+      const key = (place: string) => place.replace(/\s+/gu, " ").trim().toLowerCase();
+      const topic = url.searchParams.get("topic");
+      const place = url.searchParams.get("place");
+      const filed = (id: string) =>
+        (topic === null || TAGS.get(id)?.topic === topic) &&
+        (place === null || key(TAGS.get(id)?.place ?? "") === key(place));
       return json(200, {
         elections: listed
-          .filter((id) => id > after && (only === undefined || only.includes(id)))
+          .filter((id) => id > after && (only === undefined || only.includes(id)) && filed(id))
           .slice(0, limit),
       });
     }

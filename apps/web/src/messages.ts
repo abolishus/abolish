@@ -639,7 +639,7 @@ const enUS = {
   },
   pollInShort: "In short",
   pollAnsweredClosed: "Answered before it closed",
-  pollAnswerClosed: "This poll has closed. Its board stays public, so anyone can count it again.",
+  pollAnswerClosed: "This poll has closed and takes no more answers.",
   resultsTitle: "Results",
   resultsEachQuestion:
     "Each question is counted on its own. Answers to different questions are never matched up: only each question's totals are opened, so no result shows how anyone answered the set.",
@@ -960,7 +960,9 @@ const enUS = {
     "Your poll was registered but couldn't open before its closing time. It will never take answers, and it stays on the record. You can ask your question again as a new poll, starting from what you wrote.",
   evidenceSummary: "How do we know this is real?",
   evidenceLede:
-    "Every answer is sealed on the device that sends it and listed on the public board, which anyone can download and count again.",
+    "Every answer is listed on the public board, which anyone can download and count again.",
+  evidenceLedeClosed:
+    "Every answer was sealed on the device that sent it and listed on the public board, which anyone can download and count again.",
   evidenceKey:
     "Whoever asked it can't see anyone's answers. During launch, Abolish alone holds the key for this poll.",
   evidenceShow: "Show the evidence",

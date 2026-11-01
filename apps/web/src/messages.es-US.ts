@@ -643,8 +643,7 @@ export const esUS: Messages = {
   },
   pollInShort: "En resumen",
   pollAnsweredClosed: "Respondieron antes del cierre",
-  pollAnswerClosed:
-    "Esta encuesta ya cerró. Su tablero sigue siendo público, así que cualquiera puede volver a contarla.",
+  pollAnswerClosed: "Esta encuesta ya cerró y no recibe más respuestas.",
   resultsTitle: "Resultados",
   resultsEachQuestion:
     "Cada pregunta se cuenta por separado. Las respuestas a distintas preguntas nunca se cruzan: solo se abren los totales de cada pregunta, así que ningún resultado muestra cómo respondió alguien el conjunto.",
@@ -968,7 +967,9 @@ export const esUS: Messages = {
     "Tu encuesta se registró, pero no pudo abrir antes de su hora de cierre. Nunca recibirá respuestas y queda en el registro. Puedes volver a hacer tu pregunta en una encuesta nueva, a partir de lo que escribiste.",
   evidenceSummary: "¿Cómo sabemos que esto es real?",
   evidenceLede:
-    "Cada respuesta se sella en el dispositivo que la envía y se publica en el tablero público, que cualquiera puede descargar y volver a contar.",
+    "Cada respuesta se publica en el tablero público, que cualquiera puede descargar y volver a contar.",
+  evidenceLedeClosed:
+    "Cada respuesta se selló en el dispositivo que la envió y se publicó en el tablero público, que cualquiera puede descargar y volver a contar.",
   evidenceKey:
     "Quien la hizo no puede ver las respuestas de nadie. Durante el lanzamiento, solo Abolish tiene la clave de esta encuesta.",
   evidenceShow: "Mostrar la evidencia",

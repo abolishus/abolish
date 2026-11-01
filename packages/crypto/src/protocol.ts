@@ -26,6 +26,7 @@ import {
   type ElectionDefinitionV5Failure,
   type ElectionDefinitionV6,
   type ElectionDefinitionV7,
+  type ElectionDefinitionV7Failure,
   electionDefinitionRule,
   type ElectionDefinitionRule,
   electionDefinitionV5Rule,
@@ -929,12 +930,13 @@ export function checkElectionToShow(
   return { ok: true, definition, displayText };
 }
 
-/** Why `checkElectionRecordToShow` refuses: `ShowRefusal`, with version 5's rules. */
+/** Why `checkElectionRecordToShow` refuses: `ShowRefusal`, with version 5's and version 7's rules. */
 export type ShowRecordRefusal =
   | Exclude<ShowRefusal, { readonly problem: "definition-ill-formed" | "display-text-ill-formed" }>
   | ({ readonly problem: "definition-ill-formed" } & (
       | { readonly rule: ElectionDefinitionRule }
       | ElectionDefinitionV5Failure
+      | ElectionDefinitionV7Failure
     ))
   | {
       readonly problem: "display-text-ill-formed";
@@ -954,17 +956,27 @@ export type ShowRecordCheck =
       readonly definition: ElectionDefinitionV5;
       readonly displayText: DisplayTextV2;
     }
+  | {
+      readonly ok: true;
+      readonly version: 7;
+      readonly definition: ElectionDefinitionV7;
+      readonly displayText: DisplayTextV2;
+    }
   | ({ readonly ok: false } & ShowRecordRefusal);
 
 /**
- * `checkElectionToShow` for definition versions 1 and 5: the same checks in
- * the same order, under the definition's own version, with version 5's
- * questions read against display-text version 2 (docs/spec/display-text.md,
- * Checks): every question, each with exactly its options, commitment first.
- * A version-5 refusal for `option-count` or `selections` names the first
- * failing question. Definition versions 3 and 4 are refused as
- * `definition-undecodable`, as `checkElectionToShow` refuses them, until a
- * client checks regional cells before showing one (T-34, T-41, G-6).
+ * `checkElectionToShow` for definition versions 1, 5 and 7: the same checks
+ * in the same order, under the definition's own version, with version 5's and
+ * version 7's questions read against display-text version 2
+ * (docs/spec/display-text.md, Checks): every question, each with exactly its
+ * options, commitment first. A version-5 or version-7 refusal for
+ * `option-count` or `selections` names the first failing question. Version 7
+ * is judged by its own rules, so its electorate is read under its mode and a
+ * rolling poll that isn't everyday is refused (`rolling-class`). Definition
+ * versions 3, 4 and 6 are refused as `definition-undecodable`, as
+ * `checkElectionToShow` refuses them (T-34, T-41, G-6). Showing an election
+ * isn't casting in it: a client that can't cast the ballot version a shown
+ * definition pins (ballot version 5 for a rolling one) refuses that itself.
  */
 export function checkElectionRecordToShow(
   electionId: Uint8Array,
@@ -983,7 +995,7 @@ export function checkElectionRecordToShow(
     if (error instanceof DecodeError) return { ok: false, problem: "definition-undecodable" };
     throw error;
   }
-  if (record.version !== 5) {
+  if (record.version !== 5 && record.version !== 7) {
     const checked = checkElectionToShow(
       electionId,
       registeredHash,
@@ -996,9 +1008,15 @@ export function checkElectionRecordToShow(
   // Not secret, so no constant-time comparison is needed.
   if (!sameBytes(definition.election_id, electionId))
     return { ok: false, problem: "another-election" };
-  if (!sameBytes(electionDefinitionV5Hash(definition), registeredHash))
-    return { ok: false, problem: "unregistered-definition" };
-  const definitionFailure = electionDefinitionV5Rule(definition);
+  const hash =
+    record.version === 7
+      ? electionDefinitionV7Hash(record.value)
+      : electionDefinitionV5Hash(record.value);
+  if (!sameBytes(hash, registeredHash)) return { ok: false, problem: "unregistered-definition" };
+  const definitionFailure =
+    record.version === 7
+      ? electionDefinitionV7Rule(record.value)
+      : electionDefinitionV5Rule(record.value);
   if (definitionFailure !== undefined)
     return { ok: false, problem: "definition-ill-formed", ...definitionFailure };
   let displayText;
@@ -1014,7 +1032,9 @@ export function checkElectionRecordToShow(
   const textRule = displayTextV2Rule(displayText, definition);
   if (textRule !== undefined)
     return { ok: false, problem: "display-text-ill-formed", rule: textRule };
-  return { ok: true, version: 5, definition, displayText };
+  return record.version === 7
+    ? { ok: true, version: 7, definition: record.value, displayText }
+    : { ok: true, version: 5, definition: record.value, displayText };
 }
 
 /** A fresh display-text salt, from the platform CSPRNG (docs/spec/display-text.md; T-39). */

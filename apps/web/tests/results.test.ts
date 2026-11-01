@@ -65,36 +65,39 @@ describe("resultsView", () => {
     });
   });
 
-  test("takes a version-5 poll's slices question by question, never the joined counts", () => {
-    expect(
-      resultsView(
-        two,
-        read([
+  test.each([5, 7] as const)(
+    "takes a version-%s poll's slices question by question, never the joined counts",
+    (version) => {
+      expect(
+        resultsView(
+          { ...two, version },
+          read([
+            {
+              tier: 0,
+              counted: 4,
+              counts: ["1", "2", "1", "4", "3"],
+              byQuestion: [
+                ["1", "2", "1"],
+                ["4", "3"],
+              ],
+            },
+          ]),
+        ),
+      ).toEqual({
+        kind: "read",
+        tiers: [
           {
             tier: 0,
             counted: 4,
-            counts: ["1", "2", "1", "4", "3"],
-            byQuestion: [
+            questions: [
               ["1", "2", "1"],
               ["4", "3"],
             ],
           },
-        ]),
-      ),
-    ).toEqual({
-      kind: "read",
-      tiers: [
-        {
-          tier: 0,
-          counted: 4,
-          questions: [
-            ["1", "2", "1"],
-            ["4", "3"],
-          ],
-        },
-      ],
-    });
-  });
+        ],
+      });
+    },
+  );
 
   // T-34: counts that don't fit the definition would print under the wrong options.
   test.each([

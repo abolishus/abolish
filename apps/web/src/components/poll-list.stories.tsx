@@ -9,6 +9,7 @@ const poll = (electionId: string, overrides: Partial<PollView> = {}): PollView =
   definitionHash: "a4555c67fbc57b7ed42f873f73f36360baba11fa0de1f0ba0f104780a4071750",
   version: 1,
   illFormed: undefined,
+  rolling: false,
   counting: "plurality",
   questions: [{ optionCount: 3, minSelections: 0, maxSelections: 1 }],
   electorate: [{ tier: 0, groupSize: "5000" }],

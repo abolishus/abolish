@@ -10,12 +10,15 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import {
+  checkElectionRecordToShow,
   decodeElectionDefinition,
   decodeElectionDefinitionV5,
+  decodeElectionDefinitionV7,
   type ElectionDefinition,
   type ElectionDefinitionV5,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   pinnedVersion,
   RECORD_TYPES,
 } from "@abolishus/crypto";
@@ -408,4 +411,32 @@ describe("a version-5 election, a poll of questions", () => {
       problem: "definition-undecodable",
     });
   });
+
+  // The show check reads version 7, but this client casts no version-5
+  // ballot yet (P2-17 part 8) and doesn't seal a fixed version 7's ballot
+  // version 4, so it refuses both as it did before the check read them.
+  test.each(["definition-v7-rolling-typical", "definition-v7-fixed-typical"])(
+    "refuses %s as undecodable, though the show check passes it",
+    (id) => {
+      const v7 = encodeElectionDefinitionV7({
+        ...decodeElectionDefinitionV7(
+          hex(vector(vectors<DefinitionVector>("election-definition-v7"), id).encoding),
+        ),
+        questions: forVector(two).questions,
+        display_text_commitment: forVector(two).display_text_commitment,
+      });
+      const registered = Uint8Array.from(definitionHash(v7));
+      const electionId = decodeElectionDefinitionV7(v7).election_id;
+      expect(
+        checkElectionRecordToShow(electionId, registered, v7, hex(two.encoding)),
+      ).toMatchObject({
+        ok: true,
+        version: 7,
+      });
+      expect(check(electionId, v7, hex(two.encoding))).toEqual({
+        ok: false,
+        problem: "definition-undecodable",
+      });
+    },
+  );
 });

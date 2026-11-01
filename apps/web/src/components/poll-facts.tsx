@@ -3,7 +3,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { catalogs, tierMessage } from "../messages.ts";
-import type { PollView } from "../poll.ts";
+import type { PollView, Tier } from "../poll.ts";
 import { COUNTING_LABEL } from "./poll-status.ts";
 import { When } from "./when.tsx";
 
@@ -56,7 +56,7 @@ export function PollFacts({
 }: {
   poll: Pick<
     PollView,
-    "version" | "counting" | "questions" | "electorate" | "opensAt" | "closesAt"
+    "version" | "rolling" | "counting" | "questions" | "electorate" | "opensAt" | "closesAt"
   >;
   phoneVerification: boolean;
 }) {
@@ -71,7 +71,10 @@ export function PollFacts({
             <ul className="m-0 grid list-none gap-1 p-0">
               {/* By position: an ill-formed definition can repeat a tier. */}
               {poll.electorate.map((group, i) => (
-                <li key={i}>{t(tierMessage(group.tier, phoneVerification))}</li>
+                <li key={i}>
+                  {t(tierMessage(group.tier, phoneVerification))}
+                  {poll.rolling ? <RollingTier tier={group.tier} /> : null}
+                </li>
               ))}
             </ul>
           ),
@@ -84,7 +87,7 @@ export function PollFacts({
             <>
               {t(COUNTING_LABEL[poll.counting])}
               <span className="block text-sm text-muted-foreground">
-                {poll.version === 5
+                {poll.version !== 1
                   ? `${t("questionCount", { count: poll.questions.length })}, ${t("optionCount", { count: options })}`
                   : t("optionCount", { count: options })}
               </span>
@@ -93,5 +96,19 @@ export function PollFacts({
         },
       ]}
     />
+  );
+}
+
+/**
+ * A rolling tier's note: whoever joins it before the close can answer, so
+ * its count is never the poll's whole electorate; Tier 0's newcomers are new
+ * identities, which is also its Sybil residual (T-01, [[0028-rolling-electorates]]).
+ */
+export function RollingTier({ tier }: { tier: Tier }) {
+  const t = useTranslate(catalogs);
+  return (
+    <span className="block text-sm text-muted-foreground">
+      {t(tier === 0 ? "rollingTier0" : "rollingTier")}
+    </span>
   );
 }

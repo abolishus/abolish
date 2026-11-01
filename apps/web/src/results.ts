@@ -52,9 +52,9 @@ export function resultsView(
     if (!TIERS.includes(t.tier) || !poll.electorate.some((g) => g.tier === t.tier))
       return { kind: "unavailable" };
     if (tiers.some((seen) => seen.tier === t.tier)) return { kind: "unavailable" };
-    // Version 1 has one question, its counts; version 5 has each question's slice.
+    // Version 1 has one question, its counts; versions 5 and 7 have each question's slice.
     const questions =
-      t.counts === undefined ? undefined : poll.version === 5 ? t.byQuestion : [t.counts];
+      t.counts === undefined ? undefined : poll.version === 1 ? [t.counts] : t.byQuestion;
     if (t.counts !== undefined && !fits(poll.questions, t.counted, questions))
       return { kind: "unavailable" };
     tiers.push({ tier: t.tier as Tier, counted: t.counted, questions });
@@ -102,7 +102,7 @@ export function cellResultsView(
     const cell = partition[i];
     if (cell === undefined || c.cell !== i || c.tier !== cell.tier) return undefined;
     const questions =
-      c.counts === undefined ? undefined : poll.version === 5 ? c.byQuestion : [c.counts];
+      c.counts === undefined ? undefined : poll.version === 1 ? [c.counts] : c.byQuestion;
     if (c.counts !== undefined && !fits(poll.questions, c.counted, questions)) return undefined;
     const state =
       questions !== undefined ? "opened" : c.code === "tally-missing" ? "missing" : "failed";
@@ -115,7 +115,7 @@ export function cellResultsView(
     const own = cells.filter((c) => c.cell.tier === t.tier);
     if (own.reduce((n, c) => n + c.counted, 0) !== t.counted) return undefined;
     const counts =
-      t.counts === undefined ? undefined : poll.version === 5 ? t.byQuestion : [t.counts];
+      t.counts === undefined ? undefined : poll.version === 1 ? [t.counts] : t.byQuestion;
     // A tier has counts exactly once every one of its cells does.
     if (counts === undefined) {
       if (own.length > 0 && own.every((c) => c.questions !== undefined)) return undefined;

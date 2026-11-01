@@ -4,7 +4,7 @@
 // script doesn't carry one (P2-28 part 2b).
 
 import type { PollTopic } from "@abolishus/core/poll-topics";
-import type { ElectionDefinitionV5Rule } from "@abolishus/crypto";
+import type { ElectionDefinitionV7Rule } from "@abolishus/crypto";
 
 export type Tier = 0 | 1 | 2;
 
@@ -28,7 +28,7 @@ export interface PollQuestion {
 
 /**
  * How a poll is counted: version 1's election type, or question by question
- * under version 5, where each question carries only its limits.
+ * under versions 5 and 7, where each question carries only its limits.
  */
 export type Counting = "plurality" | "approval" | "questions";
 
@@ -40,14 +40,17 @@ export const COUNTINGS = [
 
 /** The first well-formedness rule the definition breaks, and the question it names if any. */
 export interface IllFormed {
-  readonly rule: ElectionDefinitionV5Rule;
+  readonly rule: ElectionDefinitionV7Rule;
   readonly question: number | undefined;
 }
 
 export interface PollView {
   readonly electionId: string;
-  /** The definition's record version: 1, or 5 with several questions. */
-  readonly version: 1 | 5;
+  /**
+   * The definition's record version: 1, or 5 with several questions, or 7,
+   * version 5's questions with an electorate mode.
+   */
+  readonly version: 1 | 5 | 7;
   readonly definitionHash: string;
   /** The first well-formedness rule the definition breaks, if any: the verifier fails such an election. */
   readonly illFormed: IllFormed | undefined;
@@ -55,8 +58,16 @@ export interface PollView {
   /** In ballot order; version 1 has exactly one. */
   readonly questions: readonly PollQuestion[];
   /**
-   * Each tier and its members: version 1's group size, or under version 5
-   * the sum of the tier's region counts, the members its cells hold.
+   * Whether the electorate is rolling (version 7 under `electorate_mode` 2):
+   * whoever joins one of a tier's groups before the close can answer, so the
+   * tier's `groupSize` is its members when the poll opened, not who could
+   * answer by the close ([[0028-rolling-electorates]]; T-01, T-16).
+   */
+  readonly rolling: boolean;
+  /**
+   * Each tier and its members: version 1's group size, under versions 5 and
+   * 7 the sum of the tier's region counts, the members its cells hold, or
+   * under a rolling electorate the tier's members at the opening root.
    */
   readonly electorate: readonly { readonly tier: Tier; readonly groupSize: string }[];
   readonly threshold: number;
@@ -68,10 +79,12 @@ export interface PollView {
 /**
  * One cell of a poll's tally partition, in partition order: the tier it lies
  * in, its member count as the definition states it (its anonymity set,
- * reported with its results; T-16) and, under version 5, the regions it
- * holds by index, as the fold derives them from the tier's region counts
+ * reported with its results; T-16) and, under versions 5 and 7, the regions
+ * it holds by index, as the fold derives them from the tier's region counts
  * (docs/spec/election-definition.md, Regional cells). Version 1 has one cell
- * per tier, of its one group.
+ * per tier, of its one group, and so has a rolling electorate, of its tier's
+ * groups, whose count is the members at the opening root: more may join by
+ * the close (docs/spec/election-definition.md, Tally partition).
  */
 export interface PartitionCell {
   readonly tier: Tier;

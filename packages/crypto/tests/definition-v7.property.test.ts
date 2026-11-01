@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import fc from "fast-check";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  checkElectionRecordToShow,
+  checkElectionToShow,
   DecodeError,
   decodeElectionDefinitionV6,
   decodeElectionDefinitionV7,
@@ -15,9 +17,11 @@ import {
   electionStubV7Hash,
   type ElectionDefinitionV6,
   ELECTORATE_MODES,
+  encodeDisplayTextV2,
   encodeElectionDefinitionV6,
   encodeElectionDefinitionV7,
   nullifierScope,
+  POLL_CLASSES,
   profileCombinationRule,
   RECORD_TYPES,
   RESULTS_MODES,
@@ -614,5 +618,144 @@ describe("rolling scope (docs/spec/membership.md, Rolling scope)", () => {
       expect(() => rollingNullifierScope(hash, t)).toThrow(RangeError);
     for (const h of [new Uint8Array(31), new Uint8Array(33)])
       expect(() => rollingNullifierScope(h, 0)).toThrow(TypeError);
+  });
+});
+
+describe("showing a version-7 election (docs/spec/display-text.md, Checks)", () => {
+  const text = vector("display-text-v2.json", "display-text-v2-two-questions");
+  const textBytes = hex(text.encoding);
+  // The text's two questions: 3 options then 2.
+  const questions = [
+    { method: 1, option_count: 3, min_selections: 0, max_selections: 1 },
+    { method: 1, option_count: 2, min_selections: 0, max_selections: 2 },
+  ] as const;
+  const committed = (d: ElectionDefinitionV7): ElectionDefinitionV7 => ({
+    ...d,
+    questions: [...questions],
+    display_text_commitment: hex(text.commitment!), // a valid text vector commits
+  });
+  const show = (d: ElectionDefinitionV7, t = textBytes) => {
+    const bytes = encodeElectionDefinitionV7(d);
+    return checkElectionRecordToShow(
+      d.election_id,
+      specHash("abolish/v1/election-definition", bytes),
+      bytes,
+      t,
+    );
+  };
+
+  test.each([
+    ["rolling", rollingTypical],
+    ["fixed", fixedTypical],
+  ] as const)(
+    "a registered, well-formed %s election with its own text is shown as version 7",
+    (_, d) => {
+      const definition = committed(d);
+      const checked = show(definition);
+      expect(checked.ok).toBe(true);
+      if (!checked.ok || checked.version !== 7) throw new Error("not shown as version 7");
+      expect(checked.definition).toEqual(definition);
+      expect(encodeDisplayTextV2(checked.displayText)).toEqual(textBytes);
+      // Version 1's check refuses it as before: it reads version 1 only.
+      const bytes = encodeElectionDefinitionV7(definition);
+      expect(
+        checkElectionToShow(
+          definition.election_id,
+          specHash("abolish/v1/election-definition", bytes),
+          bytes,
+          textBytes,
+        ),
+      ).toEqual({ ok: false, problem: "definition-undecodable" });
+    },
+  );
+
+  test("each check refuses in the spec's order, under version 7's own hash and rules", () => {
+    const definition = committed(rollingTypical);
+    const bytes = encodeElectionDefinitionV7(definition);
+    const registered = specHash("abolish/v1/election-definition", bytes);
+    expect(
+      checkElectionRecordToShow(definition.election_id, registered, bytes.subarray(1), textBytes),
+    ).toEqual({ ok: false, problem: "definition-undecodable" });
+    expect(checkElectionRecordToShow(new Uint8Array(32), registered, bytes, textBytes)).toEqual({
+      ok: false,
+      problem: "another-election",
+    });
+    expect(
+      checkElectionRecordToShow(definition.election_id, new Uint8Array(32), bytes, textBytes),
+    ).toEqual({ ok: false, problem: "unregistered-definition" });
+    // A rule only version 7 has: a rolling poll is everyday (T-01, T-16).
+    expect(show({ ...committed(sealedRolling), poll_class: POLL_CLASSES.civicReferendum })).toEqual(
+      {
+        ok: false,
+        problem: "definition-ill-formed",
+        rule: "rolling-class",
+      },
+    );
+    // A question rule names its question, as under version 5.
+    expect(
+      show({
+        ...definition,
+        questions: [questions[0], { ...questions[1], max_selections: 3 }],
+      }),
+    ).toEqual({ ok: false, problem: "definition-ill-formed", rule: "selections", question: 1 });
+    expect(show(definition, textBytes.subarray(1))).toEqual({
+      ok: false,
+      problem: "display-text-undecodable",
+    });
+    const other = vector("display-text-v2.json", "display-text-v2-minimal");
+    expect(show(definition, hex(other.encoding))).toEqual({
+      ok: false,
+      problem: "display-text-ill-formed",
+      rule: "commitment",
+    });
+  });
+
+  test("a version-6 definition is still refused as undecodable", () => {
+    const bytes = encodeElectionDefinitionV6({
+      ...typicalV6,
+      questions: [...questions],
+      display_text_commitment: hex(text.commitment!),
+    });
+    expect(
+      checkElectionRecordToShow(
+        typicalV6.election_id,
+        specHash("abolish/v1/election-definition", bytes),
+        bytes,
+        textBytes,
+      ),
+    ).toEqual({ ok: false, problem: "definition-undecodable" });
+  });
+
+  test("a definition shown is exactly one whose hash is registered, and no input throws", () => {
+    const bytes = encodeElectionDefinitionV7(committed(rollingTypical));
+    fc.assert(
+      fc.property(
+        fc.nat({ max: bytes.length - 1 }),
+        fc.integer({ min: 1, max: 255 }),
+        fc.boolean(),
+        (at, flip, registerMutated) => {
+          const mutated = Uint8Array.from(bytes);
+          mutated[at] = mutated[at]! ^ flip; // `at` is within the bytes
+          const registered = specHash(
+            "abolish/v1/election-definition",
+            registerMutated ? mutated : bytes,
+          );
+          const checked = checkElectionRecordToShow(
+            rollingTypical.election_id,
+            registered,
+            mutated,
+            textBytes,
+          );
+          if (!registerMutated) expect(checked.ok).toBe(false);
+          if (checked.ok) {
+            expect(checked.version).toBe(7);
+            expect(encodeElectionDefinitionV7(checked.definition as ElectionDefinitionV7)).toEqual(
+              mutated,
+            );
+          }
+        },
+      ),
+      opts,
+    );
   });
 });

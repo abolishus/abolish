@@ -35,7 +35,7 @@ import { type ElectorateCheck, stubRootBlock } from "./stub.ts";
 // the replay takes every log, but the recount these alone, so an event no
 // contract-event version this release reads decodes (T-36) can't fail every
 // stub. Their order is kept, which is all the first-occurrence rule ranks by.
-const GROUP_EVENTS = [
+export const GROUP_EVENTS = [
   "RegistrarsPinned(uint8,address[])",
   "GroupCreated(uint64,uint8)",
   "MembersAdded(uint64,uint64,bytes)",

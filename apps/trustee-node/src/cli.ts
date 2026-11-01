@@ -94,6 +94,7 @@ import { type ServedBlocks, servedBlocks } from "./served.ts";
 import { FileStore, type SeatStore } from "./store.ts";
 import { l2ElectorateCheck } from "./electorate.ts";
 import { l1OutputRootAccumulators, type RegistryAccumulators } from "./output-root.ts";
+import { l2RollingChain, type RollingChainCheck } from "./rolling-chain.ts";
 import { l2RegistrationCheck } from "./registration.ts";
 import type { ElectorateCheck } from "./stub.ts";
 import { type AvailabilityRecords, summingRule } from "./summing.ts";
@@ -182,6 +183,31 @@ function registrationOf(config: NodeConfig): RegistrationCheck {
     trusteeFromBlock: a.trusteeRegistryFromBlock,
     accumulators: accumulatorsOf(a, l2),
   });
+}
+
+/**
+ * A rolling poll's chain over the seat's L2 node, where the configuration
+ * names the group registry; without it, intake refuses every rolling
+ * poll's ballot (`intake-chain`), as the electorate check refuses its stub.
+ */
+function rollingOf(config: NodeConfig): { rolling?: RollingChainCheck } {
+  const a = config.availability;
+  const g = a?.groupRegistry;
+  if (a === undefined || g === undefined) return {};
+  const l2 = rpcClient(a.l2);
+  return {
+    rolling: l2RollingChain({
+      l2,
+      chainId: config.l2ChainId,
+      registry: g.address,
+      registrars: g.registrars,
+      threshold: g.threshold,
+      electionRegistry: a.registry,
+      fromBlock: g.fromBlock,
+      electionFromBlock: a.registryFromBlock,
+      accumulators: accumulatorsOf(a, l2),
+    }),
+  };
 }
 
 /**
@@ -362,6 +388,7 @@ async function intakeEndpoint(
     ceremony: seat,
     electorate,
     registration: registrationOf(config),
+    ...rollingOf(config),
     store,
     now: () => BigInt(Math.floor(Date.now() / 1000)),
   });

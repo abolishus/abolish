@@ -87,6 +87,21 @@ describe("stub check 4", () => {
     ).toBe(true);
   });
 
+  test("counts a served rolling election only where its intervals overlap, refusing the stub there", async () => {
+    const stub = sized(1n);
+    // A rolling election has no `M`: whatever the stub's size, a set holding
+    // one never fits while roots can't be sent or read, the safe side.
+    const overlapping = new Map([["cd".repeat(32), stubDemand(rollingStubFor(panel))]]);
+    expect(await checkStub(encodeElectionDefinition(stub), pinned, pass, overlapping)).toEqual({
+      ok: false,
+      code: "stub-capacity",
+    });
+    // Closing years later, its intervals never share a moment with this one's.
+    const later = rollingStubFor(panel, { opens_at: 900_000_000n, closes_at: 900_086_400n });
+    const apart = new Map([["cd".repeat(32), stubDemand(later)]]);
+    expect((await checkStub(encodeElectionDefinition(stub), pinned, pass, apart)).ok).toBe(true);
+  });
+
   test("only after the electorate check, whose counts it reads", async () => {
     expect(await check(sized(15_361n), () => Promise.resolve(false))).toEqual({
       ok: false,
@@ -533,7 +548,13 @@ describe("version-7 stubs, a rolling poll's", () => {
     expect(asked).toEqual([]);
   });
 
-  test("records no demand for a rolling election, which no seat approves yet", () => {
-    expect(() => stubDemand(rollingStubFor(panel))).toThrow(/rolling/);
+  test("records a rolling election's demand with the rolling flag and no M", () => {
+    const stub = rollingStubFor(panel);
+    expect(stubDemand(stub)).toEqual({
+      rolling: true,
+      seats: stub.panel_size,
+      closesAt: stub.closes_at,
+      l1InclusionBound: BigInt(stub.l1_inclusion_bound),
+    });
   });
 });

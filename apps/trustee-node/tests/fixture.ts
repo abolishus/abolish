@@ -11,9 +11,11 @@ import {
   ELECTORATE_MODES,
   electionStubHash,
   electionStubV5Hash,
+  electionStubV7Hash,
   encodeCeremonyTranscript,
   encodeElectionDefinition,
   encodeElectionDefinitionV5,
+  encodeElectionDefinitionV7,
   identityKey,
   type KeysMessage,
   type Panel,
@@ -203,6 +205,27 @@ export function electionV5(
     stub,
     stubBytes: encodeElectionDefinitionV5(stub),
     stubHash: electionStubV5Hash(stub),
+    seats: seatsFor(panelists, options),
+  };
+}
+
+export interface ElectionV7 extends CeremonyElection {
+  readonly stub: ElectionDefinitionV7;
+}
+
+/** `election` over a rolling version-7 stub (`rollingStubFor`). */
+export function rollingElection(
+  n: number,
+  k: number,
+  options: ElectionOptions & { stub?: Partial<ElectionDefinitionV7> } = {},
+): ElectionV7 {
+  const panelists = panelOf(n, k);
+  const stub = rollingStubFor(panelists.panel, options.stub);
+  return {
+    panelists,
+    stub,
+    stubBytes: encodeElectionDefinitionV7(stub),
+    stubHash: electionStubV7Hash(stub),
     seats: seatsFor(panelists, options),
   };
 }

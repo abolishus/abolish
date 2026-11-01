@@ -39,6 +39,7 @@ import {
   decode,
   decodeCeremonyTranscript,
   DecodeError,
+  ELECTORATE_MODES,
   encode,
   EncodeError,
   encodeCeremonyTranscript,
@@ -124,8 +125,23 @@ export type SeatRefusal =
 /**
  * An election this seat approved, without its secrets: what the duties that
  * outlast destruction read (the openings' sending and the destruction itself).
+ * A fixed election carries its `M`; a rolling one (definition version 7,
+ * `electorate_mode` 2) carries the rolling flag in its place, since its
+ * members over the poll aren't known when the seat approves it and it
+ * commits roots whatever its size (docs/spec/delivery.md, Elections that
+ * commit roots; T-25, T-52).
  */
-export interface ApprovedElectionInfo {
+export type ApprovedElectionInfo = ApprovedElectionBase &
+  (
+    | {
+        /** `M`, the definition's members over its tiers: what bounds the seat's contract-path obligation at `2M`. */
+        readonly members: bigint;
+        readonly rolling?: false;
+      }
+    | { readonly rolling: true }
+  );
+
+interface ApprovedElectionBase {
   readonly index: number;
   readonly stubHash: Uint8Array;
   /** The definition the approval registers: the stub with the approved transcript. */
@@ -134,12 +150,12 @@ export interface ApprovedElectionInfo {
   readonly opensAt: bigint;
   readonly closesAt: bigint;
   readonly l1InclusionBound: bigint;
-  /** `M`, the definition's members over its tiers: what bounds the seat's contract-path obligation at `2M`. */
-  readonly members: bigint;
 }
 
 /** An election this seat approved, as its later duties read it. */
-export interface ApprovedElection extends ApprovedElectionInfo {
+export type ApprovedElection = ApprovedElectionInfo & ApprovedElectionSecrets;
+
+interface ApprovedElectionSecrets {
   /** The seat's per-election signing secret, registered by the approved transcript. Never logged. */
   readonly signingSecret: Uint8Array;
   /** The seat's per-election KEM key pair, its public key the one the approved run registered. The secret is never logged. */
@@ -199,15 +215,54 @@ const APPROVED = struct([
 // so the seat's later duties find its per-election keys.
 const APPROVED_RUN = struct([["run_id", HASH]] as const);
 // What stub check 4 reads of an election the seat serves, and what shows
-// it can no longer be registered: its definition hash and `opens_at`.
-const SERVED = struct([
-  ["members", u64],
+// it can no longer be registered: its definition hash and `opens_at`. A
+// fixed election's record holds its `M`; a rolling one's holds the rolling
+// flag (`electorate_mode`, always 2) in its place (`SERVED_ROLLING`), so it
+// is counted with the root figure and never as a fixed election of some `M`
+// (docs/spec/delivery.md, Elections that commit roots; T-25, T-52). The
+// two have different lengths, so a record decodes strictly as exactly one.
+const SERVED_COMMON = [
   ["seats", u8],
   ["closes_at", u64],
   ["l1_inclusion_bound", u32],
   ["definition_hash", HASH],
   ["opens_at", u64],
-] as const);
+] as const;
+const SERVED = struct([["members", u64], ...SERVED_COMMON] as const);
+const SERVED_ROLLING = struct([["electorate_mode", u8], ...SERVED_COMMON] as const);
+
+interface Served {
+  readonly seats: number;
+  readonly closes_at: bigint;
+  readonly l1_inclusion_bound: number;
+  readonly definition_hash: Uint8Array;
+  readonly opens_at: bigint;
+  readonly demand: ForcedPathElection;
+}
+
+// A served record, fixed or rolling; throws on any other bytes, which only
+// a fault of the node's own store could leave.
+function readServed(bytes: Uint8Array): Served {
+  let r;
+  try {
+    r = decode(SERVED, bytes);
+  } catch (e) {
+    if (!(e instanceof DecodeError)) throw e;
+    const rolling = decode(SERVED_ROLLING, bytes);
+    if (rolling.electorate_mode !== ELECTORATE_MODES.rolling)
+      throw new Error("trustee node: a served record of no electorate mode the node reads");
+    const { electorate_mode: _mode, ...common } = rolling;
+    return { ...common, demand: { rolling: true, ...demandOf(common) } };
+  }
+  const { members, ...common } = r;
+  return { ...common, demand: { members, ...demandOf(common) } };
+}
+
+const demandOf = (r: Omit<Served, "demand">) => ({
+  seats: r.seats,
+  closesAt: r.closes_at,
+  l1InclusionBound: BigInt(r.l1_inclusion_bound),
+});
 const HEX64 = /^[0-9a-f]{64}$/;
 
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
@@ -431,22 +486,24 @@ export class CeremonySeat {
     // after a crash between this record and the approval.
     const demand = stubDemand(checked.stub.value);
     const definitionHash = stubDefinitionHash(checked.stub, result.hash);
+    const common = {
+      seats: demand.seats,
+      closes_at: demand.closesAt,
+      l1_inclusion_bound: Number(demand.l1InclusionBound),
+      // The definition this approval registers: the stub with this transcript.
+      definition_hash: definitionHash,
+      opens_at: checked.stub.value.opens_at,
+    };
     const recorded = await config.store.putOnce(
       `served/${hex(checked.stubHash)}`,
-      encode(SERVED, {
-        members: demand.members,
-        seats: demand.seats,
-        closes_at: demand.closesAt,
-        l1_inclusion_bound: Number(demand.l1InclusionBound),
-        // The definition this approval registers: the stub with this transcript.
-        definition_hash: definitionHash,
-        opens_at: checked.stub.value.opens_at,
-      }),
+      demand.rolling === true
+        ? encode(SERVED_ROLLING, { electorate_mode: ELECTORATE_MODES.rolling, ...common })
+        : encode(SERVED, { members: demand.members, ...common }),
     );
     // A record a crash left for another transcript of this stub names another
     // definition, which `neverRegistered` would then judge in this one's
     // place: this seat keeps to the transcript it recorded first.
-    if (!equal(decode(SERVED, recorded.value).definition_hash, definitionHash))
+    if (!equal(readServed(recorded.value).definition_hash, definitionHash))
       return refuse("approved-other");
     const approvedRun = await config.store.putOnce(
       `approved-runs/${hex(checked.stubHash)}`,
@@ -495,8 +552,8 @@ export class CeremonySeat {
     const begun = await this.#durable(`runs/${name}/${hex(runId)}/begun`);
     if (served === undefined || begun === undefined)
       throw new Error(`trustee node: approval of ${name} without its run or served record`);
-    const r = decode(SERVED, served);
-    return {
+    const r = readServed(served);
+    const base = {
       index: this.#config.index,
       stubHash: Uint8Array.from(stubHash),
       definitionHash: r.definition_hash,
@@ -504,8 +561,10 @@ export class CeremonySeat {
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       l1InclusionBound: BigInt(r.l1_inclusion_bound),
-      members: r.members,
     };
+    return r.demand.rolling === true
+      ? { ...base, rolling: true }
+      : { ...base, members: r.demand.members };
   }
 
   /**
@@ -726,14 +785,9 @@ export class CeremonySeat {
       if (!HEX64.test(name)) throw new Error(`trustee node: a served record named ${name}`);
       const bytes = await this.#durable(`served/${name}`);
       if (bytes === undefined) throw new Error(`trustee node: served/${name} vanished`);
-      const r = decode(SERVED, bytes);
+      const r = readServed(bytes);
       if (await neverRegistered(r.definition_hash, r.opens_at)) continue;
-      served.set(name, {
-        members: r.members,
-        seats: r.seats,
-        closesAt: r.closes_at,
-        l1InclusionBound: BigInt(r.l1_inclusion_bound),
-      });
+      served.set(name, r.demand);
     }
     return served;
   }

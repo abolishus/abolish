@@ -24,7 +24,6 @@ import {
   electionStubHash,
   electionStubV5Hash,
   electionStubV7Hash,
-  type FixedForcedPathElection,
   forcedPathDemand,
   type ForcedPathElection,
   forcedPathFits,
@@ -120,17 +119,14 @@ export function stubRootBlock(stub: Stub): bigint {
 
 /**
  * What the seat records of an election it approves, for check 4 of later
- * stubs: a fixed election's demand, with its `M`. Only a stub that passed
- * `checkStub` gets here, and check 4 refuses every rolling stub while roots
- * can't be sent or read, so a rolling one throws: recording one needs the
- * rolling flag in place of `M` in the served record ([[P1-12f]] parts 3b
- * and 3c, then [[P2-17]]).
+ * stubs: a fixed election's demand, with its `M`, or a rolling one's, with
+ * the rolling flag in its place, which the served record keeps as such
+ * (docs/spec/delivery.md, Elections that commit roots). Only a stub that
+ * passed `checkStub` gets here, and check 4 still refuses every rolling stub
+ * while roots can't be sent or read ([[P1-12f]] parts 3b and 3c).
  */
-export function stubDemand(stub: Stub["value"]): FixedForcedPathElection {
-  const demand = forcedPathElectionOf(stub);
-  if (demand.rolling === true)
-    throw new Error("trustee node: a rolling election can't be approved yet");
-  return demand;
+export function stubDemand(stub: Stub["value"]): ForcedPathElection {
+  return forcedPathElectionOf(stub);
 }
 
 /** What the node's release and deployment pin. */
@@ -263,9 +259,9 @@ export async function checkStub(
   // them (the contract event's included), and the rest are judged here.
   // Unlike the verifier, which leaves an election it can't read
   // unverifiable, a node refuses: it can't check what it can't read. A
-  // rolling profile is read (`readsRolling`): its ballots are judged against
-  // step roots the node computes from the registry ([[P2-17]] part 7c-3b),
-  // and check 4 refuses every rolling stub until that intake is in.
+  // rolling profile is read (`readsRolling`): intake judges its ballots
+  // against step roots it computes from the registries (`IntakeSeat`), and
+  // check 4 refuses every rolling stub until roots can be sent and read.
   if (
     profileCombinationRule(stub, 0, record.version === 7) !== undefined ||
     stub.profile.pins.some((p) => {
@@ -303,8 +299,9 @@ export async function checkStub(
   // `forcedPathFits` never fits a set holding one while roots can't be sent
   // or read, so it is refused here, before its intervals, which only the
   // root figure gives, are needed. The refusal is the node's own, not only
-  // crypto's: approving one also needs the served record's rolling flag and
-  // version-5 intake ([[P2-17]] part 7c-3b), whatever `forcedPathFits` says.
+  // crypto's: the served record's rolling flag and version-5 intake are in,
+  // but no seat sends or reads roots yet ([[P1-12f]] parts 3b and 3c),
+  // whatever `forcedPathFits` says.
   if (demand.rolling === true) return { ok: false, code: "stub-capacity" };
   const own = Buffer.from(hash).toString("hex");
   const mine = forcedPathDemand(demand, RELEASE_WINDOWS);
@@ -312,7 +309,15 @@ export async function checkStub(
     .filter(([hash]) => hash !== own)
     .map(([, other]) => other)
     .filter((other) => {
-      const o = forcedPathDemand(other, RELEASE_WINDOWS);
+      // A served rolling election's intervals are a fixed one's of the same
+      // seats and times, whatever its members: only they are read here, and
+      // it stays rolling in the set `forcedPathFits` judges, which never
+      // fits one while roots can't be sent or read, the safe side
+      // (docs/spec/delivery.md, Elections that commit roots).
+      const o = forcedPathDemand(
+        other.rolling === true ? { ...other, rolling: false, members: 0n } : other,
+        RELEASE_WINDOWS,
+      );
       return o.complaints.end > mine.receipts.start && o.receipts.start < mine.complaints.end;
     });
   if (!forcedPathFits([...others, demand], RELEASE_WINDOWS))

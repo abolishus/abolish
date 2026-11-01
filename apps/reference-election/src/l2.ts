@@ -512,6 +512,10 @@ export function registrationCheck(l2: L2, l2ChainId: bigint): RegistrationCheck 
     accumulators: async (registries) => {
       const block = BigInt(await l2.rpc.call<string>("eth_blockNumber"));
       const at = `0x${block.toString(16)}`;
+      const { timestamp } = await l2.rpc.call<{ timestamp: string }>("eth_getBlockByNumber", [
+        at,
+        false,
+      ]);
       const proven = [];
       for (const registry of registries) {
         const [accumulator, count] = await Promise.all(
@@ -521,6 +525,7 @@ export function registrationCheck(l2: L2, l2ChainId: bigint): RegistrationCheck 
         );
         proven.push({
           block,
+          timestamp: BigInt(timestamp),
           accumulator: hexToBytes((accumulator as string).slice(2)),
           count: BigInt(count as string),
         });

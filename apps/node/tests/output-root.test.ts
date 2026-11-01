@@ -78,6 +78,12 @@ async function rootOf(n: bigint): Promise<Uint8Array> {
   );
 }
 
+const timestampOf = async (n: bigint): Promise<bigint> =>
+  BigInt(
+    ((await chain.rpc.call("eth_getBlockByNumber", [quantity(n), false])) as { timestamp: string })
+      .timestamp,
+  );
+
 const claim = async (rootBlock: bigint, l2Block = rootBlock): Promise<ClaimedOutputRoot> => ({
   outputRoot: await rootOf(rootBlock),
   l2Block,
@@ -93,14 +99,16 @@ const lyingNode = (asked: bigint, served: bigint, methods: readonly string[]): R
 });
 
 describe("accumulatorUnderRoot", () => {
-  test("proves the contract's accumulator and count at the root's block", async () => {
+  test("proves the contract's accumulator and count at the root's block, with its timestamp", async () => {
     expect(await accumulatorUnderRoot(chain.rpc, await claim(b1), REGISTRY)).toEqual({
       block: b1,
+      timestamp: await timestampOf(b1),
       accumulator: ACC_1,
       count: 3n,
     });
     expect(await accumulatorUnderRoot(chain.rpc, await claim(b2), REGISTRY)).toEqual({
       block: b2,
+      timestamp: await timestampOf(b2),
       accumulator: ACC_2,
       count: 4n,
     });

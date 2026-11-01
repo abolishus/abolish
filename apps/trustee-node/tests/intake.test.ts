@@ -445,10 +445,10 @@ describe("the election's checks before intake", () => {
     });
   });
 
-  it("refuses a rolling stub, which no seat approves yet, before reading its approval", async () => {
+  it("refuses a rolling stub no seat approved, as any other (check 4 refuses every one yet)", async () => {
     const [seat] = seatsOf(s).intake;
     const bytes = encodeElectionDefinitionV7(rollingStubFor(s.e.panelists.panel));
-    expect(await deliver(seat!, bytes)).toEqual({ ok: false, code: "intake-definition" });
+    expect(await deliver(seat!, bytes)).toEqual({ ok: false, code: "intake-unapproved" });
   });
 
   it("refuses any transcript but the one the seat approved (T-37)", async () => {
@@ -610,7 +610,7 @@ describe("the obligation decided at the intake cutoff", () => {
       receipts: [honestHash()],
       complaints: [honestHash()],
     });
-    expect(approved.members).toBe(3n);
+    expect(approved).toMatchObject({ members: 3n });
   });
 
   it("waits for finalized L1 past the close", async () => {

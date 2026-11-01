@@ -160,7 +160,7 @@ describe("a version-5 stub's ceremony", () => {
         hex(electionDefinitionV5Hash(definition)),
       );
       // M: the members of every region of every tier, as the capacity check counted them.
-      expect(approved?.members).toBe(3n);
+      expect(approved).toMatchObject({ members: 3n });
     }
   });
 

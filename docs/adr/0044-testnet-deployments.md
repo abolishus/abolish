@@ -63,7 +63,7 @@ B. The conditions protect elections that can't be redone. The staging deployment
 
 - [[contracts]] gains a Testnet deployments section that lists the nine and the owner's three. Each condition's own statement names that section.
 - [[P2-32]] part 1b's deploy script takes an explicit target, and while any of the nine is open it deploys only the staging target, and only on Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338). Its deployment files record the target.
-- The owner is asked to accept, for the staging deployment only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
+- The owner was asked to accept, for the staging deployment only, [[delivery]]'s three residuals, and did on 2026-11-02 (Decision, Owner decision). Parts 1b and 2 (the script and the record) went ahead meanwhile, and only the deploy waited.
 - Closing the nine is still owed before production:
   - versions 1 and 3 and the decoder budget, with [[P1-18]]'s remaining deployment needs;
   - Tier 2 and the nullifier-key events, with [[P3-4]];
@@ -87,4 +87,6 @@ B. The conditions protect elections that can't be redone. The staging deployment
 
 ## Decision
 
-Under rule A (`AGENTS.md`): option B, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The three [[delivery]] residuals are the owner's, asked in [[STATUS]]. A veto in favour of A or C puts those parts first in [[P2-32]] before the deploy script runs on any testnet. Nothing has been deployed meanwhile.
+Under rule A (`AGENTS.md`): option B, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The three [[delivery]] residuals are the owner's; the owner accepted them for the staging deployment only (below). A veto in favour of A or C puts those parts first in [[P2-32]] before the deploy script runs on any testnet. Nothing has been deployed meanwhile.
+
+**Owner decision (2026-11-02):** the owner accepts [[delivery]]'s three owner-reserved residuals (a newest ballot that never reached the board, approved stubs holding a seat's capacity, withheld board data and the complaint scope) for the staging deployment only, and not for production. Every other deployment, a public or production one on a testnet before mainnet included, still needs each residual closed or accepted by the owner for it before its registries are deployed (T-25, T-54).

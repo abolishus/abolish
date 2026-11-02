@@ -63,7 +63,7 @@ B. The conditions protect elections that can't be redone. The staging deployment
 
 - [[contracts]] gains a Testnet deployments section that lists the nine and the owner's three. Each condition's own statement names that section.
 - [[P2-32]] part 1b's deploy script takes an explicit target, and while any of the nine is open it deploys only the staging target, and only on Sepolia with Base Sepolia, or the local Anvil pair (L1 31337, L2 31338). Its deployment files record the target.
-- The owner is asked to accept, for the staging deployment only, [[delivery]]'s three residuals. This is listed in [[STATUS]] beside the owner's other decisions. Parts 1b and 2 (the script and the record) go ahead meanwhile, and only the deploy waits.
+- The owner was asked to accept, for the staging deployment only, [[delivery]]'s three residuals, and did on 2026-11-02 (Decision, Owner decision). Parts 1b and 2 (the script and the record) went ahead meanwhile, and only the deploy waited.
 - Closing the nine is still owed before production:
   - versions 1 and 3 and the decoder budget, with [[P1-18]]'s remaining deployment needs;
   - Tier 2 and the nullifier-key events, with [[P3-4]];

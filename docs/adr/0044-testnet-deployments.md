@@ -87,6 +87,6 @@ B. The conditions protect elections that can't be redone. The staging deployment
 
 ## Decision
 
-Under rule A (`AGENTS.md`): option B, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The three [[delivery]] residuals are the owner's, asked in [[STATUS]]. A veto in favour of A or C puts those parts first in [[P2-32]] before the deploy script runs on any testnet. Nothing has been deployed meanwhile.
+Under rule A (`AGENTS.md`): option B, status `Accepted (agent) — owner may veto`, listed under Decisions to review in [[STATUS]]. The three [[delivery]] residuals are the owner's; the owner accepted them for the staging deployment only (below). A veto in favour of A or C puts those parts first in [[P2-32]] before the deploy script runs on any testnet. Nothing has been deployed meanwhile.
 
 **Owner decision (2026-11-02):** the owner accepts [[delivery]]'s three owner-reserved residuals (a newest ballot that never reached the board, approved stubs holding a seat's capacity, withheld board data and the complaint scope) for the staging deployment only, and not for production. Every other deployment, a public or production one on a testnet before mainnet included, still needs each residual closed or accepted by the owner for it before its registries are deployed (T-25, T-54).
